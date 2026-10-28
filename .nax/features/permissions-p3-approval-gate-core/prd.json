@@ -1,0 +1,898 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-gate-core",
+  "branchName": "feat/permissions-p3-approval-gate-core",
+  "createdAt": "2026-11-08T00:00:00.000Z",
+  "updatedAt": "2026-10-28T02:47:48.380Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Command variants on the engine",
+      "description": "**Goal** \u2014 Add persistent command variants without changing primary-command execution.\n\n**Motivation** \u2014 A policy on any approvable key can already be written through `/approval-policies`, and it already takes effect on assistant and MCP writes.\n\n**Approach** \u2014 Verbatim design, Variants on the engine (US-001):\n- `schema.prisma`: `ApprovalRequest` gains `variant String?` after `permissionKey`. Migration `20261108090000_approval_request_variant`: `ALTER TABLE \"ApprovalRequest\" ADD COLUMN \"variant\" TEXT;`. No index change.\n- `ApprovalCommandRegistry`:\n  - `register(command)` refuses a key that is not approvable (unchanged), a `variant` that is the empty string or longer than 100 characters (`approval command variant is invalid: <key>`), and a second command for the same `(key, variant)` (`approval command already registered: <key>` for a primary, `approval command already registered: <key>#<variant>` for a variant).\n  - `get(key, variant?)` answers the command registered for `(key, variant ?? null)`. A primary and a variant of one key never answer for each other.\n- `ApprovalGate.gate(key, input, opts)`: `opts.variant?: string`. The command is `registry.get(key, opts.variant)`; an unregistered pair throws `UnregisteredApprovalCommandError(key)` (unchanged). `newRequest` sets `variant` when given. The duplicate lookup (`PendingApprovalMatch`) gains `variant: string | null` and `findPendingDuplicate` matches it (`variant: null` matches a null column).\n- `PrismaApprovalRequestRepository`: `create` writes `variant: record.variant ?? null`; the row-to-record mapping adds `variant` only when the column is not null.\n- `ApprovalExecutionService.precheck` and `ApprovalDecisionService` (its `parseDecisionParams` lookup) use `registry.get(request.permissionKey, request.variant)`.\n- `ApprovalAskService.open` sets no variant (fleet asks run their primary command).\n\nVerbatim designer's calls:\n- `ApprovalCommand` gains an optional `variant?: string`. The registry keys commands by `(key, variant ?? null)`: one primary command (no variant) and any number of named variants per key.\n- `ApprovalRequest` gains a nullable `variant` column. Null means the key's primary command, so every request opened before this feature, and every assistant and fleet request after it, keeps running the command it ran before.\n- The alternatives were worse: one command per key with an operation union cannot coexist with the assistant tool's command on the 9 keys both use (`ticket.create`, `comment.create`, \u2026); renaming requests to command ids needs a backfill.\n- REST variants are named `rest:<controller path>.<verb>` (`rest:roles.create`). Only REST commands use variants in this feature.\n- **`ApprovalRequestRecord.variant` is optional and absent when null.** The repository maps the column into the record only when it is not null. Existing record literals in specs and exact-equality assertions on records stay valid.\n\nImplementation footprint: update schema/domain/repository/registry/gate/decision/execution plus existing unit specs, decision-params spec, repository integration match literals and configurableTestCommand. `configurableTestCommand(key, deps)` accepts `deps.variant?: string`; when given, the command object carries a `variant` getter (a plain own property alongside the existing getters, never a spread of them). Preserve parseDecision/onReject/toResult/afterCommit hooks and existing transaction semantics. Executing an unknown stored variant settles failed with { error: 'no-command' }.\n\n**Scope** \u2014 In: additive migration, variant identity, persistence, duplicate matching and all engine lookups. Out: principal reconstruction (US-002), REST gate/commands/controllers (US-003\u2013US-009), contract/OpenAPI/CLI (US-010\u2013US-012); Showing `variant` in `ApprovalRequestSummaryDto`, `ApprovalRequestDto`, MCP outputs or the web: P3 web. An index on `ApprovalRequest.variant`. Assistant or MCP writes on keys that also have REST variants: they keep the primary command.\n\n**Interface** \u2014 `ApprovalCommand.variant?: string`; `ApprovalCommandRegistry.get(key, variant?)`; `ApprovalRequestRecord.variant?: string`; `ApprovalGate.gate(key, input, { projectId, variant? })`; `PendingApprovalMatch` gains `variant: string | null`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] register of a primary command and a variant: 'rest:labels.delete' command for label.delete both succeed.",
+        "AC-2 [unit] get('label.delete') answers the primary command and get('label.delete', 'rest:labels.delete') answers the variant command.",
+        "AC-3 [unit] get('label.delete', 'rest:other') answers undefined while only the primary and rest:labels.delete are registered.",
+        "AC-4 [unit] A second register of label.delete with variant rest:labels.delete throws approval command already registered: label.delete#rest:labels.delete.",
+        "AC-5 [unit] register with variant: '' throws approval command variant is invalid: label.delete.",
+        "AC-6 [unit] register with a 101-character variant throws approval command variant is invalid: label.delete.",
+        "AC-7 [integration] ApprovalGate.gate('label.delete', input, { projectId, variant: 'rest:labels.delete' }) by an agent whose resolved mode is agent stores a pending request whose variant column is rest:labels.delete.",
+        "AC-8 [integration] The same call without variant stores a request whose variant column is null, and the record answered has no variant property.",
+        "AC-9 [integration] With a variant request pending, the same agent calling gate with the same input and no variant opens a second request (the duplicate match includes the variant).",
+        "AC-10 [integration] Approving a pending rest:labels.delete request runs the variant command (a configurableTestCommand('label.delete', { variant: 'rest:labels.delete' })) once and the primary command zero times.",
+        "AC-11 [integration] Approving a pending request whose variant names no registered command settles it failed with result { error: 'no-command' }.",
+        "AC-12 [integration] Approving a pending request whose variant column is null runs the primary command (regression pin for requests opened before this feature).",
+        "AC-13 [unit] ApprovalDecisionService.decide on a request with variant: 'v1' looks the command up with registry.get(key, 'v1').",
+        "AC-14 [unit] ApprovalGate.gate('label.delete', input, { projectId, variant: 'rest:none' }) with no command registered for that pair throws UnregisteredApprovalCommandError and never calls requests.create.",
+        "FM-1 [unit] Registering a second primary command for label.delete throws approval command already registered: label.delete."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "prisma"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Persistent command identity crosses registry, repository, gate, decision and execution authorization; additive null compatibility is security-critical."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/approvals/approval-decision.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261108090000_approval_request_variant/migration.sql",
+        "apps/api/test/integration/approvals/approval-variants.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ApprovalCommandRegistry.get('label.delete', null) returns the primary command when a primary and named variant coexist.",
+        "Registering a variant with exactly 100 characters succeeds for an approvable key.",
+        "Repeating a pending request with the same variant, actor, scope and frozen input returns the existing pending request id."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`ApprovalRequest.variant String?`"
+        },
+        {
+          "path": "apps/api/src/approvals/domain/approval.domain.ts",
+          "reason": "`ApprovalRequestRecord.variant?: string`"
+        },
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "`create` writes `variant`; the mapping adds it when not null; `PendingApprovalMatch.variant` and its match in `findPendingDuplicate`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-command.registry.ts",
+          "reason": "`ApprovalCommand.variant`; `register` and `get` by `(key, variant)`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-command.registry.spec.ts",
+          "reason": "the variant cases"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.ts",
+          "reason": "`opts.variant`; the lookup, the duplicate match and the new row carry it"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.spec.ts",
+          "reason": "the `registry.get` and `findPendingDuplicate` expectations gain the variant argument (`undefined` \u2192 `null` for existing cases)"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.ts",
+          "reason": "`registry.get(permissionKey, variant)`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "the registry double answers by `(key, variant)`; one variant case"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.ts",
+          "reason": "`registry.get(permissionKey, variant)`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.spec.ts",
+          "reason": "the registry double's expectation gains the variant argument"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision-params.spec.ts",
+          "reason": "the same"
+        },
+        {
+          "path": "apps/api/src/approvals/test-helpers/test-approval-command.ts",
+          "reason": "`configurableTestCommand(key, deps)` accepts `deps.variant?: string`; when given, the command object carries a `variant` getter (a plain own property alongside the existing getters, never a spread of them)"
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-repositories.integration.spec.ts",
+          "reason": "the `PendingApprovalMatch` literal gains `variant: null`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Rebuild the request actor principal",
+      "description": "**Goal** \u2014 Reconstruct current human/agent principals from action context for immediate and deferred commands.\n\n**Motivation** \u2014 The engine decides, executes and expires requests, and the assistant, MCP and fleet asks already go through it.\n\n**Approach** \u2014 Verbatim design, Rebuilding the caller (US-002):\n`ActorPrincipalLoader` (`@Injectable()`, provided and exported by `AuthRepositoryModule`, constructor `(PrismaAuthRepository)`):\n- `load({ type: 'USER', id })`:\n  - reads `findUserById(id)`. A missing or `disabled` user throws `ActorUnavailableError`.\n  - The role is `'ADMIN'` when `PrismaAuthRepository.hasGlobalAdminBinding(id)` (new: a `RoleBinding` with `principalType: 'USER'`, `principalId: id`, `projectId: null` and role key `owner` or `admin` exists), else `'MEMBER'`. This is the same rule as `PrismaAssistantToolCallRepository.findUserActor`.\n  - Answers `{ actorType: 'user', id, name: email, email, role, blacklisted: false, revoked: false, authorities: [role], extra: { sub: id, email, role } }`.\n- `load({ type: 'AGENT', id })`:\n  - reads the new `PrismaAuthRepository.findAgentById(id)` (`{ id, slug, status, apiKeyHash }` or null). A missing agent, or one with status `PAUSED`, throws `ActorUnavailableError`.\n  - Answers `{ actorType: 'agent', id, name: slug, slug, status, capabilities: [], blacklisted: false, revoked: false, authorities: [], extra: { slug } }`. Capabilities are not read: no permission decision uses them.\n- `forContext()`: the current action context's actor when it is `USER` or `AGENT`, loaded as above. Any other actor, or no context, throws `ActorUnavailableError`.\n- `ActorUnavailableError extends Error` with `readonly actor: { type: string; id: string } | null`, name `ActorUnavailableError`, prototype preserved.\n\nImplementation footprint: add the loader/error and its unit/DB tests, repository findAgentById/hasGlobalAdminBinding methods and query-shape tests, and AuthRepositoryModule provider/export. For the deferred-paused-actor assertion register a test command that invokes loader.forContext; it need not depend on the later routeCommand helper. A throwing actor load is classified by the existing execution engine as { error: 'execution-failed', name: 'ActorUnavailableError' }.\n\n**Scope** \u2014 In: repository reads, actor liveness and role reconstruction, loader module export. Out: command variants (US-001), routeCommand and HTTP gating (US-003), route migrations (US-004\u2013US-009). US-002 only: loading agent capabilities into a rebuilt principal.\n\n**Interface** \u2014 `ActorPrincipalLoader`: `load(actor)`, `forContext()`; constructor `(PrismaAuthRepository)`; `ActorUnavailableError extends Error` with `readonly actor: { type: string; id: string } | null`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] load({ type: 'USER', id }) for a user with a global admin binding answers an object matching { actorType: 'user', id, email, role: 'ADMIN', revoked: false }.",
+        "AC-2 [integration] load for a user with only a project developer binding answers role: 'MEMBER'.",
+        "AC-3 [integration] load for a disabled user throws ActorUnavailableError.",
+        "AC-4 [integration] load({ type: 'USER', id: 'missing' }) throws ActorUnavailableError.",
+        "AC-5 [integration] load({ type: 'AGENT', id }) for an ACTIVE agent answers an object matching { actorType: 'agent', id, slug, status: 'ACTIVE', blacklisted: false }.",
+        "AC-6 [integration] load for a PAUSED agent throws ActorUnavailableError.",
+        "AC-7 [unit] forContext() under a SYSTEM/assistant actor throws ActorUnavailableError without calling the repository.",
+        "AC-8 [unit] forContext() with no action context throws ActorUnavailableError.",
+        "AC-9 [unit] ActorUnavailableError is an Error whose prototype is ActorUnavailableError.prototype and whose actor is the value passed.",
+        "AC-10 [integration] An agent's pending request for a test command (registered by the spec under an approvable key) whose execute calls loader.forContext(), approved after the agent is set PAUSED, settles failed with result { error: 'execution-failed', name: 'ActorUnavailableError' }.",
+        "FM-1 [integration] load({ type: 'AGENT', id: 'missing' }) throws ActorUnavailableError."
+      ],
+      "tags": [
+        "api",
+        "auth",
+        "security",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three source files add straightforward repository reads and principal mapping using existing auth shapes; authentication and admin-role reconstruction require the security TDD override."
+      },
+      "contextFiles": [
+        "apps/api/src/auth/prisma-auth.repository.ts",
+        "apps/api/src/auth/auth-repository.module.ts",
+        "apps/api/src/auth/jwt-auth.provider.ts",
+        "apps/api/src/auth/agent-auth.provider.ts",
+        "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/auth/principal/actor-principal.loader.ts",
+        "apps/api/src/auth/principal/actor-principal.loader.spec.ts",
+        "apps/api/test/integration/auth/actor-principal-loader.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "load for a user with a global owner binding answers role: 'ADMIN'.",
+        "load for a user with only a project admin binding answers role: 'MEMBER'.",
+        "load for an OFFLINE agent returns a principal with status: 'OFFLINE' and capabilities: []."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/prisma-auth.repository.ts",
+          "reason": "`findAgentById`, `hasGlobalAdminBinding`"
+        },
+        {
+          "path": "apps/api/src/auth/prisma-auth.repository.spec.ts",
+          "reason": "the two methods' query shapes"
+        },
+        {
+          "path": "apps/api/src/auth/auth-repository.module.ts",
+          "reason": "provides and exports `ActorPrincipalLoader`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Provide the reusable REST approval gate",
+      "description": "**Goal** \u2014 Provide validated route commands, pre-gate authorization and adapter-independent pending HTTP responses.\n\n**Motivation** \u2014 A policy on any approvable key can already be written through `/approval-policies`, and it already takes effect on assistant and MCP writes.\n\n**Approach** \u2014 Verbatim design, The route gate (US-003):\n- `parseBody<T extends object>(cls: new () => T, raw: unknown): T`:\n  - `plainToInstance(cls, raw)`, then `validateSync` with the app pipe's options (`whitelist: true`, `stopAtFirstError: true`, `forbidUnknownValues: false`). Any error throws `new ValidationAppException({}, 'approvals.invalidInput')`.\n  - Answers `instanceToPlain` of the instance: the plain, whitelisted object the global pipe hands a handler.\n  - A non-object `raw` (null, an array, a primitive) throws the same exception.\n- `RouteCommandSpec<TInput, TResult>`: `{ key; variant; parse(input: unknown): TInput; run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>; toResult?(result: TResult): unknown }`.\n- `routeCommand(spec, loader): ApprovalCommand<TInput, TResult>`: `key` and `variant` from the spec, `parse` from the spec, `execute(input)` is `spec.run(await loader.forContext(), input)`, `toResult` from the spec when given.\n- `ApprovalRouteGate` (`@Injectable()`, provided and exported by `ApprovalEngineModule`, constructor `(ApprovalGate, PermissionService)`):\n  - `run<TResult>({ key, variant, projectId, input, keyCheck = true }): Promise<GateOutcome<TResult>>`.\n  - Step 1: the current context's actor must be `USER` or `AGENT`. A `RUNNER` actor (a runner key reaching a service-enforced route) throws `new ForbiddenAppException({}, 'permissions')`, today's answer for runners; any other actor, or no context, throws `Error('approval route gate needs a principal actor')`.\n  - Step 2 (skipped when `keyCheck` is false): the actor's `effectiveKeys` at `projectId` (or `'global'` when null) must hold `key` or `key.own`. Otherwise it throws `new ForbiddenAppException({}, 'permissions')`, and no request is written.\n  - Step 3: `gate.gate(key, input, { projectId, variant })`.\n- `ApprovalPending extends Error` with one field `readonly request: ApprovalRequestRecord`, name `ApprovalPending`, prototype preserved, message `approval pending: <id>`.\n- `ApprovalGated()` is `applyDecorators(SetMetadata(APPROVAL_GATED_METADATA, true), UseFilters(ApprovalPendingFilter), ApiExtraModels(ApprovalRequestSummaryDto), ApiResponse({ status: 202, description: 'The write waits for approval', schema: <{ ret, data: $ref ApprovalRequestSummaryDto }> }))`.\n- `ApprovalPendingFilter implements ExceptionFilter` (`@Catch(ApprovalPending)`, constructor `(HttpAdapterHost)`): `catch(error, host)` calls `httpAdapter.reply(host.switchToHttp().getResponse(), JsonResponse.Ok(ApprovalRequestSummaryDto.from(error.request)), 202)`. It catches nothing else.\n- A gated handler's shape:\n```ts\nconst outcome = await this.routeGate.run<RoleDomain>({ key: 'role.manage', variant: PERMISSION_ROUTE_VARIANTS.roleCreate, projectId: null, input: dto });\nif (outcome.status === 'pending') throw new ApprovalPending(outcome.request);\nreturn JsonResponse.Ok(RoleDto.from(outcome.result));\n```\n  A `DELETE` handler returns `undefined` on `executed` (204 as today).\n\nVerbatim designer's calls:\n- **No request is opened for a key the caller does not hold.** `ApprovalRouteGate.run` checks the key (or its `.own` form) at the request's scope before calling the gate, and answers `403 permissions` when the check fails. Without this, a service-enforced route (`@Requires(\u2026, { enforcedBy: 'service' })`: the five role and binding routes and the decide route) would let an agent with no key fill the inbox with requests that fail at execution. The six policy routes are guard-enforced, so their guard already answers 403 first; the gate's check is then redundant and harmless.\n- **The route command always loads the principal.** A route command's `execute` builds the principal from the action context through `ActorPrincipalLoader`, on the immediate path as well as the deferred one. One code path; the cost is two reads per gated write.\n- **A pending answer is `202` with the request summary, sent by an exception filter.** Nest re-applies a route's static status (`@HttpCode`, or the method default) after the interceptors run (`RouterExecutionContext` \u2192 `RouterResponseController.apply`, which both adapters honour), so neither an interceptor nor the handler can turn a `201`/`204`/`200` route into `202`. A gated handler therefore **throws** `ApprovalPending` for a pending outcome. `ApprovalPendingFilter` (`@Catch(ApprovalPending)`, applied to the handler by `@ApprovalGated()` with `UseFilters`, so it runs before the global filter) replies through `HttpAdapterHost`: `httpAdapter.reply(response, JsonResponse.Ok(ApprovalRequestSummaryDto.from(request)), 202)`. It works on Fastify (production) and Express. The request was already committed by the gate (its own bookkeeping transaction) before the throw, and `ActionContextInterceptor`'s error path only closes the audit scope, so nothing is rolled back or flagged as unaudited.\n\nSet `APPROVAL_GATED_METADATA` to `'koda:approval-gated'` and export it with the decorator. Add `approvals.invalidInput` for both 400 and -2: English `Invalid input for the approval request`; Chinese `\u5ba1\u6279\u8bf7\u6c42\u7684\u8f93\u5165\u65e0\u6548`. Extend ApprovalEngineModule and its unit wiring spec to resolve ApprovalRouteGate.\n\n**Scope** \u2014 In: reusable route validation/command/gate/error/filter/decorator and i18n. Out: installing real gated controllers/commands (US-004\u2013US-009), contract collector (US-010), generated contract/CLI (US-011\u2013US-012); Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs. Notifying the deciders of a pending REST request beyond what `ApprovalRequestedSubscriber` already does for non-fleet keys. US-003 only: pinning the SYSTEM-actor throw of `ApprovalRouteGate.run` through HTTP (no SYSTEM actor reaches a REST route).\n\n**Interface** \u2014 `parseBody<T extends object>(cls: new () => T, raw: unknown): T`; `RouteCommandSpec<TInput, TResult>`: `{ key; variant; parse(input: unknown): TInput; run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>; toResult?(result: TResult): unknown }`; `routeCommand(spec, loader): ApprovalCommand<TInput, TResult>`; `run<TResult>({ key, variant, projectId, input, keyCheck = true }): Promise<GateOutcome<TResult>>`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] parseBody(CreateRoleDto, { key: 'qa', name: 'QA', scope: 'GLOBAL', permissions: ['role.read'], extra: 1 }) answers a plain object without extra whose prototype is Object.prototype.",
+        "AC-2 [unit] parseBody(CreateRoleDto, { name: 'QA', scope: 'GLOBAL', permissions: [] }) (no key) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-3 [unit] parseBody(CreateRoleDto, null) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-4 [unit] routeCommand({ key: 'role.manage', variant: 'rest:x', parse, run }, loader) answers a command whose key is role.manage and variant is rest:x.",
+        "AC-5 [unit] Its execute(input) calls run with the principal loader.forContext() answered and the input.",
+        "AC-6 [integration] Under an agent's action context, the execute of a routeCommand whose run returns principal.actorType answers 'agent'.",
+        "AC-7 [unit] ApprovalRouteGate.run for an agent whose effective keys lack role.manage throws ForbiddenAppException with key permissions and never calls gate.gate.",
+        "AC-8 [unit] run for an agent holding ticket.update.own (and not ticket.update) calls gate.gate('ticket.update', input, { projectId, variant }).",
+        "AC-9 [unit] run reads the effective keys at 'global' when projectId is null and at { projectId } otherwise.",
+        "AC-10 [unit] run with keyCheck: false for an agent holding no key calls gate.gate and never calls effectiveKeys.",
+        "AC-11 [unit] run under a SYSTEM/budget actor throws approval route gate needs a principal actor and never calls gate.gate.",
+        "AC-12 [unit] ApprovalPendingFilter.catch(new ApprovalPending(record), host) calls httpAdapter.reply(response, JsonResponse.Ok(ApprovalRequestSummaryDto.from(record)), 202).",
+        "AC-13 [unit] run under a RUNNER/r1 actor throws ForbiddenAppException with key permissions and never calls gate.gate.",
+        "AC-14 [unit] A handler decorated with @ApprovalGated() carries APPROVAL_GATED_METADATA true and ApprovalPendingFilter in its exception filters metadata.",
+        "AC-15 [unit] The same handler's swagger responses include status 202 whose data schema references ApprovalRequestSummaryDto."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "http"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Several new helpers compose an existing gate, principal loader and standard Nest exception-filter/decorator APIs across two adapters; authorization requires strict security TDD, but no new transaction engine is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/approval-engine.module.ts",
+        "apps/api/src/auth/principal/actor-principal.loader.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/approvals/dto/approval-request.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/route/parse-body.ts",
+        "apps/api/src/approvals/route/parse-body.spec.ts",
+        "apps/api/src/approvals/route/route-command.ts",
+        "apps/api/src/approvals/route/route-command.spec.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts",
+        "apps/api/src/approvals/route/approval-route-gate.spec.ts",
+        "apps/api/src/approvals/route/approval-pending.ts",
+        "apps/api/src/approvals/route/approval-gated.decorator.ts",
+        "apps/api/src/approvals/route/approval-gated.decorator.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseBody(CreateRoleDto, []) throws ValidationAppException with key approvals.invalidInput.",
+        "parseBody(CreateRoleDto, 'invalid') throws ValidationAppException with key approvals.invalidInput.",
+        "ApprovalRouteGate.run without action context throws approval route gate needs a principal actor without calling gate.gate.",
+        "ApprovalPending(record) has message approval pending: <record.id> and is an instance of ApprovalPending."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "provides and exports `ApprovalRouteGate`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.spec.ts",
+          "reason": "resolves `ApprovalRouteGate`"
+        },
+        {
+          "path": "apps/api/src/i18n/en/approvals.json",
+          "reason": "`invalidInput` (`400` and `-2`: `Invalid input for the approval request`)"
+        },
+        {
+          "path": "apps/api/src/i18n/zh/approvals.json",
+          "reason": "`invalidInput` (`400` and `-2`: `\u5ba1\u6279\u8bf7\u6c42\u7684\u8f93\u5165\u65e0\u6548`)"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Gate role administration REST writes",
+      "description": "**Goal** \u2014 Migrate the three role writes to registered REST variants and isolate engine-dependent controllers from the global PermissionsModule.\n\n**Motivation** \u2014 The design's shipped defaults make high-risk agent writes wait for another agent (`agent`) and role, binding and policy writes wait for a human (`human`); today nothing on REST enforces them.\n\n**Approach** \u2014 Verbatim permission-route design relevant to roles:\n`PermissionRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, RoleAdminService, ActorPrincipalLoader)`) registers five `routeCommand`s:\n| Variant (`PERMISSION_ROUTE_VARIANTS`) | Key | Input | Run |\n|:--|:--|:--|:--|\n| `roleCreate` = `rest:roles.create` | `role.manage` | `parseBody(CreateRoleDto, input)` | `roles.createRole(principal, input)` |\n| `roleUpdate` = `rest:roles.update` | `role.manage` | `{ id: non-empty string, patch: parseBody(UpdateRoleDto, input.patch) }` | `roles.updateRole(principal, id, patch)` |\n| `roleDelete` = `rest:roles.delete` | `role.manage` | `{ id: non-empty string }` | `roles.deleteRole(principal, id)`; result null |\n- An `{ id }` input that is not an object with a non-empty string `id` (other members are dropped) throws `ValidationAppException({}, 'approvals.invalidInput')`.\n- `toResult` of the create and update commands is the DTO (`RoleDto.from`, `RoleBindingDto.from`), so `ApprovalRequest.result` holds what the route would have answered.\n- `RolesController` (constructor `(RoleAdminService, ApprovalRouteGate)`): `create`, `update`, `remove` are `@ApprovalGated()` and run the gate with `projectId: null`. `list` is unchanged. `update`'s input is `{ id, patch: dto }`.\n- `@Requires` metadata and the `@ApiResponse`s already declared stay; each gated handler gains the 202 response through `@ApprovalGated()`.\n\nThe shared five-command design is staged: this story implements the three role variants; the two binding variants and their RoleBindingDto projection arrive in US-005. Role create/update use RoleDto.from; role delete returns null from its command and undefined from its immediate handler.\n\nVerbatim designer's calls:\n- **Permission routes move to `PermissionsApiModule`.** `RolesController` and `RoleBindingsController` leave the global `PermissionsModule` for a new `PermissionsApiModule`, which imports `ApprovalEngineModule` and `AuthRepositoryModule`. `PermissionsModule` stays free of an engine import.\n- **Each API module registers its route commands.** `PermissionRouteCommands` (in `PermissionsApiModule`) and `ApprovalRouteCommands` (in `ApprovalApiModule`) register their variants in `onModuleInit`, as `AssistantToolCommands` does.\n- **Domain checks run when the command runs, not before the request opens.** A pending request is opened after the key check and the input validation only. Lookups, self-binding, escalation, owner lock and policy self-application run inside the service when the command executes (at once, or after approval), and a failing check settles the request `failed`. Running them twice (preflight and execute) is a later improvement, listed in Out of Scope.\n\nA gated handler's shape:\n```ts\nconst outcome = await this.routeGate.run<RoleDomain>({ key: 'role.manage', variant: PERMISSION_ROUTE_VARIANTS.roleCreate, projectId: null, input: dto });\nif (outcome.status === 'pending') throw new ApprovalPending(outcome.request);\nreturn JsonResponse.Ok(RoleDto.from(outcome.result));\n```\nA `DELETE` handler returns `undefined` on `executed` (204 as today). Import PermissionsApiModule in AppModule. Roles/bindings controller declarations are removed only from PermissionsModule; leave PermissionCatalogController there. Add MembershipService and ApprovalRouteGate to RoleBindingsController's constructor now without changing its write handlers until US-005. Keep remaining-route-declarations.spec.ts assertions compiling unchanged.\n\nThe agent in these ACs holds global `role.manage` and `role.read` (`grantKeys(db, agent, ['role.manage', 'role.read'], null)`): a GLOBAL role can carry only global keys, and `createRole` checks escalation at the global scope. Reuse root/agent HTTP fixtures and exercise approved writes/audits. Add pending status assertions on Fastify for static 201 and 204; use bootHttpApp with adapter 'fastify'. Module wiring test stays co-located and DB-free with GlobalStubsModule.\n\n**Scope** \u2014 In: PermissionsApiModule, role variants, role handlers, original-agent audit/result and Fastify status behavior. Out: binding handler/variant gating (US-005), policy/decision writes (US-006\u2013US-009), contract generation (US-010\u2013US-011); changes to service security checks. Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs.\n\n**Interface** \u2014 `PermissionRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, RoleAdminService, ActorPrincipalLoader)`); `RolesController` (constructor `(RoleAdminService, ApprovalRouteGate)`); `PERMISSION_ROUTE_VARIANTS.roleCreate`, `.roleUpdate`, `.roleDelete`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/roles with the agent's key, body { key: 'qa', name: 'QA', scope: 'GLOBAL', permissions: ['role.read'] }, answers 202.",
+        "AC-2 [integration] That response's data matches { permissionKey: 'role.manage', status: 'pending', requiredMode: 'human', actorType: 'AGENT', actorId: <the agent> }.",
+        "AC-3 [integration] After AC-1 no role with key qa exists.",
+        "AC-4 [integration] After approving AC-1's request, a role with key qa exists and the request's status is executed.",
+        "AC-5 [integration] That executed request's result matches { key: 'qa', name: 'QA' }.",
+        "AC-6 [integration] The audit entry of AC-4's role create matches { actorType: 'AGENT', actorId: <the agent>, key: 'role.manage', satisfiedBy: 'human', approverType: 'USER', approverId: <root>, approvalRequestId: <the request> }.",
+        "AC-7 [integration] POST /api/roles with the root token answers 201 with the role, and no ApprovalRequest row exists.",
+        "AC-8 [integration] The audit entry of AC-7's create has requiredMode: 'human', satisfiedBy: 'human' and approverId: <root>.",
+        "AC-9 [integration] POST /api/roles with the key of an agent that holds no role.manage answers 403 with key permissions, and no ApprovalRequest row exists.",
+        "AC-10 [integration] PATCH /api/roles/:id { name: 'Renamed' } by the agent answers 202, and after approval the role's name is Renamed.",
+        "AC-11 [integration] DELETE /api/roles/:id of an unbound custom role by the agent answers 202 with a body whose data.status is pending, and after approval the role no longer exists.",
+        "AC-12 [integration] An approved agent request to create a PROJECT-scope role granting project.delete (a key the agent holds nowhere) settles failed with result.name ForbiddenAppException, and no role is created.",
+        "AC-13 [integration] In approval-pending-status.integration.spec.ts, booted with bootHttpApp({ adapter: 'fastify' }), the agent's POST /api/roles (an @HttpCode(201) route) answers status 202 with data.status pending.",
+        "AC-14 [integration] In the same Fastify app, the agent's DELETE /api/roles/:id (an @HttpCode(204) route) answers status 202 with data.permissionKey role.manage.",
+        "AC-15 [unit] PermissionsApiModule compiles with GlobalStubsModule and resolves RolesController, RoleBindingsController and PermissionRouteCommands, and after onModuleInit the registry answers role.manage commands for rest:roles.create, rest:roles.update and rest:roles.delete."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "approvals",
+        "http"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Controller extraction and command registration span module boundaries and adapter-specific HTTP status tests, but reuse existing lifecycle and transaction patterns; role mutations trigger strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/roles.controller.ts",
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/permissions/permissions.module.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts",
+        "apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/approval-pending-status.integration.spec.ts",
+        "apps/api/src/permissions/permissions-api.module.ts",
+        "apps/api/src/permissions/permissions-api.module.spec.ts",
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/permission-route.commands.spec.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/permissions.module.ts",
+          "reason": "drops `RolesController` and `RoleBindingsController` from `controllers`"
+        },
+        {
+          "path": "apps/api/src/app.module.ts",
+          "reason": "imports `PermissionsApiModule`"
+        },
+        {
+          "path": "apps/api/src/permissions/roles.controller.ts",
+          "reason": "constructor gains `ApprovalRouteGate`; `create`, `update`, `remove` gated"
+        },
+        {
+          "path": "apps/api/src/permissions/role-bindings.controller.ts",
+          "reason": "constructor gains `MembershipService` and `ApprovalRouteGate` (the handlers change in US-005)"
+        },
+        {
+          "path": "apps/api/src/permissions/remaining-route-declarations.spec.ts",
+          "reason": "unchanged assertions; listed because it imports the two controllers, which must still compile under the new module"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Gate role binding REST writes",
+      "description": "**Goal** \u2014 Gate binding creation/removal using the owner/global/project key selected from the actual binding target.\n\n**Motivation** \u2014 The design's shipped defaults make high-risk agent writes wait for another agent (`agent`) and role, binding and policy writes wait for a human (`human`); today nothing on REST enforces them.\n\n**Approach** \u2014 Verbatim permission-route design relevant to bindings:\n`PermissionRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, RoleAdminService, ActorPrincipalLoader)`) registers five `routeCommand`s:\n| Variant (`PERMISSION_ROUTE_VARIANTS`) | Key | Input | Run |\n|:--|:--|:--|:--|\n| `bindingCreate` = `rest:role-bindings.create` | `role.binding.owner`, `.global`, `.manage` (one registration each) | `parseBody(CreateRoleBindingDto, input)` | `roles.createBinding(principal, input)` |\n| `bindingDelete` = `rest:role-bindings.delete` | the same three keys | `{ id: non-empty string }` | `roles.removeBinding(principal, id)`; result null |\n- The binding variants are registered once per key (three `register` calls each), because the route picks the key from the target. All three share one `parse` and one `run`.\n- An `{ id }` input that is not an object with a non-empty string `id` (other members are dropped) throws `ValidationAppException({}, 'approvals.invalidInput')`.\n- `toResult` of the create and update commands is the DTO (`RoleDto.from`, `RoleBindingDto.from`), so `ApprovalRequest.result` holds what the route would have answered.\n- `bindingGateKey({ roleKey, projectId }): string` (exported from `permission-route.commands.ts`): the owner role key `'owner'` (the value of the module-private `OWNER_ROLE_KEY` in `role-admin.service.ts`; export it from there rather than repeating the literal) \u2192 `role.binding.owner`; else a null `projectId` \u2192 `role.binding.global`; else `role.binding.manage`.\n- `RoleBindingsController` (constructor `(RoleAdminService, MembershipService, ApprovalRouteGate)`):\n  - `create`: key `bindingGateKey({ roleKey: dto.roleKey, projectId: dto.projectId ?? null })`, `projectId: dto.projectId ?? null`.\n  - `remove`: `membership.findBinding(id)`, a missing binding is `404 permissions.bindingNotFound` (as today, but now before the gate); key `bindingGateKey` of the stored binding, `projectId` the stored binding's.\n- `@Requires` metadata and the `@ApiResponse`s already declared stay; each gated handler gains the 202 response through `@ApprovalGated()`.\n\nVerbatim designer's call: **The binding routes pick their gate key from the target.** `role.binding.owner` when the role is the owner role, else `role.binding.global` when the binding has no project, else `role.binding.manage`. For `DELETE` the target is the stored binding, read before the gate (a missing binding is 404 before any request).\n\nExtend US-004's existing PermissionRouteCommands and its unit spec; do not re-author their files or register another provider. Binding create projects its result via RoleBindingDto.from, delete command returns null and immediate handler remains undefined/204. Owner key is user-only; an agent cannot obtain an owner-binding pending request merely by holding global binding permission. Keep RoleAdminService changes to exporting OWNER_ROLE_KEY only: self-binding, escalation, unknown role and owner lock checks still run inside the service at execution. Root binding creation remains 201.\n\n**Scope** \u2014 In: binding target key selection, two handler migrations, six variant registrations and binding failure behavior. Out: role variants/module extraction already shipped in US-004, policy/decision routes (US-006\u2013US-009), gate contract (US-010); changes to RoleAdminService's checks other than exporting OWNER_ROLE_KEY. Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs.\n\n**Interface** \u2014 `bindingGateKey({ roleKey, projectId }): string`; `PERMISSION_ROUTE_VARIANTS.bindingCreate` = `rest:role-bindings.create`; `PERMISSION_ROUTE_VARIANTS.bindingDelete` = `rest:role-bindings.delete`; `RoleBindingsController` (constructor `(RoleAdminService, MembershipService, ApprovalRouteGate)`).",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/role-bindings by an agent holding role.binding.manage in project P and bound viewer in P (grantRole), body { principalType: 'USER', principalId: <dev>, roleKey: 'viewer', projectId: P }, answers 202 with data.permissionKey role.binding.manage and data.projectId P.",
+        "AC-2 [integration] After approving AC-1's request, dev holds a viewer binding in P.",
+        "AC-3 [integration] POST /api/role-bindings by an agent holding only global role.binding.global, body { principalType: 'USER', principalId: <dev>, roleKey: 'admin' } (no projectId), answers 202 with data.permissionKey role.binding.global and data.projectId null.",
+        "AC-4 [integration] POST /api/role-bindings with roleKey: 'owner' by the AC-3 agent answers 403 with key permissions, and no ApprovalRequest row exists.",
+        "AC-5 [integration] DELETE /api/role-bindings/:id of dev's P binding by the AC-1 agent answers 202 with data.permissionKey role.binding.manage.",
+        "AC-6 [integration] After approving AC-5's request, the binding no longer exists.",
+        "AC-7 [integration] DELETE /api/role-bindings/missing by the AC-1 agent answers 404 with key permissions.bindingNotFound, and no ApprovalRequest row exists.",
+        "AC-8 [integration] POST /api/role-bindings by the AC-1 agent binding itself viewer in P, approved, settles failed, and the agent holds no new binding.",
+        "AC-9 [integration] POST /api/role-bindings with the root token answers 201 with the binding (regression pin).",
+        "AC-10 [unit] bindingGateKey({ roleKey: 'owner', projectId: null }) answers role.binding.owner.",
+        "AC-11 [unit] bindingGateKey({ roleKey: 'admin', projectId: null }) answers role.binding.global.",
+        "AC-12 [unit] bindingGateKey({ roleKey: 'viewer', projectId: 'p1' }) answers role.binding.manage.",
+        "AC-13 [unit] After onModuleInit, each of role.binding.owner, role.binding.global and role.binding.manage has commands with variants rest:role-bindings.create and rest:role-bindings.delete.",
+        "FM-1 [integration] When an approved binding-create command is refused by RoleAdminService because the role is unknown, the approval request settles failed with result { error: 'execution-failed', name: 'NotFoundAppException' }.",
+        "FM-2 [integration] When an approved binding-create command is refused by RoleAdminService for self-binding, the approval request settles failed with result { error: 'execution-failed', name: 'ForbiddenAppException' }."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three source files extend upstream route-command patterns with a three-branch target-key selector and existing service calls; owner/global binding access control mandates strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/permissions-api.module.ts",
+        "apps/api/src/permissions/role-bindings.controller.ts",
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/permissions/membership.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/gated-binding-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "bindingGateKey({ roleKey: 'owner', projectId: 'p1' }) returns role.binding.owner rather than role.binding.manage.",
+        "When RoleBindingsController.remove reads a stored global binding, its pending request uses permissionKey role.binding.global and projectId null."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/role-bindings.controller.ts",
+          "reason": "`create` and `remove` gated"
+        },
+        {
+          "path": "apps/api/src/permissions/role-admin.service.ts",
+          "reason": "exports `OWNER_ROLE_KEY`; nothing else changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Gate global approval-policy writes",
+      "description": "**Goal** \u2014 Register and gate the three global approval-policy writes without changing immediate validation/visibility behavior.\n\n**Motivation** \u2014 A policy on any approvable key can already be written through `/approval-policies`, and it already takes effect on assistant and MCP writes.\n\n**Approach** \u2014 Verbatim approval-route design relevant to global policies:\n`ApprovalRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, ApprovalPolicyService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ActorPrincipalLoader)`) registers seven `routeCommand`s, all on `approval.policy.manage` except the last:\n| Variant (`APPROVAL_ROUTE_VARIANTS`) | Input | Run |\n|:--|:--|:--|\n| `policyCreate` = `rest:approval-policies.create` | `parseBody(CreateApprovalPolicyDto, input)` | `policies.create({ ...input, appliesTo: toPolicySubject(input.appliesTo), projectId: null })` |\n| `policyUpdate` = `rest:approval-policies.update` | `{ id, patch: parseBody(UpdateApprovalPolicyDto, \u2026) }`; an empty patch throws `ValidationAppException({}, 'approvals.emptyPolicyPatch')` | `policies.update(id, patch)` after the policy's `projectId` is checked null (else `ApprovalPolicyNotFoundError`) |\n| `policyDelete` = `rest:approval-policies.delete` | `{ id }` | `policies.remove(id)` after the same check |\n- The global policy commands check the policy is global, matching what the global `PATCH` and `DELETE` routes already reach through `ApprovalPolicyService` (a project policy through a global route is a 404 there today; keep that answer).\n- Errors thrown inside these runs are domain errors (`ApprovalPolicyNotFoundError`, `ApprovalDecideForbiddenError`, \u2026). On the immediate path the controller's `rethrowApprovalError` maps them as today. On the deferred path the request is settled `failed` with `{ error: 'execution-failed', name: <the error's name> }`.\n- Controllers:\n  - `ApprovalPoliciesController`: `create`, `update`, `remove` are `@ApprovalGated()`, gate with `projectId: null`. `update` refuses an empty patch with 400 before the gate (unchanged order), and `update` and `remove` read the policy and answer 404 for a missing or project policy before the gate, as they do today.\n- `ApprovalApiModule` imports `AuthRepositoryModule` and provides `ApprovalRouteCommands`.\n\nThe shared seven-command design is staged: register the three global variants here, project variants in US-007 and decide in US-009. Keep the shared constructor and one registration provider. routeCommand always loads the principal even though ApprovalPolicyService reads actor from current context. Inputs with id require an object and non-empty string id; drop other id-envelope members and use approvals.invalidInput for malformed envelopes. Use the existing Create/UpdateApprovalPolicyDto parsing, appliesTo conversion, and policy domain errors.\n\nAgent-written policies in these ACs use `appliesTo: { kind: 'type', principalType: 'USER' }`: `ApprovalPolicyService` refuses an agent a policy whose subject is `all`, `AGENT` or itself. Self-application is deliberately checked only when the command runs: update approval-policy-routes.integration.spec.ts AC-12 to expect 202 then failed with ApprovalPolicySelfApplicationError after root approves. Role, binding and policy keys have human floor; human root writes still return 201 and do not open requests. Keep guards, Requires metadata and declared responses, gaining the handler 202 through ApprovalGated. Ensure ApprovalApiModule's no-DB GlobalStubsModule unit spec resolves the registrar.\n\n**Scope** \u2014 In: ApprovalRouteCommands global policy variants, module/auth wiring, three global handlers and existing self-application regression update. Out: project policy commands/handlers (US-007), decision service refactor (US-008), decide command/handler (US-009), OpenAPI artifact (US-011); policy preflight beyond the specified early empty-patch and scope reads. Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs.\n\n**Interface** \u2014 `ApprovalRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, ApprovalPolicyService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ActorPrincipalLoader)`); `APPROVAL_ROUTE_VARIANTS.policyCreate`, `.policyUpdate`, `.policyDelete`; `ApprovalPoliciesController` constructor gains `ApprovalRouteGate`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/approval-policies by an agent holding global approval.policy.manage, body { permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'USER' }, mode: 'agent' }, answers 202 with data.permissionKey approval.policy.manage and data.requiredMode human.",
+        "AC-2 [integration] After AC-1 no ApprovalPolicy row exists.",
+        "AC-3 [integration] After approving AC-1's request, one global policy for label.delete with mode agent exists, and its updatedByType is AGENT.",
+        "AC-4 [integration] PATCH /api/approval-policies/:id { mode: 'human' } on that policy by that agent answers 202, and after approval the policy's mode is human.",
+        "AC-5 [integration] PATCH /api/approval-policies/:id {} by that agent answers 400 with key approvals.emptyPolicyPatch, and no ApprovalRequest row exists.",
+        "AC-6 [integration] DELETE /api/approval-policies/:id by that agent answers 202, and after approval the policy no longer exists.",
+        "AC-7 [integration] An approved agent request to create a policy whose appliesTo is { kind: 'all' } settles failed with result.name ApprovalPolicySelfApplicationError.",
+        "AC-8 [integration] POST /api/approval-policies with the root token answers 201 with the policy (regression pin).",
+        "AC-9 [unit] After onModuleInit, approval.policy.manage has commands with variants rest:approval-policies.create, rest:approval-policies.update and rest:approval-policies.delete.",
+        "AC-10 [unit] The rest:approval-policies.update command's parse({ id: 'p1', patch: {} }) throws ValidationAppException with key approvals.emptyPolicyPatch.",
+        "AC-11 [unit] The rest:approval-policies.delete command's run on a policy whose projectId is 'p1' throws ApprovalPolicyNotFoundError and never calls policies.remove.",
+        "AC-12 [unit] ApprovalApiModule compiles with GlobalStubsModule and resolves ApprovalRouteCommands.",
+        "AC-13 [integration] DELETE /api/approval-policies/missing by the agent answers 404 with key approvals.policyNotFound, and no ApprovalRequest row exists.",
+        "AC-14 [integration] In updated existing approval-policy-routes.integration.spec.ts AC-12, the globally granted agent's self-applying POST /api/approval-policies answers 202, and after approval the request is failed with result.name ApprovalPolicySelfApplicationError.",
+        "FM-2 [integration] PATCH /api/approval-policies/:id with a non-empty patch targeting a project policy answers 404 approvals.policyNotFound before the gate and writes no ApprovalRequest."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "policies"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three source files register standard route commands and migrate existing global policy handlers using the upstream gate; policy administration and self-application safeguards require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-policies.controller.ts",
+        "apps/api/src/approvals/approval-policy.service.ts",
+        "apps/api/src/approvals/approval-api.module.ts",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/test/integration/approvals/approval-policy-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-route.commands.ts",
+        "apps/api/src/approvals/approval-route.commands.spec.ts",
+        "apps/api/test/integration/approvals/gated-policy-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-api.module.ts",
+          "reason": "imports `AuthRepositoryModule`, provides `ApprovalRouteCommands`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-api.module.spec.ts",
+          "reason": "resolves `ApprovalRouteCommands`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-policies.controller.ts",
+          "reason": "constructor gains `ApprovalRouteGate`; `create`, `update`, `remove` gated"
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-policy-routes.integration.spec.ts",
+          "reason": "its AC-12 (an agent's self-applying create answers 403 at once) now expects 202, then `failed` with `ApprovalPolicySelfApplicationError` after the root user approves"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Gate project approval-policy writes",
+      "description": "**Goal** \u2014 Gate the three project policy writes and recheck project ownership when deferred commands execute.\n\n**Motivation** \u2014 A policy on any approvable key can already be written through `/approval-policies`, and it already takes effect on assistant and MCP writes.\n\n**Approach** \u2014 Verbatim approval-route design relevant to project policies:\n`ApprovalRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, ApprovalPolicyService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ActorPrincipalLoader)`) registers seven `routeCommand`s, all on `approval.policy.manage` except the last:\n| Variant (`APPROVAL_ROUTE_VARIANTS`) | Input | Run |\n|:--|:--|:--|\n| `projectPolicyCreate` = `rest:project-approval-policies.create` | `{ projectId, policy: parseBody(CreateApprovalPolicyDto, \u2026) }` | `policies.create({ ...policy, appliesTo: toPolicySubject(policy.appliesTo), projectId })` |\n| `projectPolicyUpdate` = `rest:project-approval-policies.update` | `{ projectId, id, patch }`, empty patch refused as above | `policies.get(id)`; a policy of another project throws `ApprovalPolicyNotFoundError(id)`; then `policies.update(id, patch)` |\n| `projectPolicyDelete` = `rest:project-approval-policies.delete` | `{ projectId, id }` | the same check, then `policies.remove(id)` |\n- Errors thrown inside these runs are domain errors (`ApprovalPolicyNotFoundError`, `ApprovalDecideForbiddenError`, \u2026). On the immediate path the controller's `rethrowApprovalError` maps them as today. On the deferred path the request is settled `failed` with `{ error: 'execution-failed', name: <the error's name> }`.\n- Controllers:\n  - `ProjectApprovalPoliciesController`: the same, with `projectId: ctx.project.id`. `update` and `remove` read the policy and answer 404 for another project's policy before the gate (unchanged), and the command checks again.\n\nVerbatim designer's call: **A project policy's route checks run again at execution.** The project policy `PATCH` and `DELETE` commands check that the policy still belongs to the route's project before writing, because a deferred run happens later than the route's own check.\n\nExtend the ApprovalRouteCommands and unit spec created in US-006, using the existing singleton provider. The table's 'as above' means parseBody(UpdateApprovalPolicyDto, input.patch), and an empty patch throws ValidationAppException({}, 'approvals.emptyPolicyPatch'). Validate projectId and id as non-empty strings and keep projectId in frozen envelopes. create uses { projectId, policy: dto }; update uses { projectId, id, patch: dto }; delete uses { projectId, id }. Preserve ProjectMembershipGuard/RequiresGuard, @Requires and existing status/response declarations. Each handler gains ApprovalGated and calls ApprovalRouteGate at ctx.project.id; throw ApprovalPending only for pending outcomes. Immediate delete remains 204/undefined, root create remains 201. Empty patch remains 400 before the gate; cross-project/missing policies remain 404 before opening requests.\n\nThe agent holds `approval.policy.manage` in project P; its policies use `appliesTo: { kind: 'type', principalType: 'USER' }`.\n\n**Scope** \u2014 In: three project variants, handlers, execution-time project rechecks and scoped integration cases. Out: global variants already shipped in US-006, decision refactor/gating (US-008\u2013US-009), gate contract/OpenAPI (US-010\u2013US-011); policy-resolution changes. Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs.\n\n**Interface** \u2014 `APPROVAL_ROUTE_VARIANTS.projectPolicyCreate` = `rest:project-approval-policies.create`; `.projectPolicyUpdate` = `rest:project-approval-policies.update`; `.projectPolicyDelete` = `rest:project-approval-policies.delete`; `ProjectApprovalPoliciesController` constructor gains `ApprovalRouteGate`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/approval-policies by the agent answers 202 with data.projectId P.",
+        "AC-2 [integration] After approving AC-1's request, one policy with projectId P exists.",
+        "AC-3 [integration] PATCH /api/projects/:slug/approval-policies/:id { mode: 'human' } by the agent answers 202, and after approval the policy's mode is human.",
+        "AC-4 [integration] DELETE /api/projects/:slug/approval-policies/:id by the agent answers 202, and after approval the policy no longer exists.",
+        "AC-5 [integration] PATCH /api/projects/:slug/approval-policies/:id for another project's policy answers 404 with key approvals.policyNotFound, and no ApprovalRequest row exists.",
+        "AC-6 [integration] PATCH /api/projects/:slug/approval-policies/:id {} by the agent answers 400 with key approvals.emptyPolicyPatch, and no ApprovalRequest row exists.",
+        "AC-7 [integration] POST /api/projects/:slug/approval-policies with the root token answers 201 (regression pin).",
+        "AC-8 [unit] The rest:project-approval-policies.update command's run on a policy whose projectId differs from the input's throws ApprovalPolicyNotFoundError and never calls policies.update.",
+        "AC-9 [unit] The rest:project-approval-policies.create command's run calls policies.create with projectId the input's projectId.",
+        "AC-10 [unit] After onModuleInit, approval.policy.manage also has variants rest:project-approval-policies.create, rest:project-approval-policies.update and rest:project-approval-policies.delete.",
+        "FM-1 [integration] When a pending project-policy update's target no longer belongs to the frozen projectId at execution, approving the request settles it failed with result.name ApprovalPolicyNotFoundError."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "policies",
+        "project-scope"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two source files extend the established global policy command/handler pattern with projectId envelopes and scope rechecks; cross-project authorization invokes strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-route.commands.ts",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/src/approvals/project-approval-policies.controller.ts",
+        "apps/api/src/approvals/approval-policy.service.ts",
+        "apps/api/src/approvals/dto/approval-policy.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/gated-project-policy-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The rest:project-approval-policies.delete command on a policy whose projectId differs from the input's throws ApprovalPolicyNotFoundError without calling policies.remove.",
+        "DELETE /api/projects/:slug/approval-policies/:id targeting another project's policy returns 404 approvals.policyNotFound without opening an ApprovalRequest."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/project-approval-policies.controller.ts",
+          "reason": "constructor gains `ApprovalRouteGate`; `create`, `update`, `remove` gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Separate decision recording from execution",
+      "description": "**Goal** \u2014 Expose decision-only recording and read-only eligibility checks, and preserve narrowed decide permissions during deferred execution.\n\n**Motivation** \u2014 The engine decides, executes and expires requests, and the assistant, MCP and fleet asks already go through it.\n\n**Approach** \u2014 Verbatim decision-service design:\n- `ApprovalDecisionService.recordDecision(requestId, decision, comment, now, params?)` is today's private `record` made public under that name (the decision transaction, eligibility included, with no execution); `decide` becomes `recordDecision` then, for an approval, `execution.execute`. `ApprovalRouteCommands` uses `ApprovalExecutionService` for the `afterCommit`.\n- `ApprovalDecisionService.assertMayDecide(requestId): Promise<void>`: reads the request (`requests.findById`), answers `ApprovalRequestNotFoundError` when missing, reads the decider from the context and its effective keys at the request's scope exactly as the decision step does, and throws `ApprovalDecideForbiddenError(reason)` when `decideEligibility` refuses. It does not check the status (the decision step still does, under its lock).\n- The `approval.decide` audit row a deferred decision writes carries the inner request's approval (`recordDecision` runs the decision under the inner request's approval block, as today); the outer approval is on the outer `ApprovalRequest` row. This is intended; it is not pinned.\n\nVerbatim narrowed-key design:\n- **The decide route skips the key check.** A decider usually holds `approval.decide@<pattern>`, not the bare key, so the bare-key check would refuse legitimate deciders. The decide route passes `keyCheck: false`: its visibility read and `decideEligibility` (inside `ApprovalDecisionService`) stay its authority, and an ineligible decider keeps today's `403 approvals.decideForbidden`. To keep that answer when a policy makes decisions wait, the handler first calls `ApprovalDecisionService.assertMayDecide(requestId)` (the eligibility step of a decision, with no write and no lock), so an ineligible agent gets 403 before any request opens. And because a decider may hold only the narrowed form, the execution re-check (`ApprovalExecutionService.stillHoldsKey`) accepts any `approval.decide@\u2026` key for an `approval.decide` request, as `PermissionService.can` already does through `holdsNarrowedDecide`.\n\nThis story provides only the service/helper seam for that route behavior; the handler changes are US-009. Export holdsNarrowedDecide from permission.service.ts and change nothing else in PermissionService. In ApprovalExecutionService.stillHoldsKey, retain bare key/.own logic and additionally accept holdsNarrowedDecide(keys) only for request.permissionKey === 'approval.decide'. Actual inner decision eligibility still matches patterns; do not treat narrowed decide as authority to perform label.delete. recordDecision preserves lock/status/expiry order, optional params semantics, eligibility checks, decision/event/audit rows, onReject hooks and committed effects; it never executes the approved command. assertMayDecide has no lock, status check, decision row or transition. Keep decide's existing immediate approve/reject responses.\n\n**Scope** \u2014 In: recordDecision extraction, assertMayDecide, exported narrowed helper and execution recheck. Out: routeCommand/decorator infrastructure (US-003), REST decide variant/handler/wrapper/afterCommit orchestration (US-009), module/controller migration and policies (US-004\u2013US-007).\n\n**Interface** \u2014 `ApprovalDecisionService.recordDecision(requestId, decision, comment, now, params?)`; `ApprovalDecisionService.assertMayDecide(requestId): Promise<void>`; `ApprovalDecisionService.decide(requestId, decision, comment, now?, params?)`; `holdsNarrowedDecide(held: ReadonlySet<string>): boolean`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] recordDecision(id, 'approve', null, now) records the decision, transitions the request to approved, and never calls execution.execute.",
+        "AC-2 [unit] decide(id, 'approve', null) calls recordDecision and then execution.execute(id) (regression pin).",
+        "AC-3 [unit] assertMayDecide(id) for a decider whose decideEligibility answers { ok: false, reason: 'tier-too-low' } throws ApprovalDecideForbiddenError with reason tier-too-low.",
+        "AC-4 [unit] assertMayDecide(id) for an eligible decider resolves and writes nothing (createDecision and transition never called).",
+        "AC-5 [unit] assertMayDecide('missing') throws ApprovalRequestNotFoundError.",
+        "AC-6 [unit] ApprovalExecutionService pre-check of an approved approval.decide request whose actor's effective keys are { 'approval.decide@label.*' } passes the key re-check (the command runs).",
+        "AC-7 [unit] The same pre-check for a label.delete request whose actor holds only approval.decide@label.* settles failed with { error: 'permission-revoked' }.",
+        "AC-8 [unit] holdsNarrowedDecide(new Set(['approval.decide@fleet.*'])) answers true, and holdsNarrowedDecide(new Set(['approval.decide'])) answers false."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "permissions",
+        "transactions"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three source files expose the existing decision transaction, reuse its eligibility logic and export an existing narrowed-key helper without altering transaction ownership; access-control changes mandate strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-decision.service.spec.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/approvals/approval-eligibility.ts"
+      ],
+      "suggestedCriteria": [
+        "assertMayDecide on an eligible but already-settled request resolves without writing, leaving the status error to recordDecision.",
+        "recordDecision(id, 'reject', comment, now) records a rejection without invoking execution.execute."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.ts",
+          "reason": "`record` becomes public `recordDecision`; `decide` calls it; `assertMayDecide`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.spec.ts",
+          "reason": "the `recordDecision` and `assertMayDecide` cases"
+        },
+        {
+          "path": "apps/api/src/permissions/permission.service.ts",
+          "reason": "exports `holdsNarrowedDecide`; nothing else changes"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.ts",
+          "reason": "`stillHoldsKey` accepts a narrowed decide key for an `approval.decide` request"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "the narrowed re-check cases"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Gate REST approval decisions",
+      "description": "**Goal** \u2014 Support approved deferred decisions while keeping outer and inner request transactions and failures independent.\n\n**Motivation** \u2014 An agent calling the REST API or the `koda` CLI does not: it can delete a project, rotate a webhook secret or grant itself a role the moment it holds the key, whatever the policy says.\n\n**Approach** \u2014 Verbatim approval-route design relevant to decisions:\n`ApprovalRouteCommands implements OnModuleInit` (constructor `(ApprovalCommandRegistry, ApprovalPolicyService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ActorPrincipalLoader)`) registers seven `routeCommand`s, all on `approval.policy.manage` except the last:\n| Variant (`APPROVAL_ROUTE_VARIANTS`) | Input | Run |\n|:--|:--|:--|\n| `decide` = `rest:approvals.decide` (key `approval.decide`) | `{ requestId, decision, comment, params }`: `requestId` a non-empty string, `decision` `'approve'` or `'reject'`, `comment` a string or null, `params` any JSON value or absent | `decisions.recordDecision(requestId, decision, comment, new Date(), params)`, answering the decided `ApprovalRequestRecord`; an `ApprovalRequestNotPendingError` or `ApprovalRequestExpiredError` from `recordDecision` is rethrown as `DeferredDecisionRefusedError` (its `reason` is `'not-pending'` or `'expired'`, and `status` the inner request's status for `'not-pending'`). `toResult` is `ApprovalRequestSummaryDto.from(result)` of that record (the outer row does not copy the inner request's input or decisions). `afterCommit(input)`: when `input.decision` is `'approve'`, `execution.execute(requestId)`; a throw is logged by the engine only |\n- `ApprovalDecisionService.recordDecision(requestId, decision, comment, now, params?)` is today's private `record` made public under that name (the decision transaction, eligibility included, with no execution); `decide` becomes `recordDecision` then, for an approval, `execution.execute`. `ApprovalRouteCommands` uses `ApprovalExecutionService` for the `afterCommit`.\n- `DeferredDecisionRefusedError extends Error` with `readonly reason: 'not-pending' | 'expired'` and `readonly status?: string`, name and prototype preserved. On the immediate path the decide handler maps it back: `not-pending` \u2192 `409 approvals.notPending` with `{ status }`, `expired` \u2192 `409 approvals.expired`, so an immediate decide answers exactly as today.\n- `ApprovalDecisionService.assertMayDecide(requestId): Promise<void>`: reads the request (`requests.findById`), answers `ApprovalRequestNotFoundError` when missing, reads the decider from the context and its effective keys at the request's scope exactly as the decision step does, and throws `ApprovalDecideForbiddenError(reason)` when `decideEligibility` refuses. It does not check the status (the decision step still does, under its lock).\n- The `approval.decide` audit row a deferred decision writes carries the inner request's approval (`recordDecision` runs the decision under the inner request's approval block, as today); the outer approval is on the outer `ApprovalRequest` row. This is intended; it is not pinned.\n- On the immediate path (`none` mode, the default), the handler calls `execution.execute(requestId)` itself after the gate answers `executed` with an approve, then answers `ApprovalRequestDto.from({ request: <the record execute answered>, decisions: await queries.decisionsFor(id) })`, so the response is today's (`status: 'executed'`); on a reject it answers the same DTO built from the run's record. The command's `afterCommit` only runs for a request the engine executed.\n- Errors thrown inside these runs are domain errors (`ApprovalPolicyNotFoundError`, `ApprovalDecideForbiddenError`, \u2026). On the immediate path the controller's `rethrowApprovalError` maps them as today. On the deferred path the request is settled `failed` with `{ error: 'execution-failed', name: <the error's name> }`.\n- Controllers:\n  - `ApprovalRequestsController.decide`: the visibility read (`queries.get`) stays first; then `decisions.assertMayDecide(id)`; then the gate with key `approval.decide`, `projectId` = the decided request's `projectId`, `keyCheck: false`. On `executed` it runs the inner execution as above and answers 200 with the request DTO.\n\nVerbatim designer's calls:\n- **A deferred decision records the decision only.** The `decide` variant's run calls `ApprovalDecisionService.recordDecision`, the decision step of `decide` without the execution step, and its `afterCommit` runs `ApprovalExecutionService.execute(innerId)` when the decision approved. The outer request's own action is \"record a decision\"; the inner request then executes in its own transaction after the outer one commits, as every engine execution does, and a failure there is the inner request's (`failed`, or left `approved` for the sweeper's stale-approved retry). A decided request that settled while the decision waited makes the run throw `DeferredDecisionRefusedError`, not `ApprovalRequestNotPendingError`, because the execution service rethrows the latter instead of settling the outer request `failed`.\n- **The decide route skips the key check.** A decider usually holds `approval.decide@<pattern>`, not the bare key, so the bare-key check would refuse legitimate deciders. The decide route passes `keyCheck: false`: its visibility read and `decideEligibility` (inside `ApprovalDecisionService`) stay its authority, and an ineligible decider keeps today's `403 approvals.decideForbidden`. To keep that answer when a policy makes decisions wait, the handler first calls `ApprovalDecisionService.assertMayDecide(requestId)` (the eligibility step of a decision, with no write and no lock), so an ineligible agent gets 403 before any request opens. And because a decider may hold only the narrowed form, the execution re-check (`ApprovalExecutionService.stillHoldsKey`) accepts any `approval.decide@\u2026` key for an `approval.decide` request, as `PermissionService.can` already does through `holdsNarrowedDecide`.\n\nService/helper extraction is already provided by US-008; extend US-006's registrar and unit spec with this variant/wrapper and attach the command afterCommit without expanding RouteCommandSpec unnecessarily. The approve/reject choice is frozen input.decision (dto.decision on the immediate handler path); the afterCommit hook's second argument is the engine's parsed approval params, not that choice. The decision command's run answers the decided ApprovalRequestRecord and its toResult is ApprovalRequestSummaryDto.from(record), so the outer result omits the inner input, result and decisions; do not add shared mutable raw-record state to the singleton command. The handler builds the full ApprovalRequestDto for its own response: on the immediate approve path from execution.execute's returned record plus queries.decisionsFor, never a second queries.get visibility check. Add ApprovalRouteGate and ApprovalExecutionService to ApprovalRequestsController. Keep list/get/cancel unchanged. Extend the existing Fastify pending-status integration file for static @HttpCode(200).\n\nFixtures follow `approval-decide-route.integration.spec.ts`: a `label.delete` test command is registered as the primary command; agent B (the requester) holds `label.delete` in P and opens the inner request through `ApprovalGate.gate` under `withTestActor`, mode `agent`; agent A (the decider) holds `approval.decide` and `label.delete` in P. The one policy-on-decide case is created explicitly by root; do not seed such a policy.\n\n**Scope** \u2014 In: decide variant, DeferredDecisionRefusedError, visibility/eligibility/gate controller order, immediate execution and deferred afterCommit separation, Fastify 200\u2192202 behavior. Out: redoing US-008 service extraction, policy routes (US-006\u2013US-007), contract/OpenAPI/CLI (US-010\u2013US-012); US-009 only: a policy on `approval.decide` that makes agent decisions wait is not seeded or pinned beyond one case.\n\n**Interface** \u2014 `APPROVAL_ROUTE_VARIANTS.decide` = `rest:approvals.decide`; `DeferredDecisionRefusedError extends Error` with `readonly reason: 'not-pending' | 'expired'` and `readonly status?: string`; `ApprovalRouteGate.run({ key: 'approval.decide', variant, projectId, input, keyCheck: false })`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] With no policy on approval.decide, agent A's POST /api/approvals/:id/decisions { decision: 'approve' } answers 200 with data.status executed (regression pin: the default mode is none).",
+        "AC-2 [integration] With a global policy { permissionPattern: 'approval.decide', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' } (created by root), the same call answers 202 with data.permissionKey approval.decide.",
+        "AC-3 [integration] After AC-2, the inner request is still pending.",
+        "AC-4 [integration] After the root user approves AC-2's request, the inner request's status is executed and its approverId is agent A.",
+        "AC-5 [integration] After AC-4, AC-2's request is executed.",
+        "AC-6 [integration] If agent B cancels the inner request (POST /api/approvals/:id/cancel) while AC-2's request waits, approving AC-2's request settles it failed with result.name DeferredDecisionRefusedError.",
+        "AC-7 [integration] If the inner command throws when the deferred approve runs, AC-2's request is executed and the inner request is failed.",
+        "AC-8 [integration] Agent A's decision on a request invisible to it answers 404 with key approvals.requestNotFound, and no approval.decide request exists.",
+        "AC-9 [integration] An agent below the request's tier still gets 403 approvals.decideForbidden with reason tier-too-low (regression pin, the existing approval-decide-route.integration.spec.ts AC-7).",
+        "AC-10 [integration] In approval-pending-status.integration.spec.ts on Fastify, the AC-2 call (an @HttpCode(200) route) answers status 202.",
+        "AC-11 [unit] The rest:approvals.decide command's parse({ requestId: 'r1', decision: 'maybe', comment: null }) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-12 [unit] The rest:approvals.decide command's run calls decisions.recordDecision('r1', 'reject', 'no', <a Date>, undefined) and never calls execution.execute.",
+        "AC-13 [unit] Its afterCommit for an approve input calls execution.execute('r1').",
+        "AC-14 [integration] Agent A's immediate decision on a request already rejected answers 409 with key approvals.notPending and the message naming rejected (regression pin).",
+        "AC-15 [integration] With the AC-2 policy in force, an agent below the inner request's tier answers 403 approvals.decideForbidden with reason tier-too-low, and no approval.decide request exists."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "transactions",
+        "http"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-006",
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Nested approvals require strict authorization order and separate transaction/failure ownership under concurrent cancellation, expiry and execution."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-route.commands.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/gated-decide-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When recordDecision throws ApprovalRequestExpiredError during a deferred decide run, the outer request settles failed with result.name DeferredDecisionRefusedError.",
+        "An immediate decision on an expired request returns 409 approvals.expired after mapping DeferredDecisionRefusedError.",
+        "The decide command's afterCommit for a reject input does not call execution.execute.",
+        "An executed outer decision request stores an inner summary without input or decisions in its result."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-requests.controller.ts",
+          "reason": "constructor gains `ApprovalRouteGate` and `ApprovalExecutionService`; `decide` gated; maps `DeferredDecisionRefusedError`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Enforce the approvable REST write gate contract",
+      "description": "**Goal** \u2014 Make CI reject ungated approvable writes and stale rollout exemptions while accounting for every remaining domain.\n\n**Motivation** \u2014 A policy on any approvable key can already be written through `/approval-policies`, and it already takes effect on assistant and MCP writes.\n\n**Approach** \u2014 Verbatim design, The gate contract (US-010):\n- `RouteDeclaration` gains `method: string` (upper case) and `gated: boolean` (the handler's `APPROVAL_GATED_METADATA`).\n- `ContractViolation` gains:\n  - `{ kind: 'ungated-approvable-write'; route }`: a `POST`, `PUT`, `PATCH` or `DELETE` route, one of whose `@Requires` keys is approvable (`findCatalogEntry(key)?.approval.approvable`), that is neither gated nor listed in `PENDING_GATE_ROUTES`;\n  - `{ kind: 'gated-without-approvable-key'; route }`: a gated route with no approvable key;\n  - `{ kind: 'stale-pending-gate-route'; route }`: a `PENDING_GATE_ROUTES` entry that is gated, or that names no collected approvable write route.\n- `findContractViolations(declarations, catalog = PERMISSION_CATALOG, pending = PENDING_SURFACE_KEYS, pendingGateRoutes = PENDING_GATE_ROUTES)`: the allowlist is a new fourth parameter so specs pass their own, and approvability is read from the `catalog` argument (an entry of `catalog` with `approval.approvable`), never from the global catalog.\n- `PENDING_GATE_ROUTES: ReadonlyMap<string, 'gate-high' | 'gate-core-domains' | 'gate-fleet'>`, keyed by `routeSurface` label (`'DELETE /projects/:slug'`):\n  - `gate-high` (feature `permissions-p3-approval-gate-high`): a route with at least one approvable key whose catalog `approval.default` is not `none`;\n  - else `gate-fleet` (`permissions-p3-approval-gate-fleet`): every approvable key of the route starts with `fleet.`, `thread.` or `testhook.`;\n  - else `gate-core-domains` (`permissions-p3-approval-gate-core-domains`).\n- The entries are exactly the approvable write routes of the booted app minus this feature's 12. Generate them with the collector and the rule above, and commit the result sorted by label.\n\nThe parenthetical catalog lookup in the violation definition describes approvability, not permission to read global state: the explicit catalog-argument rule and AC-7 are authoritative. Preserve all existing route-without-key, unknown-key, guard-missing, unused-key and pending-key-declared checks. Collector keeps routeSurface labels shared with auditing and controller-class deduplication; add uppercase method from actual Nest metadata and handler gated metadata. Update hand-built declarations and isolated tests to pass their own fourth-argument allowlists so the production rollout map does not leak into fixture assertions. For single-declaration ACs expecting no violations, also supply a minimal second-argument catalog containing the fixture's declared keys and an appropriate third-argument pending-surface set; do not remove existing unused-key validation to silence unrelated fixture violations. Preserve guard-missing reporting for an enforcedBy: 'guard' route without RequiresGuard even after adding the gate rules. Extend the existing booted-app contract integration spec; exactly 12 routes should be gated at this feature boundary.\n\n**Scope** \u2014 In: collector fields, three contract violations, boot-derived sorted PENDING_GATE_ROUTES and contract assertions. Out: changing the 12 handlers implemented upstream, OpenAPI artifact/endpoint coverage (US-011) and CLI (US-012). Gating the other approvable write routes: `permissions-p3-approval-gate-high`, `-gate-core-domains` and `-gate-fleet`, as `PENDING_GATE_ROUTES` records. Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.\n\n**Interface** \u2014 `RouteDeclaration` gains `method: string` and `gated: boolean`; `findContractViolations(declarations, catalog = PERMISSION_CATALOG, pending = PENDING_SURFACE_KEYS, pendingGateRoutes = PENDING_GATE_ROUTES)`; `PENDING_GATE_ROUTES: ReadonlyMap<string, 'gate-high' | 'gate-core-domains' | 'gate-fleet'>`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] findContractViolations reports ungated-approvable-write for a hand-built DELETE /labels/:id declaration requiring label.delete, not gated, with an empty gate allowlist as the fourth argument.",
+        "AC-2 [unit] The same declaration listed in the fourth argument yields no violation.",
+        "AC-3 [unit] A gated POST declaration requiring only ticket.read yields gated-without-approvable-key.",
+        "AC-4 [unit] An allowlist entry for a gated route yields stale-pending-gate-route.",
+        "AC-5 [unit] An allowlist entry naming no collected route yields stale-pending-gate-route.",
+        "AC-6 [unit] A GET declaration requiring approval.decide, not gated, yields no violation.",
+        "AC-7 [unit] A catalog passed as the second argument in which label.delete is not approvable makes the AC-1 declaration yield no violation.",
+        "AC-8 [unit] The collector reports method: 'POST' and gated: true for RolesController.create.",
+        "AC-9 [unit] PENDING_GATE_ROUTES has no entry starting with POST /roles, PATCH /roles, DELETE /roles, POST /role-bindings, DELETE /role-bindings, POST /approval-policies, PATCH /approval-policies, DELETE /approval-policies, POST /projects/:slug/approval-policies, PATCH /projects/:slug/approval-policies, DELETE /projects/:slug/approval-policies or POST /approvals/:id/decisions.",
+        "AC-10 [unit] PENDING_GATE_ROUTES.get('DELETE /projects/:slug') is gate-high.",
+        "AC-11 [unit] PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets') is gate-core-domains.",
+        "AC-12 [unit] PENDING_GATE_ROUTES.get('POST /projects/:slug/threads') is gate-fleet.",
+        "AC-13 [integration] Over the booted app, the collected routes contain exactly 12 gated routes.",
+        "AC-14 [integration] Over the booted app, findContractViolations reports no violation (the existing AC-6 assertion, now including the gate rules)."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "contract",
+        "rollout"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-007",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing collector and validator gain two metadata fields and three checks plus a generated static map; the contract enforces permission coverage, so the security TDD override applies."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.collector.spec.ts",
+        "apps/api/src/permissions/route-surface.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/pending-gate-routes.ts"
+      ],
+      "suggestedCriteria": [
+        "An allowlist entry naming a collected GET route yields stale-pending-gate-route because it is not an approvable write.",
+        "A PUT route requiring an approvable key and absent from the gate allowlist yields ungated-approvable-write when not gated."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.ts",
+          "reason": "`method`, `gated`, the three violations, the `pendingGateRoutes` parameter"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the new violation cases on hand-built declarations"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.collector.spec.ts",
+          "reason": "`method` and `gated` collected"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gate assertions over the booted app"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Publish the pending-response OpenAPI contract",
+      "description": "**Goal** \u2014 Publish the exact 12 new pending HTTP responses and pin representative endpoints to 202.\n\n**Motivation** \u2014 The design's shipped defaults make high-risk agent writes wait for another agent (`agent`) and role, binding and policy writes wait for a human (`human`); today nothing on REST enforces them.\n\n**Approach** \u2014 Verbatim OpenAPI/endpoint design and verification notes:\n- `openapi.json` \u2014 regenerated with `bun run api:export-spec` from the repo root; the 12 gated operations gain a `202` response and nothing else changes (the CLI's generated client is gitignored and regenerated with `bun run generate:cli`, not committed)\n- `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` \u2014 the 202 cases below\nVerification note: `openapi.json` is regenerated with `bun run api:export-spec` (repo root); `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint` pass. AC-1 to AC-4 live in `src/approvals/approval-openapi.contract.spec.ts`, which reads `openapi.json`.\n\nThe shared decorator contract is `ApprovalGated()` is `applyDecorators(SetMetadata(APPROVAL_GATED_METADATA, true), UseFilters(ApprovalPendingFilter), ApiExtraModels(ApprovalRequestSummaryDto), ApiResponse({ status: 202, description: 'The write waits for approval', schema: <{ ret, data: $ref ApprovalRequestSummaryDto }> }))`. The upstream route migrations should already generate the 202 schemas; regenerate instead of hand-editing or widening unrelated endpoints. Preserve the existing knowledge repos reindex 202. Validate the exact operation set, not just the three examples: roles POST and /{id} PATCH/DELETE; role-bindings POST and /{id} DELETE; global approval-policies POST and /{id} PATCH/DELETE; project approval-policies POST and /{id} PATCH/DELETE; approvals/{id}/decisions POST. Expected total including existing reindex is 13 operations.\n\nExtend endpoint.e2e.spec.ts with agent fixtures granted the actual global/project key and assert exactly 202, not any 2xx or a generalized success set. The binding delete fixture must exist and be scoped to the project where the agent holds role.binding.manage. Regenerate CLI using the root generate:cli command from this OpenAPI as a generated consumer check; do not commit or manually patch ignored generated sources. This explicitly declared story remains independent despite focusing on generated contract and endpoint verification.\n\nAlso retain an endpoint permission-denied case: an agent without global role.manage must still receive 403 for a valid role-create body, not 202. This negative path pins existing authorization rather than broadening the pending contract.\n\n**Scope** \u2014 In: generated root openapi.json, one API unit contract spec, three precise pending endpoint lifecycle cases and a permission-denied regression case. Out: changing collector/allowlist semantics (US-010), CLI pending handling (US-012), unrelated schema drift or generated-client hand edits. Showing `variant` in `ApprovalRequestSummaryDto`, `ApprovalRequestDto`, MCP outputs or the web: P3 web. Any change to `apps/web`.\n\n**Interface** \u2014 `202` response schema: `<{ ret, data: $ref ApprovalRequestSummaryDto }>`; API immediate response/status contracts remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] openapi.json's post /api/roles operation has a 202 response.",
+        "AC-2 [unit] openapi.json's delete /api/role-bindings/{id} operation has a 202 response.",
+        "AC-3 [unit] openapi.json's post /api/approvals/{id}/decisions operation has a 202 response.",
+        "AC-4 [unit] The operations of openapi.json with a 202 response are exactly the 12 gated ones plus the existing post /api/projects/{slug}/knowledge/repos/{repoId}/reindex.",
+        "AC-5 [integration] In endpoint.e2e.spec.ts, POST /api/roles with the key of an agent holding global role.manage answers exactly 202.",
+        "AC-6 [integration] In endpoint.e2e.spec.ts, POST /api/approval-policies with the key of an agent holding global approval.policy.manage answers exactly 202.",
+        "AC-7 [integration] In endpoint.e2e.spec.ts, DELETE /api/role-bindings/:id with the key of an agent holding role.binding.manage in the binding's project answers exactly 202."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "openapi",
+        "contract"
+      ],
+      "dependencies": [
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Generated API contract and full endpoint cases are prescribed as a binding story; they pin security-sensitive deferred writes and preserve existing endpoint semantics."
+      },
+      "contextFiles": [
+        "openapi.json",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/src/approvals/route/approval-gated.decorator.ts",
+        "apps/api/src/approvals/dto/approval-request.dto.ts",
+        "apps/api/src/permissions/roles.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-openapi.contract.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with `bun run api:export-spec` from the repo root; the 12 gated operations gain a `202` response and nothing else changes (the CLI's generated client is gitignored and regenerated with `bun run generate:cli`, not committed)"
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the 202 cases below"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Report pending approvals consistently in the CLI",
+      "description": "**Goal** \u2014 Turn any API 202 response into a central pending output and exit code 5 without modifying commands.\n\n**Motivation** \u2014 An agent calling the REST API or the `koda` CLI does not: it can delete a project, rotate a webhook secret or grant itself a role the moment it holds the key, whatever the policy says.\n\n**Approach** \u2014 Verbatim design, The CLI (US-012):\n- `apps/cli/src/utils/approval-pending.ts`: `class ApprovalPendingError extends Error` with `readonly request: { id: string; permissionKey: string; requiredMode: string; expiresAt: string; status: string }`, message `approval pending: <id>`.\n- `configureApiClient` adds one response interceptor (registered once per process, not once per call): a `202` response's JSON body `{ ret, data }` throws `new ApprovalPendingError(data)`. Any other status returns the response unchanged.\n- `handleApiError`:\n  - checks `ApprovalPendingError` first.\n  - Text mode: stderr `Approval required: <permissionKey> waits for <requiredMode> approval (request <id>, expires <expiresAt>).` then `Follow it with: koda approval show <id>`.\n  - `--json` mode: stdout `JSON.stringify({ pending: { id, permissionKey, requiredMode, status, expiresAt } }, null, 2)`. Stdout, not stderr: a pending write is not an error, and a script reads the request id from it.\n  - Exits 5.\n- The exit-code comment in `error.ts` gains `5: approval pending`. (`.nax/rules/cli.md`, which lists only 0 to 3, is updated outside the nax run, as a follow-up.)\n\nVerbatim designer's call: **The CLI exits 5 for a pending write.** One response interceptor in `configureApiClient` turns any `202` into an `ApprovalPendingError`; `handleApiError` prints it and exits 5. No command module changes.\n\nVerification note: `bun run --cwd apps/cli type-check`, `lint` and `test` pass. The generated client is not regenerated by hand; `bun run generate:cli` (repo root) regenerates it from the US-011 `openapi.json`, and no command module changes.\n\nRepository-specific integration: current generated transport is @hey-api/client-fetch, not Axios; use its Response interceptor API and do not consume or replace any non-202 response. Guard installation once at module/process scope while still allowing configureApiClient to set baseUrl/credentials on each call. Tests capture the registered interceptor through the generated client mock, invoke it with actual Response bodies, and exercise repeated configuration, error routing, console streams and process.exit. Extend existing error.spec.ts and create approval-pending.spec.ts for the error/interceptor behavior. Pending handling precedes opts.configError/validationError and existing status mappings. Root generate:cli output stays ignored and unedited. The story summary's mention of a rule file does not override the explicit exclusion: change only the error.ts exit comment, not .nax/rules/cli.md.\n\nPreserve non-pending failure routing: handleApiError(new Error('Network timeout')) must still exit 1; adding the first pending branch must not classify every Error as pending.\n\n**Scope** \u2014 In: ApprovalPendingError, one fetch response interceptor, central text/JSON output, exit 5, exit-code comment and existing non-pending failure regression behavior. Out: API contract publishing (US-011), command modules and handwritten client changes. `koda approval wait` or any CLI polling of a pending request. Updating `.nax/rules/cli.md` (exit codes 4 and 5): a follow-up outside the nax run. Any change to `apps/web`.\n\n**Interface** \u2014 `class ApprovalPendingError extends Error` with `readonly request: { id: string; permissionKey: string; requiredMode: string; expiresAt: string; status: string }`; `configureApiClient(baseUrl: string, apiKey?: string): void`; `handleApiError(err: unknown, opts?: HandleApiErrorOpts): never`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] The response interceptor installed by configureApiClient, given a Response with status 202 and body { ret: 0, data: { id: 'r1', permissionKey: 'role.manage', requiredMode: 'human', status: 'pending', expiresAt: '2026-11-09T00:00:00.000Z' } }, rejects with an ApprovalPendingError whose request.id is r1.",
+        "AC-2 [unit] The interceptor returns a 200 response unchanged.",
+        "AC-3 [unit] Calling configureApiClient twice leaves one response interceptor installed.",
+        "AC-4 [unit] handleApiError(new ApprovalPendingError(request)) in text mode writes Approval required: role.manage waits for human approval (request r1, expires 2026-11-09T00:00:00.000Z). to stderr.",
+        "AC-5 [unit] In text mode it also writes Follow it with: koda approval show r1 to stderr.",
+        "AC-6 [unit] It exits with code 5.",
+        "AC-7 [unit] In --json mode it writes { \"pending\": { \"id\": \"r1\", \"permissionKey\": \"role.manage\", \"requiredMode\": \"human\", \"status\": \"pending\", \"expiresAt\": \"2026-11-09T00:00:00.000Z\" } } (2-space indented) to stdout and nothing to stderr.",
+        "AC-8 [unit] ApprovalPendingError is an Error whose message is approval pending: r1."
+      ],
+      "tags": [
+        "cli",
+        "approvals",
+        "http",
+        "automation"
+      ],
+      "dependencies": [
+        "US-011"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Central transport/output change uses existing client and error utilities; it reports approval outcomes without making authentication or access-control decisions."
+      },
+      "contextFiles": [
+        "apps/cli/src/utils/api-client.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/utils/error.spec.ts",
+        "apps/cli/src/utils/json-mode.ts",
+        "openapi-ts.config.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/utils/approval-pending.ts",
+        "apps/cli/src/utils/approval-pending.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After configureApiClient is called with two different API URLs, the latest URL is configured while a pending response still produces one ApprovalPendingError.",
+        "handleApiError given ApprovalPendingError and opts.configError exits 5 and prints pending output rather than CONFIG_ERROR."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/utils/api-client.ts",
+          "reason": "the response interceptor"
+        },
+        {
+          "path": "apps/cli/src/utils/error.ts",
+          "reason": "the `ApprovalPendingError` branch and the exit-code comment"
+        },
+        {
+          "path": "apps/cli/src/utils/error.spec.ts",
+          "reason": "the pending cases"
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository inspection and authority: This is an enhancement of the existing permission/approval engine, not greenfield. codebase-memory MCP is unavailable in this session, so discovery used direct reads and text searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. Read .nax/mono/apps/api/context.md and .nax/mono/apps/cli/context.md. The detected Express/Next.js metadata is not authoritative: production API is NestJS 12/Fastify; HTTP helpers also support Express; web is Nuxt and is excluded. API uses Prisma 7/PostgreSQL, Vitest, oxlint, Nathapp transaction/audit/envelope patterns. Before writing NestJS implementation, read the nathapp-nestjs-patterns skill from the implementation host; no repository-local **/nathapp-nestjs-patterns/SKILL.md was found. This planning pass changes only this PRD and has not run code or tests.\n\nProduct goal and done: Enforce existing approval policies on the 12 role, binding, policy and decision REST writes. A human always executes immediately; an agent executes immediately only for mode none, otherwise receives 202 with a committed pending-request summary and no domain write. Approval rechecks the original actor's permission and executes the selected registered variant with settlement atomically. All other approvable writes are explicitly assigned to subsequent features by a boot-derived, sorted allowlist; CI refuses new omissions and stale exemptions. CLI centrally prints any 202 pending response and exits 5 without command changes. Maintain the binding 12-story DAG and workdirs, including the explicitly declared contract/OpenAPI/endpoint story; US-011 remains apps/api although its generated artifact is root openapi.json.\n\nUS-001 engine baseline and impact: ApprovalCommand has parse/execute, decision/rejection/result/afterCommit hooks but no variant (apps/api/src/approvals/approval-command.registry.ts:16-42); its singleton registry is currently Map<string, ApprovalCommand> and rejects repeated keys (same file:46-62). Preserve every hook and primary lookup. ApprovalGate.gate currently accepts { projectId }, resolves one command, validates/freeze-hashes input and opens pending requests or immediately executes with an approval context (apps/api/src/approvals/approval-gate.service.ts:38-96). Duplicate matching includes actor/onBehalfOf/key/project/inputHash but not variant (same file:127-136; apps/api/src/approvals/prisma-approval-request.repository.ts:11-15,91-94). newRequest builds every pending row in one place (approval-gate.service.ts:155-183). ApprovalRequestRecord has no variant (apps/api/src/approvals/domain/approval.domain.ts:37-46). Prisma ApprovalRequest begins at apps/api/prisma/schema.prisma:1554, permissionKey at :1556, existing duplicate-related index at :1588. Add only a nullable TEXT column, migration 20261108090000_approval_request_variant, no index/backfill. Apply migration and regenerate Prisma before compiling variant reads. Null must remain the primary selector, never fallback from missing named variants; old requests and new assistant/fleet asks retain their primary command. Repository toDomain currently spreads row fields (prisma-approval-request.repository.ts:27-35): explicitly omit variant when null to prevent breaking exact record assertions; create must persist record.variant ?? null. toPersistenceCreate currently delegates to toPersistenceUpdate (:37-47), so preserve partial-update semantics while adding the create default. Variant affects duplicate identity, not the permission key, catalog, input hash or public DTO.\n\nExecution and transaction invariants: ApprovalExecutionService reads the registered command in precheck, validates input hash, rechecks keys, then reparses (apps/api/src/approvals/approval-execution.service.ts:60-91). It restores the request actor/context (:255-269), holds a request slot across execution/failure settlement, locks the row, and commits domain writes plus executed state in one transaction (:139-201). Only callback failures settle failed; infrastructure/commit failures leave approved for retry. ApprovalRequestNotPendingError is deliberately rethrown rather than classified execution-failed (:193-201). afterCommit runs outside the committed transaction and is warning-only (:210-220). Preserve these boundaries; do not run an inner approval execution inside the outer deferred-decision transaction. Gate's immediate path does not run command.afterCommit (approval-gate.service.ts:94-96), so the immediate decision handler must explicitly execute the approved inner request. Existing command lifecycle pattern is AssistantToolCommands.onModuleInit (apps/api/src/fleet/assistant/commands/assistant-tool-commands.ts:15-33); register route variants in owning API modules against the same exported engine registry, never replace assistant/fleet primary executors. configurableTestCommand uses dynamic getters for hooks (apps/api/src/approvals/test-helpers/test-approval-command.ts:123-184), and installOverRegisteredCommand copies descriptors (:228-240); never spread the helper object to add variant and freeze those getters.\n\nUS-002 principal reconstruction: PrismaAuthRepository exposes findUserById (:76-79), findAgentByKeyHash (:90-94), and a separate capability reader (:105-108), but needs findAgentById and hasGlobalAdminBinding (apps/api/src/auth/prisma-auth.repository.ts). Mirror global USER owner/admin membership from PrismaAssistantToolCallRepository.findUserActor (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:96-108), not a project's role. AuthRepositoryModule already exports the concrete repository and token (apps/api/src/auth/auth-repository.module.ts:12-17); export the loader there without importing the engine. UserPrincipal and AgentPrincipal are distinct from RunnerPrincipal (apps/api/src/auth/principal/koda-principal.types.ts:8-37). Reject disabled/missing users and paused/missing agents, allow non-paused agents including OFFLINE, and never reuse an HTTP credential or load capabilities. The loader must run on both immediate and deferred paths so changed actor availability is observed, and error prototypes/names must survive engine result classification.\n\nUS-003 gate and HTTP integration: ActionContextInterceptor establishes USER/AGENT/RUNNER/SYSTEM contexts around handler subscription and assigns origin rest or runner (apps/api/src/action-context/action-context.interceptor.ts:28-46). Its error path closes the audit scope without coverage checks (:55-58), while successful completion checks audit coverage (:79-91). Pending creation is bookkeeping in its own committed transaction (approval-gate.service.ts:141-145); throwing ApprovalPending therefore does not undo it. A local handler filter using HttpAdapterHost is essential: mutating a response in a handler/interceptor is overwritten by Nest's static HTTP status. Provide reusable parseBody/routeCommand/gate/error/decorator/filter in approvals/route, translated invalidInput entries in English and Chinese, and export ApprovalRouteGate from ApprovalEngineModule. parseBody must return a plain whitelisted object and use the same validation settings as the app pipe. Gate first rejects RUNNER with current permissions 403, rejects non-principal/no context as a programming error, then checks key or key.own against effectiveKeys at the right scope. Own-key acceptance is only a key check; domain ownership is still enforced by the service at execution. keyCheck:false is only the decide-route eligibility exception; it is not an authorization bypass for other writes.\n\nUS-004/005 permissions modules and routes: RolesController currently delegates directly to RoleAdminService and returns 201/200/204 for create/update/remove (apps/api/src/permissions/roles.controller.ts:22-74). RoleBindingsController does the same for create/remove with @Requires any of three binding keys (apps/api/src/permissions/role-bindings.controller.ts:28-29,71-102). Keep all @Requires and existing responses/statuses on immediate execution, and leave lists unchanged. PermissionsModule is global, owns seed/cache/repositories/services and currently all three controllers (apps/api/src/permissions/permissions.module.ts:35-65). Move only roles/bindings controllers into new PermissionsApiModule importing ApprovalEngineModule and AuthRepositoryModule; keep PermissionsModule engine-free and its service exports/bootstrap unchanged. AppModule already imports PermissionsModule, ApprovalEngineModule and ApprovalApiModule (apps/api/src/app.module.ts:147-151), and must import the new API module exactly once. RoleAdminService owns security checks and audit; its OWNER_ROLE_KEY is private at apps/api/src/permissions/role-admin.service.ts:71 and createRole/createBinding/removeBinding start at :131/:274/:317. Export the owner constant, do not rewrite its logic. Select binding key from owner role first, then null-project global, else manage. DELETE reads MembershipService.findBinding before opening a request; missing stays 404. Domain checks remain inside the command run, so agent escalation/self-binding/self-applying policies may now return 202 followed by failed, not an immediate service error. Results of role create/update and binding create use existing DTOs, and audits must identify the original agent plus approving human/request.\n\nUS-006/007 policies: Global policy write handlers directly invoke ApprovalPolicyService (apps/api/src/approvals/approval-policies.controller.ts:60-114); update checks empty patch before reading global ownership (:88-95), and remove pre-reads ownership (:106-112). Project policy handlers retain ProjectMembershipGuard, RequiresGuard and route project from CurrentProject (apps/api/src/approvals/project-approval-policies.controller.ts:63-117); update/remove already compare policy.projectId with ctx.project.id (:95-99,:111-115). Preserve these early empty/visibility errors, plus repeat policy scope checks in deferred global/project update/delete commands. Policy services infer actor from action context; still use routeCommand principal loading for actor liveness. ApprovalApiModule currently only imports engine/project access and declares controllers (apps/api/src/approvals/approval-api.module.ts:8-12); import AuthRepositoryModule and register one ApprovalRouteCommands provider. Deferred errors stay domain errors for engine classification; immediate paths use rethrowApprovalError, which maps policy, decision, not-pending and expiry errors and rethrows unknown errors (apps/api/src/approvals/approval-http-errors.ts:5-17), allowing ApprovalPending to reach the handler filter. Update existing approval-policy-routes.integration.spec.ts self-application expectation from immediate 403 to pending then failed, rather than weakening the self-application invariant.\n\nUS-008/009 decisions and races: ApprovalDecisionService.decide currently records in private record then executes approved actions separately (apps/api/src/approvals/approval-decision.service.ts:33-38). The private transaction locks the request, checks pending then expiry, resolves decider effective keys/eligibility, parses decision params through registry.get and persists audit/events under the inner approval (:68-122). Expose that exact transaction as recordDecision and add a read-only/unlocked assertMayDecide without a status check; preserve existing params-null normalization and rejection committed effects. assertMayDecide must be before opening an approval.decide request, but after the visibility read. ApprovalRequestsController.decide already calls queries.get first and returns DTO plus decisions (:68-89); maintain invisible 404, tier 403, immediate expired/non-pending 409, and no post-decision visibility reauthorization. PermissionService.can already accepts narrowed decide forms (apps/api/src/permissions/permission.service.ts:59-80); holdsNarrowedDecide currently is private (:211-214). Export only that helper and apply it to the execution recheck only when permissionKey is approval.decide; it must not authorize the action named by the narrowed pattern. Deferred decision commands record only; afterCommit executes an approved inner request independently. Wrap inner not-pending/expired errors as DeferredDecisionRefusedError so they settle the outer failed instead of triggering the engine's special rethrow. Immediate handlers translate the wrapper back to today's 409. Outer result stores only the inner request summary, not frozen input/decision details. ApprovalRequestSummaryDto.from requires a domain record with actor and Date fields, whereas the command returns a flattened ApprovalRequestDto; never pass that DTO to from. Preserve both contracts by projecting summary fields from the returned DTO, with no shared mutable command state or additional queries.get visibility recheck after the decision. The outer remains executed if inner execution fails; an infrastructure failure may leave inner approved for existing sweeper retry.\n\nUS-010 safety contract: Current RouteDeclaration has route/requires/guard only (apps/api/src/permissions/test-helpers/permission-contract.ts:10-17); collector uses routeSurface and metadata and deduplicates controller classes (:77-107,:135-164). findContractViolations currently accepts catalog and pending surface keys and checks key declaration/guards/catalog use (:167-200). Extend without removing those checks; collect uppercase method and handler gated metadata, use the caller-provided catalog for approvability, and add fourth pendingGateRoutes parameter. Generate PENDING_GATE_ROUTES from the booted app, not estimates of ~155 routes: all approvable POST/PUT/PATCH/DELETE operations except these 12, sorted by routeSurface label. Classification precedence is non-none default => gate-high; else all approvable keys fleet./thread./testhook. => gate-fleet; else gate-core-domains. Exemptions are route-specific, not per permission; stale or already-gated exemptions fail. The exact 12 gated count is a rollout assertion for this feature, not a license to suppress later routes.\n\nUS-011 contract generation: openapi.json must gain 202 on exactly these 12 operations in addition to the pre-existing knowledge reindex 202. Root scripts support api:export-spec, generate:cli and generate (package.json:25-28). Regenerate, never hand-edit OpenAPI or clients; review unrelated drift. Summary DTO deliberately contains no variant (apps/api/src/approvals/dto/approval-request.dto.ts:26-38), and no DTO/MCP/web variant exposure is required. Endpoint lifecycle harness already uses real AppModule, guards, action context and JsonResponse (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:18-57); add precise 202 cases without loosening all success statuses. The existing knowledge reindex 202 is intentionally also intercepted by the CLI's any-202 contract; this feature does not introduce polling or command-specific exceptions.\n\nUS-012 CLI transport: Current configureApiClient only calls setConfig (apps/cli/src/utils/api-client.ts:1-15), and is reached through context plus auth/project/init/login/evaluate (search references include apps/cli/src/utils/context.ts:49 and apps/cli/src/commands/project.ts:57). Contrary to old context's Axios description, current generation uses @hey-api/client-fetch with responseStyle:data and throwOnError:true (openapi-ts.config.ts:8-17); implement a Fetch Response interceptor, preserving non-202 responses/body consumption and installing it once per process. handleApiError currently branches on config/validation options before HTTP mappings, writes errors to stderr, exits 1-4 (apps/cli/src/utils/error.ts:95-138). ApprovalPendingError must be first, print exact two stderr lines in text mode or a pretty pending envelope to stdout only in JSON mode, then exit 5. Existing .gitignore:16-22 ignores generated clients and Prisma outputs; this confirms the feature's instruction to regenerate CLI locally without committing it, despite older generated-client source-control guidance. No command modules or .nax/rules/cli.md changes.\n\nTests and migration/rollout: Extend existing registry/gate/execution/decision/decision-params specs and repository integration expectations for variant arguments. configurableTestCommand requires a variant getter alongside existing live hooks. Reuse seedFleetHttpWorld/root, seedFleetHttpAgent, grantKeys/grantRole, withTestActor and PermissionCache invalidation from apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts:1-69. That fixture's old open helper includes an obsolete requiredMode option (:35-38); resolve modes via actual policies/catalog as the target design specifies rather than propagating that baseline artifact. bootHttpApp takes required registrationEnabled and optional adapter (apps/api/test/helpers/http-app.ts:13-18,32-46): supply registrationEnabled when using Fastify even though spec shorthand only shows adapter. Fastify-specific pending tests pin static 201,204,200 replacement; normal helper boots Express unless selected. DI/module registration tests must be src/**/*.module.spec.ts with GlobalStubsModule/external provider mocks and no DB. DB specs must use canRunDbTests; run test:db:up then scoped integration/e2e outside NAX_SANDBOXED with KODA_DB_TESTS=1; skipped DB tests are not verification. Never run two reset-based DB suites concurrently against the same DB; use a private test container for another checkout. API Vitest uses vi, hoisted factories and lazy TS imports; CLI uses Jest, with generated-client mocks. Generated nax acceptance files must not be edited/moved. Security-critical stories use three-session-tdd strict isolation; test author cannot change src and implementation cannot modify tests. Review migration SQL and null compatibility, module graph/one registry, pending response filter/adapters, audit attribution, scoped/narrowed authorization, policy scope rechecks, command result projection, command disappearance, actor unavailability, and outer/inner transaction races. No broad architectural or domain-rule rewrite is needed.\n\nSpec conflict resolution: ACs override contradicting prose. US-012's story summary mentions the rule file, but both its detailed scope and feature exclusions explicitly defer .nax/rules/cli.md; do not modify it. Use exact binding dependencies, including US-009 depending on US-004, US-006, US-008 and US-011 remaining its own story despite being contract-focused. Detailed stories below retain all numbered spec ACs, plus explicit failure-table assertions where the numbered list did not completely pin a listed scenario; speculative hardening belongs only in suggestedCriteria. Feature-level exclusions are copied verbatim below.\n\nRefine-pass preservation audit: Compared each numbered acceptance criterion in spec.md:437-623 with this PRD. All 143 original assertions remain in their original stories. Explicit inventory: US-001 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-002 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10]; US-003 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15]; US-004 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15]; US-005 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13]; US-006 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-007 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10]; US-008 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]; US-009 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15]; US-010 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-011 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7]; US-012 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]. Preserved qualifiers include primary null requests opened before this feature (001/12), duplicate identity (001/9), original agent state/approvable test registration (002/10), .own without bare key (003/8), static HTTP statuses and Fastify (004/13-14 and 009/10), all root-immediate regression pins, updated existing self-application case (006/14), default none and existing decide route cases (009/1,9,14), the existing permission contract assertion (010/14) and the existing knowledge reindex operation (011/4). No deprecated grep/file/verbatim AC tags were present. Assertions remain observable through return values, thrown errors, client/adapter calls, metadata, HTTP bodies/statuses, persisted rows/audits or generated JSON.\n\nRefine-pass negative/regression audit: Original negative cases remain in US-001/AC-3-6,11,14; US-002/AC-3-4,6-8,10; US-003/AC-2-3,7,11,13; US-004/AC-9,12; US-005/AC-4,7-8; US-006/AC-5,7,10-11,13-14; US-007/AC-5-6,8; US-008/AC-3,5,7; US-009/AC-6-9,11,14-15; US-010/AC-1,3-5. Added US-011/AC-8 for permission-denied rather than pending and US-012/AC-9 for existing non-pending failure exit 1, meeting this refine pass's required negative case in every story. Added US-010/AC-15 to protect old guard-missing validation while extending the signature. The existing FM-labeled assertions enumerate failure-table gaps, not speculative hardening; other suggestions stay in suggestedCriteria. All 13 feature-level exclusion items from spec.md:260-272 remain verbatim and are echoed near their relevant story boundaries. There are no additional story-local Out of Scope blocks to move.\n\nRefine-pass codebase-fit corrections: Verified principal shapes against apps/api/src/auth/jwt-auth.provider.ts:28-60 and agent-auth.provider.ts:14-39, GlobalStubsModule against apps/api/src/common/test-helpers/global-stubs.module.ts:211 and existing approval-api.module.spec.ts:11, non-pending CLI failures against apps/cli/src/utils/error.ts:105-137 and error.spec.ts:171-189, and DTO/domain differences against apps/api/src/approvals/dto/approval-request.dto.ts:26-38,62-66. ApprovalRequestQueries.findById is an existing unscoped record reader (apps/api/src/approvals/approval-request.queries.ts:44-46), so immediate refreshed responses need no invented query API or second visibility check. Corrected US-004's goal: PermissionsApiModule depends on the engine; the global PermissionsModule is what stays engine-free. Clarified US-009's DTO/summary projection without changing its run or HTTP result semantics. Updated contextFiles to prioritize spec-recommended auth providers, error mapping and the existing decision HTTP fixture; every list has at most five entries and no story lists its own new output as context. Preserved exactly the binding story IDs, workdirs and dependency arrays; no dependency was removed merely to enable parallelism. US-001 and US-008 can both touch decision/execution files, so preserve both changes when integrating independent roots rather than adding an unauthorized dependency. Reduced routine loader, handler-extension, decision-extraction and contract-collector complexity ratings to medium and reusable gate/module wiring to complex; strict security three-session TDD remains for all API access-control work, while the CLI response/output-only path retains tdd-simple. No production source, generated client, web code or excluded rule/inventory file is changed by this audit.",
+  "outOfScope": [
+    "Gating the other approvable write routes: `permissions-p3-approval-gate-high`, `-gate-core-domains` and `-gate-fleet`, as `PENDING_GATE_ROUTES` records.",
+    "Running a route's domain checks (lookups, escalation, self-binding, policy self-application) before a request opens. They run when the command runs.",
+    "Showing `variant` in `ApprovalRequestSummaryDto`, `ApprovalRequestDto`, MCP outputs or the web: P3 web.",
+    "Any change to `apps/web`.",
+    "Assistant or MCP writes on keys that also have REST variants: they keep the primary command.",
+    "`koda approval wait` or any CLI polling of a pending request.",
+    "Updating `.nax/rules/cli.md` (exit codes 4 and 5): a follow-up outside the nax run.",
+    "Notifying the deciders of a pending REST request beyond what `ApprovalRequestedSubscriber` already does for non-fleet keys.",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.",
+    "An index on `ApprovalRequest.variant`.",
+    "US-002 only: loading agent capabilities into a rebuilt principal.",
+    "US-003 only: pinning the SYSTEM-actor throw of `ApprovalRouteGate.run` through HTTP (no SYSTEM actor reaches a REST route).",
+    "US-009 only: a policy on `approval.decide` that makes agent decisions wait is not seeded or pinned beyond one case."
+  ],
+  "routingProfile": "native-codex-ds"
+}
