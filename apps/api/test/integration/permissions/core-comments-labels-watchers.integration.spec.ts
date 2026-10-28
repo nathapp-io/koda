@@ -77,6 +77,9 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   const commentDeleteRequestCount = (actorId: string) => db.approvalRequest.count({
     where: { permissionKey: 'comment.delete', actorType: 'AGENT', actorId },
   });
+  const actorApprovalRequestCount = (actorId: string) => db.approvalRequest.count({
+    where: { actorType: 'AGENT', actorId },
+  });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
     const req = request(server)[method](url).set(auth('root'));
     return body === undefined ? req : req.send(body);
@@ -151,7 +154,7 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
     return data<LabelDto[]>(res);
   };
 
-  /** A rostered agent: a `viewer` binding in p1 is its only source there (no agent role). */
+  /** An agent with the project-scoped viewer role binding used for the labels permission case. */
   const createAgent = async (slug: string): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
@@ -197,8 +200,8 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
     await bind('reviewer', 'reviewer');
     // AC-8's caller keeps no source in p1 at all.
 
-    // AC-9 / AC-14: a viewer binding in p1 and no agent role.
-    agentId = await createAgent('p1-legacy-agent');
+    // AC-14: a viewer role binding in p1, used to test label-key refusal.
+    agentId = await createAgent('p1-role-viewer-agent');
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
@@ -364,13 +367,13 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
 
   it('US-008 AC-2: a granted agent deleting a missing comment gets 404 and creates no request', async () => {
     const agentId = await createKeyedAgent('comment-delete-missing-agent', ['project.read', 'comment.delete']);
-    const before = await commentDeleteRequestCount(agentId);
+    const before = await actorApprovalRequestCount(agentId);
 
     const response = await request(server).delete('/api/comments/comment-does-not-exist').set(auth('comment-delete-missing-agent'));
 
     expect(response.status).toBe(404);
     expect(response.body.message).toBe('Comment not found');
-    expect(await commentDeleteRequestCount(agentId)).toBe(before);
+    expect(await actorApprovalRequestCount(agentId)).toBe(before);
   }, TIMEOUT);
 
   it('US-008 AC-3: an agent with only comment.delete.own gets a deferred failure on another author\'s comment', async () => {
@@ -507,13 +510,13 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   // AC-14 / AC-15 — the ticket-label routes need ticket.label.assign / .remove
   // -------------------------------------------------------------------------
 
-  it('AC-14: an agent with only a roster row is refused by POST …/tickets/:ref/labels', async () => {
+  it('AC-14: an agent with only a viewer role binding is refused by POST …/tickets/:ref/labels', async () => {
     const ref = await createTicket();
     const labelId = await createLabel();
 
     const res = await request(server)
       .post(`/api/projects/${P1_SLUG}/tickets/${ref}/labels`)
-      .set(auth('p1-legacy-agent'))
+      .set(auth('p1-role-viewer-agent'))
       .send({ labelId });
 
     expectPermissionsRefusal(res);
