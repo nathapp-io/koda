@@ -1,4 +1,5 @@
 import { error as printError } from './output';
+import { ApprovalPendingError } from './approval-pending';
 import { isJsonMode } from './json-mode';
 
 interface HandleApiErrorOpts {
@@ -101,8 +102,20 @@ function getStatusAndMessage(err: unknown): { status: number | undefined; messag
  *   - 2: config/auth error (401, 403, or config errors)
  *   - 3: validation error (400)
  *   - 4: not found (404)
+ *   - 5: approval pending
  */
 export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
+  if (err instanceof ApprovalPendingError) {
+    const { id, permissionKey, requiredMode, status, expiresAt } = err.request;
+    if (isJsonMode()) {
+      console.log(JSON.stringify({ pending: { id, permissionKey, requiredMode, status, expiresAt } }, null, 2));
+    } else {
+      console.error(`Approval required: ${permissionKey} waits for ${requiredMode} approval (request ${id}, expires ${expiresAt}).`);
+      console.error(`Follow it with: koda approval show ${id}`);
+    }
+    return process.exit(5);
+  }
+
   if (opts?.configError) {
     const configError = err as { message?: string };
     emitError(configError.message ?? 'Configuration error', 'CONFIG_ERROR', undefined);

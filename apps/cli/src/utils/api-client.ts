@@ -1,4 +1,7 @@
 import { client } from '../generated/client.gen';
+import { ApprovalPendingError, type ApprovalPendingRequest } from './approval-pending';
+
+let approvalInterceptorInstalled = false;
 
 /**
  * Point the generated client at the API host and authenticate it.
@@ -12,4 +15,16 @@ export function configureApiClient(baseUrl: string, apiKey?: string): void {
     baseUrl,
     ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
   });
+
+  if (!approvalInterceptorInstalled) {
+    client.interceptors.response.use(async (response) => {
+      if (response.status !== 202) {
+        return response;
+      }
+
+      const body = (await response.json()) as { ret: number; data: ApprovalPendingRequest };
+      throw new ApprovalPendingError(body.data);
+    });
+    approvalInterceptorInstalled = true;
+  }
 }
