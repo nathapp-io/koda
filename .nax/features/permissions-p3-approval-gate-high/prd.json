@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T09:15:39.014Z",
+  "updatedAt": "2026-10-28T09:31:12.587Z",
   "userStories": [
     {
       "id": "US-001",
@@ -277,14 +277,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two modules introduce execution-time access recomputation and preserve requester job attribution; ownership authorization is security-critical."
+        "reasoning": "Two modules introduce execution-time access recomputation and preserve requester job attribution; ownership authorization is security-critical.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/schedules.service.ts",
@@ -334,7 +337,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bf552ba1dd0499159ea703892557d000ef94d19a"
     },
     {
       "id": "US-005",
