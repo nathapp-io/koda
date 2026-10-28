@@ -21,6 +21,7 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalRequestQueries } from './approval-request.queries';
+import { ApprovalRouteGate } from './route/approval-route-gate';
 
 @Global()
 @Module({ providers: [
@@ -55,6 +56,7 @@ class EngineConsumer {
     readonly commands: ApprovalCommandRegistry,
     readonly queries: ApprovalRequestQueries,
     readonly asks: ApprovalAskService,
+    readonly routeGate: ApprovalRouteGate,
   ) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
@@ -122,5 +124,15 @@ describe('ApprovalEngineModule', () => {
     const consumer = moduleRef.get(EngineConsumer);
     expect(consumer.asks).toBeInstanceOf(ApprovalAskService);
     expect(consumer.asks).toBe(moduleRef.get(ApprovalAskService));
+  });
+  it('US-003: provides and exports one ApprovalRouteGate wired to the gate and the permission service', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+
+    const routeGate = moduleRef.get(ApprovalRouteGate);
+    expect(routeGate).toBeInstanceOf(ApprovalRouteGate);
+    // The consumer proves the export: a route module imports the engine and resolves this.
+    expect(moduleRef.get(EngineConsumer).routeGate).toBe(routeGate);
+    // Constructed, not merely registered: a missing ApprovalGate or PermissionService would throw here.
+    expect(routeGate).toHaveProperty('run');
   });
 });
