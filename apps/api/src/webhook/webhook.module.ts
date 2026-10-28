@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { WebhookRouteCommands } from './webhook-route.commands';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { WebhookController } from './webhook.controller';
@@ -14,9 +17,10 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Module({
-  imports: [PrismaModule, OutboxModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, OutboxModule, ProjectAccessModule],
   controllers: [WebhookController],
   providers: [
+    WebhookRouteCommands,
     PrismaWebhookRepository,
     { provide: WEBHOOK_REPOSITORY, useExisting: PrismaWebhookRepository },
     WebhookService,

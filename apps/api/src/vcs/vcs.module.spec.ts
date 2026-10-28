@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { VcsModule } from './vcs.module';
+import { VcsRouteCommands } from './vcs-route.commands';
 import { VcsController } from './vcs.controller';
 import { VcsWebhookController } from './vcs-webhook.controller';
 import { VcsConnectionService } from './vcs-connection.service';
@@ -24,11 +25,10 @@ describe('VcsModule (DI wiring)', () => {
   });
 
   it('compiles with the global stub providers and no database', async () => {
-    await expect(
-      Test.createTestingModule({
-        imports: [GlobalStubsModule, VcsModule],
-      }).compile(),
-    ).resolves.toBeDefined();
+    moduleRef = await Test.createTestingModule({
+      imports: [GlobalStubsModule, VcsModule],
+    }).compile();
+    expect(moduleRef).toBeDefined();
   });
 
   describe('providers', () => {
@@ -36,6 +36,10 @@ describe('VcsModule (DI wiring)', () => {
       moduleRef = await Test.createTestingModule({
         imports: [GlobalStubsModule, VcsModule],
       }).compile();
+    });
+
+    it('AC-12: resolves VcsRouteCommands without a database', () => {
+      expect(moduleRef.get(VcsRouteCommands)).toBeInstanceOf(VcsRouteCommands);
     });
 
     it('registers VcsController', () => {

@@ -4,6 +4,8 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
 import { PermissionService } from '../permissions/permission.service';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import { VcsController } from './vcs.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -95,6 +97,8 @@ describe('VcsController', () => {
   let mockPrSyncService: Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
   let mockVcsConfig: { encryptionKey: string | null };
 
+  let module: TestingModule;
+  let gate: { run: ReturnType<typeof vi.fn> };
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
   const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' } });
@@ -127,9 +131,11 @@ describe('VcsController', () => {
       encryptionKey,
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { ok: true, latencyMs: 100 } }) };
+    module = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: gate },
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsService },
         { provide: VcsSyncService, useValue: mockSyncService },
@@ -143,7 +149,8 @@ describe('VcsController', () => {
     controller = module.get<VcsController>(VcsController);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module?.close();
     vi.clearAllMocks();
   });
 
@@ -202,31 +209,29 @@ describe('VcsController', () => {
     });
   });
 
-  describe('deleteConnection', () => {
-    it('should resolve the project by slug and delete the connection', async () => {
-      await controller.deleteConnection('test-project');
-
-      expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
-      expect(mockVcsService.delete).toHaveBeenCalledWith('proj-1');
+  describe('gated routes', () => {
+    it('uses resolved project context for delete and returns no body', async () => {
+      expect(await controller.deleteConnection('unused-slug', projectContext())).toBeUndefined();
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'vcs.connection.delete', variant: 'rest:vcs.delete', projectId: 'proj-1', input: { projectId: 'proj-1' } });
+      expect(mockProjectsService.findBySlug).not.toHaveBeenCalled();
+      expect(mockVcsService.delete).not.toHaveBeenCalled();
     });
-
-  });
-
-  describe('testConnection', () => {
-    it('should return test result from vcsService.testConnection', async () => {
-      mockVcsService.testConnection.mockResolvedValue({ ok: true, latencyMs: 100 });
-
-      const result = await controller.testConnection('test-project');
-
-      expect(result.data).toMatchObject({ ok: true, latencyMs: 100 });
-      expect(mockVcsService.testConnection).toHaveBeenCalledWith('proj-1', encryptionKey);
+    it('returns the gated test result unchanged', async () => {
+      const result = await controller.testConnection('unused-slug', projectContext());
+      expect(result.data).toEqual({ ok: true, latencyMs: 100 });
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'vcs.connection.test', variant: 'rest:vcs.test', projectId: 'proj-1', input: { projectId: 'proj-1' } });
+      expect(mockProjectsService.findBySlug).not.toHaveBeenCalled();
+      expect(mockVcsService.testConnection).not.toHaveBeenCalled();
     });
-
-
-    it('should throw ValidationAppException when encryption key is not configured', async () => {
+    it('AC-8: missing encryption key throws vcs validation before the gate', async () => {
       mockVcsConfig.encryptionKey = null;
-
-      await expect(controller.testConnection('test-project')).rejects.toThrow(ValidationAppException);
+      await expect(controller.testConnection('unused-slug', projectContext())).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(controller.testConnection('unused-slug', projectContext())).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+    it.each(['deleteConnection', 'testConnection'] as const)('throws ApprovalPending for %s', async (method) => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+      await expect(controller[method]('unused-slug', projectContext())).rejects.toThrow(ApprovalPending);
     });
   });
 

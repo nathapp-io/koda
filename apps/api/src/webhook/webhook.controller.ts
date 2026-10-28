@@ -1,3 +1,9 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectContext } from '../projects/project-context';
+import { WEBHOOK_ROUTE_VARIANTS } from './webhook-route.commands';
 import {
   Controller,
   Post,
@@ -24,7 +30,10 @@ import { JsonResponse } from '@nathapp/nestjs-common';
 @ApiTags('webhooks')
 @Controller()
 export class WebhookController {
-  constructor(private webhookService: WebhookService) {}
+  constructor(
+    private readonly webhookService: WebhookService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Post('projects/:slug/webhooks')
   @HttpCode(201)
@@ -76,22 +85,42 @@ export class WebhookController {
   @HttpCode(204)
   @UseGuards(RequiresGuard)
   @Requires('webhook.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Remove a webhook' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
   @ApiResponse({ status: 404, description: 'Webhook not found' })
   async remove(@Param('id') id: string) {
-    await this.webhookService.remove(id);
+    const outcome = await this.routeGate.run({
+      key: 'webhook.delete',
+      variant: WEBHOOK_ROUTE_VARIANTS.globalDelete,
+      projectId: null,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 
   @Delete('projects/:slug/webhooks/:id')
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('webhook.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Remove a webhook (project-scoped)' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
   @ApiResponse({ status: 404, description: 'Project or webhook not found, or the webhook belongs to another project' })
-  async removeByProject(@Param('slug') slug: string, @Param('id') id: string) {
-    const project = await this.webhookService.getProjectBySlug(slug);
-    await this.webhookService.removeForProject(project.id, id);
+  async removeByProject(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @CurrentProject() ctx: ProjectContext,
+  ) {
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run({
+      key: 'webhook.delete',
+      variant: WEBHOOK_ROUTE_VARIANTS.projectDelete,
+      projectId,
+      input: { projectId, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

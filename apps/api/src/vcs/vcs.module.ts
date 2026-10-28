@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { VcsRouteCommands } from './vcs-route.commands';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { VcsController } from './vcs.controller';
@@ -16,9 +19,10 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { WebhookSecurityModule } from '../webhook-security/webhook-security.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule, WebhookSecurityModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule, WebhookSecurityModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
+    VcsRouteCommands,
     PrismaVcsRepository,
     { provide: VCS_REPOSITORY, useExisting: PrismaVcsRepository },
     VcsConnectionService,
