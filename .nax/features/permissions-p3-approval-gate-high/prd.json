@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T09:55:20.077Z",
+  "updatedAt": "2026-10-28T10:12:59.614Z",
   "userStories": [
     {
       "id": "US-001",
@@ -506,14 +506,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Deferred cross-project deletion and runtime encryption-key access cross two modules; secret-adjacent access control requires strict security TDD."
+        "reasoning": "Deferred cross-project deletion and runtime encryption-key access cross two modules; secret-adjacent access control requires strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/webhook/webhook.service.ts",
@@ -575,7 +578,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c9b8f6b88554be71faaeb7787664217192284fea"
     },
     {
       "id": "US-007",
