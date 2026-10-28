@@ -138,6 +138,13 @@ describe('permission contract checker', () => {
     expect([...PENDING_GATE_ROUTES.values()]).not.toContain('gate-high');
   });
 
+  it('US-008 AC-8: gated project create and update are not pending rollout routes', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('PATCH /projects/:slug')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets/:ref/verify')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets/:ref/verify-fix')).toBeUndefined();
+  });
+
   it('AC-10: has no pending entry for gated project deletion', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
