@@ -38,6 +38,9 @@ const gatedOperations = [
   ['delete', '/api/fleet/analytics'],
   ['delete', '/api/projects/{slug}/fleet/schedules/{id}'],
   ['post', '/api/projects/{slug}/fleet/repos/{repoId}/drift-checks'],
+  ['delete', '/api/projects/{slug}'],
+  ['delete', '/api/agents/{slug}'],
+  ['delete', '/api/admin/skills/sources/{id}'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
