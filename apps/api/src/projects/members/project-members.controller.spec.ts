@@ -1,3 +1,4 @@
+import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { ProjectMembersController } from './project-members.controller';
 import { REQUIRES_METADATA } from '../../permissions/requires.decorator';
@@ -39,10 +40,24 @@ describe('US-008 permission keys on member routes', () => {
 
 describe('ProjectMembersController', () => {
   const service = { list: vi.fn(), add: vi.fn() };
-  const controller = new ProjectMembersController(service as never);
+  const gate = { run: vi.fn() };
+  const controller = new ProjectMembersController(service as never, gate as never);
   const principal = { actorType: 'user', id: 'u1' } as never;
 
-  afterEach(() => vi.clearAllMocks());
+  it('add throws ApprovalPending when waiting', async () => {
+    gate.run.mockResolvedValue({ status: 'pending', request: { id: 'r1' } });
+    await expect(controller.add('proj', { email: 'a@example.com' }, principal, { project: { id: 'p1' } } as never)).rejects.toBeInstanceOf(ApprovalPending);
+  });
+
+  afterEach(() => vi.resetAllMocks());
+
+  it('add maps the project and validated member to the gate', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { id: 'u2' } });
+    const res = await controller.add('proj', { email: 'a@example.com' }, principal, { project: { id: 'p1' } } as never);
+    expect(gate.run).toHaveBeenCalledWith({ key: 'member.add', variant: 'rest:project-members.add', projectId: 'p1', input: { slug: 'proj', member: { email: 'a@example.com' } } });
+    expect(res.data).toEqual({ id: 'u2' });
+    expect(service.add).not.toHaveBeenCalled();
+  });
 
   it('list parses paging strings and answers the page envelope alone', async () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };

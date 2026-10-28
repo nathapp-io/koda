@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { MemberRouteCommands } from './member-route.commands';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectAccessModule } from '../project-access.module';
@@ -8,8 +11,8 @@ import { PrismaProjectMembersRepository } from './prisma-project-members.reposit
 
 /** `ProjectRolesController` lives here (US-003): the project's roles are read behind the project gate. */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule],
   controllers: [ProjectMembersController, ProjectRolesController],
-  providers: [PrismaProjectMembersRepository, ProjectMembersService],
+  providers: [MemberRouteCommands, PrismaProjectMembersRepository, ProjectMembersService],
 })
 export class ProjectMembersModule {}

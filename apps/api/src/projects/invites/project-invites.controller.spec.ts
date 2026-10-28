@@ -1,3 +1,4 @@
+import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { REQUIRES_METADATA } from '../../permissions/requires.decorator';
 import { ProjectInvitesController } from './project-invites.controller';
 
@@ -28,10 +29,16 @@ describe('US-008 permission keys on invite routes', () => {
 
 describe('ProjectInvitesController', () => {
   const service = { list: vi.fn(), create: vi.fn(), resend: vi.fn(), cancel: vi.fn() };
-  const controller = new ProjectInvitesController(service as never);
+  const gate = { run: vi.fn() };
+  const controller = new ProjectInvitesController(service as never, gate as never);
   const principal = { actorType: 'user', id: 'u1' } as never;
 
-  afterEach(() => vi.clearAllMocks());
+  it('cancel throws ApprovalPending when waiting', async () => {
+    gate.run.mockResolvedValue({ status: 'pending', request: { id: 'r1' } });
+    await expect(controller.cancel('proj', 'i1', principal, { project: { id: 'p1' } } as never)).rejects.toBeInstanceOf(ApprovalPending);
+  });
+
+  afterEach(() => vi.resetAllMocks());
 
   it('list hands the slug and principal to the service and wraps the array', async () => {
     service.list.mockResolvedValue([{ id: 'i1' }]);
@@ -52,11 +59,13 @@ describe('ProjectInvitesController', () => {
   });
 
   it('cancel returns an empty Ok', async () => {
-    service.cancel.mockResolvedValue(undefined);
+    gate.run.mockResolvedValue({ status: 'executed', result: null });
 
-    const res = await controller.cancel('proj', 'i1', principal);
+    const res = await controller.cancel('proj', 'i1', principal, { project: { id: 'p1' } } as never);
 
-    expect(service.cancel).toHaveBeenCalledWith('proj', 'i1', principal);
+    expect(gate.run).toHaveBeenCalledWith({ key: 'invite.cancel', variant: 'rest:project-invites.cancel', projectId: 'p1', input: { slug: 'proj', id: 'i1' } });
+    expect(service.cancel).not.toHaveBeenCalled();
+    expect(res.data).toEqual({});
     expect(res).toEqual(expect.objectContaining({ ret: 0 }));
   });
 });

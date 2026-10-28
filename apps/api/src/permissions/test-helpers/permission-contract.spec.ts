@@ -157,8 +157,9 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/invites/:id/resend')).toBe('gate-secret');
   });
 
-  it('US-001 AC-3: leaves invite cancellation in gate-core-domains', () => {
-    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug/invites/:id')).toBe('gate-core-domains');
+  it('US-009: member addition and invite cancellation are no longer pending', () => {
+    expect(PENDING_GATE_ROUTES.has('POST /projects/:slug/members')).toBe(false);
+    expect(PENDING_GATE_ROUTES.has('DELETE /projects/:slug/invites/:id')).toBe(false);
   });
 
   it('AC-12: assigns project thread creation to gate-fleet', () => {

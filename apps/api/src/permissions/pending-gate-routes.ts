@@ -14,7 +14,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /projects/:slug/invites/:id=gate-core-domains
 DELETE /projects/:slug/skills/:skillId=gate-core-domains
 DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
 DELETE /projects/:slug/tickets/:ref/watch=gate-core-domains
@@ -60,7 +59,6 @@ POST /projects/:slug/kb/import/graphify=gate-core-domains
 POST /projects/:slug/kb/optimize=gate-core-domains
 POST /projects/:slug/kb/search=gate-core-domains
 POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet
-POST /projects/:slug/members=gate-core-domains
 POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet
 POST /projects/:slug/threads/:id/archive=gate-fleet

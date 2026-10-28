@@ -1,3 +1,9 @@
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { CurrentProject } from '../current-project.decorator';
+import { ProjectContext } from '../project-context';
+import { INVITE_ROUTE_VARIANTS } from './invite-route.commands';
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
@@ -25,7 +31,10 @@ const inviteLocale = (acceptLanguage: string | undefined): string =>
 @Controller('projects/:slug/invites')
 @UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class ProjectInvitesController {
-  constructor(private readonly invites: ProjectInvitesService) {}
+  constructor(
+    private readonly invites: ProjectInvitesService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @Requires('invite.read')
@@ -73,14 +82,21 @@ export class ProjectInvitesController {
 
   @Delete(':id')
   @HttpCode(200)
+  @ApprovalGated()
   @Requires('invite.cancel')
   @ApiOperation({ summary: 'Cancel a pending invite (invite.cancel)' })
   @ApiResponse({ status: 200, description: 'Invite cancelled' })
   @ApiResponse({ status: 403, description: 'Not a project member, or invite.cancel is missing' })
   @ApiResponse({ status: 404, description: 'Project or invite not found' })
   @ApiResponse({ status: 409, description: 'Invite is already accepted or cancelled' })
-  async cancel(@Param('slug') slug: string, @Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    await this.invites.cancel(slug, id, principal);
+  async cancel(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
+  ) {
+    const outcome = await this.routeGate.run<null>({ key: 'invite.cancel', variant: INVITE_ROUTE_VARIANTS.cancel, projectId: project.project.id, input: { slug, id } });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok({});
   }
 }
