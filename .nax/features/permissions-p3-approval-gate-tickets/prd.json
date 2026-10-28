@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T14:52:01.133Z",
+  "updatedAt": "2026-10-28T15:14:22.790Z",
   "userStories": [
     {
       "id": "US-001",
@@ -161,14 +161,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three handlers extend the existing ticket command class and gate wiring without a new abstraction; deferred authorization still mandates security-isolated TDD."
+        "reasoning": "Three handlers extend the existing ticket command class and gate wiring without a new abstraction; deferred authorization still mandates security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/tickets/ticket-route.commands.ts",
@@ -210,7 +213,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6b7e1fe0f8ec3dde98ecec0382eddb6af7602fe9"
     },
     {
       "id": "US-004",
