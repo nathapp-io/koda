@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T15:38:26.515Z",
+  "updatedAt": "2026-10-28T15:49:51.216Z",
   "userStories": [
     {
       "id": "US-001",
@@ -402,14 +402,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two handlers reuse the existing comment-delete scope lookup, command class and module wiring; ownable access and lookup privacy require security-isolated TDD."
+        "reasoning": "Two handlers reuse the existing comment-delete scope lookup, command class and module wiring; ownable access and lookup privacy require security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/comments/comment-route.commands.ts",
@@ -447,7 +450,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "22c9278223808c4f6d101f88fbc4721cd4a5e692"
     },
     {
       "id": "US-007",
