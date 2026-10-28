@@ -18,6 +18,9 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
 import type { AssistantTool } from '../../fleet/assistant/assistant-tool.types';
 import { Requires } from '../requires.decorator';
+import { RolesController } from '../roles.controller';
+import { RoleAdminService } from '../role-admin.service';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { RequiresGuard } from '../requires.guard';
 import { PermissionService } from '../permission.service';
 import { SystemWriter } from '../system-writer.decorator';
@@ -73,6 +76,15 @@ class TwoWritersModule {}
 class RouteModule {}
 
 @Module({
+  controllers: [RolesController],
+  providers: [
+    { provide: RoleAdminService, useValue: {} },
+    { provide: ApprovalRouteGate, useValue: {} },
+  ],
+})
+class RolesModule {}
+
+@Module({
   controllers: [ClassGuardedController, HandlerGuardedController],
   // The guard is never called here; it only has to be injectable so the module compiles.
   providers: [{ provide: PermissionService, useValue: { can: async () => ({ allowed: false }) } }],
@@ -120,6 +132,12 @@ describe('permission declaration collector', () => {
     expect(keySets).toEqual(
       new Set([JSON.stringify(['ticket.read']), JSON.stringify(['ticket.update'])]),
     );
+  });
+
+  it('AC-8 (US-010): collects the actual RolesController.create method and gate metadata', async () => {
+    const testingModule = await build([RolesModule]);
+    const create = collect(testingModule).routes.find((route) => route.route === 'POST /roles');
+    expect(create).toMatchObject({ method: 'POST', gated: true });
   });
 
   it('AC-5: lists the registered tools with their catalog keys', () => {

@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from '../catalog';
+import { PENDING_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import type { RequiresMetadata } from '../requires.decorator';
 import {
-  findContractViolations,
+  findContractViolations as findContractViolationsWithAllowlist,
   type ContractViolation,
   type PermissionDeclarations,
 } from './permission-contract';
 
 describe('permission contract checker', () => {
+  const findContractViolations = (
+    declarations: PermissionDeclarations,
+    catalog = PERMISSION_CATALOG,
+    pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,
+    pendingGateRoutes: ReadonlyMap<string, PendingGateFeature> = new Map(),
+  ) => findContractViolationsWithAllowlist(declarations, catalog, pending, pendingGateRoutes);
+
   const expectedPending = new Set([
     'fleet.approval.decide.assistant',
     // Permissions P1 US-003 deleted the two member routes that declared this key. Removing a
@@ -32,15 +40,94 @@ describe('permission contract checker', () => {
     keys: readonly string[] | undefined,
     enforcedBy: 'guard' | 'service' = 'guard',
     hasRequiresGuard = true,
+    method = 'GET',
+    gated = false,
+    label = `${method} /x`,
   ) => ({
-    route: 'GET /x',
+    route: label,
+    method,
+    gated,
     requires: keys === undefined ? undefined : requires(keys, enforcedBy),
     hasRequiresGuard,
   });
+  const entry = (key: string, approvable: boolean, defaultMode: 'none' | 'human' = 'none') => ({
+    key,
+    scope: 'global' as const,
+    access: 'role' as const,
+    risk: 'low' as const,
+    principals: ['agent'] as const,
+    ownable: false,
+    approval: { approvable, floor: 'none' as const, default: defaultMode },
+  });
+  const isolated = (routes: PermissionDeclarations['routes'], catalog = [entry('label.delete', true)]) =>
+    findContractViolations(declarations({ routes }), catalog, new Set(), new Map());
   const asSet = (violations: readonly ContractViolation[]) =>
     new Set(violations.map((violation) => JSON.stringify(violation)));
   const contains = (violations: readonly ContractViolation[], expected: ContractViolation) =>
     expect(asSet(violations)).toContain(JSON.stringify(expected));
+
+  it('AC-1: reports an ungated approvable write', () => {
+    contains(isolated([route(['label.delete'], 'service', false, 'DELETE', false, 'DELETE /labels/:id')]), {
+      kind: 'ungated-approvable-write', route: 'DELETE /labels/:id',
+    });
+  });
+
+  it('AC-2: a pending gate route exempts an ungated approvable write', () => {
+    expect(findContractViolations(
+      declarations({ routes: [route(['label.delete'], 'service', false, 'DELETE', false, 'DELETE /labels/:id')] }),
+      [entry('label.delete', true)], new Set(), new Map([['DELETE /labels/:id', 'gate-core-domains']]),
+    )).toEqual([]);
+  });
+
+  it('AC-3: reports a gated route without an approvable key', () => {
+    const violations = isolated([route(['ticket.read'], 'service', false, 'POST', true)], [entry('ticket.read', false)]);
+    contains(violations, { kind: 'gated-without-approvable-key', route: 'POST /x' });
+  });
+
+  it('AC-4: reports a pending gate route that is gated', () => {
+    const violations = findContractViolations(
+      declarations({ routes: [route(['label.delete'], 'service', false, 'DELETE', true, 'DELETE /labels/:id')] }),
+      [entry('label.delete', true)], new Set(), new Map([['DELETE /labels/:id', 'gate-core-domains']]),
+    );
+    contains(violations, { kind: 'stale-pending-gate-route', route: 'DELETE /labels/:id' });
+  });
+
+  it('AC-5: reports a pending gate route absent from declarations', () => {
+    const violations = findContractViolations(declarations(), [], new Set(), new Map([['POST /gone', 'gate-high']]));
+    contains(violations, { kind: 'stale-pending-gate-route', route: 'POST /gone' });
+  });
+
+  it('AC-6: does not gate read routes', () => {
+    expect(isolated([route(['approval.decide'], 'service', false, 'GET')], [entry('approval.decide', true)])).toEqual([]);
+  });
+
+  it('AC-7: uses the supplied catalog approvability', () => {
+    expect(isolated([route(['label.delete'], 'service', false, 'DELETE')], [entry('label.delete', false)])).toEqual([]);
+  });
+
+  it('AC-9: rollout gate map excludes all routes already gated in this feature', () => {
+    const excluded = [
+      'POST /roles', 'PATCH /roles', 'DELETE /roles', 'POST /role-bindings', 'DELETE /role-bindings',
+      'POST /approval-policies', 'PATCH /approval-policies', 'DELETE /approval-policies',
+      'POST /projects/:slug/approval-policies', 'PATCH /projects/:slug/approval-policies',
+      'DELETE /projects/:slug/approval-policies', 'POST /approvals/:id/decisions',
+    ];
+    for (const routePrefix of excluded) {
+      expect([...PENDING_GATE_ROUTES.keys()].some((route) => route.startsWith(routePrefix))).toBe(false);
+    }
+  });
+
+  it('AC-10: assigns high-risk project deletion to gate-high', () => {
+    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBe('gate-high');
+  });
+
+  it('AC-11: assigns project ticket creation to gate-core-domains', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets')).toBe('gate-core-domains');
+  });
+
+  it('AC-12: assigns project thread creation to gate-fleet', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/threads')).toBe('gate-fleet');
+  });
 
   it('AC-8: approval.decide is no longer pending', () => {
     expect(PENDING_SURFACE_KEYS.has('approval.decide')).toBe(false);

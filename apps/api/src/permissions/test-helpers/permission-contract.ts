@@ -1,6 +1,9 @@
-import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
+import { GUARDS_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import type { ModulesContainer } from '@nestjs/core';
 import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
+import { APPROVAL_GATED_METADATA } from '../../approvals/route/approval-gated.decorator';
+import { PENDING_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS, type PermissionCatalogEntry } from '../catalog';
 import { routeSurface } from '../route-surface';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../requires.decorator';
@@ -10,6 +13,10 @@ import { SYSTEM_WRITER_METADATA } from '../system-writer.decorator';
 export interface RouteDeclaration {
   /** `"<METHOD> /<controller path>/<handler path>"`, for violation messages. */
   route: string;
+  /** Upper-case Nest HTTP method. */
+  method: string;
+  /** Whether the handler carries `APPROVAL_GATED_METADATA`. */
+  gated: boolean;
   /** Handler metadata, else class metadata, as RequiresGuard reads it. */
   requires: RequiresMetadata | undefined;
   /** Whether RequiresGuard is among the class's or the handler's `@UseGuards`. */
@@ -37,7 +44,10 @@ export type ContractViolation =
   | { kind: 'unknown-key'; source: string; key: string }
   | { kind: 'guard-missing'; route: string }
   | { kind: 'unused-key'; key: string }
-  | { kind: 'pending-key-declared'; source: string; key: string };
+  | { kind: 'pending-key-declared'; source: string; key: string }
+  | { kind: 'ungated-approvable-write'; route: string }
+  | { kind: 'gated-without-approvable-key'; route: string }
+  | { kind: 'stale-pending-gate-route'; route: string };
 
 /** The parts of Nest's `InstanceWrapper` the collector reads. */
 interface ProviderWrapper {
@@ -93,9 +103,12 @@ function collectControllerRoutes(controller: Function): RouteDeclaration[] {
     const handlerRequires = Reflect.getMetadata(REQUIRES_METADATA, handler) as
       | RequiresMetadata
       | undefined;
+    const method = Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod;
 
     routes.push({
       route,
+      method: RequestMethod[method] ?? 'UNKNOWN',
+      gated: Reflect.getMetadata(APPROVAL_GATED_METADATA, handler) === true,
       requires: handlerRequires !== undefined ? handlerRequires : classRequires,
       hasRequiresGuard: [...(classGuards ?? []), ...(handlerGuards ?? [])].some(isRequiresGuard),
     });
@@ -166,8 +179,10 @@ export function findContractViolations(
   declarations: PermissionDeclarations,
   catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,
   pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,
+  pendingGateRoutes: ReadonlyMap<string, PendingGateFeature> = PENDING_GATE_ROUTES,
 ): ContractViolation[] {
   const catalogKeys = new Set(catalog.map(({ key }) => key));
+  const catalogByKey = new Map(catalog.map((entry) => [entry.key, entry]));
   const declaredKeys = new Set<string>();
   const violations: ContractViolation[] = [];
 
@@ -177,7 +192,21 @@ export function findContractViolations(
     if (pending.has(key)) violations.push({ kind: 'pending-key-declared', source, key });
   };
 
+  const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  const declarationsBySurface = new Map(declarations.routes.map((route) => [route.route, route]));
+
   for (const route of declarations.routes) {
+    const requiredKeys = route.requires?.keys ?? [];
+    const approvableKeys = requiredKeys.filter((key) => catalogByKey.get(key)?.approval?.approvable === true);
+    const approvableWrite = writeMethods.has(route.method) && approvableKeys.length > 0;
+
+    if (route.gated && approvableKeys.length === 0) {
+      violations.push({ kind: 'gated-without-approvable-key', route: route.route });
+    }
+    if (approvableWrite && !route.gated && !pendingGateRoutes.has(route.route)) {
+      violations.push({ kind: 'ungated-approvable-write', route: route.route });
+    }
+
     if (route.requires === undefined) {
       violations.push({ kind: 'route-without-key', route: route.route });
       continue;
@@ -187,6 +216,15 @@ export function findContractViolations(
       violations.push({ kind: 'guard-missing', route: route.route });
     }
     for (const key of route.requires.keys) record(route.route, key);
+  }
+
+  for (const [surface] of pendingGateRoutes) {
+    const route = declarationsBySurface.get(surface);
+    const approvableWrite = route !== undefined && writeMethods.has(route.method) &&
+      (route.requires?.keys ?? []).some((key) => catalogByKey.get(key)?.approval?.approvable === true);
+    if (!approvableWrite || route?.gated) {
+      violations.push({ kind: 'stale-pending-gate-route', route: surface });
+    }
   }
 
   for (const tool of declarations.tools) record(tool.tool, tool.key);
