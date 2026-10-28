@@ -1,0 +1,916 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-gate-high",
+  "branchName": "feat/permissions-p3-approval-gate-high",
+  "createdAt": "2026-10-28T00:00:00Z",
+  "updatedAt": "2026-10-28T08:29:41.901Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Route input parsing and the gate-secret label",
+      "description": "**Goal** \u2014 Add shared composite route-input parsing and separate the six secret-bearing routes from the high-risk rollout.\n\n**Motivation** \u2014 Every other approvable write route is listed in `PENDING_GATE_ROUTES` with the feature that will gate it.\n\n**Approach** \u2014 **`parseRouteInput` for composite id inputs.** `parseRouteInput(input, names)` (in `approvals/route/parse-route-input.ts`) answers an object with exactly the named members, each a non-empty string. A non-object input, an array, or a missing, empty or non-string member throws `ValidationAppException({}, 'approvals.invalidInput')`. The 5a helper `parseIdInput` stays where it is; new commands use `parseRouteInput(input, ['id'])`.\n\n**`gate-secret` is chosen from an explicit list, not derived.** `SECRET_GATE_ROUTES` (exported from `pending-gate-routes.ts`) names the 6 labels. The integration rule checks that list first, so every other route keeps the 5a derivation.\n\n- US-001:\n  - `PendingGateFeature` becomes `'gate-high' | 'gate-secret' | 'gate-core-domains' | 'gate-fleet'`, and `isPendingGateFeature` accepts `gate-secret`;\n  - the 6 secret-bearing rows are relabelled `gate-secret`;\n  - `SECRET_GATE_ROUTES` holds exactly those 6 labels.\n- The rollout rule (in `permission-contract.integration.spec.ts`), first match wins:\n  1. a label in `SECRET_GATE_ROUTES` \u2192 `gate-secret`;\n  2. a key whose default is not `none` \u2192 `gate-high`;\n  3. all keys under `fleet.`, `thread.` or `testhook.` \u2192 `gate-fleet`;\n  4. else `gate-core-domains`.\n\nThe explicit labels are POST /fleet/enrollments, POST /projects/:slug/vcs, PATCH /projects/:slug/vcs, POST /projects/:slug/vcs/webhook-secret/rotate, POST /projects/:slug/webhooks and PATCH /projects/:slug/webhooks/:id. Change AC-13's exact toHaveLength(12) to at least 12 so dependent gating stories can land individually; US-010 restores exact 41. Preserve sorted rollout-map equality and existing contract detection. Add parse-route-input unit cases and gate-secret cases in permission-contract.spec.ts.\n\n**Scope** \u2014 In: parser, temporary feature union, explicit secret list, six relabels, rollout precedence and count lower bound. Out: registering/gating any domain route (US-002..US-009); removing gate-high or restoring exact 41 (US-010); gating secret-bearing routes.\n\n**Interface** \u2014 `parseRouteInput(input, names)`; `SECRET_GATE_ROUTES: ReadonlySet<string>`; `PendingGateFeature` becomes `'gate-high' | 'gate-secret' | 'gate-core-domains' | 'gate-fleet'` in this story.\n\n**Verification** \u2014 Three-session security TDD; pure parser/contract unit assertions plus booted-app rollout-map comparison using the shared DB gate and a host Postgres run.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: parseRouteInput({ projectId: 'p1', id: 'b1', extra: 1 }, ['projectId', 'id']) returns exactly { projectId: 'p1', id: 'b1' }.",
+        "AC-2 [unit]: parseRouteInput({ projectId: 'p1' }, ['projectId', 'id']) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-3 [unit]: parseRouteInput({ id: '' }, ['id']) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-4 [unit]: parseRouteInput(['b1'], ['id']) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-5 [unit]: parseRouteInput({ id: 7 }, ['id']) throws ValidationAppException with key approvals.invalidInput.",
+        "AC-6 [unit]: SECRET_GATE_ROUTES equals the set of POST /fleet/enrollments, POST /projects/:slug/vcs, PATCH /projects/:slug/vcs, POST /projects/:slug/vcs/webhook-secret/rotate, POST /projects/:slug/webhooks and PATCH /projects/:slug/webhooks/:id.",
+        "AC-7 [unit]: PENDING_GATE_ROUTES.get(label) returns gate-secret for every label in SECRET_GATE_ROUTES.",
+        "AC-8 [integration]: Given the booted app, PENDING_GATE_ROUTES equals the rollout rule's map sorted by label, checking the explicit secret list before the existing default-mode and fleet/thread/testhook derivation.",
+        "FM-1 [unit]: parseRouteInput(null, ['id']) throws ValidationAppException with key approvals.invalidInput, representing the failure table's non-object input refusal.",
+        "FM-2 [unit]: parseRouteInput('b1', ['id']) throws ValidationAppException with key approvals.invalidInput."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "permissions",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared untrusted-input validation and authorization-rollout classification are security-critical despite following established patterns."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/approvals/route/parse-body.ts",
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/pending-gate-routes.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/route/parse-route-input.ts",
+        "apps/api/src/approvals/route/parse-route-input.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "PendingGateFeature gains 'gate-secret'; the 6 secret-bearing rows are relabelled; SECRET_GATE_ROUTES exported"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the gate-secret cases"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the rollout rule checks SECRET_GATE_ROUTES first; AC-13's exact toHaveLength(12) becomes \"at least 12\" (US-010 restores an exact count)"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Gate global and project budget writes",
+      "description": "**Goal** \u2014 Gate the eight budget create, update, delete and resume HTTP routes through registered route commands.\n\n**Motivation** \u2014 The 35 `gate-high` routes are the ones the design's shipped defaults already make agents wait on (`high` \u2192 `agent`), yet an agent calling them over REST or the `koda` CLI still writes at once: it can delete a project, a ticket or a runner, raise a budget or unregister a repo the moment it holds the key.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\nEach row is one `routeCommand` registered by the story's commands class. \"Scope\" is the `projectId` passed to `ApprovalRouteGate.run` (`null` = global). The run calls the service the handler calls today, with `principal` the rebuilt `UserPrincipal | AgentPrincipal`. A route whose handler answers no body has a run that returns `null`, and its handler returns `undefined` on `executed` (204 or the route's status, as today). Every other run answers what the service answers, and the handler answers `JsonResponse.Ok(outcome.result)`. Every body-returning command declares `toResult: (result) => result`, so `ApprovalRequest.result` holds the body the route answers (the services already answer DTOs or plain objects); a no-body command declares no `toResult` and stores `null`.\n\nProvide BudgetRouteCommands in BudgetsModule; BudgetRouteCommands.onModuleInit registers the eight BUDGET_ROUTE_VARIANTS:\n| Route | Key | Scope | Variant | Input | Run |\n| POST /fleet/budgets | fleet.budget.create | null | rest:fleet-budgets.create | parseBody(CreateBudgetPolicyDto, input) | budgets.create(principal.id, { kind: 'admin' }, dto) |\n| PATCH /fleet/budgets/:id | fleet.budget.update | null | rest:fleet-budgets.update | { id, patch: parseBody(UpdateBudgetPolicyDto, \u2026) } | budgets.update(principal.id, { kind: 'admin' }, id, patch) |\n| DELETE /fleet/budgets/:id | fleet.budget.delete | null | rest:fleet-budgets.delete | { id } | budgets.remove(principal.id, { kind: 'admin' }, id) |\n| POST /fleet/budgets/:id/resume | fleet.budget.resume | null | rest:fleet-budgets.resume | { id, body: parseBody(ResumeBudgetPolicyDto, \u2026) } | budgets.resume(principal.id, { kind: 'admin' }, id, body.amountUsd) |\n| POST /projects/:slug/fleet/budgets | fleet.budget.create | project | rest:project-fleet-budgets.create | { projectId, policy: parseBody(CreateBudgetPolicyDto, \u2026) } | budgets.create(principal.id, { kind: 'project', projectId }, policy) |\n| PATCH /projects/:slug/fleet/budgets/:id | fleet.budget.update | project | rest:project-fleet-budgets.update | { projectId, id, patch } | budgets.update(principal.id, { kind: 'project', projectId }, id, patch) |\n| DELETE /projects/:slug/fleet/budgets/:id | fleet.budget.delete | project | rest:project-fleet-budgets.delete | { projectId, id } | budgets.remove(\u2026, { kind: 'project', projectId }, id) |\n| POST /projects/:slug/fleet/budgets/:id/resume | fleet.budget.resume | project | rest:project-fleet-budgets.resume | { projectId, id, body } | budgets.resume(\u2026, { kind: 'project', projectId }, id, body.amountUsd) |\n\n- The id members of every input are read with `parseRouteInput`. A body member is read with `parseBody` of the route's DTO; a missing body member is parsed as `{}`.\n\n**The project id of a project route comes from `@CurrentProject()`.** `ProjectMembershipGuard` has already resolved it. Services that take a slug get the slug from the frozen input.\n\nInject ApprovalRouteGate into FleetBudgetsController and ProjectFleetBudgetsController. Each gated handler gains `@ApprovalGated()`, keeps its `@Requires` and `@ApiResponse`s, and throws ApprovalPending for pending. Keep route parameters declared, remove unused @Principal, retain existing executed statuses (create 201, update/resume 200, delete 204), and never freeze principal or config. Drop all eight budget PENDING_GATE_ROUTES rows in this story. Move service-call expectations from handler specs to budget-route.commands.spec.ts; handlers assert gate arguments and executed/pending mapping. Extend budgets.module.spec.ts to resolve BudgetRouteCommands with GlobalStubsModule.\n\n**Scope** \u2014 In: one budget commands class, eight handlers, module wiring, allowlist removals and per-route behavior. Out: other fleet gates (US-003/US-004), shared parser/secret classification (US-001) and exact contract/OpenAPI closure (US-010). Do not pre-run service domain checks.\n\n**Interface** \u2014 `BudgetsService.create/update/remove/resume(actorId, route: BudgetRoute, \u2026)`, `BudgetRoute = { kind: 'admin' } | { kind: 'project'; projectId }`. Mirror `ApprovalRouteGate.run({ key, variant, projectId, input, keyCheck? })` and `routeCommand(spec, loader)` from 5a.\n\n**Verification** \u2014 Three-session security TDD; commands/handler/DB-free module specs and real HTTP approval integration with fleet-budgets-api fixtures. Grant the four budget keys globally for global routes and with project.read in P for project routes; seed no policy. Approve using root POST /api/approvals/:id/decisions { decision: 'approve' }. Run DB specs outside sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Given an agent holding the four budget keys globally, POST /api/fleet/budgets with a valid global policy body returns { status: 202, data: { permissionKey: 'fleet.budget.create', requiredMode: 'agent' } } under the catalog default; and When root approves that request, exactly one global policy exists; and When root approves that request, ApprovalRequest.result matches { scopeType: 'global' }.",
+        "AC-3 [integration]: PATCH /api/fleet/budgets/:id with { amountUsd: 42 } by the granted agent on a global policy returns 202; and When root approves that global update request, the policy's amountUsd is 42.",
+        "AC-4 [integration]: DELETE /api/fleet/budgets/:id by the granted agent on a global policy returns 202; and When root approves that global delete request, the policy no longer exists.",
+        "AC-5 [integration]: POST /api/fleet/budgets/:id/resume by the granted agent on a paused global policy returns 202; and When root approves that global resume request, the policy is not paused.",
+        "AC-6 [integration]: Given the budget keys and project.read in P, POST /api/projects/:slug/fleet/budgets with a valid project policy body by the agent returns { status: 202, data: { projectId: P } }; and When root approves that project create request, a project policy for P exists.",
+        "AC-7 [integration]: PATCH /api/projects/:slug/fleet/budgets/:id with { amountUsd: 42 } by the granted agent on a project policy returns 202; and When root approves that project update request, the policy's amountUsd is 42.",
+        "AC-8 [integration]: DELETE /api/projects/:slug/fleet/budgets/:id by the granted agent on a project policy returns 202; and When root approves that project delete request, the policy no longer exists.",
+        "AC-9 [integration]: POST /api/projects/:slug/fleet/budgets/:id/resume by the granted agent on a paused project policy returns 202; and When root approves that project resume request, the policy is not paused.",
+        "AC-10 [integration]: Given a pending global resume whose policy root resumes while it waits, approving the request settles it failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the refused service Error's name.",
+        "AC-11 [integration]: POST /api/fleet/budgets with the root token returns 201 with the policy; and When root creates a budget directly, no ApprovalRequest row exists.",
+        "AC-12 [integration]: DELETE /api/fleet/budgets/:id by an agent holding no budget key returns 403 with key permissions; and When that keyless agent attempts budget deletion, no ApprovalRequest row exists.",
+        "AC-13 [unit]: After BudgetRouteCommands.onModuleInit, ApprovalCommandRegistry.get answers commands for all eight BUDGET_ROUTE_VARIANTS under their matching fleet.budget.create/update/delete/resume keys.",
+        "AC-14 [unit]: Given loader.forContext() returns principal, executing the registered rest:project-fleet-budgets.delete command with { projectId: 'p1', id: 'b1' } invokes its run callback with that principal and calls budgets.remove(principal.id, { kind: 'project', projectId: 'p1' }, 'b1').",
+        "AC-15 [unit]: Given BudgetsModule compiled with GlobalStubsModule and no database, its container resolves BudgetRouteCommands."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "fleet",
+        "budgets"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Eight scoped write paths integrate approval execution and budget domain state; access-control changes require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/roles.controller.ts",
+        "apps/api/src/fleet/budgets/budgets.service.ts",
+        "apps/api/test/integration/fleet/fleet-budgets-api.integration.spec.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/budgets/budget-route.commands.ts",
+        "apps/api/src/fleet/budgets/budget-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-budget-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops the 8 budget rows"
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budgets.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides BudgetRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budgets.module.spec.ts",
+          "reason": "the module also resolves BudgetRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/fleet-budgets.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; create, update, remove, resume gated"
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/project-fleet-budgets.controller.ts",
+          "reason": "the same, with projectId: ctx.project.id"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Gate fleet repo, runner and analytics writes",
+      "description": "**Goal** \u2014 Gate six fleet-admin REST writes using per-domain repo, runner and analytics command variants.\n\n**Motivation** \u2014 Every other approvable write route is listed in `PENDING_GATE_ROUTES` with the feature that will gate it.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\nRegister FleetRepoRouteCommands/FLEET_REPO_ROUTE_VARIANTS in FleetReposModule, RunnerRouteCommands/RUNNER_ROUTE_VARIANTS in RunnersModule and AnalyticsRouteCommands/ANALYTICS_ROUTE_VARIANTS in AnalyticsModule. All six gate scopes are null, even when analytics filters a project.\n| Route | Key | Variant | Input | Run |\n| POST /fleet/repos | fleet.repo.create | rest:fleet-repos.create | parseBody(CreateFleetRepoDto, input) | repos.create(principal.id, dto) |\n| DELETE /fleet/repos/:id | fleet.repo.delete | rest:fleet-repos.delete | { id } | repos.remove(principal.id, id) |\n| POST /fleet/repos/:id/check | fleet.repo.check | rest:fleet-repos.check | { id } | repos.check(id) |\n| PATCH /fleet/runners/:id | fleet.runner.update | rest:fleet-runners.update | { id, patch: parseBody(UpdateRunnerDto, \u2026) } | runners.update(principal.id, id, patch) |\n| DELETE /fleet/runners/:id | fleet.runner.delete | rest:fleet-runners.delete | { id } | runners.remove(principal.id, id) |\n| DELETE /fleet/analytics | fleet.analytics.delete | rest:fleet-analytics.delete | { before, projectId?, confirm }: parseBody(DeleteAnalyticsQuery, { before, projectId }) merged with parseBody(DeleteAnalyticsBody, { confirm }) | analytics.deleteRows(principal.id, input, new Date()) |\n\n- The id members of every input are read with `parseRouteInput`. A body member is read with `parseBody` of the route's DTO; a missing body member is parsed as `{}`.\n- A missing or malformed `before` is refused with 400 by the global validation pipe before the handler runs, so no request opens; the handler passes `parseQuery(DeleteAnalyticsQuery, raw)` into the input as today. The run's `deleteRows` refuses a `confirm` that names neither the project's slug nor `ALL` (today's 400, now a `failed` request).\n\n**Reads the handler already makes before its service call stay before the gate.** Their answers stay as today, and no request is opened when they refuse:\n  - the analytics query validation (400 from the global validation pipe on `@Query() raw: DeleteAnalyticsQuery`; `parseQuery` only strips undeclared fields).\nEvery check inside a service runs when the command runs, at once or after approval; a failing check settles the request `failed`. This is 5a's rule.\n\nInject ApprovalRouteGate into FleetReposController, RunnersController and FleetAnalyticsController; decorate only these six handlers @ApprovalGated(), preserve Requires/guards/ApiResponses/path parameters, and map pending to ApprovalPending. Body-returning commands use identity toResult and JsonResponse.Ok(outcome.result); no-body repo/runner deletion commands return null without toResult and handlers return undefined preserving 204. Pass a new Date when analytics executes, not when requesting. Drop six matching allowlist rows. Update affected controller specs to gate assertions and move service expectations to the three new command specs.\n\n**Scope** \u2014 In: three commands classes/modules, six handlers and their allowlist removals. Out: budget/schedule gates (US-002/US-004), shared parser (US-001), exact route count/OpenAPI (US-010), real forge checks in tests and enrollment's secret-bearing route.\n\n**Interface** \u2014 `FleetReposService.create(actorId, dto)`, `.remove(actorId, id)`, `.check(id, now?)`; `RunnersService.update(actorId, id, dto)`, `.remove(actorId, id)`; `AnalyticsService.deleteRows(actorId, q: DeleteInput, now)`.\n\n**Verification** \u2014 Three-session security TDD; command registration/parser and handler unit cases, then gated-fleet-admin-routes HTTP integration with global grants and real root decisions. Stub forge checks as fleet-repos.integration.spec.ts does; use fleet-analytics-delete.integration.spec.ts data fixtures. Assert no mutation before approval and failed outcomes on service refusal; DB tests must execute outside sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/fleet/repos with a valid body by an agent holding fleet.repo.create globally returns { status: 202, data: { permissionKey: 'fleet.repo.create' } }; and While that repo-create request is pending, no repo is registered.",
+        "AC-2 [integration]: When root approves that request and the stubbed forge check passes, the repo is registered; and When root approves that successful repo-create request, it settles executed.",
+        "AC-3 [integration]: An approved repo create whose forge check fails when the command runs settles failed with result matching { error: 'execution-failed', name: forgeFailure.name }, where forgeFailure is the Error rejected by the forge-check stub; and When the approved repo create's forge check fails, no repo is registered.",
+        "AC-4 [integration]: DELETE /api/fleet/repos/:id by an agent holding fleet.repo.delete globally returns 202; and When root approves that repo-delete request, the repo is unregistered.",
+        "AC-5 [integration]: POST /api/fleet/repos/:id/check by an agent holding fleet.repo.check globally returns 202; and When root approves that check request, its result matches { repoId: repo.id, reachable: expect.any(Boolean) }, where repo is the fixture addressed by the request.",
+        "AC-6 [integration]: PATCH /api/fleet/runners/:id with { enabled: false } by an agent holding fleet.runner.update globally returns 202; and When root approves that runner-update request, the runner is disabled.",
+        "AC-7 [integration]: DELETE /api/fleet/runners/:id by an agent holding fleet.runner.delete globally returns 202; and When root approves that runner-delete request, the runner no longer exists.",
+        "AC-8 [integration]: DELETE /api/fleet/analytics?before=<instant> with { confirm: 'ALL' } by an agent holding fleet.analytics.delete globally returns 202; and When root approves that analytics deletion, analytics rows dated before the instant are gone.",
+        "AC-9 [integration]: DELETE /api/fleet/analytics without before by the granted agent returns 400 before the gate; and When analytics deletion omits before, no ApprovalRequest row exists.",
+        "AC-10 [integration]: An approved analytics delete filtered to one project whose confirm is not that project's slug settles failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the name of the ValidationAppException instance thrown by the service; and When that analytics confirmation is refused at execution, the rows remain.",
+        "AC-11 [integration]: DELETE /api/fleet/runners/:id with the root token returns 204; and When root deletes a runner directly, no ApprovalRequest row exists.",
+        "AC-12 [unit]: After FleetRepoRouteCommands.onModuleInit, the registry answers fleet.repo.create, fleet.repo.delete and fleet.repo.check commands for rest:fleet-repos.create, rest:fleet-repos.delete and rest:fleet-repos.check respectively.",
+        "AC-13 [unit]: After RunnerRouteCommands.onModuleInit, the registry answers fleet.runner.update and fleet.runner.delete commands for rest:fleet-runners.update and rest:fleet-runners.delete respectively.",
+        "AC-14 [unit]: After AnalyticsRouteCommands.onModuleInit, the registry answers a fleet.analytics.delete command for rest:fleet-analytics.delete.",
+        "AC-15 [unit]: The rest:fleet-analytics.delete command's parse({ before: '2026-01-01T00:00:00Z', extra: 1 }) throws ValidationAppException with key approvals.invalidInput because confirm is missing."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "fleet",
+        "analytics"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three domain modules and destructive analytics integrate deferred authorization, DTO validation and forge failures; security override requires strict isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/runners/runners.service.ts",
+        "apps/api/src/fleet/analytics/analytics.service.ts",
+        "apps/api/test/integration/fleet/fleet-repos.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-analytics-delete.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.ts",
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.spec.ts",
+        "apps/api/src/fleet/runners/runner-route.commands.ts",
+        "apps/api/src/fleet/runners/runner-route.commands.spec.ts",
+        "apps/api/src/fleet/analytics/analytics-route.commands.ts",
+        "apps/api/src/fleet/analytics/analytics-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-admin-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops the 6 rows of POST /fleet/repos, DELETE /fleet/repos/:id, POST /fleet/repos/:id/check, PATCH /fleet/runners/:id, DELETE /fleet/runners/:id, DELETE /fleet/analytics"
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.module.ts",
+          "reason": "imports the engine and auth repository modules; provides FleetRepoRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; create, remove, check gated"
+        },
+        {
+          "path": "apps/api/src/fleet/runners/runners.module.ts",
+          "reason": "imports the two modules; provides RunnerRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/runners/runners.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; update, remove gated"
+        },
+        {
+          "path": "apps/api/src/fleet/analytics/analytics.module.ts",
+          "reason": "imports the two modules; provides AnalyticsRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/analytics/fleet-analytics.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated after parseQuery"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Gate schedule deletion and repo drift checks",
+      "description": "**Goal** \u2014 Gate schedule deletion and repo drift submission while re-evaluating schedule administration at execution time.\n\n**Motivation** \u2014 The 35 `gate-high` routes are the ones the design's shipped defaults already make agents wait on (`high` \u2192 `agent`), yet an agent calling them over REST or the `koda` CLI still writes at once: it can delete a project, a ticket or a runner, raise a budget or unregister a repo the moment it holds the key.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\n**The project id of a project route comes from `@CurrentProject()`.** `ProjectMembershipGuard` has already resolved it. Services that take a slug get the slug from the frozen input.\n\n**The gate key is the route's `@Requires` key.** For an ownable key (`comment.delete`, `ticket.link.remove`, `kb.document.delete`, `fleet.schedule.delete`), `ApprovalRouteGate` already accepts `<key>.own`. The row-level check (whose row it is) runs in the command.\n\n**The schedule command recomputes \"may administer\" when it runs:** `(await permissions.can(principal, 'fleet.schedule.delete', { projectId })).allowed`, the controller's `canAdminister` rule. A deferred delete is judged on the principal's keys at execution.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /projects/:slug/fleet/schedules/:id | fleet.schedule.delete | project | rest:project-fleet-schedules.delete | { projectId, id } | schedules.remove(principal.id, projectId, id, canAdminister), canAdminister computed as above |\n| POST /projects/:slug/fleet/repos/:repoId/drift-checks | fleet.repo.drift.check | project | rest:project-repo-config.drift-check | { projectId, repoId } | configJobs.submitDrift(principal.id, projectId, repoId) |\n\nAdd ScheduleRouteCommands/SCHEDULE_ROUTE_VARIANTS in SchedulesModule and RepoConfigRouteCommands/REPO_CONFIG_ROUTE_VARIANTS in RepoConfigModule. Use parseRouteInput for all identifiers; register in onModuleInit via routeCommand and ActorPrincipalLoader. Inject ApprovalRouteGate into ProjectFleetSchedulesController and ProjectRepoConfigController; only remove/submitDrift are gated. Move the remove handler's canAdminister call into its command, not into frozen input; preserve other controller helper uses. Add @ApprovalGated(), retain Requires, guards, response metadata and path parameters, and throw ApprovalPending on pending. Schedule run returns null, omits toResult and handler returns undefined preserving 204; drift command uses identity toResult and handler JsonResponse.Ok(outcome.result), preserving 201 on immediate execution. Remove the two corresponding allowlist rows.\n\nUpdate enforce-fleet-config-knowledge.integration.spec.ts: its AC-7 (a DEVELOPER agent queues a drift check, 201) now expects 202 with data.permissionKey fleet.repo.drift.check; its AC-8 approves that request as root, then asserts the created CONFIG_DRIFT job has requestedById the agent and requestedByType AGENT. Extend schedules.module.spec.ts to resolve ScheduleRouteCommands. Move handler service expectations to command unit specs.\n\n**Scope** \u2014 In: these two route commands, two module imports/providers, two handlers, current-key ownership semantics and their allowlist rows. Out: other schedule mutations and config-edit routes; shared parser/classification (US-001); budget/fleet-admin gates (US-002/US-003); exact count/OpenAPI closure (US-010).\n\n**Interface** \u2014 `SchedulesService.remove(actorId, projectId, id, canAdminister)`; `ConfigJobsService.submitDrift(actorId, projectId, repoId)`.\n\n**Verification** \u2014 Three-session security TDD with .own/all-row schedule cases, registration and DB-free module resolution, plus real HTTP root approvals in gated-project-fleet-routes.integration.spec.ts. Use fleet-schedules-api and fleet-repo-config-api fixtures, project.read grants and no seeded policy. Preserve the member-human 201 drift regression and agent job attribution; run DB integration outside sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/projects/:slug/fleet/schedules/:id by an agent holding fleet.schedule.delete and project.read in P returns { status: 202, data: { permissionKey: 'fleet.schedule.delete', projectId: P } }; and When root approves that schedule-delete request, the schedule no longer exists.",
+        "AC-3 [integration]: DELETE /api/projects/:slug/fleet/schedules/:id by an agent holding only fleet.schedule.delete.own plus project.read in P on another user's schedule returns 202; and When root approves that other-owner schedule-delete request, it settles failed; and When that .own deletion fails, the other user's schedule remains.",
+        "AC-4 [integration]: The same .own agent deleting a schedule it created returns 202; and When root approves that own-schedule request, the schedule no longer exists.",
+        "AC-5 [integration]: DELETE /api/projects/:slug/fleet/schedules/:id with the root token returns 204; and When root deletes a schedule directly, no ApprovalRequest row exists.",
+        "AC-6 [integration]: POST /api/projects/:slug/fleet/repos/:repoId/drift-checks by an agent holding fleet.repo.drift.check and project.read in P returns { status: 202, data: { permissionKey: 'fleet.repo.drift.check' } }.",
+        "AC-7 [integration]: When root approves that drift-check request, a CONFIG_DRIFT job exists for the repo; and When root approves that drift-check request, ApprovalRequest.result equals the JSON round-trip (JSON.parse(JSON.stringify(...))) of the DispatchResultDto returned by ConfigJobsService.submitDrift, including its job and placement members, preserving the body the route answers today without a JsonResponse envelope.",
+        "AC-8 [integration]: POST /api/projects/:slug/fleet/repos/:repoId/drift-checks with a project member user's token returns 201, preserving the existing immediate-human regression behavior.",
+        "AC-9 [unit]: Given loader.forContext() returns principal and permissions.can(principal, 'fleet.schedule.delete', { projectId: 'p1' }) returns { allowed: false }, executing the registered rest:project-fleet-schedules.delete command with { projectId: 'p1', id: 's1' } calls schedules.remove(principal.id, 'p1', 's1', false) through its run callback.",
+        "AC-10 [unit]: After onModuleInit, the registry answers a fleet.schedule.delete command for rest:project-fleet-schedules.delete and a fleet.repo.drift.check command for rest:project-repo-config.drift-check.",
+        "AC-11 [unit]: Given SchedulesModule compiled with GlobalStubsModule and no database, its container resolves ScheduleRouteCommands."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "fleet",
+        "ownership"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two modules introduce execution-time access recomputation and preserve requester job attribution; ownership authorization is security-critical."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedules.service.ts",
+        "apps/api/src/fleet/repo-config/config-jobs.service.ts",
+        "apps/api/test/integration/fleet/fleet-schedules-api.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-repo-config-api.integration.spec.ts",
+        "apps/api/src/permissions/permission-route.commands.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/schedules/schedule-route.commands.ts",
+        "apps/api/src/fleet/schedules/schedule-route.commands.spec.ts",
+        "apps/api/src/fleet/repo-config/repo-config-route.commands.ts",
+        "apps/api/src/fleet/repo-config/repo-config-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-project-fleet-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /projects/:slug/fleet/schedules/:id and POST /projects/:slug/fleet/repos/:repoId/drift-checks"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedules.module.ts",
+          "reason": "imports the two modules; provides ScheduleRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedules.module.spec.ts",
+          "reason": "the module also resolves ScheduleRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated (its canAdminister call moves into the command)"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/repo-config.module.ts",
+          "reason": "imports the two modules; provides RepoConfigRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/project-repo-config.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; submitDrift gated"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-config-knowledge.integration.spec.ts",
+          "reason": "its AC-7 (a DEVELOPER agent queues a drift check, 201) now expects 202 with data.permissionKey fleet.repo.drift.check; its AC-8 approves that request as root, then asserts the created CONFIG_DRIFT job has requestedById the agent and requestedByType AGENT"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Gate project, agent and skill-source deletion",
+      "description": "**Goal** \u2014 Make project, agent and skill-source HTTP deletions wait for approval under agent defaults.\n\n**Motivation** \u2014 The 35 `gate-high` routes are the ones the design's shipped defaults already make agents wait on (`high` \u2192 `agent`), yet an agent calling them over REST or the `koda` CLI still writes at once: it can delete a project, a ticket or a runner, raise a budget or unregister a repo the moment it holds the key.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\n**The project id of a project route comes from `@CurrentProject()`.** `ProjectMembershipGuard` has already resolved it. Services that take a slug get the slug from the frozen input.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /projects/:slug | project.delete | project | rest:projects.delete | { slug } | projects.softDelete(slug) |\n| DELETE /agents/:slug | agent.delete | null | rest:agents.delete | { slug } | agents.remove(slug) |\n| DELETE /admin/skills/sources/:id | skill.source.delete | null | rest:admin-skill-sources.delete | { id } | skills.deleteSource(id) |\n\nRegister ProjectRouteCommands/PROJECT_ROUTE_VARIANTS in ProjectsModule, AgentRouteCommands/AGENT_ROUTE_VARIANTS in AgentsModule and SkillSourceRouteCommands/SKILL_SOURCE_ROUTE_VARIANTS in SkillsModule. Parse named identifiers with parseRouteInput. Inject ApprovalRouteGate in ProjectsController, AgentsController and AdminSkillsController; gate only their remove HTTP handlers, retain Requires/guards/ApiResponses/path params, decorate @ApprovalGated and throw ApprovalPending for pending. Project/skill-source delete commands return null with no toResult, and executed handlers return undefined preserving 204. Agent deletion remains hard delete with service result, identity toResult and JsonResponse.Ok(outcome.result), preserving 200. Remove these three allowlist rows.\n\n**Only the HTTP handlers change.** The controllers' non-route helper methods (`AgentsController.deleteAgent`, `CommentsController.delete`, `LabelsController.delete` and `removeLabel`, `TicketsController.deleteTicket`) stay as they are, and so do their spec cases. A gated handler drops a `@Principal()` parameter it no longer reads, except where `no-principal-params.spec.ts` requires it (`RagController.deleteDocument` keeps `@Principal()`). Route parameters (`@Param('slug')`, `@Param('id')`, \u2026) always stay declared, even when the handler reads the project from `@CurrentProject()` (name an unread one `_slug`), so the OpenAPI document keeps every path parameter.\n\n**Controller unit specs move their service expectations to the commands spec.** A spec that builds a controller provides an `ApprovalRouteGate` double. Gated handler cases assert the `run` call (`key`, `variant`, `projectId`, `input`) and the executed or pending mapping. The service call each one used to assert is pinned in the commands spec instead.\n\nUpdate ProjectsController remove cases to assert project.delete/rest:projects.delete/project id/{ slug }. Provide gate doubles without assertion changes in projects.module.spec.ts, projects-brief.routes.spec.ts, project-membership.guard.routes.spec.ts (shared by its three controllers), test/unit/projects/projects-conflict-responses.spec.ts, agents.controller.spec.ts, agents-create.routes.spec.ts, agents-pickup.routes.spec.ts and agent-create-canonical-dto.routes.spec.ts. Extend skills.module.spec.ts to resolve SkillSourceRouteCommands. permission-contract.spec.ts's former AC-10 now asserts DELETE /projects/:slug has no pending entry. These shared doubles are prerequisite work for US-007 and US-009.\n\n**Scope** \u2014 In: three deletion commands/handlers/modules, three allowlist removals and shared controller fixture compatibility. Out: ticket/label/link gating (US-007), KB extraction/gating (US-009), other admin/project writes and exact count/OpenAPI closure (US-010).\n\n**Interface** \u2014 `ProjectsService.softDelete(slug)`; `AgentsService.remove(slug)`; `SkillsService.deleteSource(id)`.\n\n**Verification** \u2014 Three-session security TDD using command registration/service-call unit specs, DB-free module resolution and gated-admin-delete-routes.integration.spec.ts with real root approval. Grant project.read/project.delete in P for project deletion and global action keys for agent/skill-source deletion. Verify delayed mutation, correct soft versus hard deletion, preserved human statuses, keyless refusal and failed stale-source execution.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/projects/:slug by an agent holding project.delete and project.read in P returns { status: 202, data: { permissionKey: 'project.delete', projectId: P } }; and After that call, the project is not deleted while the request waits; and When root approves that project-delete request, the project is soft-deleted.",
+        "AC-3 [integration]: DELETE /api/projects/:slug with the root token returns 204; and When root deletes a project directly, no ApprovalRequest row exists.",
+        "AC-4 [integration]: DELETE /api/agents/:slug of agent X by an agent holding global agent.delete returns 202; and When root approves that agent-delete request, X's Agent row no longer exists, preserving the existing hard delete.",
+        "AC-5 [integration]: The executed request for deletion of X has result matching { slug: <X's slug> }.",
+        "AC-6 [integration]: DELETE /api/agents/:slug with the root token returns 200; and When root deletes an agent directly, no ApprovalRequest row exists.",
+        "AC-7 [integration]: DELETE /api/admin/skills/sources/:id by an agent holding global skill.source.delete returns 202; and When root approves that skill-source delete request, the source no longer exists.",
+        "AC-8 [integration]: An approved skill-source delete whose source root deleted while it waited settles failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the name of the NotFoundAppException instance thrown by the service.",
+        "AC-9 [integration]: DELETE /api/agents/:slug by an agent holding no agent.delete returns 403 with key permissions; and When that keyless agent attempts agent deletion, no ApprovalRequest row exists.",
+        "AC-10 [unit]: After onModuleInit, the registry answers rest:projects.delete under project.delete, rest:agents.delete under agent.delete and rest:admin-skill-sources.delete under skill.source.delete.",
+        "AC-11 [unit]: Executing the registered rest:projects.delete command with { slug: 'alpha' } calls projects.softDelete('alpha') through its run callback.",
+        "AC-12 [unit]: Given SkillsModule compiled with GlobalStubsModule and no database, its container resolves SkillSourceRouteCommands.",
+        "AC-13 [unit]: PENDING_GATE_ROUTES.get('DELETE /projects/:slug') returns undefined."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "projects",
+        "agents",
+        "skills"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three destructive domains and many shared controller consumers change access-control entry points while preserving distinct deletion semantics."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/skills/skills.service.ts",
+        "apps/api/test/integration/skills/skill-source-update-delete.integration.spec.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/project-route.commands.ts",
+        "apps/api/src/projects/project-route.commands.spec.ts",
+        "apps/api/src/agents/agent-route.commands.ts",
+        "apps/api/src/agents/agent-route.commands.spec.ts",
+        "apps/api/src/skills/skill-source-route.commands.ts",
+        "apps/api/src/skills/skill-source-route.commands.spec.ts",
+        "apps/api/test/integration/permissions/gated-admin-delete-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /projects/:slug, DELETE /agents/:slug, DELETE /admin/skills/sources/:id"
+        },
+        {
+          "path": "apps/api/src/projects/projects.module.ts",
+          "reason": "imports the two modules; provides ProjectRouteCommands"
+        },
+        {
+          "path": "apps/api/src/projects/projects.module.spec.ts",
+          "reason": "its testing module provides an ApprovalRouteGate double for ProjectsController; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated with @CurrentProject()"
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "the remove cases assert the gate call (project.delete, rest:projects.delete, the project id, { slug }) instead of softDelete"
+        },
+        {
+          "path": "apps/api/src/projects/projects-brief.routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double (shared by its three controllers); no assertion changes"
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-conflict-responses.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/agents/agents.module.ts",
+          "reason": "imports the two modules; provides AgentRouteCommands"
+        },
+        {
+          "path": "apps/api/src/agents/agents.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated"
+        },
+        {
+          "path": "apps/api/src/agents/agents.controller.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/agents/agents-create.routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/agents/agents-pickup.routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/agents/agent-create-canonical-dto.routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/skills/skills.module.ts",
+          "reason": "imports the two modules; provides SkillSourceRouteCommands"
+        },
+        {
+          "path": "apps/api/src/skills/skills.module.spec.ts",
+          "reason": "the module also resolves SkillSourceRouteCommands"
+        },
+        {
+          "path": "apps/api/src/skills/admin-skills.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its AC-10 (DELETE /projects/:slug is gate-high) now asserts PENDING_GATE_ROUTES has no entry for DELETE /projects/:slug, because this story gates that route"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Gate webhook deletion and VCS delete/test",
+      "description": "**Goal** \u2014 Gate four non-secret webhook and VCS routes without freezing encryption keys or tokens.\n\n**Motivation** \u2014 Every other approvable write route is listed in `PENDING_GATE_ROUTES` with the feature that will gate it.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\n**The frozen input is what the service call needs, never config.** An input carries ids, slugs and the validated body. It never carries a value read from config: the VCS test command reads `vcsConfig.encryptionKey` when it runs.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /projects/:slug/webhooks/:id | webhook.delete | project | rest:project-webhooks.delete | { projectId, id } | webhooks.removeForProject(projectId, id) |\n| DELETE /webhooks/:id | webhook.delete | null | rest:webhooks.delete | { id } | webhooks.remove(id) |\n| DELETE /projects/:slug/vcs | vcs.connection.delete | project | rest:vcs.delete | { projectId } | vcs.delete(projectId) |\n| POST /projects/:slug/vcs/test | vcs.connection.test | project | rest:vcs.test | { projectId } | vcs.testConnection(projectId, key); key is vcsConfig.encryptionKey read at run time, and a missing key throws ValidationAppException({}, 'vcs') |\n\n- The VCS test handler checks `vcsConfig.encryptionKey` before the gate (400 `vcs` as today). The VCS delete handler no longer reads `projectsService.findBySlug`: the scope and input use `@CurrentProject()`.\n- The project webhook delete handler no longer calls `webhookService.getProjectBySlug`: the scope and input use `@CurrentProject()`. A webhook of another project answers 404 `webhooks` from `removeForProject` when the command runs.\n\nThe project id of a project route comes from `@CurrentProject()`. `ProjectMembershipGuard` has already resolved it. Services that take a slug get the slug from the frozen input. The id members of every input are read with `parseRouteInput`.\n\nAdd WebhookRouteCommands/WEBHOOK_ROUTE_VARIANTS in WebhookModule and VcsRouteCommands/VCS_ROUTE_VARIANTS in VcsModule; register in onModuleInit via routeCommand/ActorPrincipalLoader. Inject ApprovalRouteGate into WebhookController and VcsController. Decorate only removeByProject/remove/deleteConnection/testConnection @ApprovalGated(), retain guards/Requires/ApiResponses and all @Param declarations, and throw ApprovalPending on pending. The three no-body commands return null without toResult and handlers return undefined with 204. TestConnectionResultDto is returned/stored unchanged using identity toResult and JsonResponse.Ok(outcome.result). Preserve runtime POST default 201 for immediate VCS tests: its existing @ApiResponse(200) is not @HttpCode. Do not freeze encryptionKey or token, and check config again when the test runs. Remove the four matching pending rows; leave six secret-bearing routes ungated.\n\nController unit specs move service expectations into commands specs. In webhook-routes.spec.ts use an executing gate double: for rest:project-webhooks.delete call WebhookService.removeForProject(input.projectId, input.id); for rest:webhooks.delete call WebhookService.remove(input.id); return { status: 'executed', result: null }, preserving AC-6/AC-9's user deletion 204/row-gone assertions. Update both src/vcs/vcs.controller.spec.ts and test/integration/vcs/vcs-controller.spec.ts to gate calls for delete/test; keep missing-key 400 before gate. Add a gate double to vcs-manual-sync.spec.ts without assertion changes; extend vcs.module.spec.ts to resolve VcsRouteCommands.\n\n**Scope** \u2014 In: four non-secret operations and command/module/controller wiring. Out: VCS create/update/secret rotation, webhook create/update and fleet enrollment gating (gate-secret); shared parsing/classification (US-001); other domains and closure (US-010). A real network call to a forge and behavior beyond failed when the encryption key disappears while waiting are excluded.\n\n**Interface** \u2014 `WebhookService.removeForProject(projectId, id)`, `.remove(id)`; `VcsConnectionService.delete(projectId)`, `.testConnection(projectId, encryptionKey)`.\n\n**Verification** \u2014 Three-session security TDD; register/run/config checks and DB-free module resolution, then gated-webhook-vcs-routes.integration.spec.ts using existing vcs-permissions and webhook-permissions fixtures, project.read plus project keys/global webhook grant, and real root approvals. Stub the provider's connection test called by VcsConnectionService.testConnection; AC-8/AC-9 make no network calls. Verify frozen input is exactly { projectId: P } and another project's webhook remains on failed execution.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/projects/:slug/webhooks/:id by an agent holding webhook.delete and project.read in P returns { status: 202, data: { permissionKey: 'webhook.delete' } }; and When root approves that project webhook-delete request, the webhook no longer exists.",
+        "AC-2 [integration]: The same agent deleting another project's webhook through P's project route returns 202; and When root approves that cross-project webhook request, it settles failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the name of the NotFoundAppException instance thrown by removeForProject; and When that cross-project webhook execution is refused, the other project's webhook remains.",
+        "AC-3 [integration]: DELETE /api/webhooks/:id by an agent holding global webhook.delete returns { status: 202, data: { projectId: null } }; and When root approves that global webhook-delete request, the webhook no longer exists.",
+        "AC-4 [integration]: DELETE /api/projects/:slug/webhooks/:id with the root token returns 204; and When root deletes a project webhook directly, no ApprovalRequest row exists.",
+        "AC-5 [integration]: DELETE /api/projects/:slug/vcs by an agent holding vcs.connection.delete and project.read in P returns 202; and When root approves that VCS-delete request, the project has no VCS connection.",
+        "AC-6 [integration]: POST /api/projects/:slug/vcs/test by an agent holding vcs.connection.test and project.read in P returns { status: 202, data: { permissionKey: 'vcs.connection.test' } }; and that pending ApprovalRequest.input equals exactly { projectId: P }, with no encryption key or token frozen; and When root approves that request with the provider connection test stubbed, it settles executed without a network call; and The executed VCS-test request's result matches TestConnectionResultDto with ok of type boolean and latencyMs of type number; error remains optional and, when returned by VcsConnectionService, is preserved as a string, matching the existing route result rather than the raw provider response.",
+        "AC-9 [integration]: POST /api/projects/:slug/vcs/test with the root token and stubbed provider returns 201 with the test result, preserving Nest's unchanged POST default because the route has no @HttpCode; and When root tests a VCS connection directly, no ApprovalRequest row exists.",
+        "AC-10 [unit]: VcsController.testConnection with no encryption key configured throws ValidationAppException with key vcs; and When no encryption key is configured, VcsController.testConnection never calls routeGate.run.",
+        "AC-11 [unit]: Given vcsConfig.encryptionKey is 'k1', executing the registered rest:vcs.test command with { projectId: 'p1' } calls vcs.testConnection('p1', 'k1') through its run callback.",
+        "AC-12 [unit]: Executing the registered rest:vcs.test command with { projectId: 'p1' } and no encryption key configured rejects with ValidationAppException with key vcs from its run callback.",
+        "AC-13 [unit]: After onModuleInit, the registry answers webhook.delete for rest:project-webhooks.delete and rest:webhooks.delete, vcs.connection.delete for rest:vcs.delete, and vcs.connection.test for rest:vcs.test.",
+        "AC-14 [unit]: Given VcsModule compiled with GlobalStubsModule and no database, its container resolves VcsRouteCommands."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "webhooks",
+        "vcs"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Deferred cross-project deletion and runtime encryption-key access cross two modules; secret-adjacent access control requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.service.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/test/integration/vcs/vcs-permissions.integration.spec.ts",
+        "apps/api/test/integration/webhook/webhook-permissions.integration.spec.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/webhook-route.commands.ts",
+        "apps/api/src/webhook/webhook-route.commands.spec.ts",
+        "apps/api/src/vcs/vcs-route.commands.ts",
+        "apps/api/src/vcs/vcs-route.commands.spec.ts",
+        "apps/api/test/integration/webhook/gated-webhook-vcs-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /projects/:slug/webhooks/:id, DELETE /webhooks/:id, DELETE /projects/:slug/vcs, POST /projects/:slug/vcs/test"
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.module.ts",
+          "reason": "imports the two modules; provides WebhookRouteCommands"
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; removeByProject (with @CurrentProject()) and remove gated"
+        },
+        {
+          "path": "apps/api/src/webhook/webhook-routes.spec.ts",
+          "reason": "provides an ApprovalRouteGate double whose run executes the webhook write itself and answers { status: 'executed', result: null }: for variant rest:project-webhooks.delete it calls WebhookService.removeForProject(input.projectId, input.id), for rest:webhooks.delete WebhookService.remove(input.id), so its AC-6 and AC-9 (a user deletes a webhook, 204, row gone) keep their assertions"
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.module.ts",
+          "reason": "imports the two modules; provides VcsRouteCommands"
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.module.spec.ts",
+          "reason": "the module also resolves VcsRouteCommands"
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; deleteConnection and testConnection gated with @CurrentProject()"
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.controller.spec.ts",
+          "reason": "the deleteConnection and testConnection cases assert the gate call; the missing-encryption-key case still answers 400 before the gate"
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-controller.spec.ts",
+          "reason": "the same change for its deleteConnection and testConnection cases"
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-manual-sync.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; no assertion changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Gate ticket deletion and label/link removals",
+      "description": "**Goal** \u2014 Gate the four destructive ticket, label, ticket-label and ticket-link HTTP operations.\n\n**Motivation** \u2014 The 35 `gate-high` routes are the ones the design's shipped defaults already make agents wait on (`high` \u2192 `agent`), yet an agent calling them over REST or the `koda` CLI still writes at once: it can delete a project, a ticket or a runner, raise a budget or unregister a repo the moment it holds the key.\n\n**Approach** \u2014 **One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\n**The project id of a project route comes from `@CurrentProject()`.** `ProjectMembershipGuard` has already resolved it. Services that take a slug get the slug from the frozen input.\n\n**The gate key is the route's `@Requires` key.** For an ownable key (`comment.delete`, `ticket.link.remove`, `kb.document.delete`, `fleet.schedule.delete`), `ApprovalRouteGate` already accepts `<key>.own`. The row-level check (whose row it is) runs in the command.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /projects/:slug/tickets/:ref | ticket.delete | project | rest:tickets.delete | { slug, ref } | tickets.softDelete(slug, ref, principal) |\n| DELETE /projects/:slug/labels/:id | label.delete | project | rest:labels.delete | { slug, id } | labels.delete(slug, id, principal) |\n| DELETE /projects/:slug/tickets/:ref/labels/:labelId | ticket.label.remove | project | rest:ticket-labels.remove | { slug, ref, labelId } | labels.removeFromTicket(slug, ref, labelId, principal) |\n| DELETE /projects/:slug/tickets/:ref/links/:linkId | ticket.link.remove | project | rest:ticket-links.remove | { slug, ref, linkId } | ticketLinks.remove(slug, ref, linkId, principal) |\n\nUse parseRouteInput for every named identifier; routeCommand rebuilds the principal. Add TicketRouteCommands/TICKET_ROUTE_VARIANTS in TicketsModule, LabelRouteCommands/LABEL_ROUTE_VARIANTS in LabelsModule and TicketLinkRouteCommands/TICKET_LINK_ROUTE_VARIANTS in TicketLinksModule. Inject ApprovalRouteGate and gate TicketsController.softDelete, LabelsController.deleteFromHttp/removeLabelFromHttp and TicketLinksController.remove. Preserve Requires/guards/path params/ApiResponses and add @ApprovalGated(); pending throws ApprovalPending. Ticket soft-delete returns the existing body via identity toResult and JsonResponse.Ok(outcome.result); the three no-body operations return null from run without toResult and undefined from executed handlers preserving 204. Drop these four pending rows.\n\n**Only the HTTP handlers change.** The controllers' non-route helper methods (`AgentsController.deleteAgent`, `CommentsController.delete`, `LabelsController.delete` and `removeLabel`, `TicketsController.deleteTicket`) stay as they are, and so do their spec cases. A gated handler drops a `@Principal()` parameter it no longer reads, except where `no-principal-params.spec.ts` requires it (`RagController.deleteDocument` keeps `@Principal()`). Route parameters (`@Param('slug')`, `@Param('id')`, \u2026) always stay declared, even when the handler reads the project from `@CurrentProject()` (name an unread one `_slug`), so the OpenAPI document keeps every path parameter.\n\nFor ticket-link deletion a caller holding neither ticket.link.remove nor ticket.link.remove.own is refused 403 permissions by the route gate before link lookup, including an unknown link that used to return 404. A key holder still encounters the service's missing-link/ownership check when the command runs; a deferred failure settles failed. Do not pre-load a link or pre-run row ownership.\n\nController unit specs move service expectations to commands specs. Add wrapper gate-call and executed/pending cases for TicketsController.softDelete and the two LabelsController wrappers without changing helper cases; update TicketLinksController.remove cases. US-005 provides the shared project-membership.guard.routes.spec.ts gate double. In approval-variants.integration.spec.ts change only probe VARIANT from rest:labels.delete to rest:variants-probe, because the real command now owns label.delete#rest:labels.delete.\n\n**Scope** \u2014 In: four operations, three commands classes/modules, allowlist removals, unchanged helper behavior and registry-probe compatibility. Out: admin/project deletes and shared fixture setup (US-005), comment delete (US-008), KB delete (US-009), shared parsing (US-001) and OpenAPI/count closure (US-010).\n\n**Interface** \u2014 `TicketsService.softDelete(slug, ref, principal)`; `LabelsService.delete(slug, id, principal)`, `.removeFromTicket(slug, ref, labelId, principal)`; `TicketLinksService.remove(slug, ref, linkId, principal)`.\n\n**Verification** \u2014 Three-session security TDD with registration/parser/service-call and HTTP wrapper unit cases, then gated-ticket-routes.integration.spec.ts using core-ticket-links/core-ticket-routes fixtures, project.read grants and real root decisions. Preserve the Developer ticket-delete refusal regression and execution-time .own/missing-link failures.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/projects/:slug/tickets/:ref by an agent holding ticket.delete and project.read in P returns { status: 202, data: { permissionKey: 'ticket.delete' } }; and While that ticket-delete request waits, the ticket is not deleted.",
+        "AC-2 [integration]: When root approves that ticket-delete request, the ticket is soft-deleted; and The executed ticket-delete request's result matches { ref: <the ref> }.",
+        "AC-3 [integration]: DELETE /api/projects/:slug/labels/:id by an agent holding label.delete and project.read in P returns 202; and When root approves that label-delete request, the label no longer exists.",
+        "AC-4 [integration]: DELETE /api/projects/:slug/tickets/:ref/labels/:labelId by an agent holding ticket.label.remove and project.read in P returns 202; and When root approves that ticket-label removal request, the ticket no longer carries the label.",
+        "AC-5 [integration]: DELETE /api/projects/:slug/tickets/:ref/links/:linkId by an agent holding ticket.link.remove and project.read in P returns 202; and When root approves that ticket-link removal request, the link no longer exists.",
+        "AC-6 [integration]: The ticket-link removal route by an agent holding only ticket.link.remove.own plus project.read in P on another user's link returns 202; and When root approves that other-owner link removal, it settles failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the name of the ForbiddenAppException instance thrown by TicketLinksService.remove; and When that .own link removal fails, the other user's link remains.",
+        "AC-7 [integration]: DELETE /api/projects/:slug/tickets/:ref/links/missing by an agent holding ticket.link.remove and project.read returns 202; and When root approves that missing-link request, it settles failed with result matching { error: 'execution-failed', name: expect.any(String) }, where name equals the name of the NotFoundAppException instance thrown by TicketLinksService.remove.",
+        "AC-8 [integration]: DELETE /api/projects/:slug/labels/:id with the root token returns 204; and When root deletes a label directly, no ApprovalRequest row exists.",
+        "AC-9 [integration]: An agent with a Developer role calling DELETE /api/projects/:slug/tickets/:ref returns 403 with key permissions, preserving core-ticket-routes.integration.spec.ts AC-8; and When that Developer agent is refused ticket deletion, no ApprovalRequest row exists.",
+        "AC-10 [unit]: After onModuleInit, the registry answers rest:tickets.delete under ticket.delete, rest:labels.delete under label.delete, rest:ticket-labels.remove under ticket.label.remove and rest:ticket-links.remove under ticket.link.remove.",
+        "AC-11 [unit]: Given loader.forContext() returns principal, executing the registered rest:ticket-labels.remove command with { slug: 'alpha', ref: 'AL-1', labelId: 'l1' } calls labels.removeFromTicket('alpha', 'AL-1', 'l1', principal) through its run callback.",
+        "AC-12 [unit]: The rest:ticket-links.remove command's parse({ slug: 'alpha', ref: 'AL-1' }) throws ValidationAppException with key approvals.invalidInput.",
+        "FM-1 [integration]: Given project.read in P but neither ticket.link.remove nor ticket.link.remove.own, DELETE /api/projects/:slug/tickets/:ref/links/missing returns 403 with key permissions before any link lookup; and When that keyless ticket-link deletion is refused, no ApprovalRequest row exists."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "tickets",
+        "labels",
+        "ownership"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three domain modules change destructive HTTP access paths and keyless/ownership failure ordering, requiring security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/labels/labels.service.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/test/integration/permissions/core-ticket-links.integration.spec.ts",
+        "apps/api/test/integration/permissions/core-ticket-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/ticket-route.commands.spec.ts",
+        "apps/api/src/labels/label-route.commands.ts",
+        "apps/api/src/labels/label-route.commands.spec.ts",
+        "apps/api/src/ticket-links/ticket-link-route.commands.ts",
+        "apps/api/src/ticket-links/ticket-link-route.commands.spec.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /projects/:slug/tickets/:ref, DELETE /projects/:slug/labels/:id, DELETE /projects/:slug/tickets/:ref/labels/:labelId, DELETE /projects/:slug/tickets/:ref/links/:linkId"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.module.ts",
+          "reason": "imports the two modules; provides TicketRouteCommands"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; softDelete gated"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "new cases for the softDelete handler assert the gate call (key, variant, project id, input) and the executed/pending mapping; its existing cases call the unchanged helper methods and stay; it provides an ApprovalRouteGate double"
+        },
+        {
+          "path": "apps/api/src/labels/labels.module.ts",
+          "reason": "imports the two modules; provides LabelRouteCommands"
+        },
+        {
+          "path": "apps/api/src/labels/labels.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; deleteFromHttp and removeLabelFromHttp gated with @CurrentProject()"
+        },
+        {
+          "path": "apps/api/src/labels/labels.controller.spec.ts",
+          "reason": "new cases for the deleteFromHttp and removeLabelFromHttp handler assert the gate call (key, variant, project id, input) and the executed/pending mapping; its existing cases call the unchanged helper methods and stay; it provides an ApprovalRouteGate double"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.module.ts",
+          "reason": "imports the two modules; provides TicketLinkRouteCommands"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; remove gated with @CurrentProject()"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.controller.spec.ts",
+          "reason": "the remove cases assert the gate call"
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-variants.integration.spec.ts",
+          "reason": "its probe constant VARIANT changes from rest:labels.delete to rest:variants-probe, because LabelRouteCommands now registers label.delete#rest:labels.delete in the booted app and a second register of that pair throws; every use of VARIANT follows the constant, and no other assertion changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Gate comment deletion using membership-resolved scope",
+      "description": "**Goal** \u2014 Resolve a comment's project before gating its deletion while preserving hidden-existence and execution-time ownership checks.\n\n**Motivation** \u2014 Every other approvable write route is listed in `PENDING_GATE_ROUTES` with the feature that will gate it.\n\n**Approach** \u2014 **The comment route needs a project before the gate.** `CommentsService.resolveCommentProject(commentId, principal): Promise<string>` is the existing private `assertCommentProjectMembership` exposed to answer only the project id, with the same 404 `comments` for a missing comment, a deleted ticket or project, or a non-member.\n\nKeep assertCommentProjectMembership private and unchanged; add the public wrapper returning its projectId only.\n\n- The comment handler calls `resolveCommentProject(id, principal)` first, then gates with `projectId` its answer.\n\n**The gate key is the route's `@Requires` key.** For an ownable key (`comment.delete`, `ticket.link.remove`, `kb.document.delete`, `fleet.schedule.delete`), `ApprovalRouteGate` already accepts `<key>.own`. The row-level check (whose row it is) runs in the command.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /comments/:id | comment.delete | the comment's project (resolveCommentProject) | rest:comments.delete | { id } | comments.delete(id, principal) |\n\n**One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\nAdd CommentRouteCommands/COMMENT_ROUTE_VARIANTS in CommentsModule, registering routeCommand in onModuleInit with parseRouteInput(input, ['id']) and ActorPrincipalLoader. Its run awaits comments.delete with the rebuilt requester, returns null and omits toResult. Inject ApprovalRouteGate in CommentsController. deleteFromHttp keeps @Principal because it needs membership resolution, then calls the gate with { key: 'comment.delete', variant: 'rest:comments.delete', projectId, input: { id } }. Preserve service-enforced Requires, ApiResponses and @Param('id'), add @ApprovalGated(), throw ApprovalPending on pending, return undefined on executed preserving 204. Remove DELETE /comments/:id from PENDING_GATE_ROUTES. The public non-route CommentsController.delete helper and its existing specs stay unchanged. A caller without comment.delete or .own in the resolved project is refused 403 permissions by the gate with no request; do not move row-ownership checks before opening a request. Missing/nonmember 404 remains before the gate.\n\nController unit specs add wrapper gate-call/executed/pending cases; service call expectations live in comment-route.commands.spec.ts. Add resolveCommentProject service cases. Update core-comments-labels-watchers.integration.spec.ts AC-9: its agent with only a roster row deleting its own comment now receives 202, and after root approves the comment is gone.\n\n**Scope** \u2014 In: public project resolver, comment delete command/module/HTTP handler, one allowlist removal and roster-row regression update. Out: comment create/update, non-route helper changes, ticket/label/link gates (US-007), KB deletion (US-009) and closure (US-010).\n\n**Interface** \u2014 `CommentsService.resolveCommentProject(commentId, principal): Promise<string>`; `CommentsService.delete(id, principal)`.\n\n**Verification** \u2014 Three-session security TDD: resolver unit cases for admitted project, deleted ticket and forbidden membership; wrapper scope/gate mapping and registry tests; real HTTP gated-comment-routes.integration.spec.ts with project.read/action grants and root approval. Check immediate missing/nonmember 404, deferred other-owner failure and preserved human 204; DB checks execute outside sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/comments/:id on a comment in P by an agent holding comment.delete and project.read in P returns { status: 202, data: { permissionKey: 'comment.delete', projectId: P } }; and When root approves that request, the comment no longer exists.",
+        "AC-3 [integration]: DELETE /api/comments/missing by that granted agent returns 404 with key comments before the gate; and When comment deletion cannot resolve a missing comment, no ApprovalRequest row exists.",
+        "AC-4 [integration]: DELETE /api/comments/:id by an agent holding only comment.delete.own plus project.read in P on another user's comment returns 202; and When root approves that other-owner comment request, it settles failed; and When that .own deletion fails, the other user's comment remains.",
+        "AC-5 [integration]: DELETE /api/comments/:id with the root token returns 204; and When root deletes a comment directly, no ApprovalRequest row exists.",
+        "AC-6 [integration]: In the existing core-comments-labels-watchers.integration.spec.ts AC-9 scenario, an agent with only a roster row deleting its own comment returns 202 instead of immediate 204; and When root approves that roster-row agent's request, the comment is gone.",
+        "AC-7 [unit]: resolveCommentProject(id, principal) returns 'p1' for a comment whose ticket is in p1 when the membership check admits principal.",
+        "AC-8 [unit]: resolveCommentProject throws NotFoundAppException with key comments for a comment whose ticket is soft-deleted.",
+        "AC-9 [unit]: resolveCommentProject throws NotFoundAppException with key comments when the membership check refuses principal with ForbiddenAppException.",
+        "AC-10 [unit]: CommentsController.deleteFromHttp('c1', principal) calls routeGate.run with { key: 'comment.delete', variant: 'rest:comments.delete', projectId: <resolveCommentProject's answer>, input: { id: 'c1' } }.",
+        "AC-11 [unit]: After CommentRouteCommands.onModuleInit, the registry answers a comment.delete command for rest:comments.delete.",
+        "FM-1 [integration]: DELETE /api/comments/:id by a non-member returns 404 with key comments before the gate; and When non-member comment resolution is refused, no ApprovalRequest row exists.",
+        "FM-2 [integration]: Given membership access in P but neither comment.delete nor comment.delete.own, deleting a comment in P returns 403 with key permissions from the route gate without running the delete command; and When that keyless comment deletion is refused, no ApprovalRequest row exists."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "comments",
+        "ownership"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One module adds a thin wrapper over an existing membership resolver and one established route-command adapter; medium implementation complexity is sufficient, while access-control semantics mandate three-session-tdd."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/roles.controller.ts",
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/comments/comments.controller.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/comments/comment-route.commands.ts",
+        "apps/api/src/comments/comment-route.commands.spec.ts",
+        "apps/api/test/integration/comments/gated-comment-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /comments/:id"
+        },
+        {
+          "path": "apps/api/src/comments/comments.module.ts",
+          "reason": "imports the two modules; provides CommentRouteCommands"
+        },
+        {
+          "path": "apps/api/src/comments/comments.service.ts",
+          "reason": "public resolveCommentProject"
+        },
+        {
+          "path": "apps/api/src/comments/comments.service.spec.ts",
+          "reason": "the resolveCommentProject cases"
+        },
+        {
+          "path": "apps/api/src/comments/comments.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; deleteFromHttp resolves the project, then gates"
+        },
+        {
+          "path": "apps/api/src/comments/comments.controller.spec.ts",
+          "reason": "new cases for the deleteFromHttp handler assert the gate call (key, variant, project id, input) and the executed/pending mapping; its existing cases call the unchanged helper methods and stay; it provides an ApprovalRouteGate double"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-comments-labels-watchers.integration.spec.ts",
+          "reason": "its AC-9 (an agent with only a roster row deletes its own comment, 204) now expects 202, and after the root user approves, the comment is gone"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Extract and gate KB document deletion",
+      "description": "**Goal** \u2014 Extract KB deletion into a rechecking service and gate the document-delete HTTP route without losing its immediate preflight refusals.\n\n**Motivation** \u2014 Every other approvable write route is listed in `PENDING_GATE_ROUTES` with the feature that will gate it.\n\n**Approach** \u2014 **KB deletion moves into a service.** The handler's preflight, delete loop and audit move to `KbDocumentDeletion` (rag module) unchanged:\n  - `preflight(principal, projectId, sourceId, source?)` answers the creators by source after the ownership check;\n  - `delete(principal, projectId, sourceId, source?)` runs `preflight` again, then deletes and audits as today.\n\nThe handler calls `preflight` before the gate so a refusal is immediate; the command calls `delete`, so a deferred run re-checks ownership.\n\n**`RagController`'s own helpers stay.** `assertMayDeleteRow` and `mayDeleteAnyRow` are also used by `addDocument` and stay in the controller; `KbDocumentDeletion` makes its own `PermissionService.can` check.\n\n- The KB handler: `resolveProject(slug)` (404 `rag`), `kbDeletion.preflight(principal, project.id, sourceId, query.source)`, then the gate.\n\n| Route | Key | Scope | Variant | Input | Run |\n| DELETE /projects/:slug/kb/documents/:sourceId | kb.document.delete | project | rest:kb-documents.delete | { projectId, sourceId, source? } (source validated by DeleteKbDocumentQuery) | kbDeletion.delete(principal, projectId, sourceId, source), answering { deleted: true } |\n\n**One commands class per domain module, registered in that module.** The module imports `ApprovalEngineModule` (the registry and `ApprovalRouteGate`) and `AuthRepositoryModule` (`ActorPrincipalLoader`). `ApprovalEngineModule` imports nothing and is one instance per application, so importing it from many modules shares one registry.\n\nProvide KbDocumentDeletion and KbRouteCommands/KB_ROUTE_VARIANTS in RagModule; register routeCommand in onModuleInit with ActorPrincipalLoader. Parse projectId/sourceId using parseRouteInput, optional source using parseBody(DeleteKbDocumentQuery, \u2026), and reject source web with approvals.invalidInput. Omitted source retains both KB_DELETE_SOURCES (doc/manual), never ticket/code. KbDocumentDeletion.preflight reads every chosen source's creators and checks permissions.can(principal, 'kb.document.delete', { projectId, resource: { createdBy } }) for every creator before any deletion; delete redoes the full preflight, then deletes each chosen source and audits only sources with matching rows. Preserve current filter-safe-id validation. The command returns { deleted: true } with toResult: (result) => result.\n\nInject KbDocumentDeletion and ApprovalRouteGate into RagController. deleteDocument keeps @Principal(), all path params, Requires/guards/ApiResponses, adds @ApprovalGated(), performs resolveProject/preflight/gate in that order, throws ApprovalPending for pending and returns JsonResponse.Ok(outcome.result) on executed preserving 200. Remove only its allowlist row.\n\nMove controller ownership/source/audit specs to kb-document-deletion.service.spec.ts; keep handler preflight and gate-call/pending/executed cases in rag.controller.spec.ts. Provide both doubles in kb-documents-membership.routes.spec.ts, graphify-kb-validation.integration.spec.ts and rag-api-project-id-validation.integration.spec.ts without assertion changes. In project-membership.guard.routes.spec.ts add KbDocumentDeletion.preflight resolving [] beside US-005's existing gate double; keep the KB DELETE refusal 403 and no deleteBySource assertion.\n\n**Scope** \u2014 In: extraction with unchanged preflight/loop/audit behavior, execution-time ownership recheck, one gate/command and module/fixture wiring. Out: changing addDocument or its helpers, deleting ticket/code sources, other project/ticket gates (US-005/US-007), shared parsing (US-001) and exact contract/OpenAPI closure (US-010).\n\n**Interface** \u2014 `preflight(principal, projectId, sourceId, source?)`; `delete(principal, projectId, sourceId, source?)`; `RagService.findSourceCreators(projectId, source, sourceId)`, `.deleteBySource(projectId, source, sourceId)`; `KB_DELETE_SOURCES`; `PermissionService.can`.\n\n**Verification** \u2014 Three-session security TDD. Unit tests pin all-source preflight, delete ordering, no audit for absent rows, query rejection, registration and handler mapping. gated-kb-document-routes.integration.spec.ts uses real HTTP root decisions, project.read/key grants and audit inspection; verify retained rows while pending, 403/404 before opening, ownership changes while waiting and AGENT/approvalRequestId audit provenance. Execute DB behavior outside sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: DELETE /api/projects/:slug/kb/documents/:sourceId by an agent holding kb.document.delete and project.read in P returns { status: 202, data: { permissionKey: 'kb.document.delete' } }; and While that KB-delete request waits, the matching rows remain.",
+        "AC-2 [integration]: When root approves that request without a source filter, the doc and manual rows of that sourceId are gone; and The executed KB-delete request's result equals { deleted: true }.",
+        "AC-3 [integration]: That approved deletion records one kb.document.delete audit entry per deleted source, each with actorType AGENT and approvalRequestId equal to the request id.",
+        "AC-4 [integration]: The KB-delete route by an agent holding only kb.document.delete.own plus project.read on rows another user created returns 403 with key permissions before the gate; and When that KB ownership preflight refuses deletion, no ApprovalRequest row exists.",
+        "AC-5 [integration]: The KB-delete route for an unknown project slug returns 404 with key rag before the gate; and When that KB project lookup fails, no ApprovalRequest row exists.",
+        "AC-6 [integration]: An approved KB delete by a .own agent whose matching rows were replaced by another user's rows while it waited settles failed when execution preflight rechecks ownership; and When that execution-time KB ownership check fails, the replacement rows remain.",
+        "AC-7 [integration]: The KB-delete route with the root token returns 200 with { deleted: true }; and When root deletes KB documents directly, no ApprovalRequest row exists.",
+        "AC-8 [unit]: KbDocumentDeletion.preflight with source absent reads creators of both user sources and checks each creator with permissions.can(principal, 'kb.document.delete', { projectId, resource: { createdBy } }).",
+        "AC-9 [unit]: KbDocumentDeletion.delete calls deleteBySource only after every preflight check passes; and KbDocumentDeletion.delete never calls deleteBySource when any preflight check refuses.",
+        "AC-10 [unit]: KbDocumentDeletion.delete writes no audit entry for a source with no matching rows.",
+        "AC-11 [unit]: After KbRouteCommands.onModuleInit, the registry answers a kb.document.delete command for rest:kb-documents.delete; and That command's parse({ projectId: 'p1', sourceId: 's1', source: 'web' }) throws ValidationAppException with key approvals.invalidInput.",
+        "FM-1 [integration]: Given project.read in P but neither kb.document.delete nor kb.document.delete.own, the KB-delete route returns 403 with key permissions; and When that keyless KB deletion is refused, no ApprovalRequest row exists."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "rag",
+        "knowledge-base",
+        "ownership",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extracting multi-source deletion and preserving preflight versus execution-time ownership/audit semantics is security-critical across service, command and controller boundaries."
+      },
+      "contextFiles": [
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/dto/delete-kb-document.query.ts",
+        "apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts",
+        "apps/api/src/approvals/route/parse-route-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/rag/kb-document-deletion.service.ts",
+        "apps/api/src/rag/kb-document-deletion.service.spec.ts",
+        "apps/api/src/rag/kb-route.commands.ts",
+        "apps/api/src/rag/kb-route.commands.spec.ts",
+        "apps/api/test/integration/rag/gated-kb-document-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops DELETE /projects/:slug/kb/documents/:sourceId"
+        },
+        {
+          "path": "apps/api/src/rag/rag.module.ts",
+          "reason": "imports the two modules; provides KbDocumentDeletion and KbRouteCommands"
+        },
+        {
+          "path": "apps/api/src/rag/rag.controller.ts",
+          "reason": "constructor gains KbDocumentDeletion and ApprovalRouteGate; deleteDocument gated (its preflight, loop and audit move to KbDocumentDeletion)"
+        },
+        {
+          "path": "apps/api/src/rag/rag.controller.spec.ts",
+          "reason": "the deleteDocument cases: the handler cases assert preflight then the gate call; the ownership, source and audit cases move to kb-document-deletion.service.spec.ts"
+        },
+        {
+          "path": "apps/api/src/rag/kb-documents-membership.routes.spec.ts",
+          "reason": "provides KbDocumentDeletion and ApprovalRouteGate doubles; no assertion changes"
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.routes.spec.ts",
+          "reason": "provides a KbDocumentDeletion double whose preflight answers [] (the gate double is US-005's); its kb DELETE refusal case still expects 403 and no deleteBySource"
+        },
+        {
+          "path": "apps/api/test/integration/graphify-kb-validation/graphify-kb-validation.integration.spec.ts",
+          "reason": "provides KbDocumentDeletion and ApprovalRouteGate doubles; no assertion changes"
+        },
+        {
+          "path": "apps/api/test/integration/rag/rag-api-project-id-validation.integration.spec.ts",
+          "reason": "provides KbDocumentDeletion and ApprovalRouteGate doubles; no assertion changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Close gate-high and publish the 41-route contract",
+      "description": "**Goal** \u2014 Retire gate-high from pending assignments and publish the complete 41-route approval contract and OpenAPI responses.\n\n**Motivation** \u2014 5a built the mechanism and gated the 12 permission and approval routes.\n\n**Approach** \u2014 **Each gating story removes its own `PENDING_GATE_ROUTES` rows.** The contract test reports a `stale-pending-gate-route` for a gated route left on the allowlist, so a story that gates a route must drop its row. US-001 relaxes the exact gated-route count to a lower bound, and US-010 restores an exact count (41).\n\n- US-010:\n  - `PendingGateFeature` becomes `'gate-secret' | 'gate-core-domains' | 'gate-fleet'`, and `isPendingGateFeature` refuses `gate-high`;\n  - the rule keeps its `gate-high` branch, so a new high-risk route that is not gated produces an expected entry no allowlist value can match, and the test fails.\n\nChange permission-contract.spec.ts's stale-pending-gate-route literal map to gate-secret, because gate-high no longer belongs to the union. permission-contract.integration.spec.ts AC-13 asserts exactly 41 gated routes over the fully booted app; retain secret-list precedence and no-violation/rollout-map equality. Do not weaken the contract to hide missed or stale entries.\n\nRegenerate root openapi.json with `bun run api:export-spec` from the repo root; the 29 newly gated operations gain a 202 response and nothing else changes. Update approval-openapi.contract.spec.ts gatedOperations to all 41 (the 12 shipped permission/approval routes plus US-002..US-009's 29). Its AC-4 asserts exactly those plus the preexisting reindex operation carry 202. Enrollments and all six gate-secret routes remain ungated. Verify path parameter declarations and prior success codes did not drift; do not change the VCS test's runtime default 201.\n\nAdd only two representative 202 endpoint scenarios in existing test/e2e/api-endpoint/endpoint.e2e.spec.ts: an agent granted label.delete in the project deletes a label, and an agent granted comment.delete.own deletes its own comment. Include project.read in project grants; expect exactly 202, not a range or immediate success. Per-route behavior belongs to each upstream integration spec, not a full duplicate endpoint suite here.\n\n**Scope** \u2014 In: final union/validator closure, exact live route count, fail-closed rollout contract, generated OpenAPI and two endpoint cases in existing files. Out: implementing any missing domain gate (US-002..US-009), secret-bearing or medium-risk routes, all-route endpoint coverage, CLI/web changes and action-inventory changes. This binding closure story creates no files.\n\n**Interface** \u2014 `PendingGateFeature` becomes `'gate-secret' | 'gate-core-domains' | 'gate-fleet'`; `ApprovalCommandRegistry.get(key, variant)` and `findContractViolations` retain existing interfaces.\n\n**Verification** \u2014 Three-session security TDD: unit checks of pending values and generated OpenAPI operation set, booted-app contract and two real HTTP endpoint scenarios outside sandbox. Regenerate OpenAPI from root and run API type-check/lint as pipeline verification, not acceptance criteria. Keep the existing reindex 202 exception; no manual generated-client edits.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: No value returned by PENDING_GATE_ROUTES.values() equals gate-high.",
+        "AC-2 [integration]: Given the booted app, the collected routes contain exactly 41 routes with gated metadata.",
+        "AC-3 [integration]: Given the booted app's permission declarations, findContractViolations returns no violation.",
+        "AC-4 [unit]: openapi.json's delete /api/projects/{slug} operation has a 202 response.",
+        "AC-5 [unit]: openapi.json's delete /api/fleet/budgets/{id} operation has a 202 response.",
+        "AC-6 [unit]: openapi.json's delete /api/projects/{slug}/kb/documents/{sourceId} operation has a 202 response.",
+        "AC-7 [unit]: openapi.json's post /api/fleet/enrollments operation has no 202 response.",
+        "AC-8 [unit]: The operations in openapi.json with a 202 response equal exactly the 41 gated operations plus post /api/projects/{slug}/knowledge/repos/{repoId}/reindex.",
+        "AC-9 [integration]: In endpoint.e2e.spec.ts, DELETE /api/projects/:slug/labels/:id with the API key of an agent granted label.delete and project.read in the project returns exactly 202.",
+        "AC-10 [integration]: In endpoint.e2e.spec.ts, DELETE /api/comments/:id on its own comment with the API key of an agent granted comment.delete.own and project.read in the project returns exactly 202.",
+        "FM-1 [integration]: Given declarations containing a high-risk approvable REST write that is neither gated nor allowlisted after closure, findContractViolations returns an entry matching { kind: 'ungated-approvable-write', route: <that route's label> }.",
+        "FM-2 [integration]: Given a new ungated non-secret high-risk write in the collected declarations with no pending row, the rollout rule's sorted expected entries compare unequal to the sorted PENDING_GATE_ROUTES entries, because the expected map contains [<that route's label>, 'gate-high']."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "permissions",
+        "openapi",
+        "contract"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Closure updates existing union/validator and contract assertions, regenerates an existing artifact and adds two established endpoint scenarios without new runtime abstractions; authorization-contract changes retain the mandatory security TDD strategy."
+      },
+      "contextFiles": [
+        "apps/api/scripts/export-spec.cjs",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/permissions/pending-gate-routes.ts",
+        "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "PendingGateFeature drops 'gate-high'; isPendingGateFeature refuses it"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the stale-pending-gate-route case's literal map uses 'gate-secret' instead of 'gate-high' (the union no longer has it)"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "AC-13 asserts exactly 41 gated routes"
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec from the repo root; the 29 gated operations gain a 202 response and nothing else changes"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "gatedOperations lists the 41 gated operations; its AC-4 asserts exactly those plus the reindex operation carry a 202"
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the 202 cases below"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository and investigation: This is an enhancement of the shipped P3 approval engine, not a new authorization system. Execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The codebase-memory MCP tools are unavailable in this host, so discovery used direct Read, Glob and Grep. The repository does not expose a nathapp-nestjs-patterns skill file; implementation agents should load that skill from their host if available before writing NestJS. Read .nax/mono/apps/api/context.md first. Contrary to the supplied stack-detection summary, the API is NestJS 12 with Fastify, Prisma 7 and Vitest, not an Express application; the web is Nuxt and is not in scope. The API package confirms Nest 12, @nestjs/platform-fastify, Vitest and oxlint (apps/api/package.json:11, apps/api/package.json:16, apps/api/package.json:77). No schema migration or new package dependency is required. All ten stories intentionally have workdir apps/api, including US-010, which also updates the existing root artifact openapi.json as expressly required by the binding structure.\n\nVerified core integration: PermissionRouteCommands is the reference registration pattern: an injectable OnModuleInit provider registers routeCommand specifications under stable rest:* variants, using ActorPrincipalLoader (apps/api/src/permissions/permission-route.commands.ts:21, apps/api/src/permissions/permission-route.commands.ts:44, apps/api/src/permissions/permission-route.commands.ts:51). Keep its existing parseIdInput unchanged (same file:116); new commands use parseRouteInput. RolesController demonstrates @ApprovalGated(), routeGate.run, ApprovalPending and executed-result mapping (apps/api/src/permissions/roles.controller.ts:49, apps/api/src/permissions/roles.controller.ts:57, apps/api/src/permissions/roles.controller.ts:93). The correct gate import path is approvals/route/approval-route-gate.ts, not an assumed *.service.ts. ApprovalRouteGate.run<TResult>(call: RouteGateCall) checks action-context actor type and permissions.canHoldKey, then delegates to ApprovalGate.gate with the supplied projectId and variant (apps/api/src/approvals/route/approval-route-gate.ts:8, apps/api/src/approvals/route/approval-route-gate.ts:44). Do not bypass this gate, weaken guards, or skip key rechecking. routeCommand loads the requester principal on every immediate or deferred execution, and omitting toResult means stored result null (apps/api/src/approvals/route/route-command.ts:12, apps/api/src/approvals/route/route-command.ts:39). ApprovalEngineModule has no imports and exports one shared registry and ApprovalRouteGate; importing it from each owner module does not create per-controller registries (apps/api/src/approvals/approval-engine.module.ts:18, apps/api/src/approvals/approval-engine.module.ts:28). AuthRepositoryModule exports ActorPrincipalLoader without importing AuthModule (apps/api/src/auth/auth-repository.module.ts:13). Use those two imports and one commands provider per owning domain module; avoid circularly importing application modules or registering a route pair twice.\n\nExecution and security: ApprovalExecutionService resolves the exact key/variant pair, verifies frozen-input hash and current requester keys (including .own), re-parses input, restores the requester's action context and executes under transaction ownership (apps/api/src/approvals/approval-execution.service.ts:61, apps/api/src/approvals/approval-execution.service.ts:77, apps/api/src/approvals/approval-execution.service.ts:126, apps/api/src/approvals/approval-execution.service.ts:171). A thrown service error rolls back command writes and settles failed with { error: 'execution-failed', name } (same file:211); do not move service checks to request time except explicitly preserved handler preflights. Do not reimplement engine policy, decisions, audit context or execution logic in these commands. A human satisfies every mode immediately; an agent under default agent mode waits, and a none policy executes immediately. Body-returning new commands use toResult: (result) => result; no-body commands await the service, return null, omit toResult, and handlers return undefined with their existing success status. Other handlers return JsonResponse.Ok(outcome.result). Catalog keys, guard metadata and existing response decorators stay unchanged. Every gated HTTP handler adds @ApprovalGated(), throws ApprovalPending on pending, and preserves every existing @Param declaration (use _slug if unused) for Swagger path stability. Only unused @Principal parameters are removed; retain RagController.deleteDocument's @Principal as required by no-principal-params.spec.ts. AgentsController.deleteAgent, CommentsController.delete, LabelsController.delete/removeLabel and TicketsController.deleteTicket are non-route helpers and must not change.\n\nUS-001 rollout seam: pending-gate-routes.ts currently defines the three-value feature union and a parsed route-label assignment map (apps/api/src/permissions/pending-gate-routes.ts:2, apps/api/src/permissions/pending-gate-routes.ts:4, apps/api/src/permissions/pending-gate-routes.ts:124). Thirty-five entries are gate-high, six of which must be relabeled gate-secret before any route is gated. Export SECRET_GATE_ROUTES as an explicit ReadonlySet<string> of the six exact labels; do not infer secret handling from keys or risk. The booted contract currently computes pending assignments from default mode and fleet/thread/testhook prefixes and asserts exactly 12 gated routes (apps/api/test/integration/permissions/permission-contract.integration.spec.ts:70, same file:74). Add secret-list precedence, relax only the exact count to >=12, and maintain sorted-label comparison. The contract collector reads actual handler approval metadata and preserves Requires guard verification (apps/api/src/permissions/test-helpers/permission-contract.ts:39, same file:74); its violation union already includes ungated-approvable-write, gated-without-approvable-key and stale-pending-gate-route (same file:41). Each route-owning story removes only its own allowlist rows concurrently with adding gate metadata. New parseRouteInput picks exactly named nonempty string fields, strips extras, rejects arrays/null/primitives/missing/empty/non-string fields with ValidationAppException({}, 'approvals.invalidInput'). parseBody already rejects nonobjects, whitelists DTO fields and returns plain JSON (apps/api/src/approvals/route/parse-body.ts:18, same file:26). For new composite inputs, a missing nested body is parsed as {}; the existing 5a parser is not changed.\n\nUS-002 impact: BudgetsModule currently imports budget, job, activity and webhook collaborators and exposes two controllers without engine/auth-repository imports (apps/api/src/fleet/budgets/budgets.module.ts:17). Add BudgetRouteCommands and BUDGET_ROUTE_VARIANTS for eight route variants: global create/update/delete/resume and project create/update/delete/resume. Global controller currently calls BudgetsService with ADMIN and principal.id (apps/api/src/fleet/budgets/fleet-budgets.controller.ts:15, same file:45); the project controller constructs { kind: 'project', projectId: ctx.project.id } (apps/api/src/fleet/budgets/project-fleet-budgets.controller.ts:18, same file:53). Freeze validated bodies and identifiers, never principal objects or route context. Remove eight allowlist rows. Update controller specs to assert gate calls and pending/executed mappings; transfer exact service arguments into budget-route.commands.spec.ts. Extend budgets.module.spec.ts with command resolution. Use existing fleet-budgets-api.integration.spec.ts fixtures in new gated-budget-routes.integration.spec.ts. Preserve budget money/domain rules, policy conflict checks and resume-not-paused behavior at execution.\n\nUS-003 impact: Add FleetRepoRouteCommands, RunnerRouteCommands and AnalyticsRouteCommands; register them in FleetReposModule, RunnersModule and AnalyticsModule and inject gates in their respective controllers. Service signatures are already suitable: FleetReposService.create/remove/check (apps/api/src/fleet/repos/fleet-repos.service.ts:31, same file:71, same file:90), RunnersService.update/remove (apps/api/src/fleet/runners/runners.service.ts:47, same file:68), AnalyticsService.deleteRows with execution-time Date and service confirmation validation (apps/api/src/fleet/analytics/analytics.service.ts:140, same file:146). Analytics remove uses @Query() raw: DeleteAnalyticsQuery and parseQuery today (apps/api/src/fleet/analytics/fleet-analytics.controller.ts:44); keep the global validation pipe's required before check before gating, freeze { before, projectId?, confirm }, and re-parse query and body DTOs separately on execution. A query projectId is an analytics filter, not approval scope: this route remains projectId null. Remove six allowlist rows; update controller doubles and service expectations. New gated-fleet-admin-routes.integration.spec.ts uses forge stubs from fleet-repos.integration.spec.ts and deletion fixtures from fleet-analytics-delete.integration.spec.ts; never call the real forge.\n\nUS-004 impact: ProjectFleetSchedulesController.remove currently precomputes canAdminister then calls schedules.remove (apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts:96, same file:131). Move only the delete calculation into ScheduleRouteCommands: re-read permissions.can(principal, 'fleet.schedule.delete', { projectId }) at execution, pass allowed as canAdminister, and retain service row ownership checks; do not freeze an authorization boolean. Other schedule methods keep the helper. ProjectRepoConfigController.submitDrift currently calls ConfigJobsService directly (apps/api/src/fleet/repo-config/project-repo-config.controller.ts:75, same file:82); route it through RepoConfigRouteCommands. submitDrift already derives requestedByType via action context (apps/api/src/fleet/repo-config/config-jobs.service.ts:75, same file:130); preserve deferred attribution to the requesting agent, not the approving root. Wire SchedulesModule/RepoConfigModule, extend schedules.module.spec.ts, remove two allowlist rows and add gated-project-fleet-routes.integration.spec.ts. Update enforce-fleet-config-knowledge.integration.spec.ts AC-7 to 202 and AC-8 to approve as root before asserting CONFIG_DRIFT requestedById/requestedByType.\n\nUS-005 impact: ProjectsController.remove currently calls softDelete directly (apps/api/src/projects/projects.controller.ts:122); use @CurrentProject for gate scope while freezing { slug }. AgentsController.remove uses the deleteAgent helper (apps/api/src/agents/agents.controller.ts:71, same file:182); gate only the HTTP handler and preserve its 200 result and hard delete. AdminSkillsController.remove is a no-body service call (apps/api/src/skills/admin-skills.controller.ts:51). Add ProjectRouteCommands/AgentRouteCommands/SkillSourceRouteCommands in ProjectsModule/AgentsModule/SkillsModule; remove three allowlist rows and add gated-admin-delete-routes.integration.spec.ts. Extend skills.module.spec.ts. ProjectsController remove specs move service expectations into commands specs; agents' existing helper cases remain. Constructor-only dependents need { provide: ApprovalRouteGate, useValue: { run: vi.fn() } }: projects.module.spec.ts, projects-brief.routes.spec.ts, project-membership.guard.routes.spec.ts, test/unit/projects/projects-conflict-responses.spec.ts, agents.controller.spec.ts, agents-create.routes.spec.ts, agents-pickup.routes.spec.ts and agent-create-canonical-dto.routes.spec.ts. The shared project-membership routes double is why US-007 and US-009 depend on US-005. Change permission-contract.spec.ts's former project-delete allowlist assertion to absence immediately in this story, not at closure.\n\nUS-006 impact: WebhookController currently resolves a project by slug before removeForProject (apps/api/src/webhook/webhook.controller.ts:86, same file:93); project webhook delete instead uses @CurrentProject and defers row/project validation to removeForProject. VcsController currently re-fetches the project for delete/test and reads its encryption key in test (apps/api/src/vcs/vcs.controller.ts:136, same file:141, same file:160). Both commands freeze only { projectId }; the test handler retains its missing-encryption-key refusal before the gate and VcsRouteCommands re-reads VCS_CFG.encryptionKey at execution, throwing ValidationAppException({}, 'vcs') when absent. Never store encryption keys or forge tokens in ApprovalRequest.input/result. The existing @ApiResponse(200) on test does not set runtime status: there is no @HttpCode, so root POST must remain 201 (same file:154). Do not introduce a 200 status override. Add WebhookRouteCommands/VcsRouteCommands in WebhookModule/VcsModule, remove four rows and add gated-webhook-vcs-routes.integration.spec.ts. Update vcs.controller.spec.ts and test/integration/vcs/vcs-controller.spec.ts to gate assertions; add a constructor double to vcs-manual-sync.spec.ts; extend vcs.module.spec.ts. webhook-routes.spec.ts needs an executing gate double dispatching rest:project-webhooks.delete to removeForProject(input.projectId,input.id) and rest:webhooks.delete to remove(input.id), returning { status: 'executed', result: null }, so its existing deletion/204 assertions remain. Stub the provider method reached by testConnection rather than bypassing the command or performing real network calls.\n\nUS-007 impact: Label HTTP wrappers are distinct from their direct-call helper methods (apps/api/src/labels/labels.controller.ts:56, same file:140, same file:176). Preserve helper specs and add wrapper gate specs. TicketLinksController.remove is service-enforced for row ownership (apps/api/src/ticket-links/ticket-links.controller.ts:90, same file:98); use project context for gate scope and freeze { slug, ref, linkId }, without loading links before the gate. This intentionally changes a keyless unknown-link response from 404 to 403 permissions; a key holder gets 202 and a later failed request for a missing link. TicketsController.softDelete similarly gates its HTTP wrapper, not deleteTicket (apps/api/src/tickets/tickets.controller.ts:86, same file:236). Wire TicketRouteCommands/LabelRouteCommands/TicketLinkRouteCommands in TicketsModule/LabelsModule/TicketLinksModule, remove four rows, update four handlers and associated unit specs, add gated-ticket-routes.integration.spec.ts. approval-variants.integration.spec.ts currently probes rest:labels.delete; change its VARIANT constant to rest:variants-probe to avoid a duplicate registry pair once the real command exists.\n\nUS-008 impact: CommentsService.assertCommentProjectMembership already checks missing comment/ticket/project, hides non-members as 404 comments, and returns { projectId, comment } (apps/api/src/comments/comments.service.ts:56, same file:68). Keep it private and unchanged, and expose a public resolveCommentProject(commentId, principal): Promise<string> wrapper returning only projectId. CommentsController.deleteFromHttp resolves that project before gate.run, whereas its public non-route delete helper stays unchanged (apps/api/src/comments/comments.controller.ts:58, same file:128). The specific handler-order design and AC-3 require this membership resolution before the gate; the broader prose saying keyless comments are refused before any lookup cannot override that explicit flow. Keyless resolution in an admitted project still must open no request and must not invoke the delete command. The actual comment ownership check stays in CommentsService.delete at execution. Wire CommentRouteCommands in CommentsModule; remove one row; extend service/controller unit cases and add gated-comment-routes.integration.spec.ts. Update core-comments-labels-watchers.integration.spec.ts AC-9 from immediate 204 to 202 followed by root approval and deletion.\n\nUS-009 impact: RagController currently contains project lookup, source selection, all-source ownership preflight, delete loop and per-source audit (apps/api/src/rag/rag.controller.ts:73, same file:176, same file:189). Extract deletion behavior unchanged into KbDocumentDeletion: preflight returns creators by selected source, and delete invokes preflight again before any deletion. Retain the controller's resolveProject and call the new preflight before the gate so its existing 404 rag, 400 unsafe-id and 403 permissions remain immediate. Retain mayDeleteAnyRow/assertMayDeleteRow controller helpers used by document addition; the new service performs its own PermissionService.can check. KB_DELETE_SOURCES is exactly doc/manual; omitted source deletes both, never code or ticket; DeleteKbDocumentQuery validates optional source (apps/api/src/rag/dto/delete-kb-document.query.ts:11). RagService exposes the required findSourceCreators/deleteBySource methods (apps/api/src/rag/rag.service.ts:70, same file:80). New KbRouteCommands validates projectId/sourceId via parseRouteInput and optional source via parseBody(DeleteKbDocumentQuery,...), returns { deleted: true } and stores it via identity toResult. Wire both providers plus gate in RagModule, remove one row, move ownership/source/audit unit expectations to kb-document-deletion.service.spec.ts, and keep handler preflight/gate cases in rag.controller.spec.ts. Update constructor doubles in kb-documents-membership.routes.spec.ts, project-membership.guard.routes.spec.ts (preflight resolves []), graphify-kb-validation.integration.spec.ts and rag-api-project-id-validation.integration.spec.ts. The membership DELETE refusal assertion remains 403 with no deleteBySource. Add gated-kb-document-routes.integration.spec.ts and assert per-deleted-source audit provenance includes AGENT and approvalRequestId. Replacing a caller's rows while waiting must fail the execution-time preflight before deleting any source.\n\nUS-010 closure and migration: After the other eight gating stories, the live gated total moves from 12 to exactly 41; the six gate-secret routes stay ungated. Remove gate-high from PendingGateFeature and its validator, retain the integration rule's gate-high branch so future ungated high-risk additions cannot be legitimized by the remaining union. Change the stale-pending test literal to gate-secret. Existing OpenAPI contract lists exactly twelve operations and one preexisting reindex 202 (apps/api/src/approvals/approval-openapi.contract.spec.ts:12, same file:27, same file:50); expand the list to 41 and assert the total 202 operation set equals those plus reindex, with enrollments excluded. scripts/export-spec.cjs builds Swagger from AppModule with prefix api and writes root openapi.json (apps/api/scripts/export-spec.cjs:6, same file:20). Regenerate with bun run api:export-spec from root; retain all path params, original success statuses and all unrelated content. The spec explicitly excludes CLI/web changes, so do not manually edit or regenerate CLI files as a workaround for this response-only rollout. Add just label.delete and comment.delete.own representative 202 endpoint cases to existing endpoint.e2e.spec.ts, whose fixtures already import grantKeys (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:23). No expectedFiles for this binding closure story. No data backfill is required; deploy route registrations and removal of their pending rows atomically. Removing/renaming persisted variants later could cause no-command failures, so freeze the listed names now.\n\nTest strategy and sequencing: All stories are access-control critical and use three-session-tdd with strict test/implementation isolation, irrespective of complexity. The ten ids, workdirs and dependencies are binding. US-001 introduces parsing/secret classification and temporarily permits count growth; US-002..US-009 gate only their routes; US-007/US-009 also depend on US-005's shared constructor fixture; US-010 depends on every gating story and closes the exact contract. No separate analysis or test-only story is introduced; the explicitly specified closure story remains independent. Every numbered spec AC is retained in its own story; multi-stage ACs are split into lettered assertions for independent testing. Failure-table requirements not fully covered by numbered ACs are also explicitly carried as FM criteria, not treated as optional suggestions.\n\nHTTP integration fixtures mirror gated-role-routes.integration.spec.ts: real bootHttpApp, seedFleetHttpWorld root Owner token, seedFleetHttpAgent API key, grantKeys and real POST /api/approvals/:id/decisions { decision: 'approve' } (apps/api/test/integration/permissions/gated-role-routes.integration.spec.ts:39, same file:79, same file:102). Project grants must include project.read in P as well as the action key; global grants use null; an agent baseline supplies only agent.read. Do not seed policies unless an AC requests one; default high risk is agent, not the human mode of the role-route reference test. Reset approval rows/cache/throttle between tests as needed; assertions on no ApprovalRequest require isolated data. Use GlobalStubsModule for DB-free module-compilation specs and vi.*, not jest.*; move service expectations to command specs rather than leaving invalid direct-service handler tests. API package default tests exclude integration/e2e (apps/api/package.json:11), so explicitly run targeted DB behavior. Start bun run test:db:up from apps/api, then bun run test:scoped <targeted specs> outside sandbox; KODA_DB_TESTS=1 is required for explicit Vitest DB commands. Preserve canRunDbTests/NAX_SANDBOXED=1 gates; a skip is not verification. Do not run concurrent force-resetting suites against the same test DB; use KODA_TEST_DB_CONTAINER=1 for a private worktree container when needed. Generated nax acceptance material is not edited or copied into src/test. Final verification additionally regenerates OpenAPI, runs API type-check and lint, and verifies only the 29 new 202 responses change the contract. These are pipeline checks, not product acceptance criteria. Main risks are accidental immediate agent mutations, secret persistence, wrong global/project scope, stale ownership authorization, audit attribution to the approver, duplicate registry pairs, broken constructor-only unit fixtures and disappearing Swagger path parameters.\n\nAdversarial refine audit: All 120 numbered spec criteria remain in their original binding stories. Inventory, with lettered suffixes identifying independently testable parts of an original criterion: US-001 AC-1,2,3,4,5,6,7,8; US-002 AC-1,2a/b,3a/b,4a/b,5a/b,6a/b,7a/b,8a/b,9a/b,10,11a/b,12a/b,13,14,15; US-003 AC-1a/b,2a/b,3a/b,4a/b,5a/b,6a/b,7a/b,8a/b,9a/b,10a/b,11a/b,12,13,14,15; US-004 AC-1,2,3a/b/c,4a/b,5a/b,6,7a/b,8,9,10,11; US-005 AC-1,2a/b,3a/b,4a/b,5,6a/b,7a/b,8,9a/b,10,11,12,13; US-006 AC-1a/b,2a/b/c,3a/b,4a/b,5a/b,6,7,8a/b,9a/b,10a/b,11,12,13,14; US-007 AC-1a/b,2a/b,3a/b,4a/b,5a/b,6a/b/c,7a/b,8a/b,9a/b,10,11,12; US-008 AC-1,2,3a/b,4a/b/c,5a/b,6a/b,7,8,9,10,11; US-009 AC-1a/b,2a/b,3,4a/b,5a/b,6a/b,7a/b,8,9a/b,10,11a/b; US-010 AC-1,2,3,4,5,6,7,8,9,10. Retained regression anchors include US-004's existing dispatch body and member-human 201, US-005's hard agent deletion, US-006's secret-free input and unchanged Nest POST 201, US-007's Developer refusal from core-ticket-routes AC-8, US-008's update to existing roster-row AC-9, and US-010's existing reindex 202 exception. Every story already has a negative-path assertion; no speculative failure was added merely to meet that rule. Every failure-table row remains represented by numbered or FM criteria. All ten feature-level exclusions are retained verbatim, including the story-qualified items that occur in the feature's own Out of Scope section. All spec-recommended context files fit their respective five-file limits and remain included; US-009's additional parser context is an upstream US-001 output, not its own output. Binding dependencies and workdirs were rechecked and are unchanged.\n\nCorrections from re-reading code: onModuleInit belongs to BudgetRouteCommands, not BudgetsModule. Registered ApprovalCommand objects expose execute(input), whereas run(principal, input) is the RouteCommandSpec callback invoked by that adapter; unit service-call assertions exercise execute with a loader double, matching permission-route.commands.spec.ts:111 and route-command.ts:39. TestConnectionResultDto declares ok: boolean, latencyMs: number and optional error?: string (apps/api/src/vcs/dto/test-connection-result.dto.ts:1); VcsConnectionService measures latency itself rather than copying the raw provider result (apps/api/src/vcs/vcs-connection.service.ts:277), so tests must not require an error field on a successful response or stub out the whole service. Dispatch result persistence is the JSON service body with job and placement, not the JsonResponse wrapper (apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:139). Execution-failure name checks compare the actual Error instance's name, not its constructor's class name; the engine uses error.name (apps/api/src/approvals/approval-execution.service.ts:288). Response notation { status, data } in criteria is a partial assertion on HTTP response.status and response.body.data; it does not place status in the JSON envelope or exclude other pending-summary fields. Bare returns 202 also requires the spec's pending summary in response.body.data. Reuse existing helpers and the real registry rather than adding a command.run method or inventing a rollout-rule export. The FM closure assertion is an observable unequal sorted-map comparison using the existing test-local rule, not an attempt to inspect a TypeScript union at runtime. US-008 and US-010 are medium-complexity applications of existing mechanisms rather than new architecture; three-session-tdd remains mandatory for all access-control stories under the security override.",
+  "outOfScope": [
+    "Gating the 6 secret-bearing routes (`POST /fleet/enrollments`, `POST /projects/:slug/vcs`, `PATCH /projects/:slug/vcs`, `POST /projects/:slug/vcs/webhook-secret/rotate`, `POST /projects/:slug/webhooks`, `PATCH /projects/:slug/webhooks/:id`): a later feature, `gate-secret`, which must keep secrets out of `ApprovalRequest.input` and `result`.",
+    "Gating the medium-risk routes: `permissions-p3-approval-gate-core-domains` and `-gate-fleet`, as `PENDING_GATE_ROUTES` records.",
+    "Running a service's domain checks (lookups, row ownership, conflicts) before a request opens, beyond the handler reads listed in Design. They run when the command runs.",
+    "Assistant or MCP writes on these keys: they keep their primary command.",
+    "Any change to `apps/web` or `apps/cli` (5a's CLI already handles 202).",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.",
+    "US-003 only: running the real forge check in tests; the fixtures stub it as `fleet-repos.integration.spec.ts` does.",
+    "US-006 only: a real network call to a forge. The VCS test fixtures stub the provider's connection test (the method `VcsConnectionService.testConnection` calls), so AC-8 and AC-9 make no network call.",
+    "`endpoint.e2e.spec.ts` coverage for every gated route: US-010 adds two representative 202 cases (labels, comments), as 5a did for its 12 routes; per-route coverage lives in each story's integration spec.",
+    "US-006 only: deferring a VCS test whose encryption key is removed between the request and its approval beyond the `failed` outcome the run's check gives."
+  ],
+  "routingProfile": "native-codex"
+}
