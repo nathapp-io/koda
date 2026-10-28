@@ -51,6 +51,7 @@ describe('RoleAdminService', () => {
   let store: InMemoryPermissionStore;
   let cache: FakeCacheManager;
   let permissionCache: PermissionCache;
+  let afterCommit: AfterCommitService;
   let service: RoleAdminService;
   let owner: KodaPrincipal;
   let admin: KodaPrincipal;
@@ -63,6 +64,8 @@ describe('RoleAdminService', () => {
     store = new InMemoryPermissionStore();
     cache = new FakeCacheManager();
     permissionCache = new PermissionCache(cache as never);
+    // One queue for the service and the membership writes it delegates: nested writes join its scope.
+    afterCommit = new AfterCommitService();
     const permissions = new PermissionService(
       store.roleRepo() as never,
       store.bindingRepo() as never,
@@ -74,7 +77,7 @@ describe('RoleAdminService', () => {
       txManager as never,
       permissionCache,
       cache as never,
-      new AfterCommitService(),
+      afterCommit,
     );
     service = new RoleAdminService(
       store.roleRepo() as never,
@@ -83,6 +86,7 @@ describe('RoleAdminService', () => {
       permissionCache,
       membership,
       mockAuditRecorder,
+      afterCommit,
     );
 
     // A caller who may administer roles without holding every key: the escalation tests' baseline.
@@ -463,9 +467,10 @@ describe('RoleAdminService', () => {
           txManager as never,
           permissionCache,
           cache as never,
-          new AfterCommitService(),
+          afterCommit,
         ),
         mockAuditRecorder,
+        afterCommit,
       );
 
       const error = await thrown(() => racing.createRole(owner, qa));
@@ -1066,6 +1071,56 @@ describe('RoleAdminService', () => {
         expect(error).toBeInstanceOf(NotFoundAppException);
         expect(error.prefix).toBe('permissions.bindingNotFound');
       });
+    });
+  });
+
+  describe('the commit boundary of a role write (B1)', () => {
+    const qa = {
+      key: 'qa',
+      name: 'QA',
+      scope: 'PROJECT' as const,
+      permissions: ['ticket.read', 'comment.create'],
+    };
+
+    it('defers the permission-cache drop to the end of the transaction that owns the write', async () => {
+      await service.listRoles(owner);
+      cache.invalidations.length = 0;
+
+      await afterCommit.scope(async () => {
+        await service.createRole(owner, qa);
+        // Nothing outside can see the role yet, so nothing may drop the cache here: a request in
+        // this window would recompute the old keys and cache them under the new generation.
+        expect(cache.invalidations).toEqual([]);
+      });
+
+      expect(cache.invalidations).toEqual(['permissions#tag']);
+    });
+
+    it('defers the delete too, flushing once at the end of the caller’s transaction', async () => {
+      const created = await service.createRole(owner, qa);
+      cache.invalidations.length = 0;
+
+      await afterCommit.scope(async () => {
+        await service.deleteRole(owner, created.id);
+        expect(cache.invalidations).toEqual([]);
+      });
+
+      expect(cache.invalidations).toEqual(['permissions#tag']);
+    });
+
+    it('drops nothing when the transaction that owns the write rolled back', async () => {
+      const failure = new Error('rolled back');
+      await service.listRoles(owner);
+      cache.invalidations.length = 0;
+
+      await expect(
+        afterCommit.scope(async () => {
+          await service.createRole(owner, qa);
+          throw failure;
+        }),
+      ).rejects.toBe(failure);
+
+      expect(cache.invalidations).toEqual([]);
     });
   });
 });

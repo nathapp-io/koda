@@ -7,6 +7,7 @@ import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { canRunDbTests } from '../../helpers/test-environment';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -73,6 +74,34 @@ describeIntegration('gated role-binding routes (US-005)', () => {
     const { id } = pending(await postBinding({ principalType: 'USER', principalId: devId, roleKey: 'viewer', projectId }));
     expect((await approve(id)).status).toBe('executed');
     expect(await db.roleBinding.count({ where: { principalId: devId, projectId, role: { key: 'viewer' } } })).toBe(1);
+  });
+  it('B1: drops the permission cache only once the execution transaction committed', async () => {
+    const { id } = pending(await postBinding({ principalType: 'USER', principalId: devId, roleKey: 'viewer', projectId }));
+    const cache = app.get(PermissionCache);
+    // A concurrent reader: its own connection, so it never sees the execution's open transaction.
+    const reader = createTestPrismaClient();
+    /** What a request in the invalidation window would read: the binding, or nothing. */
+    const visibleAtInvalidation: number[] = [];
+    const invalidate = cache.invalidate.bind(cache);
+    const spy = vi.spyOn(cache, 'invalidate').mockImplementation(async () => {
+      visibleAtInvalidation.push(
+        await reader.roleBinding.count({ where: { principalId: devId, projectId, role: { key: 'viewer' } } }),
+      );
+      await invalidate();
+    });
+    let outcome: DecidedRequest;
+    try {
+      outcome = await approve(id);
+    } finally {
+      spy.mockRestore();
+      await reader.$disconnect();
+    }
+
+    expect(outcome.status).toBe('executed');
+    // Invalidating before the commit would have let a concurrent read cache the pre-commit keys
+    // under the new generation, keeping revoked access for one TTL.
+    expect(visibleAtInvalidation.length).toBeGreaterThan(0);
+    expect(visibleAtInvalidation.every((visible) => visible === 1)).toBe(true);
   });
   it('AC-3: global binding request selects the global key and null project', async () => {
     const summary = pending(await postBinding({ principalType: 'USER', principalId: devId, roleKey: 'admin' }));

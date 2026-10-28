@@ -19,6 +19,7 @@ import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domai
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { OutboxService } from '@nathapp/nestjs-outbox';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalRequestQueries } from './approval-request.queries';
 import { ApprovalRouteGate } from './route/approval-route-gate';
@@ -29,12 +30,14 @@ import { ApprovalRouteGate } from './route/approval-route-gate';
   { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
   { provide: PrismaService, useValue: createMockPrismaService({ fn: vi.fn }) },
+  // The global PermissionsModule provides this in production; the engine's execution opens its scope.
+  { provide: AfterCommitService, useValue: new AfterCommitService() },
   { provide: TRANSACTION_MANAGER, useValue: {
     run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false),
   } },
   // The sweeper reads the fleet sweep window; a stub keeps the module DB-free and starts no timer.
   { provide: FLEET_CFG, useValue: { sweepEnabled: false, approvalSweepMs: 15_000 } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG, AfterCommitService] })
 class ExternalStubsModule {}
 
 @Injectable()

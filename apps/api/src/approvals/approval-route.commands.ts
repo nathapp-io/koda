@@ -69,6 +69,12 @@ export class ApprovalRouteCommands implements OnModuleInit {
         }
       },
       toResult: ApprovalRequestSummaryDto.from,
+      // `recordDecision` re-reads the decider's keys and applies the engine's eligibility rules
+      // (self-confirmation included) inside the decision transaction, so it is the authority for a
+      // request opened for this command. Without the flag, a requester confirming its own `self`-mode
+      // request would be refused as permission-revoked after a human approved it: it holds the inner
+      // action key, never `approval.decide`.
+      skipKeyRecheck: true,
     }, this.principalLoader);
     // Only engine executions invoke this hook, after the outer transaction has committed.
     // The immediate handler executes the inner request itself to return its final status.

@@ -14,6 +14,7 @@ import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from '../c
 import { findCatalogEntry } from './catalog';
 import { expandEntries, ScopeMismatchEntryError, UnknownPermissionEntryError } from './entry-matcher';
 import { ROLE_KEY_FOR_LEGACY_ROLE } from './legacy-project-roles';
+import { AfterCommitService } from './after-commit.service';
 import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
 import { PermissionService, PermissionScope } from './permission.service';
@@ -86,8 +87,9 @@ const PROJECT_SCOPE: RoleScope = 'PROJECT';
  * `MembershipService`, which owns every `RoleBinding` write (idempotency, owner-row lock, legacy
  * `User.role` mirroring). Deleting a role needs no escalation check: removing a role grants nothing.
  *
- * Every write invalidates the permission cache in the same call, so the next `can` evaluation sees
- * the edited role or the new binding.
+ * Every write invalidates the permission cache, so the next `can` evaluation sees the edited role or
+ * the new binding. The invalidation is deferred when the write joined a transaction another service
+ * owns (an approved REST write runs inside the approval execution's), so it never precedes that commit.
  */
 @Injectable()
 export class RoleAdminService {
@@ -98,6 +100,7 @@ export class RoleAdminService {
     private readonly permissionCache: PermissionCache,
     private readonly membership: MembershipService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommitHooks: AfterCommitService,
   ) {}
 
   /** The routes' own check: `ForbiddenAppException({}, 'permissions')` when `can` denies. */
@@ -149,7 +152,7 @@ export class RoleAdminService {
         key: 'role.manage', resourceType: 'role', resourceId: role.id, projectId: null,
         summary: `created ${role.key}`,
       }));
-      await this.permissionCache.invalidate();
+      await this.invalidatePermissions();
       return created;
     } catch (error) {
       // A concurrent create won the unique index after the check above; both answer the same 409.
@@ -189,7 +192,7 @@ export class RoleAdminService {
         summary: fieldsSummary(patch),
       }),
     );
-    await this.permissionCache.invalidate();
+    await this.invalidatePermissions();
     return updated;
   }
 
@@ -217,7 +220,23 @@ export class RoleAdminService {
       if (isRecordNotFound(error)) throw new NotFoundAppException({}, 'permissions.roleNotFound');
       throw error;
     }
-    await this.permissionCache.invalidate();
+    await this.invalidatePermissions();
+  }
+
+  /**
+   * Dropped once the transaction that wrote the role has committed.
+   *
+   * A role write is not necessarily its own transaction: an approved REST write runs inside the
+   * approval execution's transaction, so invalidating here would open the window this cache exists
+   * to close — a request reading in that window recomputes from the pre-commit state and caches the
+   * result under the new generation. The execution service owns that transaction and opens the same
+   * `AfterCommitService` scope, so the deferral is flushed there; a write that owns its transaction
+   * (the immediate path) has no scope and invalidates at once.
+   */
+  private async invalidatePermissions(): Promise<void> {
+    const invalidate = (): Promise<void> => this.permissionCache.invalidate();
+    if (this.afterCommitHooks.defer(invalidate)) return;
+    await invalidate();
   }
 
   private async findById(id: string): Promise<RoleDomain> {

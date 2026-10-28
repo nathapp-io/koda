@@ -53,6 +53,11 @@ describe('ApprovalRouteCommands decisions', () => {
     await command.afterCommit?.({ requestId: 'r1', decision: 'reject', comment: null }, 'approve', undefined);
     expect(execution.execute).not.toHaveBeenCalled();
   });
+  it('B2: the decide command authorises itself, so the execution key re-check does not apply', () => {
+    // `recordDecision` re-checks eligibility (self-confirmation included); a requester confirming its
+    // own self-mode request holds the inner action key, never `approval.decide`.
+    expect(command.skipKeyRecheck).toBe(true);
+  });
   it.each([
     [new ApprovalRequestNotPendingError('cancelled'), 'not-pending', 'cancelled', 'approvals.notPending'],
     [new ApprovalRequestExpiredError('r1'), 'expired', undefined, 'approvals.expired'],

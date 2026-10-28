@@ -7,6 +7,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { INotifyService, NOTIFY_SERVICE, PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { MembershipService } from '../../permissions/membership.service';
 import { PermissionService } from '../../permissions/permission.service';
 import { RoleAdminService } from '../../permissions/role-admin.service';
@@ -128,6 +129,9 @@ export const mockRoleAdminService = {
   listProjectRoles: vi.fn(async () => []),
 } as unknown as RoleAdminService;
 
+/** Permissions P1a US-003: the approval engine's execution opens this scope; the real queue is dependency-free. */
+export const mockAfterCommitService = new AfterCommitService();
+
 export const mockAuthConfig: IAuthConfig = {
   jwtSecret: 'test-secret',
   jwtExpiresIn: '15m',
@@ -199,6 +203,7 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: PermissionService, useValue: mockPermissionService },
     { provide: MembershipService, useValue: mockMembershipService },
     { provide: RoleAdminService, useValue: mockRoleAdminService },
+    { provide: AfterCommitService, useValue: mockAfterCommitService },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
@@ -206,6 +211,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AfterCommitService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

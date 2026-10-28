@@ -21,6 +21,12 @@ export interface RouteCommandSpec<TInput, TResult> {
   run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>;
   /** What `ApprovalRequest.result` stores; omitted means null. */
   toResult?(result: TResult): unknown;
+  /**
+   * The route's `run` re-checks its own authorisation, so the engine's execution pre-check ("the
+   * actor still holds the key") does not apply to its requests. Only the decision route sets it; see
+   * `ApprovalCommand.skipKeyRecheck`.
+   */
+  skipKeyRecheck?: boolean;
 }
 
 /**
@@ -42,6 +48,7 @@ export function routeCommand<TInput, TResult>(
   };
   const { toResult } = spec;
   if (toResult !== undefined) command.toResult = (result) => toResult(result);
+  if (spec.skipKeyRecheck === true) command.skipKeyRecheck = true;
 
   return command;
 }

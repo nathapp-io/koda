@@ -38,9 +38,9 @@ import { canRunDbTests } from '../../helpers/test-environment';
     .set('Authorization', `Bearer ${world.tokens.root}`).send({
       permissionPattern: 'approval.decide', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human',
     }).expect(201);
-  const open = async (scope = projectId, requiredMode: 'agent' | 'human' = 'agent') => {
-    if (requiredMode === 'human') await request(server()).patch(`/api/approval-policies/${labelPolicyId}`)
-      .set('Authorization', `Bearer ${world.tokens.root}`).send({ mode: 'human' }).expect(200);
+  const open = async (scope = projectId, requiredMode: 'self' | 'agent' | 'human' = 'agent') => {
+    if (requiredMode !== 'agent') await request(server()).patch(`/api/approval-policies/${labelPolicyId}`)
+      .set('Authorization', `Bearer ${world.tokens.root}`).send({ mode: requiredMode }).expect(200);
     const outcome = await withTestActor({ type: 'AGENT', id: b.id }, () => app.get(ApprovalGate).gate('label.delete',
       { labelId: randomUUID() }, { projectId: scope }));
     if (outcome.status !== 'pending') throw new Error('expected pending inner request');
@@ -134,6 +134,24 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await post(outer.id, 'approve', world.tokens.root).expect(200);
     expect(await row(innerId)).toMatchObject({ status: 'executed', approverId: narrowed.id });
     expect((await row(outer.id)).status).toBe('executed');
+  });
+  it('a self-mode requester with no approval.decide confirms its own request after a human approves the decision', async () => {
+    // `b` holds label.delete in the project and nothing else: it may confirm its own `self`-mode
+    // request, which is what the route's eligibility check allows, but it never holds approval.decide.
+    const selfId = await open(projectId, 'self');
+    await policy();
+
+    const outer = data<{ id: string; permissionKey: string }>(await post(selfId, 'approve', b.apiKey).expect(202));
+    expect(outer.permissionKey).toBe('approval.decide');
+    expect((await row(selfId)).status).toBe('pending');
+
+    await post(outer.id, 'approve', world.tokens.root).expect(200);
+
+    // The deferred execution re-checks the actor's keys: the decision's own eligibility check is the
+    // authority, so the request is not refused as permission-revoked for lacking approval.decide.
+    expect(await row(selfId)).toMatchObject({ status: 'executed', approverId: b.id, approverType: 'AGENT' });
+    expect((await row(outer.id)).status).toBe('executed');
+    expect(labels.state.calls).toHaveLength(1);
   });
   it('a deferred reject records rejection without executing the inner command', async () => {
     await policy();

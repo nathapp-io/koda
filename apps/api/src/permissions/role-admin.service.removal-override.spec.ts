@@ -45,13 +45,14 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
       store.bindingRepo() as never,
       permissionCache,
     );
+    const afterCommit = new AfterCommitService();
     membership = new MembershipService(
       store.roleRepo() as never,
       store.bindingRepo() as never,
       txManager as never,
       permissionCache,
       cache as never,
-      new AfterCommitService(),
+      afterCommit,
     );
     // The override itself is the subject here; the guarded transaction is AC-11..AC-14's.
     removeBinding = vi.spyOn(membership, 'removeBinding').mockResolvedValue(undefined);
@@ -62,6 +63,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
       permissionCache,
       membership,
       mockAuditRecorder,
+      afterCommit,
     );
 
     store.projects.add(PROJECT);

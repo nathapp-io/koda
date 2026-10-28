@@ -25,6 +25,10 @@ import { SystemRoleSeeder } from './system-role.seeder';
  * `MembershipService` and `RoleAdminService`. All three are exported.
  * `PermissionCache` is internal: it is the one invalidation point the services share. The module is
  * imported by `AppModule`, so `SystemRoleSeeder` runs when the API bootstraps.
+ * `AfterCommitService` is exported for a transaction owner outside this module: the approval
+ * execution runs a role or binding command inside its own transaction and must open the scope those
+ * writes defer their cache invalidation into. It must be the same instance the permission services
+ * inject, which the global module guarantees.
  *
  * `onModuleInit` is the owner bootstrap's fail-fast (US-004): in production an installation with no
  * `KODA_OWNER_EMAIL` cannot be configured later — the first registration is already taken — so the API
@@ -47,14 +51,14 @@ import { SystemRoleSeeder } from './system-role.seeder';
     { provide: SYSTEM_ROLES_SEED, useValue: SYSTEM_ROLES },
     SystemRoleSeeder,
     PermissionCache,
-    // Internal: `MembershipService` defers its cache invalidation through it, and `afterCommit` is the
-    // only way for an outer transaction owner to flush that deferral at commit.
+    // `MembershipService` and `RoleAdminService` defer their cache invalidation through it; the
+    // approval execution opens the scope for a gated permission write, so it is exported.
     AfterCommitService,
     PermissionService,
     MembershipService,
     RoleAdminService,
   ],
-  exports: [PermissionService, MembershipService, RoleAdminService],
+  exports: [PermissionService, MembershipService, RoleAdminService, AfterCommitService],
 })
 export class PermissionsModule implements OnModuleInit {
   constructor(@Inject(AUTH_CFG) private readonly authConfig: IAuthConfig) {}

@@ -100,4 +100,15 @@ describe('ApprovalCommandRegistry', () => {
     expect(() => registry.register(command('label.delete')))
       .toThrow('approval command already registered: label.delete');
   });
+
+  it('M1: a key spelled like another pair never answers that pair', () => {
+    const variant = command('label.delete', 'rest:labels.delete');
+    registry.register(variant);
+
+    // The variant is reachable as `(key, variant)` only: the same characters read as one primary key
+    // name a different pair, which has no command.
+    expect(registry.get('label.delete#rest:labels.delete')).toBeUndefined();
+    expect(registry.get('label.delete', 'rest:labels.delete')).toBe(variant);
+    expect(registry.get('label.delete#rest:labels.delete', 'rest:labels.delete')).toBeUndefined();
+  });
 });

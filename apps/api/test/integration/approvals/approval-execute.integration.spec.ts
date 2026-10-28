@@ -19,6 +19,7 @@ import {
   type TestCommandPrisma,
 } from '../../../src/approvals/test-helpers/test-approval-command';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -154,7 +155,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
     const r = await open(); await moveToApproved(r.id);
     const bare = new ApprovalExecutionService(app.get(TRANSACTION_MANAGER, { strict: false }) as ITransactionManager,
       requests, app.get(PermissionService, { strict: false }), new ApprovalCommandRegistry(),
-      app.get(ApprovalRequestEvents, { strict: false }));
+      app.get(ApprovalRequestEvents, { strict: false }), app.get(AfterCommitService, { strict: false }));
     expect(await bare.execute(r.id, now)).toMatchObject({ status: 'failed', result: { error: 'no-command' } });
     expect(labels.state.calls).toEqual([]);
   });

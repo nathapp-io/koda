@@ -58,4 +58,11 @@ describe('routeCommand', () => {
 
     expect(command.toResult).toBeUndefined();
   });
+
+  it('carries the self-authorising flag only when the spec asks for it', () => {
+    const base = { key: 'approval.decide', variant: 'rest:x', parse: (raw: unknown) => raw, run: async () => 'done' };
+
+    expect(routeCommand(base, { forContext: async () => principal }).skipKeyRecheck).toBeUndefined();
+    expect(routeCommand({ ...base, skipKeyRecheck: true }, { forContext: async () => principal }).skipKeyRecheck).toBe(true);
+  });
 });
