@@ -643,7 +643,9 @@ describe('CommentsService', () => {
         ticket: { ...OWNING_TICKET, deletedAt: new Date() },
       });
 
-      await expect(service.resolveCommentProject('comment-123', mockUserPrincipal)).rejects.toMatchObject({ response: { prefix: 'comments' } });
+      const error = await service.resolveCommentProject('comment-123', mockUserPrincipal).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ response: { prefix: 'comments' } });
       expect(mockAccessService.resolveMembership).not.toHaveBeenCalled();
     });
 
@@ -651,7 +653,9 @@ describe('CommentsService', () => {
       givenComment(mockComment);
       mockAccessService.resolveMembership.mockRejectedValueOnce(new ForbiddenAppException({}, 'projects'));
 
-      await expect(service.resolveCommentProject('comment-123', mockUser456Principal)).rejects.toMatchObject({ response: { prefix: 'comments' } });
+      const error = await service.resolveCommentProject('comment-123', mockUser456Principal).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ response: { prefix: 'comments' } });
     });
   });
 

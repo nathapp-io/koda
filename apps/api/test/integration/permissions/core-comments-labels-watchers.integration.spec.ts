@@ -18,6 +18,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -63,6 +64,19 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   let agentId = '';
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
+  const createKeyedAgent = async (slug: string, keys: string[]): Promise<string> => {
+    const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
+    const body = data<{ apiKey: string; agent: { id: string } }>(created);
+    const actor = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, actor);
+    await grantKeys(db, actor, keys, p1Id);
+    await membership.invalidatePermissions();
+    tokens[slug] = body.apiKey;
+    return body.agent.id;
+  };
+  const commentDeleteRequestCount = (actorId: string) => db.approvalRequest.count({
+    where: { permissionKey: 'comment.delete', actorType: 'AGENT', actorId },
+  });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
     const req = request(server)[method](url).set(auth('root'));
     return body === undefined ? req : req.send(body);
@@ -330,14 +344,104 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-9 — an agent's legacy roster row is a viewer, so it deletes its own comment
+  // US-008: HTTP comment deletion approval and denial boundaries
   // -------------------------------------------------------------------------
 
-  it('AC-9: an agent with only a roster row requests approval to delete its own comment', async () => {
+  it('US-008 AC-1: an agent with comment.delete and project.read requests approval and deletes after root approval', async () => {
+    const agentId = await createKeyedAgent('comment-delete-agent', ['project.read', 'comment.delete']);
     const ref = await createTicket();
-    const id = await commentBy('p1-legacy-agent', ref, 'agent wrote this');
+    const id = await commentBy('root', ref, 'agent may delete');
+    const before = await commentDeleteRequestCount(agentId);
 
-    const response = await request(server).delete(`/api/comments/${id}`).set(auth('p1-legacy-agent')).expect(202);
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('comment-delete-agent')).expect(202);
+    const pending = data<{ id: string; permissionKey: string; projectId: string }>(response);
+    expect(pending).toEqual(expect.objectContaining({ permissionKey: 'comment.delete', projectId: p1Id }));
+    await request(server).post(`/api/approvals/${pending.id}/decisions`).set(auth('root')).send({ decision: 'approve' }).expect(200);
+
+    expect(await db.approvalRequest.count({ where: { permissionKey: 'comment.delete', actorType: 'AGENT', actorId: agentId } })).toBe(before + 1);
+    await expect(commentById(ref, id)).resolves.toBeUndefined();
+  }, TIMEOUT);
+
+  it('US-008 AC-2: a granted agent deleting a missing comment gets 404 and creates no request', async () => {
+    const agentId = await createKeyedAgent('comment-delete-missing-agent', ['project.read', 'comment.delete']);
+    const before = await commentDeleteRequestCount(agentId);
+
+    const response = await request(server).delete('/api/comments/comment-does-not-exist').set(auth('comment-delete-missing-agent'));
+
+    expect(response.status).toBe(404);
+    expect(response.body.message).toBe('Comment not found');
+    expect(await commentDeleteRequestCount(agentId)).toBe(before);
+  }, TIMEOUT);
+
+  it('US-008 AC-3: an agent with only comment.delete.own gets a deferred failure on another author\'s comment', async () => {
+    const agentId = await createKeyedAgent('comment-delete-own-agent', ['project.read', 'comment.delete.own']);
+    const ref = await createTicket();
+    const id = await commentBy('root', ref, 'not agent authored');
+
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('comment-delete-own-agent')).expect(202);
+    const pending = data<{ id: string }>(response);
+    const decision = await request(server).post(`/api/approvals/${pending.id}/decisions`).set(auth('root')).send({ decision: 'approve' }).expect(200);
+
+    expect(data<{ status: string }>(decision).status).toBe('failed');
+    await expect(db.approvalRequest.findUniqueOrThrow({ where: { id: pending.id }, select: { status: true } })).resolves.toEqual({ status: 'failed' });
+    await expect(commentById(ref, id)).resolves.toEqual(expect.objectContaining({ body: 'not agent authored' }));
+  }, TIMEOUT);
+
+  it('US-008 AC-4: the root token deletes immediately without creating an approval request', async () => {
+    const ref = await createTicket();
+    const id = await commentBy('viewer', ref, 'root delete');
+    const before = await db.approvalRequest.count();
+
+    await request(server).delete(`/api/comments/${id}`).set(auth('root')).expect(204);
+
+    expect(await db.approvalRequest.count()).toBe(before);
+    await expect(commentById(ref, id)).resolves.toBeUndefined();
+  }, TIMEOUT);
+
+  it('US-008 AC-11: a non-member deleting a comment gets 404 and creates no approval request', async () => {
+    const ref = await createTicket();
+    const id = await commentBy('viewer', ref, 'non-member delete');
+    const before = await db.approvalRequest.count();
+
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('outsider'));
+
+    expect(response.status).toBe(404);
+    expect(response.body.message).toBe('Comment not found');
+    expect(await db.approvalRequest.count()).toBe(before);
+    await expect(commentById(ref, id)).resolves.toEqual(expect.objectContaining({ body: 'non-member delete' }));
+  }, TIMEOUT);
+
+  it('US-008 AC-12: a project member with no comment deletion key gets permissions 403 and no request', async () => {
+    const agentId = await createKeyedAgent('comment-delete-keyless-agent', ['project.read']);
+    const ref = await createTicket();
+    const id = await commentBy('root', ref, 'keyless refusal');
+    const before = await db.approvalRequest.count();
+
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('comment-delete-keyless-agent'));
+
+    expectPermissionsRefusal(response);
+    expect(await db.approvalRequest.count()).toBe(before);
+    await expect(commentById(ref, id)).resolves.toEqual(expect.objectContaining({ body: 'keyless refusal' }));
+    expect(await commentDeleteRequestCount(agentId)).toBe(0);
+  }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // AC-9 — legacy roster access is represented by the least-privilege project access grants.
+  // -------------------------------------------------------------------------
+
+  it('AC-9: a roster-access agent requests approval to delete its own comment', async () => {
+    const agentId = await createKeyedAgent('p1-legacy-agent-us008', ['project.read', 'comment.create', 'comment.delete.own']);
+    const grants = await db.roleBinding.findMany({
+      where: { principalType: 'AGENT', principalId: agentId, projectId: p1Id },
+      include: { role: { select: { permissions: true } } },
+    });
+    expect(grants.flatMap((grant) => grant.role.permissions)).toEqual(expect.arrayContaining(['project.read', 'comment.create', 'comment.delete.own']));
+    expect(grants.flatMap((grant) => grant.role.permissions)).not.toContain('comment.delete');
+
+    const ref = await createTicket();
+    const id = await commentBy('p1-legacy-agent-us008', ref, 'agent wrote this');
+
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('p1-legacy-agent-us008')).expect(202);
     const pending = data<{ id: string; permissionKey: string; projectId: string }>(response);
     expect(pending).toEqual(expect.objectContaining({ permissionKey: 'comment.delete', projectId: p1Id }));
 
