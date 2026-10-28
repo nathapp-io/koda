@@ -22,6 +22,7 @@ export class RepoConfigRouteCommands implements OnModuleInit {
     this.commands.register(routeCommand<{ projectId: string; repoId: string }, DispatchResultDto>({
       key: 'fleet.repo.drift.check', variant: REPO_CONFIG_ROUTE_VARIANTS.driftCheck,
       parse: (input) => parseRouteInput(input, ['projectId', 'repoId']),
+      prepare: (principal, input) => this.configJobs.prepareDrift(principal.id, input.projectId, input.repoId),
       run: (principal, input) => this.configJobs.submitDrift(principal.id, input.projectId, input.repoId),
       toResult: (result) => result,
     }, this.loader));

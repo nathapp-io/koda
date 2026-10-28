@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -29,6 +30,10 @@ export class FleetReposService {
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
+    return (await this.prepareCreate(actorId, dto))();
+  }
+
+  async prepareCreate(actorId: string, dto: CreateFleetRepoDto): Promise<() => Promise<FleetRepoDto>> {
     const project = await this.repo.findProject(dto.projectSlug);
     if (!project) throw new NotFoundAppException({}, 'projects');
 
@@ -37,7 +42,9 @@ export class FleetReposService {
       ? await this.github.verifyRepo(dto.owner, dto.name)
       : { ...(await this.verifyGitLab(project.id, dto.owner, dto.name)), installationId: null };
 
-    return this.txManager.run(async () => {
+    return () => this.txManager.run(async () => {
+      const current = await this.repo.findProject(dto.projectSlug);
+      if (!current || current.id !== project.id) throw new NotFoundAppException({}, 'projects');
       const row = await this.repo.create({
         projectId: project.id,
         provider: dto.provider,
@@ -88,20 +95,30 @@ export class FleetReposService {
    * A forge verdict is returned as data; anything else is a real error and propagates.
    */
   async check(id: string, now = new Date()): Promise<RepoCheckResultDto> {
+    return (await this.prepareCheck(id, now))();
+  }
+
+  async prepareCheck(id: string, now = new Date()): Promise<() => Promise<RepoCheckResultDto>> {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundAppException({}, 'fleet.repos');
     const result = (reachable: boolean, reason: RepoCheckResultDto['reason']) =>
       Object.assign(new RepoCheckResultDto(), { repoId: id, reachable, reason, checkedAt: now.toISOString() });
+    let checked: RepoCheckResultDto;
     try {
       if (row.provider === 'github') {
         if (row.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
         await this.github.verifyRepo(row.owner, row.name, row.githubInstallationId);
       }
       else await this.verifyGitLab(row.projectId, row.owner, row.name);
-      return result(true, null);
+      checked = result(true, null);
     } catch (error) {
-      if (error instanceof RepoCheckException) return result(false, error.reason);
-      throw error;
+      if (!(error instanceof RepoCheckException)) throw error;
+      checked = result(false, error.reason);
     }
+    return async () => {
+      const current = await this.repo.findById(id);
+      if (!isDeepStrictEqual(current, row)) throw new ConflictAppException({}, 'fleet.repos');
+      return checked;
+    };
   }
 }

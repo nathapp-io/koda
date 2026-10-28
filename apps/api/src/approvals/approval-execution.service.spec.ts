@@ -1,3 +1,6 @@
+import { VcsConnectionService } from '../vcs/vcs-connection.service';
+import { FleetReposService } from '../fleet/repos/fleet-repos.service';
+import { FleetRepoRouteCommands } from '../fleet/repos/fleet-repo-route.commands';
 import { Logger } from '@nestjs/common';
 import { FleetJobLivePublisher } from '../fleet/jobs/fleet-job-live.publisher';
 import { RunnerNotifier } from '../fleet/jobs/runner-notifier';
@@ -62,6 +65,101 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it('prepares slow external work without a transaction or request lock, then executes atomically', async () => {
+    const s = setup();
+    let active = false;
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      active = true;
+      try { return await fn(); } finally { active = false; }
+    });
+    const mutation = vi.fn(async () => {
+      expect(active).toBe(true);
+      expect(s.repo.lockById).toHaveBeenCalled();
+      return null;
+    });
+    s.test.command.prepare = async () => {
+      expect(active).toBe(false);
+      expect(s.repo.lockById).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(active).toBe(false);
+      return mutation;
+    };
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(mutation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['settlement', 'commit', 'success'])('real VCS deletion preserves polling on %s failure', async (mode) => {
+    const s = setup();
+    const connection = { id: 'conn', projectId: 'p1', provider: 'github', repoOwner: 'acme', repoName: 'app' };
+    let stored: typeof connection | null = connection;
+    const polling = { unschedulePolling: vi.fn() };
+    const vcs = new VcsConnectionService({
+      findVcsConnectionByProjectId: async () => stored,
+      deleteVcsConnection: async () => { stored = null; },
+    } as never, {} as never, polling as never, {
+      audited: async (fn: () => Promise<unknown>) => fn(),
+    } as never);
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      const before = stored;
+      try {
+        const result = await fn();
+        if (mode === 'commit' && stored === null) throw new Error('commit failed');
+        return result;
+      } catch (error) { stored = before; throw error; }
+    });
+    if (mode === 'settlement') s.repo.transition.mockRejectedValueOnce(new Error('settlement failed'));
+    s.test.command.execute = async () => { await vcs.delete('p1'); return null; };
+    if (mode === 'commit') await expect(s.service.execute('r1', now)).rejects.toThrow('commit failed');
+    else expect(await s.service.execute('r1', now)).toMatchObject({ status: mode === 'success' ? 'executed' : 'failed' });
+    expect(stored).toEqual(mode === 'success' ? null : connection);
+    expect(polling.unschedulePolling).toHaveBeenCalledTimes(mode === 'success' ? 1 : 0);
+  });
+
+  it.each(['create', 'check'] as const)('approved repo %s performs slow forge HTTP before opening the owning transaction', async (operation) => {
+    const dto = { projectSlug: 'p', provider: 'github', owner: 'acme', name: 'app' };
+    const frozen = operation === 'create' ? dto : { id: 'repo' };
+    const s = setup({ permissionKey: `fleet.repo.${operation}`, variant: `rest:fleet-repos.${operation}`, input: frozen, inputHash: approvalInputHash(frozen) });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set([`fleet.repo.${operation}`]));
+    let active = false;
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      if (active) return fn();
+      active = true;
+      try { return await fn(); } finally { active = false; }
+    });
+    const repo = {
+      findProject: vi.fn(async () => ({ id: 'p1' })),
+      findById: vi.fn(async () => ({ id: 'repo', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 1n })),
+      create: vi.fn(async (data) => {
+        expect(active).toBe(true);
+        return { ...data, id: 'repo', createdAt: now };
+      }),
+    };
+    const github = { verifyRepo: vi.fn(async () => {
+      expect(active).toBe(false);
+      expect(s.repo.lockById).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(active).toBe(false);
+      return { owner: 'acme', name: 'app', defaultBranch: 'main', installationId: 1n };
+    }) };
+    const service = new FleetReposService(repo as never, github as never, {} as never, {} as never,
+      { record: vi.fn() } as never, s.tx as never, { record: vi.fn() } as never);
+    new FleetRepoRouteCommands(s.registry, service, { forContext: async () => ({ id: 'a1' }) } as never).onModuleInit();
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(repo.create).toHaveBeenCalledTimes(operation === 'create' ? 1 : 0);
+    expect(github.verifyRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks authority after preparation and does not mutate if it was revoked', async () => {
+    const s = setup();
+    const mutate = vi.fn(async () => null);
+    s.test.command.prepare = async () => {
+      s.permissions.effectiveKeys.mockResolvedValue(new Set());
+      return mutate;
+    };
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'permission-revoked' } });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it('AC-6: accepts a narrowed decide key when rechecking an approval.decide request', async () => {
     const s = setup({ permissionKey: 'approval.decide' });
     const command = configurableTestCommand('approval.decide');

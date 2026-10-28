@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { committedEffect } from '../common/committed-effects';
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
@@ -219,7 +221,7 @@ export class VcsConnectionService {
       }),
     );
 
-    this.vcsPollingService.unschedulePolling(connection.id);
+    committedEffect(() => this.vcsPollingService.unschedulePolling(connection.id));
   }
 
   /**
@@ -247,6 +249,18 @@ export class VcsConnectionService {
     return { webhookSecret };
   }
 
+  /** Provider HTTP is outside the approval transaction; settlement rechecks the tested target. */
+  async prepareTestConnection(projectId: string, encryptionKey: string): Promise<() => Promise<TestConnectionResultDto>> {
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
+    if (!connection) throw new NotFoundAppException({}, 'vcs');
+    const result = await this.testTarget(connection, encryptionKey);
+    return async () => {
+      const current = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
+      if (!isDeepStrictEqual(current, connection)) throw new ValidationAppException({}, 'vcs');
+      return result;
+    };
+  }
+
   /**
    * Test connection to the VCS service
    */
@@ -260,6 +274,10 @@ export class VcsConnectionService {
       throw new NotFoundAppException({}, 'vcs');
     }
 
+    return this.testTarget(connection, encryptionKey);
+  }
+
+  private async testTarget(connection: VcsConnectionDomain, encryptionKey: string): Promise<TestConnectionResultDto> {
     const startTime = Date.now();
 
     // Decrypt the token

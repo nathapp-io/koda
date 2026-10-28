@@ -47,6 +47,17 @@ function setup() {
 describe('ConfigJobsService (fleet S3 §4)', () => {
   const body = { baseSha: SHA, edits: [{ path: '.nax/context.md', op: 'put' as const, content: '# x', baseSha: null }], prTitle: ' Tighten ', prBody: undefined };
 
+  it('prepares drift reads before mutation, then refuses a changed repo', async () => {
+    const { svc, jobs, reader } = setup();
+    const run = await svc.prepareDrift('u1', 'p1', 'repo-1');
+    expect(reader.list).toHaveBeenCalledTimes(1);
+    expect(jobs.createJob).not.toHaveBeenCalled();
+    jobs.findRepo.mockResolvedValue({ ...REPO, defaultBranch: 'changed' });
+    await expect(run()).rejects.toBeInstanceOf(ConflictAppException);
+    expect(jobs.createJob).not.toHaveBeenCalled();
+    expect(reader.list).toHaveBeenCalledTimes(1);
+  });
+
   it('creates a CONFIG_EDIT job with the fixed columns, its edit row and a QUEUED event, then places it', async () => {
     const { svc, jobs, edits, placement, activity } = setup();
     const res = await svc.submitEdit('u1', 'p1', 'repo-1', body);

@@ -29,3 +29,10 @@ describe('parseRouteInput', () => {
     expectInvalidInput(input, names);
   });
 });
+
+it('rejects inherited members and preserves an own __proto__ string', () => {
+  expect(() => parseRouteInput(Object.create({ id: 'inherited' }), ['id'])).toThrow(ValidationAppException);
+  const parsed = parseRouteInput(JSON.parse('{"__proto__":"value"}'), ['__proto__']);
+  expect(Object.hasOwn(parsed, '__proto__')).toBe(true);
+  expect(parsed.__proto__).toBe('value');
+});

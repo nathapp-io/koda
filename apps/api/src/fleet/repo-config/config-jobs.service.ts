@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -73,9 +74,17 @@ export class ConfigJobsService {
   }
 
   async submitDrift(actorId: string, projectId: string, repoId: string): Promise<DispatchResultDto> {
+    return (await this.prepareDrift(actorId, projectId, repoId))();
+  }
+
+  async prepareDrift(actorId: string, projectId: string, repoId: string): Promise<() => Promise<DispatchResultDto>> {
     const repo = await this.repoIn(projectId, repoId);
     const { baseSha } = await this.reader.list(repo);
-    return this.create(actorId, repo, 'drift', [], null, null, baseSha);
+    return async () => {
+      const current = await this.repoIn(projectId, repoId);
+      if (!isDeepStrictEqual(current, repo)) throw new ConflictAppException({}, 'fleet.repos');
+      return this.create(actorId, current, 'drift', [], null, null, baseSha);
+    };
   }
 
   /** "Reopen edits" (spec §6): the full stored edit set of a config job in this project. */

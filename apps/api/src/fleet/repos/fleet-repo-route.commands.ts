@@ -27,6 +27,7 @@ export class FleetRepoRouteCommands implements OnModuleInit {
     this.commands.register(routeCommand<CreateFleetRepoDto, FleetRepoDto>({
       key: 'fleet.repo.create', variant: FLEET_REPO_ROUTE_VARIANTS.create,
       parse: (input) => parseBody(CreateFleetRepoDto, input),
+      prepare: (principal, input) => this.repos.prepareCreate(principal.id, input),
       run: (principal, input) => this.repos.create(principal.id, input),
       toResult: (result) => result,
     }, this.loader));
@@ -41,6 +42,7 @@ export class FleetRepoRouteCommands implements OnModuleInit {
     this.commands.register(routeCommand<{ id: string }, RepoCheckResultDto>({
       key: 'fleet.repo.check', variant: FLEET_REPO_ROUTE_VARIANTS.check,
       parse: (input) => parseRouteInput(input, ['id']),
+      prepare: (_principal, input) => this.repos.prepareCheck(input.id),
       run: (_principal, input) => this.repos.check(input.id),
       toResult: (result) => result,
     }, this.loader));

@@ -48,6 +48,12 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
    * service owns that transaction, so those effects run only once the decision and these rows commit.
    */
   onReject?(input: TInput, decision: TDecision | undefined): Promise<void>;
+  /**
+   * External read-only work before the execution transaction. Returns an ephemeral mutation callback;
+   * it must re-read targets before writing. Never persisted, including any credentials it closes over.
+   * Immediate callers use execute, which performs the same preparation itself.
+   */
+  prepare?(input: TInput, decision?: TDecision): Promise<() => Promise<TResult>>;
   /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */
   execute(input: TInput, decision?: TDecision): Promise<TResult>;
   /** What `ApprovalRequest.result` stores; omitted means null. */

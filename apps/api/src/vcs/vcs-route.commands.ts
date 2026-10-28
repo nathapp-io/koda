@@ -31,6 +31,11 @@ export class VcsRouteCommands implements OnModuleInit {
     this.commands.register(routeCommand<{ projectId: string }, TestConnectionResultDto>({
       key: 'vcs.connection.test', variant: VCS_ROUTE_VARIANTS.test,
       parse: (input) => parseRouteInput(input, ['projectId']),
+      prepare: (_principal, input) => {
+        const key = this.vcsConfig.encryptionKey;
+        if (!key) throw new ValidationAppException({}, 'vcs');
+        return this.vcs.prepareTestConnection(input.projectId, key);
+      },
       run: (_principal, input) => {
         const key = this.vcsConfig.encryptionKey;
         if (!key) throw new ValidationAppException({}, 'vcs');

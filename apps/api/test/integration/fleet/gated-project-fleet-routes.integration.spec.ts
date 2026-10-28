@@ -84,14 +84,22 @@ describeIntegration('gated project fleet routes', () => {
     expect(await db.approvalRequest.count()).toBe(0);
   });
   it('AC-5/AC-6: drift waits, then stores the exact dispatch DTO and attributes the job to the agent', async () => {
-    const submit = vi.spyOn(app.get(ConfigJobsService), 'submitDrift');
+    const service = app.get(ConfigJobsService);
+    const original = service.prepareDrift.bind(service);
+    const mutate = vi.fn();
+    const submit = vi.spyOn(service, 'prepareDrift').mockImplementation(async (...args) => {
+      const run = await original(...args);
+      mutate.mockImplementation(run);
+      return mutate;
+    });
     try {
       const summary = pending(await request(server()).post(drift()).set(auth(agent.apiKey)), 'fleet.repo.drift.check');
       expect(submit).not.toHaveBeenCalled();
       expect(await db.fleetJob.count()).toBe(0);
       expect((await approve(summary.id)).status).toBe('executed');
       expect(submit).toHaveBeenCalledExactlyOnceWith(agent.id, world.projectId, world.repoId);
-      const result = await submit.mock.results[0].value;
+      expect(mutate).toHaveBeenCalledTimes(1);
+      const result = await mutate.mock.results[0].value;
       const stored = await db.approvalRequest.findUniqueOrThrow({ where: { id: summary.id } });
       expect(stored.result).toEqual(JSON.parse(JSON.stringify(result)));
       expect(stored.result).toMatchObject({ job: { command: 'CONFIG_DRIFT' }, placement: expect.any(Object) });

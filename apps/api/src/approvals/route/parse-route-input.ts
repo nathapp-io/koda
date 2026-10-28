@@ -10,9 +10,10 @@ export function parseRouteInput<const Names extends readonly string[]>(
   const source = input as Record<string, unknown>;
   const parsed: Record<string, string> = {};
   for (const name of names) {
+    if (!Object.hasOwn(source, name)) throw invalidInput();
     const value = source[name];
     if (typeof value !== 'string' || value.length === 0) throw invalidInput();
-    parsed[name] = value;
+    Object.defineProperty(parsed, name, { value, enumerable: true, writable: true, configurable: true });
   }
   return parsed as { [Name in Names[number]]: string };
 }
