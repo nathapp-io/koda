@@ -55,6 +55,22 @@ export class PermissionService {
     private readonly cache: PermissionCache,
   ) {}
 
+  /** Route-gate key check with catalog principal eligibility enforced before reading effective keys. */
+  async canHoldKey(
+    principal: PrincipalRef,
+    key: string,
+    scope: PermissionScope,
+    requirePossession = true,
+  ): Promise<boolean> {
+    const entry = findCatalogEntry(key);
+    const principalType = principal.type === 'USER' ? 'user' : 'agent';
+    if (entry !== undefined && !entry.principals.includes(principalType)) return false;
+    if (!requirePossession) return true;
+
+    const held = await this.effectiveKeys(principal, scope);
+    return held.has(key) || held.has(`${key}${OWN_SUFFIX}`);
+  }
+
   async can(principal: KodaPrincipal, key: string, ctx: PermissionContext = {}): Promise<PermissionDecision> {
     if (principal.actorType === 'runner') return deny('non-role-key');
 

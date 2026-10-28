@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { currentContext } from '../../action-context/action-context';
-import { findCatalogEntry } from '../../permissions/catalog';
 import { PermissionService, type PermissionScope } from '../../permissions/permission.service';
 import { ApprovalGate, type GateOutcome } from '../approval-gate.service';
 
@@ -20,9 +19,6 @@ export interface RouteGateCall {
    */
   keyCheck?: boolean;
 }
-
-/** The suffix a role entry uses for "on rows the caller created". */
-const OWN_SUFFIX = '.own';
 
 /**
  * US-003: the REST entry point of the approval gate.
@@ -53,29 +49,18 @@ export class ApprovalRouteGate {
     if (actor.type !== 'USER' && actor.type !== 'AGENT') {
       throw new Error('approval route gate needs a principal actor');
     }
-    const entry = findCatalogEntry(key);
-    const principalType = actor.type === 'USER' ? 'user' : 'agent';
-    if (entry !== undefined && !entry.principals.includes(principalType)) {
-      throw new ForbiddenAppException({}, 'permissions');
-    }
-
-    if (keyCheck && !(await this.holdsKey(actor.type, actor.id, key, scopeOf(projectId)))) {
+    if (!(await this.permissions.canHoldKey(
+      { type: actor.type, id: actor.id },
+      key,
+      scopeOf(projectId),
+      keyCheck,
+    ))) {
       throw new ForbiddenAppException({}, 'permissions');
     }
 
     return this.gate.gate<TResult>(key, input, { projectId, variant });
   }
 
-  /** The union of `key` and `key.own` in the request's scope, as `PermissionService.can` reads it. */
-  private async holdsKey(
-    type: 'USER' | 'AGENT',
-    id: string,
-    key: string,
-    scope: PermissionScope,
-  ): Promise<boolean> {
-    const held = await this.permissions.effectiveKeys({ type, id }, scope);
-    return held.has(key) || held.has(`${key}${OWN_SUFFIX}`);
-  }
 }
 
 /** A global write reads the principal's global keys; a project write, that project's keys. */

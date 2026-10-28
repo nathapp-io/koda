@@ -26,14 +26,26 @@ const record: ApprovalRequestRecord = {
 
 interface Harness {
   gate: { gate: ReturnType<typeof vi.fn> };
-  permissions: { effectiveKeys: ReturnType<typeof vi.fn> };
+  permissions: { effectiveKeys: ReturnType<typeof vi.fn>; canHoldKey: ReturnType<typeof vi.fn> };
   routeGate: ApprovalRouteGate;
 }
 
 /** The gate and permission service as the route gate sees them, holding `keys` at every scope. */
 function harness(keys: string[] = [], outcome?: GateOutcome<unknown>): Harness {
   const gate = { gate: vi.fn().mockResolvedValue(outcome ?? { status: 'pending', request: record }) };
-  const permissions = { effectiveKeys: vi.fn().mockResolvedValue(new Set(keys)) };
+  const effectiveKeys = vi.fn().mockResolvedValue(new Set(keys));
+  const canHoldKey = vi.fn(async (
+    principal: { type: 'USER' | 'AGENT' },
+    key: string,
+    scope: unknown,
+    requirePossession = true,
+  ) => {
+    if (key === 'role.binding.owner' && principal.type !== 'USER') return false;
+    if (!requirePossession) return true;
+    const held = await effectiveKeys(principal, scope);
+    return held.has(key) || held.has(`${key}.own`);
+  });
+  const permissions = { effectiveKeys, canHoldKey };
 
   return {
     gate,
