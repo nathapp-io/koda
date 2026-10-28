@@ -18,6 +18,9 @@ describeDb('AssistantActionRequest committed migration (PG)', () => {
   beforeAll(async () => {
     scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, `assistant_link_${randomUUID().replaceAll('-', '')}`, '20261105090000_assistant_action_request');
     await applyMigration(scratch.db, '20261105090000_assistant_action_request');
+    // The generated client selects every scalar the model declares, so this chain needs the columns
+    // later migrations add to ApprovalRequest too.
+    await applyMigration(scratch.db, '20261108090000_approval_request_variant');
   }, 120_000);
   afterAll(async () => { await scratch?.drop(); });
 

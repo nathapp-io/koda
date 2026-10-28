@@ -84,7 +84,8 @@ export class ApprovalDecisionService {
       // Keep the persistence boundary principal-only even if eligibility is replaced by a test seam.
       if (decider.type !== 'USER' && decider.type !== 'AGENT') throw new ApprovalDecideForbiddenError('not-a-principal');
 
-      const command = this.registry.get(request.permissionKey);
+      // The pair the request was opened for: a variant request never runs the key's primary command.
+      const command = this.registry.get(request.permissionKey, request.variant);
       const { parsedInput, parsed } = parseDecisionParams(command, decision, params, request.input);
 
       await this.requests.createDecision({

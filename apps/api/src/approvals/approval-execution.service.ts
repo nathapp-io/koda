@@ -70,7 +70,9 @@ export class ApprovalExecutionService {
   }
 
   private async precheck(request: ApprovalRequestRecord): Promise<Prechecked> {
-    const command = this.registry.get(request.permissionKey);
+    // The pair the request was opened for: a variant request whose command is gone has no command,
+    // even while the key's primary command is still registered.
+    const command = this.registry.get(request.permissionKey, request.variant);
     if (command === undefined) return { ok: false, error: 'no-command' };
 
     const hash = createHash('sha256').update(canonicalJson(request.input), 'utf8').digest('hex');

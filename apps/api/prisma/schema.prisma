@@ -1554,6 +1554,8 @@ model ApprovalPolicy {
 model ApprovalRequest {
   id                      String    @id @default(cuid())
   permissionKey           String
+  /// The registered command variant this request runs (US-001); NULL runs the key's primary command.
+  variant                 String?
   projectId               String?
   actorType               String    // USER | AGENT | SYSTEM
   actorId                 String

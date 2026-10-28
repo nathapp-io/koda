@@ -101,6 +101,19 @@ it('executes after an approve commits and returns the execution result', async (
   expect(s.tx.run).toHaveBeenCalledTimes(1);
 });
 
+it('AC-13: looks the command up for the request variant', async () => {
+  const s = setup();
+  s.request.variant = 'v1';
+  await s.decide();
+  expect(s.registry.get).toHaveBeenCalledExactlyOnceWith('label.delete', 'v1');
+});
+
+it('looks the primary command up for a request with no variant', async () => {
+  const s = setup();
+  await s.decide();
+  expect(s.registry.get).toHaveBeenCalledExactlyOnceWith('label.delete', undefined);
+});
+
 it('does not execute a rejection or a refused decision', async () => {
   const s = setup();
   await s.decide('reject');

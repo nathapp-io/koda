@@ -38,12 +38,15 @@ describeDb('approval engine migration', () => {
     // The generated client knows every column the later migrations add, so the scratch schema must
     // carry them too or a create on this table sends a column the schema does not have.
     await applyMigration(scratch.db, '20261106090000_approval_fleet_core');
+    await applyMigration(scratch.db, '20261108090000_approval_request_variant');
   }, 60_000);
   afterAll(async () => { await scratch?.drop(); });
   it('AC-1: creates every model column and the unique selector index', async () => {
     const expected = {
       ApprovalPolicy: 'id selector projectId permissionPattern principalType roleId principalId mode timeoutSec onTimeout requiredApprovals approverMustHoldAction requireDistinctApprover updatedByType updatedById createdAt updatedAt',
-      ApprovalRequest: 'id permissionKey projectId actorType actorId onBehalfOfType onBehalfOfId origin correlationId input inputHash requiredMode policyId onTimeout approverMustHoldAction requireDistinctApprover status satisfiedBy approverType approverId expiresAt decidedAt settledAt result createdAt updatedAt',
+      // `variant` is appended by 20261108090000_approval_request_variant: ALTER TABLE ADD COLUMN
+      // lands last, whatever position the Prisma model declares.
+      ApprovalRequest: 'id permissionKey projectId actorType actorId onBehalfOfType onBehalfOfId origin correlationId input inputHash requiredMode policyId onTimeout approverMustHoldAction requireDistinctApprover status satisfiedBy approverType approverId expiresAt decidedAt settledAt result createdAt updatedAt variant',
       ApprovalDecision: 'id requestId deciderType deciderId decision comment decidedAt params',
     };
     for (const [table, names] of Object.entries(expected)) {
@@ -89,7 +92,7 @@ describeDb('approval repositories through AppModule', () => {
   afterAll(async () => { await app?.close(); await db.$disconnect(); });
   beforeEach(async () => { await write(async () => { await db.approvalRequest.deleteMany(); await db.approvalPolicy.deleteMany(); }); });
   const create = (patch: Partial<Prisma.ApprovalRequestCreateInput> = {}) => write(() => db.approvalRequest.create({ data: request(patch) }));
-  const match = { actorType: 'AGENT' as const, actorId: 'a1', onBehalfOfType: 'USER' as const, onBehalfOfId: 'u2', permissionKey: 'ticket.delete', projectId: 'p1', inputHash: 'hash' };
+  const match = { actorType: 'AGENT' as const, actorId: 'a1', onBehalfOfType: 'USER' as const, onBehalfOfId: 'u2', permissionKey: 'ticket.delete', projectId: 'p1', inputHash: 'hash', variant: null };
   it('AC-4: matches exact keys and dot-bounded prefixes only in this project or globally', async () => {
     const expected: string[] = [];
     for (const projectId of ['p1', 'p2', null]) for (const pattern of ['ticket.delete', 'ticket.*', 'ti.*', 'ticket.update', 'comment.*']) {
@@ -107,6 +110,11 @@ describeDb('approval repositories through AppModule', () => {
     }
     await write(() => db.approvalRequest.update({ where: { id: row.id }, data: { onBehalfOfType: null, onBehalfOfId: null } }));
     expect((await requests.findPendingDuplicate({ ...match, onBehalfOfType: null, onBehalfOfId: null }, now))?.id).toBe(row.id);
+    // The variant is part of the identity: a primary match ignores a variant row, and the variant
+    // match finds it.
+    await write(() => db.approvalRequest.update({ where: { id: row.id }, data: { variant: 'rest:labels.delete' } }));
+    expect(await requests.findPendingDuplicate({ ...match, onBehalfOfType: null, onBehalfOfId: null }, now)).toBeNull();
+    expect((await requests.findPendingDuplicate({ ...match, onBehalfOfType: null, onBehalfOfId: null, variant: 'rest:labels.delete' }, now))?.id).toBe(row.id);
   });
   it('AC-6: returns only due pending requests oldest first', async () => {
     const older = await create({ expiresAt: new Date(now.getTime() - 1000) });
@@ -187,6 +195,20 @@ describeDb('approval repositories through AppModule', () => {
     expect((await requests.findById(copy.id))?.onBehalfOf).toBeNull();
     expect(await requests.findPendingDuplicate({ ...match, projectId: 'other' }, now)).toBeNull();
     expect(await requests.findPendingDuplicate({ ...match, onBehalfOfType: 'AGENT' }, now)).toBeNull();
+  });
+  it('persists a request variant and omits it from a null-variant record', async () => {
+    const row = await create();
+    const domain = await requests.findById(row.id);
+    if (!domain) throw new Error('missing request');
+    // A row written before variants existed: the column is null and the record carries no property.
+    expect('variant' in domain).toBe(false);
+
+    const variant = await write(() => requests.create({ ...domain, id: randomUUID(), variant: 'rest:labels.delete' }));
+
+    expect(variant.variant).toBe('rest:labels.delete');
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: variant.id } })).variant).toBe('rest:labels.delete');
+    expect((await requests.findById(variant.id))?.variant).toBe('rest:labels.delete');
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: row.id } })).variant).toBeNull();
   });
   it('joins ambient transactions and rolls back transitions and decisions together', async () => {
     const row = await create();

@@ -39,10 +39,10 @@ export class ApprovalGate {
   async gate<TResult>(
     key: string,
     input: unknown,
-    opts: { projectId: string | null },
+    opts: { projectId: string | null; variant?: string },
     now?: Date,
   ): Promise<GateOutcome<TResult>> {
-    const command = this.registry.get(key);
+    const command = this.registry.get(key, opts.variant);
     if (command === undefined) throw new UnregisteredApprovalCommandError(key);
 
     const context = currentContext();
@@ -78,7 +78,7 @@ export class ApprovalGate {
       approval = { requiredMode: resolved.mode, satisfiedBy: 'human', approverType: 'USER', approverId: actor.id };
     } else {
       const request = await this.openRequest(
-        { key, projectId: opts.projectId, parsed, resolved, context, actorType: requestActorType },
+        { key, projectId: opts.projectId, variant: opts.variant, parsed, resolved, context, actorType: requestActorType },
         now ?? new Date(),
       );
       return { status: 'pending', request };
@@ -91,15 +91,17 @@ export class ApprovalGate {
 
   /**
    * Step 7 of the gate: the request a non-human call waits on. A still-pending request for the same
-   * actor, on-behalf-of principal, key, project and frozen input is that request — an agent that
-   * retries gets the one it already opened instead of flooding the inbox. Two identical calls racing
-   * each other can still open two (check-then-insert, no unique index); each is then decided on its
-   * own.
+   * actor, on-behalf-of principal, key, variant, project and frozen input is that request — an agent
+   * that retries gets the one it already opened instead of flooding the inbox. Two identical calls
+   * racing each other can still open two (check-then-insert, no unique index); each is then decided
+   * on its own.
    */
   private async openRequest(
     opened: {
       key: string;
       projectId: string | null;
+      /** The command's variant (US-001): absent for the key's primary command. */
+      variant: string | undefined;
       parsed: unknown;
       resolved: ResolvedApproval;
       context: ActionContext;
@@ -107,7 +109,7 @@ export class ApprovalGate {
     },
     now: Date,
   ): Promise<ApprovalRequestRecord> {
-    const { key, projectId, resolved, context, actorType } = opened;
+    const { key, projectId, variant, resolved, context, actorType } = opened;
     // Freeze once: the snapshot the row stores is exactly the value the hash describes.
     const input = freezeApprovalInput(opened.parsed);
     const inputHash = approvalInputHash(input);
@@ -119,6 +121,8 @@ export class ApprovalGate {
       permissionKey: key,
       projectId,
       inputHash,
+      // The pair, not the key: a variant of the same key with the same input is a different ask.
+      variant: variant ?? null,
     };
 
     const pending = await this.requests.findPendingDuplicate(duplicate, now);
@@ -127,7 +131,9 @@ export class ApprovalGate {
     // The ApprovalRequest row is itself the record of the ask, so opening it is bookkeeping: no
     // audit entry, and the write does not count against the entry point's audit coverage.
     return bookkeeping('approval.request-open', () => this.txManager.run(async () => {
-      const created = await this.requests.create(newRequest({ key, projectId, resolved, context, actorType, input, inputHash }, now));
+      const created = await this.requests.create(
+        newRequest({ key, projectId, variant, resolved, context, actorType, input, inputHash }, now),
+      );
       await this.events.record(created);
       return created;
     }));
@@ -143,6 +149,7 @@ function newRequest(
   opened: {
     key: string;
     projectId: string | null;
+    variant: string | undefined;
     resolved: ResolvedApproval;
     context: ActionContext;
     actorType: ApprovalRequestRecord['actor']['type'];
@@ -151,13 +158,15 @@ function newRequest(
   },
   now: Date,
 ): ApprovalRequestRecord {
-  const { key, projectId, resolved, context, actorType, input, inputHash } = opened;
+  const { key, projectId, variant, resolved, context, actorType, input, inputHash } = opened;
   const { policy } = resolved;
   const timeoutSec = policy?.timeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
 
   return {
     id: randomUUID(),
     permissionKey: key,
+    // Absent, never `undefined`: the record doubles as the null-variant check its readers rely on.
+    ...(variant === undefined ? {} : { variant }),
     projectId,
     actor: { type: actorType, id: context.actor.id },
     onBehalfOf: context.onBehalfOf ?? null,

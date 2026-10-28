@@ -144,6 +144,23 @@ describe('ApprovalExecutionService', () => {
     expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'failed' }));
   });
 
+  it('AC-11 (unit leg): a stored variant with no registered command settles no-command, never the primary', async () => {
+    const s = setup({ variant: 'rest:gone' });
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'no-command' } });
+    expect(s.test.state.calls).toEqual([]);
+  });
+
+  it('AC-10 (unit leg): runs the variant command the request names, not the primary', async () => {
+    const s = setup({ variant: 'rest:labels.delete' });
+    const variant = configurableTestCommand('label.delete', { variant: 'rest:labels.delete' });
+    s.registry.register(variant.command);
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(variant.state.calls).toEqual([{ labelId: 'l1' }]);
+    expect(s.test.state.calls).toEqual([]);
+  });
+
   it('settles input-hash-mismatch when the stored input changed', async () => {
     const s = setup({ input: { labelId: 'l2' } });
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'input-hash-mismatch' } });
