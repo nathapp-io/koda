@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T15:57:39.125Z",
+  "updatedAt": "2026-10-28T16:21:46.848Z",
   "userStories": [
     {
       "id": "US-001",
@@ -576,14 +576,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two handlers extend an existing project command class and gate, with routine write-through test-double updates; global/project access scopes require security-isolated TDD."
+        "reasoning": "Two handlers extend an existing project command class and gate, with routine write-through test-double updates; global/project access scopes require security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/projects/projects.service.ts",
@@ -629,7 +632,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0d24c3f5affe1f0cf93e6fec3e21ef862119c5ba"
     },
     {
       "id": "US-009",
