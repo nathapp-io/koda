@@ -1,3 +1,8 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { KbDocumentDeletion } from './kb-document-deletion.service';
+import { KB_ROUTE_VARIANTS } from './kb-route.commands';
 import {
   Body,
   Controller,
@@ -21,7 +26,7 @@ import { RequiresGuard } from '../permissions/requires.guard';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { AddDocumentDto } from './dto/add-document.dto';
-import { DeleteKbDocumentQuery, KB_DELETE_SOURCES, type KbDeleteSource } from './dto/delete-kb-document.query';
+import { DeleteKbDocumentQuery } from './dto/delete-kb-document.query';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
@@ -68,6 +73,8 @@ export class RagController {
     private readonly ragRepository: PrismaRagRepository,
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    private readonly kbDeletion: KbDocumentDeletion,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   private async resolveProject(slug: string) {
@@ -165,6 +172,7 @@ export class RagController {
   }
 
   @Delete('documents/:sourceId')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('kb.document.delete')
@@ -180,35 +188,13 @@ export class RagController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
-    // US-006 keyed the rows by `(source, sourceId)`; this route names the user sources only. An absent `source`
-    // keeps its interim meaning — delete both user rows of this id — and never touches the ticket or code rows.
-    const sources: KbDeleteSource[] = query.source ? [query.source] : [...KB_DELETE_SOURCES];
-
-    // Preflight every chosen source before deleting either one: a refusal must leave both rows in place. The read
-    // also answers ValidationAppException (400) for an id that is not filter-safe, before any write happens.
-    const creatorsBySource = await Promise.all(
-      sources.map((source) => this.ragService.findSourceCreators(project.id, source, sourceId)),
-    );
-    await Promise.all(
-      creatorsBySource
-        .flat()
-        .map((createdBy) => this.assertMayDeleteRow(principal, project.id, createdBy)),
-    );
-
-    for (const [index, source] of sources.entries()) {
-      await this.ragService.deleteBySource(project.id, source, sourceId);
-      const creators = creatorsBySource[index] ?? [];
-      if (creators.length > 0) {
-        await this.audit.audited(async () => undefined, () => ({
-          key: 'kb.document.delete',
-          resourceType: 'kb-document',
-          resourceId: `${source}:${sourceId}`,
-          projectId: project.id,
-          summary: `deleted ${creators.length} ${source} rows`,
-        }));
-      }
-    }
-    return JsonResponse.Ok({ deleted: true });
+    await this.kbDeletion.preflight(principal, project.id, sourceId, query.source);
+    const outcome = await this.routeGate.run<{ deleted: boolean }>({
+      key: 'kb.document.delete', variant: KB_ROUTE_VARIANTS.delete, projectId: project.id,
+      input: { projectId: project.id, sourceId, ...(query.source ? { source: query.source } : {}) },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('search')

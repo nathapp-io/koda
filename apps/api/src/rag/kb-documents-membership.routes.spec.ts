@@ -1,3 +1,5 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { KbDocumentDeletion } from './kb-document-deletion.service';
 import type { Mock } from 'vitest';
 /**
  * US-005 — AC1: POST /api/projects/:slug/kb/documents keeps returning 403 for a
@@ -106,6 +108,8 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
         ProjectMembershipGuard,
         { provide: PermissionService, useValue: { can } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
+        { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: { deleted: true } }) } },
       ],
     }).compile();
 

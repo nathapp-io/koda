@@ -1,3 +1,5 @@
+import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
+import { KbDocumentDeletion } from '../../../src/rag/kb-document-deletion.service';
 import type { Mock } from 'vitest';
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -547,6 +549,8 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
           // US-007: the KB routes carry permission keys; these cases exercise the graphify handler itself.
           { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
           { provide: AuditRecorder, useValue: mockAuditRecorder },
+          { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
+          { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: { deleted: true } }) } },
         ],
       }).compile();
 
