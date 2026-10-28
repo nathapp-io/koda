@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { RunnerRouteCommands } from './runner-route.commands';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { EnrollmentsController } from './enrollments.controller';
@@ -13,9 +16,9 @@ import { EnrollmentRetentionProcessor } from './enrollment-retention.processor';
 import { RUNNER_REPOSITORY } from './domain/runner.domain';
 
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule],
   controllers: [EnrollmentsController, RunnerApiController, RunnersController, ProjectFleetRunnersController],
-  providers: [PrismaRunnerRepository, { provide: RUNNER_REPOSITORY, useExisting: PrismaRunnerRepository }, EnrollmentService, RunnersService, EnrollmentRetentionProcessor],
+  providers: [RunnerRouteCommands, PrismaRunnerRepository, { provide: RUNNER_REPOSITORY, useExisting: PrismaRunnerRepository }, EnrollmentService, RunnersService, EnrollmentRetentionProcessor],
   exports: [RUNNER_REPOSITORY, RunnersService],
 })
 export class RunnersModule {}
