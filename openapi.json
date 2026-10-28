@@ -815,6 +815,24 @@
           "200": {
             "description": "Delete documents by sourceId"
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "source is not doc or manual, or the id is not filter-safe"
           },

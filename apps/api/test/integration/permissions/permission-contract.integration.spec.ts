@@ -63,8 +63,8 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  it('AC-13: collects at least twelve gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBeGreaterThanOrEqual(12);
+  it('AC-2 (US-010): collects exactly 41 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(41);
   });
 
   it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
@@ -85,6 +85,41 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
       })
       .sort(([left], [right]) => left.localeCompare(right));
     expect([...PENDING_GATE_ROUTES]).toEqual(expected);
+  });
+
+  it('AC-11 (US-010): catches an unlisted, ungated high-risk write', () => {
+    const route = {
+      route: 'DELETE /projects/:slug/new-high-risk-resource',
+      method: 'DELETE',
+      gated: false,
+      requires: { keys: ['project.delete'] as const, mode: 'all' as const, enforcedBy: 'guard' as const },
+      hasRequiresGuard: true,
+    };
+    expect(findContractViolations({ routes: [route], tools: [], systemWriters: [] })).toContainEqual({
+      kind: 'ungated-approvable-write', route: route.route,
+    });
+  });
+
+  it('AC-12 (US-010): rollout expectations cannot allowlist a new high-risk route after closure', () => {
+    const route = {
+      route: 'DELETE /projects/:slug/new-high-risk-resource',
+      method: 'DELETE',
+      gated: false,
+      requires: { keys: ['project.delete'] as const, mode: 'all' as const, enforcedBy: 'guard' as const },
+      hasRequiresGuard: true,
+    };
+    const catalog = new Map(PERMISSION_CATALOG.map((entry) => [entry.key, entry]));
+    const keys = route.requires.keys.filter((key) => catalog.get(key)?.approval.approvable);
+    const feature = keys.some((key) => catalog.get(key)?.approval.default !== 'none')
+      ? 'gate-high'
+      : keys.every((key) => /^(fleet|thread|testhook)\\./.test(key))
+        ? 'gate-fleet'
+        : 'gate-core-domains';
+    const expected = [...PENDING_GATE_ROUTES, [route.route, feature] as const].sort(([left], [right]) => left.localeCompare(right));
+    const allowed = [...PENDING_GATE_ROUTES].sort(([left], [right]) => left.localeCompare(right));
+
+    expect([route.route, feature]).toEqual([route.route, 'gate-high']);
+    expect(expected).not.toEqual(allowed);
   });
 
   it('AC-7: declares runner.sync, thread.read, role.binding.owner and system.schedule.dispatch', () => {

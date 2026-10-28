@@ -1000,6 +1000,23 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
     });
+
+    it('AC-10 (US-010): an agent deletes its own comment with exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.delete.own', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const ownComment = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/comments`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ body: 'Agent-owned comment for approval gate coverage.', type: 'GENERAL' })
+        .expect(201);
+      const ownCommentId = body<{ id: string }>(ownComment).id;
+
+      await request(httpServer)
+        .delete(`/api/comments/${ownCommentId}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(202);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────
@@ -1481,6 +1498,23 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
       expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
+    });
+
+    it('AC-9 (US-010): an agent with label.delete and project.read gets exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['label.delete', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const created = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'agent-pending-delete', color: '#aa0000' })
+        .expect(201);
+      const id = body<{ id: string }>(created).id;
+
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/labels/${id}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(202);
     });
 
     it('GET .../labels — deleted label no longer appears', async () => {

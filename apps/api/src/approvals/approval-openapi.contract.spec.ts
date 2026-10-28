@@ -44,6 +44,7 @@ const gatedOperations = [
   ['delete', '/api/projects/{slug}/tickets/{ref}/links/{linkId}'],
   ['post', '/api/projects/{slug}/fleet/repos/{repoId}/drift-checks'],
   ['delete', '/api/projects/{slug}'],
+  ['delete', '/api/projects/{slug}/kb/documents/{sourceId}'],
   ['delete', '/api/agents/{slug}'],
   ['delete', '/api/admin/skills/sources/{id}'],
   ['delete', '/api/projects/{slug}/webhooks/{id}'],
@@ -75,7 +76,23 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/approvals/{id}/decisions']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-4: 202 responses exist on exactly the currently shipped gated operations and existing reindex operation', () => {
+  it('AC-4 (US-010): DELETE /api/projects/{slug} has a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}']?.delete?.responses).toHaveProperty('202');
+  });
+
+  it('AC-5 (US-010): DELETE /api/fleet/budgets/{id} has a 202 response', () => {
+    expect(openapi.paths['/api/fleet/budgets/{id}']?.delete?.responses).toHaveProperty('202');
+  });
+
+  it('AC-6 (US-010): DELETE /api/projects/{slug}/kb/documents/{sourceId} has a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/kb/documents/{sourceId}']?.delete?.responses).toHaveProperty('202');
+  });
+
+  it('AC-7 (US-010): POST /api/fleet/enrollments remains ungated', () => {
+    expect(openapi.paths['/api/fleet/enrollments']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-8 (US-010): 202 responses exist on exactly the 41 gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });
