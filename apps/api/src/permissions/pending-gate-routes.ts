@@ -9,6 +9,8 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
   'POST /projects/:slug/vcs/webhook-secret/rotate',
   'POST /projects/:slug/webhooks',
   'PATCH /projects/:slug/webhooks/:id',
+  'POST /projects/:slug/invites',
+  'POST /projects/:slug/invites/:id/resend',
 ]);
 
 const ROUTE_ASSIGNMENTS = `
@@ -55,8 +57,8 @@ POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate=gate-fleet
 POST /projects/:slug/fleet/schedules=gate-fleet
 POST /projects/:slug/fleet/schedules/:id/disable=gate-fleet
 POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
-POST /projects/:slug/invites=gate-core-domains
-POST /projects/:slug/invites/:id/resend=gate-core-domains
+POST /projects/:slug/invites=gate-secret
+POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/kb/documents=gate-core-domains
 POST /projects/:slug/kb/evaluate/retrieval=gate-core-domains
 POST /projects/:slug/kb/import/graphify=gate-core-domains

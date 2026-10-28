@@ -125,6 +125,8 @@ describe('permission contract checker', () => {
       'POST /projects/:slug/vcs/webhook-secret/rotate',
       'POST /projects/:slug/webhooks',
       'PATCH /projects/:slug/webhooks/:id',
+      'POST /projects/:slug/invites',
+      'POST /projects/:slug/invites/:id/resend',
     ]));
   });
 
@@ -142,6 +144,14 @@ describe('permission contract checker', () => {
 
   it('AC-11: assigns project ticket creation to gate-core-domains', () => {
     expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets')).toBe('gate-core-domains');
+  });
+
+  it('US-001 AC-2: assigns invite resend to gate-secret', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/invites/:id/resend')).toBe('gate-secret');
+  });
+
+  it('US-001 AC-3: leaves invite cancellation in gate-core-domains', () => {
+    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug/invites/:id')).toBe('gate-core-domains');
   });
 
   it('AC-12: assigns project thread creation to gate-fleet', () => {
