@@ -429,26 +429,37 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-9 — legacy roster access is represented by the least-privilege project access grants.
+  // AC-9 — binding-based access with only the baseline and least-privilege project grants.
   // -------------------------------------------------------------------------
 
-  it('AC-9: a roster-access agent requests approval to delete its own comment', async () => {
-    const agentId = await createKeyedAgent('p1-legacy-agent-us008', ['project.read', 'comment.create', 'comment.delete.own']);
+  it('AC-9: a binding-based agent deletes its own comment only after root approval', async () => {
+    const slug = 'p1-binding-agent-us008';
+    const projectKeys = ['project.read', 'comment.create', 'comment.delete.own'];
+    const agentId = await createKeyedAgent(slug, projectKeys);
     const grants = await db.roleBinding.findMany({
-      where: { principalType: 'AGENT', principalId: agentId, projectId: p1Id },
-      include: { role: { select: { permissions: true } } },
+      where: { principalType: 'AGENT', principalId: agentId },
+      include: { role: { select: { key: true, permissions: true } } },
     });
-    expect(grants.flatMap((grant) => grant.role.permissions)).toEqual(expect.arrayContaining(['project.read', 'comment.create', 'comment.delete.own']));
-    expect(grants.flatMap((grant) => grant.role.permissions)).not.toContain('comment.delete');
+    // Check every binding, not just the expected project: no hidden global or wildcard grant.
+    expect(grants).toHaveLength(2);
+    expect(grants.filter((grant) => grant.projectId === null).map((grant) => grant.role)).toEqual([
+      { key: 'agent', permissions: ['agent.read'] },
+    ]);
+    const projectGrants = grants.filter((grant) => grant.projectId === p1Id);
+    expect(projectGrants).toHaveLength(1);
+    expect(projectGrants.flatMap((grant) => grant.role.permissions).sort()).toEqual([...projectKeys].sort());
 
     const ref = await createTicket();
-    const id = await commentBy('p1-legacy-agent-us008', ref, 'agent wrote this');
+    const id = await commentBy(slug, ref, 'agent wrote this');
 
-    const response = await request(server).delete(`/api/comments/${id}`).set(auth('p1-legacy-agent-us008')).expect(202);
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth(slug)).expect(202);
     const pending = data<{ id: string; permissionKey: string; projectId: string }>(response);
     expect(pending).toEqual(expect.objectContaining({ permissionKey: 'comment.delete', projectId: p1Id }));
+    await expect(commentById(ref, id)).resolves.toEqual(expect.objectContaining({ authorAgentId: agentId, body: 'agent wrote this' }));
+    await expect(db.approvalRequest.findUniqueOrThrow({ where: { id: pending.id }, select: { status: true } })).resolves.toEqual({ status: 'pending' });
 
-    await request(server).post(`/api/approvals/${pending.id}/decisions`).set(auth('root')).send({ decision: 'approve' }).expect(200);
+    const decision = await request(server).post(`/api/approvals/${pending.id}/decisions`).set(auth('root')).send({ decision: 'approve' }).expect(200);
+    expect(data<{ status: string }>(decision).status).toBe('executed');
     await expect(commentById(ref, id)).resolves.toBeUndefined();
   }, TIMEOUT);
 
