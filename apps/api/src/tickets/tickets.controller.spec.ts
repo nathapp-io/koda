@@ -599,8 +599,11 @@ describe('TicketsController', () => {
 
       await controller.start('koda', 'KODA-1', mockMemberUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockMemberUser);
-      expect(vi.mocked(mockTransitionsService.start).mock.calls[0]?.[2]).toBe(mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.start', variant: 'rest:tickets.start',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1' },
+      });
+      expect(mockTransitionsService.start).not.toHaveBeenCalled();
     });
   });
 
@@ -644,12 +647,11 @@ describe('TicketsController', () => {
 
       await controller.verify('koda', 'KODA-1', { body: 'Verified against staging' }, mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.verify).toHaveBeenCalledWith(
-        'koda',
-        'KODA-1',
-        'Verified against staging',
-        mockAdminUser,
-      );
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify', variant: 'rest:tickets.verify',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1', body: 'Verified against staging' },
+      });
+      expect(mockTransitionsService.verify).not.toHaveBeenCalled();
     });
 
     it('M1: start route has no required comment and still works without a body', async () => {
@@ -657,7 +659,11 @@ describe('TicketsController', () => {
 
       await controller.start('koda', 'KODA-1', mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.start', variant: 'rest:tickets.start',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1' },
+      });
+      expect(mockTransitionsService.start).not.toHaveBeenCalled();
     });
   });
 
