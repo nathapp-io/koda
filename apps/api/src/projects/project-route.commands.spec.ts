@@ -17,6 +17,15 @@ describe('ProjectRouteCommands', () => {
     new ProjectRouteCommands(registry, service as unknown as ProjectsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
   }
+  it('refuses secret-bearing input before it can be frozen or serialized', () => {
+    const { registry } = build();
+    const command = registry.get('project.update', PROJECT_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing command');
+    for (const ciWebhookToken of ['s'.repeat(32), '', null]) {
+      expect(() => command.parse({ slug: 'alpha', patch: { ciWebhookToken } })).toThrow(ValidationAppException);
+    }
+    expect(command.parse({ slug: 'alpha', patch: { name: 'Safe' } })).toEqual({ slug: 'alpha', patch: { name: 'Safe' } });
+  });
   it('AC-8: registers create, update and delete variants', () => {
     const { registry } = build();
     expect(registry.get('project.create', PROJECT_ROUTE_VARIANTS.create)).toMatchObject({ key: 'project.create', variant: 'rest:projects.create' });

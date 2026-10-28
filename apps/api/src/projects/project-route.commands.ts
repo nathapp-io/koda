@@ -1,4 +1,5 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../approvals/approval-command.registry';
 import { parseBody } from '../approvals/route/parse-body';
 import { parseRouteInput } from '../approvals/route/parse-route-input';
@@ -34,7 +35,10 @@ export class ProjectRouteCommands implements OnModuleInit {
       parse: (input) => {
         const { slug } = parseRouteInput(input, ['slug']);
         const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-        return { slug, patch: parseBody(UpdateProjectDto, source.patch ?? {}) };
+        const patch = parseBody(UpdateProjectDto, source.patch ?? {});
+        // Defense in depth: direct registry callers must not persist secrets either.
+        if (patch.ciWebhookToken !== undefined) throw new ValidationAppException({}, 'approvals.invalidInput');
+        return { slug, patch };
       },
       run: async (_principal, input) => this.service.update(input.slug, input.patch),
       toResult: (result) => result,

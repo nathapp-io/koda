@@ -134,6 +134,11 @@ export class ProjectsController {
   ) {
     const { slug: parsedSlug } = parseRouteInput({ slug }, ['slug']);
     const patch = parseBody(UpdateProjectDto, updateProjectDto ?? {});
+    // Secret changes retain the pre-gate route behavior until gate-secret ships. Never
+    // put plaintext authentication material in ApprovalRequest.input (including mixed patches).
+    if (patch.ciWebhookToken !== undefined) {
+      return JsonResponse.Ok(await this.projectsService.update(slug, patch));
+    }
     const outcome = await this.routeGate.run<ProjectResponseDto>({
       key: 'project.update',
       variant: PROJECT_ROUTE_VARIANTS.update,
