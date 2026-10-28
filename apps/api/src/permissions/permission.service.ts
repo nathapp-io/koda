@@ -224,7 +224,7 @@ function decidePatterns(keys: ReadonlySet<string>): DecidePatterns {
     .map((key) => key.slice(APPROVAL_DECIDE_NARROWED_PREFIX.length)))].sort();
 }
 
-function holdsNarrowedDecide(held: ReadonlySet<string>): boolean {
+export function holdsNarrowedDecide(held: ReadonlySet<string>): boolean {
   for (const key of held) if (key.startsWith(APPROVAL_DECIDE_NARROWED_PREFIX)) return true;
   return false;
 }

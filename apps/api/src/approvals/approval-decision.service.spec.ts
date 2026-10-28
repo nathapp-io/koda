@@ -21,7 +21,7 @@ function setup() {
     requireDistinctApprover: false, status: 'pending', satisfiedBy: null, approverType: null, approverId: null,
     expiresAt: new Date(now.getTime() + 1000), decidedAt: null, settledAt: null, result: null, createdAt: now,
   };
-  const repo = { lockById: vi.fn().mockResolvedValue(request), createDecision: vi.fn(),
+  const repo = { findById: vi.fn().mockResolvedValue(request), lockById: vi.fn().mockResolvedValue(request), createDecision: vi.fn(),
     transition: vi.fn().mockImplementation(async (_id, _from, patch) => ({ ...request, ...patch })) };
   const keys = new Set(['label.delete', 'approval.decide']);
   const permissions = { effectiveKeys: vi.fn().mockResolvedValue(keys) };
@@ -40,6 +40,51 @@ function setup() {
 }
 
 beforeEach(() => { vi.mocked(decideEligibility).mockReset().mockReturnValue({ ok: true, satisfiedBy: 'human' }); });
+
+it('AC-1: recordDecision records and approves without executing', async () => {
+  const s = setup();
+  const decided = await runWithActionContext({ actor: { type: 'USER', id: 'u1' }, origin: 'rest' },
+    () => s.service.recordDecision('r1', 'approve', null, now));
+
+  expect(decided).toMatchObject({ status: 'approved', decidedAt: now });
+  expect(s.repo.createDecision).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'r1', decision: 'approve' }));
+  expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'pending', expect.objectContaining({ status: 'approved' }));
+  expect(s.execution.execute).not.toHaveBeenCalled();
+});
+
+it('AC-2: decide records first and then executes an approval', async () => {
+  const s = setup();
+  const recordDecision = vi.spyOn(s.service, 'recordDecision');
+  await s.decide();
+  expect(recordDecision).toHaveBeenCalledExactlyOnceWith('r1', 'approve', null, now, undefined);
+  expect(recordDecision.mock.invocationCallOrder[0]).toBeLessThan(s.execution.execute.mock.invocationCallOrder[0] as number);
+  expect(s.repo.createDecision.mock.invocationCallOrder[0]).toBeLessThan(s.execution.execute.mock.invocationCallOrder[0] as number);
+  expect(s.execution.execute).toHaveBeenCalledExactlyOnceWith('r1');
+});
+
+it('AC-3: assertMayDecide reports eligibility refusals with their reason', async () => {
+  const s = setup();
+  vi.mocked(decideEligibility).mockReturnValue({ ok: false, reason: 'tier-too-low' });
+  await expect(runWithActionContext({ actor: { type: 'USER', id: 'u1' }, origin: 'rest' },
+    () => s.service.assertMayDecide('r1'))).rejects.toEqual(new ApprovalDecideForbiddenError('tier-too-low'));
+  expect(s.repo.createDecision).not.toHaveBeenCalled();
+  expect(s.repo.transition).not.toHaveBeenCalled();
+});
+
+it('AC-4: assertMayDecide permits an eligible actor without writing', async () => {
+  const s = setup();
+  await runWithActionContext({ actor: { type: 'USER', id: 'u1' }, origin: 'rest' },
+    () => s.service.assertMayDecide('r1'));
+  expect(s.repo.findById).toHaveBeenCalledExactlyOnceWith('r1');
+  expect(s.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, { projectId: 'p1' });
+  expect(s.repo.createDecision).not.toHaveBeenCalled();
+  expect(s.repo.transition).not.toHaveBeenCalled();
+});
+
+it('AC-5: assertMayDecide reports a missing request', async () => {
+  const s = setup(); s.repo.findById.mockResolvedValue(null);
+  await expect(s.service.assertMayDecide('missing')).rejects.toEqual(new ApprovalRequestNotFoundError('missing'));
+});
 
 it('AC-14: delegates the locked request, actor and exact scoped effective keys, mapping refusal', async () => {
   const s = setup();

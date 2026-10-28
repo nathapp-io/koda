@@ -4,7 +4,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { runWithActionContext, type ActionApproval, type ActionContextInput } from '../action-context/action-context';
 import { bookkeeping } from '../action-context/audit-coverage';
-import { PermissionService } from '../permissions/permission.service';
+import { holdsNarrowedDecide, PermissionService } from '../permissions/permission.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from './approval-command.registry';
 import { canonicalJson } from './canonical-json';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
@@ -124,7 +124,8 @@ export class ApprovalExecutionService {
 
     const scope = request.projectId === null ? 'global' : { projectId: request.projectId };
     const keys = await this.permissions.effectiveKeys(principal, scope);
-    return keys.has(request.permissionKey) || keys.has(`${request.permissionKey}${OWN_SUFFIX}`);
+    return keys.has(request.permissionKey) || keys.has(`${request.permissionKey}${OWN_SUFFIX}`) ||
+      (request.permissionKey === 'approval.decide' && holdsNarrowedDecide(keys));
   }
 
   /**

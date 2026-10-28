@@ -4,7 +4,7 @@ import { RunnerNotifier } from '../fleet/jobs/runner-notifier';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext, type ActionContext } from '../action-context/action-context';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
-import type { PermissionService } from '../permissions/permission.service';
+import { holdsNarrowedDecide, type PermissionService } from '../permissions/permission.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { approvalInputHash } from './approval-input';
@@ -58,6 +58,29 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it('AC-6: accepts a narrowed decide key when rechecking an approval.decide request', async () => {
+    const s = setup({ permissionKey: 'approval.decide' });
+    const command = configurableTestCommand('approval.decide');
+    s.registry.register(command.command);
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['approval.decide@label.*']));
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(command.state.calls).toEqual([{ labelId: 'l1' }]);
+  });
+
+  it('AC-7: does not use a narrowed decide key to recheck label.delete', async () => {
+    const s = setup();
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['approval.decide@label.*']));
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'permission-revoked' } });
+    expect(s.test.state.calls).toEqual([]);
+  });
+
+  it('AC-8: identifies narrowed decide keys but not the bare decide key', () => {
+    expect(holdsNarrowedDecide(new Set(['approval.decide@fleet.*']))).toBe(true);
+    expect(holdsNarrowedDecide(new Set(['approval.decide']))).toBe(false);
+  });
+
   it('runs the command under the request context and settles it executed', async () => {
     const s = setup({ onBehalfOf: null });
     let seen: ActionContext | undefined;
