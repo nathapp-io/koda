@@ -19,9 +19,9 @@ describe('ApprovalRouteCommands global policies', () => {
   });
 
   it('AC-9 registers the three global policy command variants', () => {
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.policyCreate)).toBeDefined();
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.policyUpdate)).toBeDefined();
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.policyDelete)).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:approval-policies.create')).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:approval-policies.update')).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:approval-policies.delete')).toBeDefined();
   });
 
   it('AC-10 rejects an empty update patch', () => {
