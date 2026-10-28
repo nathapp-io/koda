@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T15:27:25.903Z",
+  "updatedAt": "2026-10-28T15:38:26.515Z",
   "userStories": [
     {
       "id": "US-001",
@@ -323,14 +323,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Four registrations and three handlers extend the already-wired ticket class using existing transition methods; selecting the correct verify-fix key requires security-isolated TDD."
+        "reasoning": "Four registrations and three handlers extend the already-wired ticket class using existing transition methods; selecting the correct verify-fix key requires security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/tickets/ticket-route.commands.ts",
@@ -368,7 +371,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c506e354bedce3f07c08e94b6564ac0dac6cd691"
     },
     {
       "id": "US-006",
