@@ -60,6 +60,35 @@ koda() {
   HOME="$SMOKE_HOME" bun run --silent --cwd "$CLI_DIR" src/index.ts "$@" 2>&1 || true
 }
 
+# High-risk agent writes must wait under the shipped policy. Do not use koda()
+# here: it intentionally masks exit codes for the older output-only assertions.
+assert_approved_write() {
+  local desc="$1" key="$2"
+  shift 2
+  local output code request_id settled
+  output=$(HOME="$SMOKE_HOME" bun run --silent --cwd "$CLI_DIR" src/index.ts "$@" 2>&1)
+  code=$?
+  if [[ "$code" != "5" ]] || ! grep -Fq "Approval required: $key waits for agent approval" <<< "$output"; then
+    fail "$desc — expected approval pending (exit 5), got exit $code: $output"
+    return
+  fi
+  request_id=$(python3 -c 'import re,sys; m=re.search(r"\(request ([0-9a-f-]{36}),", sys.stdin.read()); print(m.group(1) if m else "")' <<< "$output")
+  if [[ -z "$request_id" ]]; then
+    fail "$desc — missing approval request id"
+    return
+  fi
+  ok "$desc waits for approval (exit 5)"
+  settled=$(curl -sf -X POST "$API_URL/api/approvals/$request_id/decisions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $JWT" \
+    -d '{"decision":"approve"}')
+  if python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("data",d); assert r["status"] == "executed" and r["permissionKey"] == sys.argv[1]' "$key" <<< "$settled"; then
+    ok "$desc executes after human approval"
+  else
+    fail "$desc — approval did not execute: $settled"
+  fi
+}
+
 # =============================================================================
 # STEP 0: Basic sanity
 # =============================================================================
@@ -314,13 +343,8 @@ assert "ticket close (admin override)" "close\|CLOSED\|success" "$CLOSE_OUT"
 log "Step 13: Ticket links..."
 koda ticket create --project koda --type BUG --title "Link test ticket" > /dev/null
 assert "koda ticket link"     "link\|success\|github"    "$(koda ticket link KODA-5 --url 'https://github.com/owner/repo/pull/42')"
-# unlink exits 0 with no output on success — check exit code instead
-UNLINK_EXIT=$(HOME="$SMOKE_HOME" bun run --silent --cwd "$CLI_DIR" src/index.ts ticket unlink KODA-5 --url 'https://github.com/owner/repo/pull/42' > /dev/null 2>&1; echo $?)
-if [[ "$UNLINK_EXIT" == "0" ]]; then
-  ok "koda ticket unlink"
-else
-  fail "koda ticket unlink — exit code $UNLINK_EXIT"
-fi
+assert_approved_write "koda ticket unlink" "ticket.link.remove" \
+  ticket unlink KODA-5 --url 'https://github.com/owner/repo/pull/42'
 
 # =============================================================================
 # STEP 14: Ticket labels (attach/detach)
@@ -328,7 +352,8 @@ fi
 log "Step 14: Ticket labels..."
 if [[ -n "$LABEL_ID" ]]; then
   assert "koda ticket label add"    "success\|added\|attach"   "$(koda ticket label add KODA-5 --label "$LABEL_ID")"
-  assert "koda ticket label remove" "success\|removed\|detach" "$(koda ticket label remove KODA-5 --label "$LABEL_ID")"
+  assert_approved_write "koda ticket label remove" "ticket.label.remove" \
+    ticket label remove KODA-5 --label "$LABEL_ID"
 else
   fail "koda ticket label add — skipped (no LABEL_ID)"
   fail "koda ticket label remove — skipped (no LABEL_ID)"
@@ -360,7 +385,8 @@ COMMENT_ID=$(echo "$COMMENT_CREATE_OUT" | python3 -c "import json,sys; d=json.lo
 assert "koda comment list"  "Great ticket\|GENERAL\|comment" "$(koda comment list KODA-7 --project koda)"
 if [[ -n "$COMMENT_ID" ]]; then
   assert "koda comment update" "updated\|Edited by smoke\|success" "$(koda comment update --id "$COMMENT_ID" --body 'Edited by smoke')"
-  assert "koda comment delete" "deleted\|success\|removed" "$(koda comment delete --id "$COMMENT_ID" --force)"
+  assert_approved_write "koda comment delete" "comment.delete" \
+    comment delete --id "$COMMENT_ID" --force
 else
   fail "koda comment update — skipped (no COMMENT_ID)"
   fail "koda comment delete — skipped (no COMMENT_ID)"
