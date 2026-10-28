@@ -142,8 +142,8 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
-  it('AC-11: assigns project ticket creation to gate-core-domains', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets')).toBe('gate-core-domains');
+  it('AC-11: assigns memory creation to gate-core-domains', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /memory')).toBe('gate-core-domains');
   });
 
   it('US-001 AC-2: assigns invite resend to gate-secret', () => {
