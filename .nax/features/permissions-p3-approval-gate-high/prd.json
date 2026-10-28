@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T09:05:33.951Z",
+  "updatedAt": "2026-10-28T09:15:39.014Z",
   "userStories": [
     {
       "id": "US-001",
@@ -186,14 +186,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three domain modules and destructive analytics integrate deferred authorization, DTO validation and forge failures; security override requires strict isolation."
+        "reasoning": "Three domain modules and destructive analytics integrate deferred authorization, DTO validation and forge failures; security override requires strict isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/repos/fleet-repos.service.ts",
@@ -245,7 +248,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "df37a1a4038b8f578ea673c74f23ef6bc931681b"
     },
     {
       "id": "US-004",
