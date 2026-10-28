@@ -1,3 +1,4 @@
+import { ProjectNotFoundPrefix } from '../projects/project-not-found-prefix.decorator';
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
@@ -172,6 +173,7 @@ export class RagController {
   }
 
   @Delete('documents/:sourceId')
+  @ProjectNotFoundPrefix('rag')
   @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)

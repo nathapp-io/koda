@@ -20,6 +20,13 @@ export interface IndexDocumentInput {
   createdBy?: KbCreator;
 }
 
+/** Operations valid only inside the project's shared LanceDB write mutex. */
+export interface KbDocumentWriteSession {
+  deleteBySource(source: string, sourceId: string): Promise<void>;
+  findSourceRowIds(source: string, sourceId: string): Promise<string[]>;
+  deleteRows(ids: readonly string[]): Promise<void>;
+}
+
 @Injectable()
 export class RagService {
   constructor(
@@ -29,6 +36,10 @@ export class RagService {
     @Optional() private readonly graphStore?: GraphStoreService,
     @Optional() private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {}
+
+  withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true }): Promise<T> {
+    return this.vectorStore.withDocumentWriteLock(projectId, work, options);
+  }
 
   clearProjectCaches(projectId: string): void {
     this.vectorStore.clearProjectCaches(projectId);

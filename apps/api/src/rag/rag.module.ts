@@ -1,3 +1,4 @@
+import { KbDeletionJournal } from './kb-deletion-journal';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { KbDocumentDeletion } from './kb-document-deletion.service';
@@ -90,6 +91,7 @@ class EntityStoreWarmup implements OnModuleInit {
     },
     RagService,
     KbDocumentDeletion,
+    KbDeletionJournal,
     KbRouteCommands,
     VectorStore,
     EmbeddingService,

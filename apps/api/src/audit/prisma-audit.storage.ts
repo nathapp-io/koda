@@ -18,7 +18,7 @@ export class PrismaAuditStorage implements IAuditStorage {
     if (!metadata.origin) this.invalid('metadata.origin');
     if (!metadata.approval) this.invalid('metadata.approval');
     const approval = metadata.approval;
-    await this.repository.create({
+    const record: AuditEntryRecord = {
       key: entry.action,
       resourceType: entry.resource,
       resourceId: entry.resourceId,
@@ -36,7 +36,9 @@ export class PrismaAuditStorage implements IAuditStorage {
       approverId: approval.approverId ?? null,
       approvalRequestId: approval.requestId ?? null,
       summary: metadata.summary ?? null,
-    });
+    };
+    if (metadata.recordId) await this.repository.createOnce({ ...record, id: metadata.recordId });
+    else await this.repository.create(record);
   }
 
   private invalid(field: string): never {

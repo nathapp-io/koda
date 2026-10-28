@@ -1,3 +1,4 @@
+import { PROJECT_NOT_FOUND_PREFIX } from './project-not-found-prefix.decorator';
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -31,7 +32,10 @@ export class ProjectMembershipGuard implements CanActivate {
     if (!slug) return true;
     if (!req.user) throw new ForbiddenAppException({}, 'projects');
 
-    const projectId = await this.access.findProjectIdBySlug(slug);
+    const prefix = this.reflector.getAllAndOverride<'projects' | 'rag' | undefined>(PROJECT_NOT_FOUND_PREFIX, [ctx.getHandler(), ctx.getClass()]);
+    const projectId = prefix
+      ? await this.access.findProjectIdBySlug(slug, prefix)
+      : await this.access.findProjectIdBySlug(slug);
     await this.access.resolveMembership(projectId, req.user);
     req.projectContext = { project: { id: projectId, slug } };
     return true;

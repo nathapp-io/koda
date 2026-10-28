@@ -82,6 +82,7 @@ export interface AuditDisplayNames {
 
 /** What AuditRecorder puts in the package entry's `metadata`, and PrismaAuditStorage reads back. */
 export interface KodaAuditMetadata {
+  recordId?: string;
   projectId: string | null;
   onBehalfOf: { type: ActorType; id: string } | null;
   origin: ActionOrigin;

@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
+import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { RagService } from '../../../src/rag/rag.service';
+import { KbDeletionJournal } from '../../../src/rag/kb-deletion-journal';
+import { AUDIT_STORAGE, type IAuditStorage } from '@nathapp/nestjs-audit';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -55,6 +58,7 @@ describeDb('gated KB document deletion', () => {
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {
     resetThrottle(app);
+    await app.get(KbDeletionJournal).recover();
     sourceId = `gated-${++serial}`;
     await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
@@ -72,15 +76,53 @@ describeDb('gated KB document deletion', () => {
     expect(audits.map(row => row.resourceId).sort()).toEqual([`doc:${sourceId}`, `manual:${sourceId}`]);
     for (const row of audits) expect(row).toMatchObject({ actorType: 'AGENT', actorId: agent.id, approvalRequestId: id });
   });
+  it('F3: audit storage failure after deletion is durably repaired without deleting a replacement', async () => {
+    await seed();
+    const id = pending(await remove());
+    const storage = app.get<IAuditStorage>(AUDIT_STORAGE);
+    const original = storage.record.bind(storage);
+    const failAudit = vi.spyOn(storage, 'record').mockImplementation(async entry => {
+      if (entry.action === 'kb.document.delete') throw new Error('injected audit-storage failure');
+      return original(entry);
+    });
+    try {
+      expect(await approve(id)).toMatchObject({ status: 'failed' });
+      expect(await rag.findSourceCreators(world.projectId, 'doc', sourceId)).toEqual([]);
+      expect(await db.auditEntry.count({ where: { key: 'kb.document.delete', approvalRequestId: id } })).toBe(0);
+    } finally { failAudit.mockRestore(); }
+    await rag.indexDocument(world.projectId, { source: 'doc', sourceId, content: 'replacement', metadata: {}, createdBy: { type: 'USER', id: world.ids.dev } });
+    await app.get(KbDeletionJournal).recover();
+    expect(await creators()).toEqual([[{ type: 'USER', id: world.ids.dev }], []]);
+    const where = { key: 'kb.document.delete', approvalRequestId: id };
+    const audits = await db.auditEntry.findMany({ where });
+    expect(audits).toHaveLength(2);
+    for (const row of audits) expect(row).toMatchObject({ actorType: 'AGENT', actorId: agent.id, approvalRequestId: id });
+    await app.get(KbDeletionJournal).recover();
+    expect(await db.auditEntry.count({ where })).toBe(2);
+  });
+  it('F3: replay after a successful audit commit is idempotent', async () => {
+    await seed(); const id = pending(await remove());
+    expect(await approve(id)).toMatchObject({ status: 'executed' });
+    await app.get(KbDeletionJournal).recover();
+    expect(await db.auditEntry.count({ where: { key: 'kb.document.delete', approvalRequestId: id } })).toBe(2);
+  });
   it('AC-4: ownership refusal precedes opening', async () => {
     await seed(); const res = await remove(own.apiKey);
     expect(res.status).toBe(403); expect(res.body.ret).toBe(40003); expect(res.body.message).toBe(permissionsText);
     expect(await db.approvalRequest.count()).toBe(0);
   });
   it('AC-5: missing project precedes opening with 404', async () => {
-    const res = await remove(world.tokens.root, 'missing');
-    expect(res.status).toBe(404); expect(res.body.ret).toBe(404);
-    expect(await db.approvalRequest.count()).toBe(0);
+    const lookup = vi.spyOn(app.get(ProjectAccessService), 'findProjectIdBySlug');
+    try {
+      const res = await remove(world.tokens.root, 'missing');
+      expect(res.status).toBe(404); expect(res.body.ret).toBe(404);
+      const ragText = JSON.parse(readFileSync(join(__dirname, '../../../src/i18n/en/rag.json'), 'utf8')) as Record<string, string>;
+      expect(res.body.message).toBe(ragText['404']);
+      // projects.404 currently has identical prose: assert the selected policy too.
+      expect(lookup).toHaveBeenCalledWith('missing', 'rag');
+      await expect(lookup.mock.results[0]?.value).rejects.toMatchObject({ response: { prefix: 'rag' } });
+      expect(await db.approvalRequest.count()).toBe(0);
+    } finally { lookup.mockRestore(); }
   });
   it('AC-6: changed ownership fails at execution and keeps replacement rows', async () => {
     for (const source of ['doc', 'manual']) await rag.indexDocument(world.projectId, { source, sourceId, content: 'own', metadata: {}, createdBy: { type: 'AGENT', id: own.id } });

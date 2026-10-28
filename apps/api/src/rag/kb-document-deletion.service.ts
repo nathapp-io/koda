@@ -1,3 +1,4 @@
+import { KbDeletionJournal } from './kb-deletion-journal';
 import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -13,6 +14,7 @@ export class KbDocumentDeletion {
     private readonly rag: RagService,
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    private readonly journal: KbDeletionJournal,
   ) {}
 
   async preflight(principal: KodaPrincipal, projectId: string, sourceId: string, source?: KbDeleteSource) {
@@ -27,17 +29,18 @@ export class KbDocumentDeletion {
   }
 
   async delete(principal: KodaPrincipal, projectId: string, sourceId: string, source?: KbDeleteSource): Promise<void> {
-    const creatorsBySource = await this.preflight(principal, projectId, sourceId, source);
-    const sources = source ? [source] : [...KB_DELETE_SOURCES];
-    for (const [index, source] of sources.entries()) {
-      await this.rag.deleteBySource(projectId, source, sourceId);
-      const creators = creatorsBySource[index] ?? [];
-      if (creators.length > 0) {
-        await this.audit.audited(async () => undefined, () => ({
-          key: 'kb.document.delete', resourceType: 'kb-document', resourceId: `${source}:${sourceId}`,
-          projectId, summary: `deleted ${creators.length} ${source} rows`,
-        }));
+    await this.rag.withDocumentWriteLock(projectId, async session => {
+      // Indexing uses this same mutex: no replacement can slip between the recheck and either delete.
+      await this.preflight(principal, projectId, sourceId, source);
+      const sources = source ? [source] : [...KB_DELETE_SOURCES];
+      const intent = await this.journal.prepare(projectId, sourceId, sources, session);
+      for (const source of sources) {
+        await session.deleteBySource(source, sourceId);
+        const entry = intent.sources.find(item => item.source === source)?.audit;
+        if (entry) await this.audit.audited(async () => undefined, () => entry);
       }
-    }
+      // Do not remove the receipt here: an enclosing approval transaction may still roll back.
+      // The independent journal sweeper commits the idempotent audit before acknowledging it.
+    });
   }
 }

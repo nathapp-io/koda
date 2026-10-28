@@ -14,6 +14,13 @@ describe('PrismaAuditStorage', () => {
     const create = vi.fn<(record: AuditEntryRecord) => Promise<unknown>>().mockResolvedValue({});
     return { create, storage: new PrismaAuditStorage({ create } as never) };
   };
+  it('F3: routes stable journal ids to conflict-safe insertion for replay', async () => {
+    const create = vi.fn(); const createOnce = vi.fn().mockResolvedValue(undefined);
+    const storage = new PrismaAuditStorage({ create, createOnce } as never);
+    await storage.record({ ...base, metadata: { ...base.metadata, recordId: 'journal-audit-id' } } as PackageAuditEntry);
+    expect(createOnce).toHaveBeenCalledWith(expect.objectContaining({ id: 'journal-audit-id', key: 'ticket.create' }));
+    expect(create).not.toHaveBeenCalled();
+  });
   it('AC-1: maps action, resource, actor and correlation fields', async () => {
     const { create, storage } = setup(); await storage.record(base);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ key: 'ticket.create', resourceType: 'ticket', resourceId: 't1', actorType: 'USER', actorId: 'u1', correlationId: 'c1' }));

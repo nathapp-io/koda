@@ -15,9 +15,9 @@ export class ProjectAccessService {
     private readonly permissions: PermissionService,
   ) {}
 
-  async findProjectIdBySlug(slug: string): Promise<string> {
+  async findProjectIdBySlug(slug: string, notFoundPrefix: 'projects' | 'rag' = 'projects'): Promise<string> {
     const project = await this.projectRepo.findBySlug(slug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, notFoundPrefix);
     return project.id;
   }
 

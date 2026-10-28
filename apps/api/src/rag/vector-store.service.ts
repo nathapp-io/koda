@@ -1,3 +1,4 @@
+import type { KbDocumentWriteSession } from './rag.service';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -486,6 +487,42 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
           sourceProjectId: projectId,
         },
       };
+    });
+  }
+
+  /** Runs an ownership recheck and its mutations in the shared project-table write critical section. */
+  async withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true }): Promise<T> {
+    // Recovery owns an already-authorized, durable row-id intent. A later project soft-delete must
+    // not prevent its audit from being repaired. It never widens to source ids or runs new writes.
+    const table = options?.recovery
+      ? await this.lanceTable.getOrCreateTable(`project_${projectId}`)
+      : await this.getOrCreateTable(projectId);
+    return this.lanceTable.exclusive(`project_${projectId}`, async () => {
+      let active = true;
+      const check = (...values: string[]) => {
+        if (!active) throw new Error('KB write session used outside its lock');
+        if (values.some(value => !isSafeFilterValue(value))) throw new ValidationAppException();
+      };
+      try {
+        return await work({
+          deleteBySource: async (source, sourceId) => {
+            if (options?.recovery) throw new Error('Recovery may delete only captured row ids');
+            check(source, sourceId);
+            await table.delete(sourceRowFilter(source, sourceId));
+          },
+          findSourceRowIds: async (source, sourceId) => {
+            check(source, sourceId);
+            const count: number = await table.countRows();
+            if (count === 0) return [];
+            const rows: LanceRecord[] = await whereIfSupported(table.query(), sourceRowFilter(source, sourceId)).limit(count).toArray();
+            return rows.filter(row => row.source === source && row.source_id === sourceId).map(row => row.id);
+          },
+          deleteRows: async ids => {
+            check(...ids);
+            for (const id of ids) await table.delete(`id = '${id}'`);
+          },
+        });
+      } finally { active = false; }
     });
   }
 
