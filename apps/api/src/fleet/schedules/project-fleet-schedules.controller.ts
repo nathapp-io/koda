@@ -3,6 +3,10 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { SCHEDULE_ROUTE_VARIANTS } from './schedule-route.commands';
 import { PermissionService } from '../../permissions/permission.service';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
@@ -34,6 +38,7 @@ export class ProjectFleetSchedulesController {
   constructor(
     private readonly schedules: SchedulesService,
     private readonly permissions: PermissionService,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   @Get()
@@ -87,13 +92,18 @@ export class ProjectFleetSchedulesController {
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.schedule.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Delete a schedule; its jobs are kept (fleet.schedule.delete: the owner, or the any-row key)' })
   @ApiResponse({ status: 204, description: 'Deleted' })
   @ApiResponse({ status: 403, description: 'The caller neither holds fleet.schedule.delete nor created the schedule' })
   @ApiResponse({ status: 404, description: 'Schedule not found in this project' })
-  async remove(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal): Promise<void> {
-    const canAdminister = await this.canAdminister(principal, 'fleet.schedule.delete', ctx);
-    await this.schedules.remove(principal.id, ctx.project.id, id, canAdminister);
+  async remove(@Param('id') id: string, @CurrentProject() ctx: ProjectContext): Promise<void> {
+    const outcome = await this.routeGate.run<null>({
+      key: 'fleet.schedule.delete', variant: SCHEDULE_ROUTE_VARIANTS.delete,
+      projectId: ctx.project.id, input: { projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 
   @Post(':id/enable')

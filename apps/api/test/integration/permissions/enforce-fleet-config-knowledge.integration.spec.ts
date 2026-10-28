@@ -311,21 +311,25 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     );
   }, TIMEOUT);
 
-  it('AC-7: a DEVELOPER agent queues a drift check (201)', async () => {
+  it('AC-7: a DEVELOPER agent requests a drift check (202)', async () => {
     await cancelActiveConfigJobs();
 
-    const res = await postAs('p1-developer-agent', `${repoBase()}/drift-checks`).expect(201);
+    const res = await postAs('p1-developer-agent', `${repoBase()}/drift-checks`).expect(202);
 
-    expect(data<{ job: { command: string } }>(res).job.command).toBe('CONFIG_DRIFT');
+    expect(data<{ permissionKey: string }>(res).permissionKey).toBe('fleet.repo.drift.check');
   }, TIMEOUT);
 
   it("AC-8: that agent's drift check records the job as requested by the agent", async () => {
     await cancelActiveConfigJobs();
 
-    const created = data<{ job: { id: string } }>(await postAs('p1-developer-agent', `${repoBase()}/drift-checks`).expect(201)).job;
+    const pending = data<{ id: string }>(await postAs('p1-developer-agent', `${repoBase()}/drift-checks`).expect(202));
+    const approved = data<{ status: string; result: { job: { id: string } } }>(
+      await postAs('root', `/api/approvals/${pending.id}/decisions`, { decision: 'approve' }).expect(200),
+    );
+    expect(approved.status).toBe('executed');
 
-    await expect(db.fleetJob.findUniqueOrThrow({ where: { id: created.id } })).resolves.toEqual(
-      expect.objectContaining({ requestedById: developerAgentId, requestedByType: 'AGENT' }),
+    await expect(db.fleetJob.findUniqueOrThrow({ where: { id: approved.result.job.id } })).resolves.toEqual(
+      expect.objectContaining({ command: 'CONFIG_DRIFT', requestedById: developerAgentId, requestedByType: 'AGENT' }),
     );
   }, TIMEOUT);
 

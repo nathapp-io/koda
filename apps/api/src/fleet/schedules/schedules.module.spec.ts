@@ -5,6 +5,7 @@ import { ProjectFleetSchedulesController } from './project-fleet-schedules.contr
 import { ScheduleProgressService } from './schedule-progress.service';
 import { ScheduleTicker } from './schedule-ticker';
 import { SchedulesModule } from './schedules.module';
+import { ScheduleRouteCommands } from './schedule-route.commands';
 import { SchedulesService } from './schedules.service';
 
 /** DI guard, as budgets.module.spec.ts: a missing provider or an import cycle fails `bun run test`. */
@@ -12,6 +13,7 @@ describe('SchedulesModule', () => {
   it('compiles and resolves the ticker, the service, the progress service and the controller', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, SchedulesModule] }).compile();
     try {
+      expect(moduleRef.get(ScheduleRouteCommands)).toBeDefined();
       expect(moduleRef.get(ScheduleTicker)).toBeDefined();
       expect(moduleRef.get(SchedulesService)).toBeDefined();
       expect(moduleRef.get(ScheduleProgressService, { strict: false })).toBeDefined();
