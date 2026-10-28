@@ -58,6 +58,30 @@ describe('TicketRouteCommands', () => {
     expect(loader.forContext).toHaveBeenCalledOnce();
   });
 
+  it('US-005 AC-9/10/11: registers review commands and executes the selected transition with the loaded principal', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'agent-review' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const transitions = {
+      verifyFix: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'CLOSED' } }),
+      close: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'CLOSED' } }),
+      reject: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'REJECTED' } }),
+    };
+    new TicketRouteCommands(registry, {} as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    const approve = registry.get('ticket.transition.verify-fix.approve', 'rest:tickets.verify-fix');
+    const returning = registry.get('ticket.transition.verify-fix.return', 'rest:tickets.verify-fix');
+    expect(approve).toBeDefined();
+    expect(returning).toBeDefined();
+    expect(registry.get('ticket.transition.close', 'rest:tickets.close')).toBeDefined();
+    expect(registry.get('ticket.transition.reject', 'rest:tickets.reject')).toBeDefined();
+    if (!approve || !returning) throw new Error('Missing verify-fix command');
+    const input = { slug: 'alpha', ref: 'AL-1', body: 'good' };
+    expect(await approve.execute(approve.parse(input))).toEqual({ ref: 'AL-1', status: 'CLOSED' });
+    expect(await returning.execute(returning.parse(input))).toEqual({ ref: 'AL-1', status: 'CLOSED' });
+    expect(transitions.verifyFix).toHaveBeenNthCalledWith(1, 'alpha', 'AL-1', 'good', true, principal);
+    expect(transitions.verifyFix).toHaveBeenNthCalledWith(2, 'alpha', 'AL-1', 'good', false, principal);
+  });
+
   it('AC-8: registers create and update route commands', () => {
     const registry = new ApprovalCommandRegistry();
     const loader = { forContext: vi.fn() };

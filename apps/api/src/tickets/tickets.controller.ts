@@ -375,6 +375,7 @@ export class TicketsController {
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires(['ticket.transition.verify-fix.approve', 'ticket.transition.verify-fix.return'], { mode: 'any' })
+  @ApprovalGated()
   @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
   @ApiQuery({ name: 'approve', type: Boolean, required: false, description: 'true closes the ticket; false (default) returns it to IN_PROGRESS' })
   @ApiResponse({ status: 200, description: 'Fix reviewed', type: TicketResponseDto })
@@ -392,16 +393,20 @@ export class TicketsController {
     // M1: validate the required comment body before any approve/reject branching.
     const commentBody = this.requireCommentBody(dto.body);
     const isApproved = approve === 'true' || approve === true;
-    const result = await this.verifyFixTicket(
-      slug, ref, commentBody, isApproved, principal,
-    );
-    return JsonResponse.Ok(result.ticket);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: isApproved ? 'ticket.transition.verify-fix.approve' : 'ticket.transition.verify-fix.return',
+      variant: TICKET_ROUTE_VARIANTS.verifyFix,
+      projectId: project.project.id, input: { slug, ref, body: commentBody },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/close')
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.transition.close')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Close a ticket (reason required, written as a GENERAL comment)' })
   @ApiResponse({ status: 200, description: 'Ticket closed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition or blank reason' })
@@ -414,22 +419,20 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    // Permissions P1 (US-003): the key check is the guard's — a caller without ticket.transition.close
-    // is refused before this handler runs, and the service adds no check of its own (no other caller
-    // reaches close()).
-    const result = await this.closeTicket(
-      slug,
-      ref,
-      this.requireCommentBody(dto.body),
-      principal,
-    );
-    return JsonResponse.Ok(result.ticket);
+    const body = this.requireCommentBody(dto.body);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.transition.close', variant: TICKET_ROUTE_VARIANTS.close,
+      projectId: project.project.id, input: { slug, ref, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/reject')
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.transition.reject')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Reject a ticket (CREATED or VERIFIED → REJECTED)' })
   @ApiResponse({ status: 200, description: 'Ticket rejected', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
@@ -442,9 +445,12 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.rejectTicket(
-      slug, ref, this.requireCommentBody(dto.body), principal,
-    );
-    return JsonResponse.Ok(result.ticket);
+    const body = this.requireCommentBody(dto.body);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.transition.reject', variant: TICKET_ROUTE_VARIANTS.reject,
+      projectId: project.project.id, input: { slug, ref, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

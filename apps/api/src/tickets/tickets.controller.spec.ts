@@ -667,6 +667,21 @@ describe('TicketsController', () => {
     });
   });
 
+  describe('US-005 verify-fix approval route gate', () => {
+    it.each([
+      ['true', 'ticket.transition.verify-fix.approve'],
+      [true, 'ticket.transition.verify-fix.approve'],
+      ['false', 'ticket.transition.verify-fix.return'],
+      [undefined, 'ticket.transition.verify-fix.return'],
+    ] as const)('gates approve=%s with the matching key and frozen input', async (approve, key) => {
+      await controller.verifyFix('alpha', 'AL-1', { body: 'good' }, approve, mockAgent, adminProject);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key, variant: 'rest:tickets.verify-fix', projectId: 'proj-1',
+        input: { slug: 'alpha', ref: 'AL-1', body: 'good' },
+      });
+    });
+  });
+
   describe('POST :ref/close (reason required, key checked by RequiresGuard)', () => {
     const project = { project: { id: 'p1', slug: 'koda' } };
 
@@ -677,7 +692,8 @@ describe('TicketsController', () => {
 
       await controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'why' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
     it('lets an agent through to the service (the guard, not the principal type, decides)', async () => {
@@ -685,7 +701,8 @@ describe('TicketsController', () => {
 
       await controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockAgent);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'why' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
     it.each([undefined, '', '   '])('400 for a blank reason %j, without reaching the service', async (body) => {
@@ -706,8 +723,9 @@ describe('TicketsController', () => {
     it('closes with a reason, passing the principal itself', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
       const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project);
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', mockMemberUser);
-      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'dup' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+      expect(res).toEqual(expect.objectContaining({ data: mockTicket }));
     });
   });
 });
