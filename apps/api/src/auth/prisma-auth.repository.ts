@@ -87,6 +87,26 @@ export class PrismaAuthRepository {
     return m.tokenVersion;
   }
 
+  async findAgentById(id: string): Promise<AgentDomain | null> {
+    const agent = await this.db.agent.findUnique({
+      where: { id },
+      select: { id: true, slug: true, status: true, apiKeyHash: true },
+    });
+    return agent;
+  }
+
+  async hasGlobalAdminBinding(userId: string): Promise<boolean> {
+    const count = await this.db.roleBinding.count({
+      where: {
+        principalType: 'USER',
+        principalId: userId,
+        projectId: null,
+        role: { key: { in: ['owner', 'admin'] } },
+      },
+    });
+    return count > 0;
+  }
+
   async findAgentByKeyHash(keyHash: string): Promise<AgentDomain | null> {
     const m = await this.db.agent.findFirst({ where: { apiKeyHash: keyHash } });
     if (!m) return null;
