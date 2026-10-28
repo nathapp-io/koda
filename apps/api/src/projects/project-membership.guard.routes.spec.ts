@@ -1,4 +1,5 @@
 import { KbDocumentDeletion } from '../rag/kb-document-deletion.service';
+import { disableEnvProxy } from '../../test/helpers/no-env-proxy';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock } from 'vitest';
 /**
@@ -234,6 +235,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   });
 
   beforeEach(() => {
+    // Re-apply the hermetic loopback setup in this HTTP suite in case another test
+    // in the same worker restored or changed proxy variables after test-setup ran.
+    disableEnvProxy();
     vi.clearAllMocks();
 
     currentPrincipal = developerUser;
