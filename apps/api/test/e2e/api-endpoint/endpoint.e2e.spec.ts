@@ -20,7 +20,7 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
-import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
+import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
@@ -784,6 +784,22 @@ describeIntegration('API Integration Tests', () => {
       labelId = data.id;
     });
 
+    it('AC-7 (US-011): agent label.create under a wait policy returns exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['label.create', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(prismaClient(), 'label.create', project.id);
+      try {
+        await request(httpServer)
+          .post(`/api/projects/${projectSlug}/labels`)
+          .set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ name: 'approval-gated-label' })
+          .expect(202);
+      } finally {
+        await prismaClient().approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
     it('GET /api/projects/:slug/labels — lists labels', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/labels`)
@@ -1016,6 +1032,28 @@ describeIntegration('API Integration Tests', () => {
         .delete(`/api/comments/${ownCommentId}`)
         .set('Authorization', `Bearer ${agentApiKey}`)
         .expect(202);
+    });
+
+    it('AC-8 (US-011): agent comment.update.own under a comment.update wait policy returns exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.create', 'comment.update.own', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const ownComment = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/comments`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ body: 'Own comment for update approval coverage.', type: 'GENERAL' })
+        .expect(201);
+      const ownCommentId = body<{ id: string }>(ownComment).id;
+      const policy = await seedWaitPolicy(prismaClient(), 'comment.update', project.id);
+      try {
+        await request(httpServer)
+          .patch(`/api/comments/${ownCommentId}`)
+          .set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ body: 'Updated after approval.' })
+          .expect(202);
+      } finally {
+        await prismaClient().approvalPolicy.delete({ where: { id: policy.id } });
+      }
     });
   });
 

@@ -134,6 +134,14 @@ describe('permission contract checker', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
   });
 
+  it('US-011 AC-3: holds exactly 25 core, 36 fleet and 8 secret rollout routes', () => {
+    const counts = [...PENDING_GATE_ROUTES.values()].reduce<Record<string, number>>((result, feature) => {
+      result[feature] = (result[feature] ?? 0) + 1;
+      return result;
+    }, {});
+    expect(counts).toEqual({ 'gate-core-domains': 25, 'gate-fleet': 36, 'gate-secret': 8 });
+  });
+
   it('AC-1 (US-010): has no gate-high pending assignments', () => {
     expect([...PENDING_GATE_ROUTES.values()]).not.toContain('gate-high');
   });
