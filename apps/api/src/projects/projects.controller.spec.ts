@@ -147,7 +147,7 @@ describe('ProjectsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: mockProject }) } },
         { provide: ProjectsService, useValue: projectsService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: AgentsService, useValue: agentsService },
@@ -174,7 +174,13 @@ describe('ProjectsController', () => {
 
       const result = await controller.create({ name: 'Alpha', slug: 'alpha', key: 'ALP' } as any);
 
-      expect(projectsService.create).toHaveBeenCalled();
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.create',
+        variant: 'rest:projects.create',
+        projectId: null,
+        input: { name: 'Alpha', slug: 'alpha', key: 'ALP' },
+      });
+      expect(projectsService.create).not.toHaveBeenCalled();
       expect((result as any).data).toEqual(mockProject);
     });
   });
@@ -254,10 +260,17 @@ describe('ProjectsController', () => {
     it('updates a project', async () => {
       projectsService.update.mockResolvedValue({ ...mockProject, name: 'Updated' } as any);
 
-      const result = await controller.update('alpha', { name: 'Updated' } as any);
+      const projectContext: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' } };
+      const result = await controller.update('alpha', { name: 'Updated' } as any, projectContext);
 
-      expect(projectsService.update).toHaveBeenCalledWith('alpha', { name: 'Updated' });
-      expect((result as any).data.name).toBe('Updated');
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.update',
+        variant: 'rest:projects.update',
+        projectId: 'proj-1',
+        input: { slug: 'alpha', patch: { name: 'Updated' } },
+      });
+      expect(projectsService.update).not.toHaveBeenCalled();
+      expect((result as any).data).toEqual(mockProject);
     });
   });
 
