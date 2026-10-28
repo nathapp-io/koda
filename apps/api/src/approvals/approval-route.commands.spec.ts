@@ -33,9 +33,9 @@ describe('ApprovalRouteCommands global policies', () => {
   });
 
   it('AC-10 registers the three project policy command variants', () => {
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyCreate)).toBeDefined();
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyUpdate)).toBeDefined();
-    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyDelete)).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:project-approval-policies.create')).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:project-approval-policies.update')).toBeDefined();
+    expect(registry.get('approval.policy.manage', 'rest:project-approval-policies.delete')).toBeDefined();
   });
 
   it('AC-8 rechecks project ownership when executing a deferred update', async () => {
