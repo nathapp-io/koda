@@ -21,6 +21,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
+import type { UpdateProjectDto } from './dto/update-project.dto';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
@@ -106,7 +107,18 @@ describe('PATCH /api/projects/:slug — the project brief (US-001)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        {
+          provide: ApprovalRouteGate,
+          inject: [ProjectsService],
+          useFactory: (service: ProjectsService) => ({
+            run: vi.fn(async (call: { variant?: string; input: unknown }) => ({
+              status: 'executed',
+              result: call.variant === 'rest:projects.update'
+                ? await service.update((call.input as { slug: string }).slug, (call.input as { patch: UpdateProjectDto }).patch)
+                : null,
+            })),
+          }),
+        },
         ProjectsService,
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         PrismaProjectRepository,

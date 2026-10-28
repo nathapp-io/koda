@@ -96,7 +96,22 @@ describe('US-004: project conflict responses', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        {
+          provide: ApprovalRouteGate,
+          inject: [ProjectsService],
+          useFactory: (service: ProjectsService) => ({
+            run: vi.fn(async (call: { variant?: string; input: unknown }) => {
+              if (call.variant === 'rest:projects.create') {
+                return { status: 'executed', result: await service.create(call.input as Parameters<ProjectsService['create']>[0]) };
+              }
+              if (call.variant === 'rest:projects.update') {
+                const input = call.input as { slug: string; patch: Parameters<ProjectsService['update']>[1] };
+                return { status: 'executed', result: await service.update(input.slug, input.patch) };
+              }
+              return { status: 'executed', result: null };
+            }),
+          }),
+        },
         ProjectsService,
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         ProjectAccessService,

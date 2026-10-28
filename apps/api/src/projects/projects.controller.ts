@@ -1,6 +1,8 @@
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { parseBody } from '../approvals/route/parse-body';
+import { parseRouteInput } from '../approvals/route/parse-route-input';
 import { PROJECT_ROUTE_VARIANTS } from './project-route.commands';
 import {
   Controller,
@@ -58,6 +60,7 @@ export class ProjectsController {
   @HttpCode(201)
   @UseGuards(RequiresGuard)
   @Requires('project.create')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Create a new project' })
   @ApiResponse({ status: 201, description: 'Project created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -65,8 +68,15 @@ export class ProjectsController {
   @ApiResponse({ status: 403, description: 'project.create is missing' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
   async create(@Body() createProjectDto: CreateProjectDto) {
-    const data = await this.projectsService.create(createProjectDto);
-    return JsonResponse.Ok(data);
+    const dto = parseBody(CreateProjectDto, createProjectDto);
+    const outcome = await this.routeGate.run<ProjectResponseDto>({
+      key: 'project.create',
+      variant: PROJECT_ROUTE_VARIANTS.create,
+      projectId: null,
+      input: dto,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get()
@@ -109,6 +119,7 @@ export class ProjectsController {
   @Patch(':slug')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('project.update')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Update a project' })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -119,9 +130,18 @@ export class ProjectsController {
   async update(
     @Param('slug') slug: string,
     @Body() updateProjectDto: UpdateProjectDto,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.projectsService.update(slug, updateProjectDto);
-    return JsonResponse.Ok(data);
+    const { slug: parsedSlug } = parseRouteInput({ slug }, ['slug']);
+    const patch = parseBody(UpdateProjectDto, updateProjectDto ?? {});
+    const outcome = await this.routeGate.run<ProjectResponseDto>({
+      key: 'project.update',
+      variant: PROJECT_ROUTE_VARIANTS.update,
+      projectId: project.project.id,
+      input: { slug: parsedSlug, patch },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':slug')
