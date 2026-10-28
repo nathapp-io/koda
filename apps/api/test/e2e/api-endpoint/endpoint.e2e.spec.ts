@@ -373,6 +373,25 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/approvals/:id/cancel without credentials returns 401', async () => {
       await request(httpServer).post('/api/approvals/unknown/cancel').send({}).expect(401);
     });
+    it('POST /api/approvals/:id/decisions immediately rejects and keeps the non-pending conflict', async () => {
+      const row = await prismaClient().approvalRequest.create({ data: {
+        permissionKey: 'label.delete', actorType: 'USER', actorId: memberUserId,
+        origin: 'rest', correlationId: 'decision-endpoint', input: {}, inputHash: 'decision-endpoint',
+        requiredMode: 'agent', onTimeout: 'reject', approverMustHoldAction: true,
+        requireDistinctApprover: false, expiresAt: new Date(Date.now() + 60_000),
+      } });
+      try {
+        const response = await request(httpServer).post(`/api/approvals/${row.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'reject', comment: 'no' }).expect(200);
+        expect(body(response)).toMatchObject({ id: row.id, status: 'rejected', decisions: [{ decision: 'reject', comment: 'no' }] });
+        const again = await request(httpServer).post(`/api/approvals/${row.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'approve' }).expect(409);
+        refusal(again, 'approvals.notPending.409', { status: 'rejected' });
+      } finally { await prismaClient().approvalRequest.delete({ where: { id: row.id } }); }
+    });
+    it('POST /api/approvals/:id/decisions without credentials returns 401', async () => {
+      await request(httpServer).post('/api/approvals/unknown/decisions').send({ decision: 'approve' }).expect(401);
+    });
   });
 
   describe('Global approval policies', () => {

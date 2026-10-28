@@ -6,7 +6,9 @@ import { ApprovalDecisionService } from './approval-decision.service';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { ApprovalPolicyService } from './approval-policy.service';
 import { ApprovalRequestQueries } from './approval-request.queries';
-import { ApprovalPolicyNotFoundError } from './domain/approval.errors';
+import { ApprovalPolicyNotFoundError, ApprovalRequestExpiredError, ApprovalRequestNotPendingError, DeferredDecisionRefusedError } from './domain/approval.errors';
+import type { ApprovalRequestRecord } from './domain/approval.domain';
+import { ApprovalRequestSummaryDto } from './dto/approval-request.dto';
 import { CreateApprovalPolicyDto, UpdateApprovalPolicyDto } from './dto/approval-policy.dto';
 import { toPolicySubject } from './dto/approval-policy-subject.dto';
 import { parseBody } from './route/parse-body';
@@ -19,10 +21,12 @@ export const APPROVAL_ROUTE_VARIANTS = {
   projectPolicyCreate: 'rest:project-approval-policies.create',
   projectPolicyUpdate: 'rest:project-approval-policies.update',
   projectPolicyDelete: 'rest:project-approval-policies.delete',
+  decide: 'rest:approvals.decide',
 } as const;
 
 const POLICY_KEY = 'approval.policy.manage';
 
+type DecideInput = { requestId: string; decision: 'approve' | 'reject'; comment: string | null; params?: unknown };
 type PolicyUpdateInput = { id: string; patch: UpdateApprovalPolicyDto };
 type PolicyDeleteInput = { id: string };
 type ProjectPolicyCreateInput = { projectId: string; policy: CreateApprovalPolicyDto };
@@ -34,14 +38,45 @@ export class ApprovalRouteCommands implements OnModuleInit {
   constructor(
     private readonly registry: ApprovalCommandRegistry,
     private readonly policies: ApprovalPolicyService,
-    // Kept in the shared constructor for the project-policy and decide variants added subsequently.
-    _decisions: ApprovalDecisionService,
-    _execution: ApprovalExecutionService,
+    private readonly decisions: ApprovalDecisionService,
+    private readonly execution: ApprovalExecutionService,
     _queries: ApprovalRequestQueries,
     private readonly principalLoader: ActorPrincipalLoader,
   ) {}
 
   onModuleInit(): void {
+    const decideCommand = routeCommand<DecideInput, ApprovalRequestRecord>({
+      key: 'approval.decide',
+      variant: APPROVAL_ROUTE_VARIANTS.decide,
+      parse: (input) => {
+        const envelope = requireObject(input);
+        const requestId = requireId(envelope.requestId);
+        const { decision, comment, params } = envelope;
+        if ((decision !== 'approve' && decision !== 'reject') || (comment !== null && typeof comment !== 'string')) {
+          throw new ValidationAppException({}, 'approvals.invalidInput');
+        }
+        return { requestId, decision, comment: typeof comment === 'string' ? comment : null, ...(params === undefined ? {} : { params }) };
+      },
+      run: async (_principal, { requestId, decision, comment, params }) => {
+        try {
+          return await this.decisions.recordDecision(requestId, decision, comment, new Date(), params);
+        } catch (error) {
+          // The engine treats its own not-pending row as a concurrency refusal. An inner row
+          // settling meanwhile must instead fail this outer request, without losing its decision.
+          if (error instanceof ApprovalRequestNotPendingError) throw new DeferredDecisionRefusedError('not-pending', error.status);
+          if (error instanceof ApprovalRequestExpiredError) throw new DeferredDecisionRefusedError('expired');
+          throw error;
+        }
+      },
+      toResult: ApprovalRequestSummaryDto.from,
+    }, this.principalLoader);
+    // Only engine executions invoke this hook, after the outer transaction has committed.
+    // The immediate handler executes the inner request itself to return its final status.
+    decideCommand.afterCommit = async (input) => {
+      if (input.decision === 'approve') await this.execution.execute(input.requestId);
+    };
+    this.registry.register(decideCommand);
+
     this.registry.register(routeCommand({
       key: POLICY_KEY,
       variant: APPROVAL_ROUTE_VARIANTS.policyCreate,

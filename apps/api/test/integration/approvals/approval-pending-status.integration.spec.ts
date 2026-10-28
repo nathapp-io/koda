@@ -3,7 +3,10 @@ import type { FastifyInstance, HTTPMethods } from 'fastify';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
-import { fixtureDb } from '../../helpers/action-context';
+import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command.registry';
+import { ApprovalGate } from '../../../src/approvals/approval-gate.service';
+import { configurableTestCommand } from '../../../src/approvals/test-helpers/test-approval-command';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { bootHttpApp, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -58,6 +61,7 @@ describeIntegration('approval pending status on Fastify (US-004)', () => {
     app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, adapter: 'fastify' });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
+    app.get(ApprovalCommandRegistry).register(configurableTestCommand('label.delete').command);
     // The first registration is the installation's Owner; it also holds `role.manage` globally.
     const registered = await api<{ accessToken: string; user: { id: string } }>(
       'POST', '/api/auth/register', 201,
@@ -107,6 +111,36 @@ describeIntegration('approval pending status on Fastify (US-004)', () => {
     // The root is a human: its own delete answers 204, the route's static status.
     await api('DELETE', `/api/roles/${role.id}`, 204, undefined, rootToken);
     expect(await db.role.findUnique({ where: { id: role.id } })).toBeNull();
+  });
+
+  it('US-009 AC-10: an agent decision (a static 200 route) answers 202 on Fastify', async () => {
+    const createAgent = (slug: string) => api<{ apiKey: string; agent: { id: string } }>(
+      'POST', '/api/agents', 201, { name: slug, slug, capabilities: [] }, rootToken,
+    );
+    const a = await createAgent(`decider-${randomUUID()}`);
+    const b = await createAgent(`requester-${randomUUID()}`);
+    const projectId = randomUUID();
+    await db.project.create({ data: { id: projectId, slug: `fastify-${projectId}`, key: projectId, name: projectId } });
+    await grantKeys(db, { type: 'AGENT', id: a.agent.id }, ['approval.decide', 'label.delete'], projectId);
+    await grantKeys(db, { type: 'AGENT', id: b.agent.id }, ['label.delete'], projectId);
+    await app.get(PermissionCache).invalidate();
+    const labelPolicy = await api<{ id: string }>('POST', '/api/approval-policies', 201, {
+      permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'agent',
+    }, rootToken);
+    const decidePolicy = await api<{ id: string }>('POST', '/api/approval-policies', 201, {
+      permissionPattern: 'approval.decide', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human',
+    }, rootToken);
+    try {
+      const inner = await withTestActor({ type: 'AGENT', id: b.agent.id }, () => app.get(ApprovalGate)
+        .gate('label.delete', { labelId: randomUUID() }, { projectId }));
+      if (inner.status !== 'pending') throw new Error('expected pending request');
+      const summary = await api<PendingSummary>('POST', `/api/approvals/${inner.request.id}/decisions`, 202,
+        { decision: 'approve' }, a.apiKey);
+      expect(summary).toMatchObject({ permissionKey: 'approval.decide', status: 'pending' });
+      expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: inner.request.id } })).status).toBe('pending');
+    } finally {
+      await db.approvalPolicy.deleteMany({ where: { id: { in: [labelPolicy.id, decidePolicy.id] } } });
+    }
   });
 
   it('a human write keeps the route status: the root POST answers 201', async () => {
