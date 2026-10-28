@@ -91,6 +91,18 @@ describe('ApprovalRouteGate', () => {
     expect(h.permissions.effectiveKeys).toHaveBeenLastCalledWith({ type: 'AGENT', id: 'agent' }, { projectId: 'p1' });
   });
 
+  it('refuses an agent-only key by catalog principal type even when keyCheck is disabled', async () => {
+    const h = harness(['role.binding.owner']);
+
+    const error = await asActor(agent, () => h.routeGate.run(call({ key: 'role.binding.owner', keyCheck: false })))
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect((error as ForbiddenAppException).prefix).toBe('permissions');
+    expect(h.permissions.effectiveKeys).not.toHaveBeenCalled();
+    expect(h.gate.gate).not.toHaveBeenCalled();
+  });
+
   it('AC-10: keyCheck false reaches the gate without reading any key', async () => {
     const h = harness([]);
 

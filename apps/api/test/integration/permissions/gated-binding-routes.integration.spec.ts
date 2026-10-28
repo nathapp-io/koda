@@ -78,11 +78,23 @@ describeIntegration('gated role-binding routes (US-005)', () => {
     const summary = pending(await postBinding({ principalType: 'USER', principalId: devId, roleKey: 'admin' }));
     expect(summary).toMatchObject({ permissionKey: 'role.binding.global', projectId: null });
   });
-  it('AC-4: an agent cannot request an owner binding', async () => {
+  it('AC-4: an agent cannot request an owner binding even when its bound global role gains that key', async () => {
+    const bindings = await db.roleBinding.findMany({
+      where: { principalType: 'AGENT', principalId: agent.id, projectId: null },
+      include: { role: true },
+    });
+    const binding = bindings.find(({ role }) => role.permissions.includes('role.binding.global'));
+    if (!binding) throw new Error('fixture global role.binding.global role was not found');
+    await db.role.update({ where: { id: binding.roleId }, data: { permissions: ['role.binding.global', 'role.binding.owner'] } });
+    await app.get(PermissionCache).invalidate();
+
     const res = await postBinding({ principalType: 'USER', principalId: devId, roleKey: 'owner' });
     expect(res.status).toBe(403);
     expect(res.body.ret).toBe(40003);
     expect(await db.approvalRequest.count()).toBe(0);
+
+    await db.role.update({ where: { id: binding.roleId }, data: { permissions: ['role.binding.global'] } });
+    await app.get(PermissionCache).invalidate();
   });
   it('AC-5: deleting a project binding selects the stored project key', async () => {
     const binding = await seedBinding(devId, 'viewer', projectId);

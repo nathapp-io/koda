@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { currentContext } from '../../action-context/action-context';
+import { findCatalogEntry } from '../../permissions/catalog';
 import { PermissionService, type PermissionScope } from '../../permissions/permission.service';
 import { ApprovalGate, type GateOutcome } from '../approval-gate.service';
 
@@ -51,6 +52,11 @@ export class ApprovalRouteGate {
     if (actor.type === 'RUNNER') throw new ForbiddenAppException({}, 'permissions');
     if (actor.type !== 'USER' && actor.type !== 'AGENT') {
       throw new Error('approval route gate needs a principal actor');
+    }
+    const entry = findCatalogEntry(key);
+    const principalType = actor.type === 'USER' ? 'user' : 'agent';
+    if (entry !== undefined && !entry.principals.includes(principalType)) {
+      throw new ForbiddenAppException({}, 'permissions');
     }
 
     if (keyCheck && !(await this.holdsKey(actor.type, actor.id, key, scopeOf(projectId)))) {
