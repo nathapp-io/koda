@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -80,6 +80,45 @@ it('F4: a real failed COMMIT plus failed rollback cannot turn rejected preparati
   } finally {
     failRollback.mockRestore();
     if (locker.isOpen) locker.close();
+    f.journal.onModuleDestroy();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it('F4 round 4: a COMMIT error after journal removal reports an indeterminate outcome and survives restart', async () => {
+  const f = fixture();
+  const path = join(f.directory, 'committed.sqlite');
+  const exec = DatabaseSync.prototype.exec;
+  const failure = new Error('injected directory sync failure after journal unlink');
+  const fault = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) {
+    if (sql === 'COMMIT') {
+      expect(existsSync(`${path}-journal`)).toBe(true);
+      exec.call(this, sql);
+      // Model SQLite's post-unlink error boundary: the transaction is visible, but COMMIT
+      // did not acknowledge durability. This is not a pre-commit SQLITE_BUSY failure.
+      expect(existsSync(`${path}-journal`)).toBe(false);
+      throw failure;
+    }
+    return exec.call(this, sql);
+  });
+  const deletion = new KbDocumentDeletion(f.rag, { can: async () => ({ allowed: true }) } as unknown as PermissionService, f.audit as unknown as AuditRecorder, f.journal);
+  try {
+    const result = deletion.delete({ actorType: 'agent', id: 'a1' } as AgentPrincipal, 'p1', 's1', 'doc');
+    await expect(result).rejects.toMatchObject({ name: 'KbDeletionCommitIndeterminateError', outcome: 'indeterminate', intentId: expect.any(String), errors: [failure, expect.any(Error)] });
+    expect(f.rows()).toEqual(['old']);
+    expect(f.audit.audited).not.toHaveBeenCalled();
+    fault.mockRestore();
+    f.journal.onModuleDestroy();
+    const restarted = f.restart();
+    try {
+      await restarted.recover();
+      expect(f.rows()).toEqual([]);
+      expect(f.audit.audited).toHaveBeenCalledTimes(1);
+      await restarted.recover();
+      expect(f.audit.audited).toHaveBeenCalledTimes(1);
+    } finally { restarted.onModuleDestroy(); }
+  } finally {
+    fault.mockRestore();
     f.journal.onModuleDestroy();
     rmSync(f.root, { recursive: true, force: true });
   }

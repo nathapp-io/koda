@@ -25,10 +25,21 @@ interface DeleteIntent {
 }
 interface CommittedIntent { sequence: number; payload: string }
 
+/** A failed COMMIT acknowledgment is not proof of abort. Recovery may still execute this id. */
+export class KbDeletionCommitIndeterminateError extends AggregateError {
+  readonly outcome = 'indeterminate';
+
+  constructor(readonly intentId: string, errors: unknown[]) {
+    super(errors, `KB deletion intent ${intentId} has an indeterminate commit outcome; recovery may complete deletion`);
+    this.name = 'KbDeletionCommitIndeterminateError';
+  }
+}
+
 /**
- * Only COMMITTED SQLite rows authorize recovery. A payload file or an uncommitted INSERT is
- * never a commit witness. SQLite's rollback journal owns crash/failed-fsync rollback; recovery
- * does not depend on our successfully renaming, deleting or fsyncing a rejected preparation.
+ * Only visible SQLite rows authorize recovery, never candidate payload files. COMMIT may
+ * fail after journal removal: unless ROLLBACK succeeds, the caller must regard the outcome
+ * as indeterminate, not aborted. Restart decides which intents survived; we neither promise
+ * durability on an error nor try to cancel a possibly committed intent with fallible cleanup.
  * Stable audit ids protect against crash after the Postgres audit commit but before acknowledgment.
  */
 @Injectable()
@@ -85,21 +96,28 @@ export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestro
   private persist(intent: DeleteIntent): void {
     const database = this.ledger();
     database.exec('BEGIN IMMEDIATE');
+    let commitAttempted = false;
     try {
       database.prepare('INSERT INTO intents (id, payload) VALUES (?, ?)').run(intent.id, JSON.stringify(intent));
-      // EXTRA also syncs the rollback-journal unlink; returning from COMMIT is the durable authorization point.
-      // Until then, both other connections and a restart see no intent, even if cleanup fails.
+      // EXTRA syncs journal removal, but that sync can fail AFTER the transaction becomes visible.
+      commitAttempted = true;
       database.exec('COMMIT');
     } catch (error) {
       try { database.exec('ROLLBACK'); }
       catch (rollbackError) {
+        if (commitAttempted) {
+          const uncertain = new KbDeletionCommitIndeterminateError(intent.id, [error, rollbackError]);
+          this.logger.error(uncertain.message);
+          throw uncertain;
+        }
         throw new AggregateError([error, rollbackError], 'KB deletion intent transaction failed');
       } finally {
-        // Closing abandons any remaining transaction. Native recovery, not a quarantine rename,
-        // discards uncommitted state if the process exits before this cleanup can run.
+        // Close rolls back only a still-active transaction, never an already-visible commit.
+        // Keep any surviving intent for exact-id recovery, even when prepare reports uncertainty.
         this.database = undefined;
         database.close();
       }
+      // Successful rollback proves this transaction did not commit.
       throw error;
     }
   }
