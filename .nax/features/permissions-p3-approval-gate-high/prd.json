@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T10:24:24.068Z",
+  "updatedAt": "2026-10-28T10:51:31.221Z",
   "userStories": [
     {
       "id": "US-001",
@@ -721,14 +721,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One module adds a thin wrapper over an existing membership resolver and one established route-command adapter; medium implementation complexity is sufficient, while access-control semantics mandate three-session-tdd."
+        "reasoning": "One module adds a thin wrapper over an existing membership resolver and one established route-command adapter; medium implementation complexity is sufficient, while access-control semantics mandate three-session-tdd.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/permissions/permission-route.commands.ts",
@@ -776,7 +779,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d0de94cb24cc129b46372b4216e6b652e76f495f"
     },
     {
       "id": "US-009",
