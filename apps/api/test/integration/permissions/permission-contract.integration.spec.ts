@@ -16,12 +16,12 @@ import { AuthController } from '../../../src/auth/auth.controller';
 import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
 import {
   collectPermissionDeclarations,
+  expectedPendingGateRoutes,
   findContractViolations,
   type PermissionDeclarations,
 } from '../../../src/permissions/test-helpers/permission-contract';
 import { routeSurface } from '../../../src/permissions/route-surface';
-import { PERMISSION_CATALOG } from '../../../src/permissions/catalog';
-import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES } from '../../../src/permissions/pending-gate-routes';
+import { PENDING_GATE_ROUTES } from '../../../src/permissions/pending-gate-routes';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -68,22 +68,7 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
   });
 
   it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
-    const catalog = new Map(PERMISSION_CATALOG.map((entry) => [entry.key, entry]));
-    const expected = declarations.routes
-      .filter((route) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(route.method) && !route.gated)
-      .flatMap((route) => {
-        const keys = (route.requires?.keys ?? []).filter((key) => catalog.get(key)?.approval.approvable);
-        if (keys.length === 0) return [];
-        const feature = SECRET_GATE_ROUTES.has(route.route)
-          ? 'gate-secret'
-          : keys.some((key) => catalog.get(key)?.approval.default !== 'none')
-            ? 'gate-high'
-            : keys.every((key) => /^(fleet|thread|testhook)\./.test(key))
-            ? 'gate-fleet'
-            : 'gate-core-domains';
-        return [[route.route, feature] as const];
-      })
-      .sort(([left], [right]) => left.localeCompare(right));
+    const expected = expectedPendingGateRoutes(declarations.routes);
     expect([...PENDING_GATE_ROUTES]).toEqual(expected);
   });
 
@@ -100,7 +85,7 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     });
   });
 
-  it('AC-12 (US-010): rollout expectations cannot allowlist a new high-risk route after closure', () => {
+  it('AC-12 (US-010): rollout expectations reject a new high-risk route after closure', () => {
     const route = {
       route: 'DELETE /projects/:slug/new-high-risk-resource',
       method: 'DELETE',
@@ -108,17 +93,11 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
       requires: { keys: ['project.delete'] as const, mode: 'all' as const, enforcedBy: 'guard' as const },
       hasRequiresGuard: true,
     };
-    const catalog = new Map(PERMISSION_CATALOG.map((entry) => [entry.key, entry]));
-    const keys = route.requires.keys.filter((key) => catalog.get(key)?.approval.approvable);
-    const feature = keys.some((key) => catalog.get(key)?.approval.default !== 'none')
-      ? 'gate-high'
-      : keys.every((key) => /^(fleet|thread|testhook)\\./.test(key))
-        ? 'gate-fleet'
-        : 'gate-core-domains';
-    const expected = [...PENDING_GATE_ROUTES, [route.route, feature] as const].sort(([left], [right]) => left.localeCompare(right));
+    const syntheticDeclarations = [...declarations.routes, route];
+    const expected = expectedPendingGateRoutes(syntheticDeclarations);
     const allowed = [...PENDING_GATE_ROUTES].sort(([left], [right]) => left.localeCompare(right));
 
-    expect([route.route, feature]).toEqual([route.route, 'gate-high']);
+    expect(expected).toContainEqual([route.route, 'gate-high']);
     expect(expected).not.toEqual(allowed);
   });
 
