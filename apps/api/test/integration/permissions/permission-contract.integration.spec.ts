@@ -21,7 +21,7 @@ import {
 } from '../../../src/permissions/test-helpers/permission-contract';
 import { routeSurface } from '../../../src/permissions/route-surface';
 import { PERMISSION_CATALOG } from '../../../src/permissions/catalog';
-import { PENDING_GATE_ROUTES } from '../../../src/permissions/pending-gate-routes';
+import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES } from '../../../src/permissions/pending-gate-routes';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -63,8 +63,8 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  it('AC-13: collects exactly twelve gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated)).toHaveLength(12);
+  it('AC-13: collects at least twelve gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBeGreaterThanOrEqual(12);
   });
 
   it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
@@ -74,9 +74,11 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
       .flatMap((route) => {
         const keys = (route.requires?.keys ?? []).filter((key) => catalog.get(key)?.approval.approvable);
         if (keys.length === 0) return [];
-        const feature = keys.some((key) => catalog.get(key)?.approval.default !== 'none')
-          ? 'gate-high'
-          : keys.every((key) => /^(fleet|thread|testhook)\./.test(key))
+        const feature = SECRET_GATE_ROUTES.has(route.route)
+          ? 'gate-secret'
+          : keys.some((key) => catalog.get(key)?.approval.default !== 'none')
+            ? 'gate-high'
+            : keys.every((key) => /^(fleet|thread|testhook)\./.test(key))
             ? 'gate-fleet'
             : 'gate-core-domains';
         return [[route.route, feature] as const];

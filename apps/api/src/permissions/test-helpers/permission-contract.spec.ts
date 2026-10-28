@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from '../catalog';
-import { PENDING_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
+import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import type { RequiresMetadata } from '../requires.decorator';
 import {
   findContractViolations as findContractViolationsWithAllowlist,
@@ -115,6 +115,21 @@ describe('permission contract checker', () => {
     for (const routePrefix of excluded) {
       expect([...PENDING_GATE_ROUTES.keys()].some((route) => route.startsWith(routePrefix))).toBe(false);
     }
+  });
+
+  it('AC-6: explicitly lists exactly the secret-bearing routes', () => {
+    expect(SECRET_GATE_ROUTES).toEqual(new Set([
+      'POST /fleet/enrollments',
+      'POST /projects/:slug/vcs',
+      'PATCH /projects/:slug/vcs',
+      'POST /projects/:slug/vcs/webhook-secret/rotate',
+      'POST /projects/:slug/webhooks',
+      'PATCH /projects/:slug/webhooks/:id',
+    ]));
+  });
+
+  it('AC-7: assigns every explicit secret route to gate-secret', () => {
+    for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
   });
 
   it('AC-10: assigns high-risk project deletion to gate-high', () => {
