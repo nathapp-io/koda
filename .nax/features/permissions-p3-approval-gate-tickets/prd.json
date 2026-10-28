@@ -1,0 +1,839 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-gate-tickets",
+  "branchName": "feat/permissions-p3-approval-gate-tickets",
+  "createdAt": "2026-10-28T00:00:00.000Z",
+  "updatedAt": "2026-10-28T14:30:43.945Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Move token-answering invites to gate-secret and add wait-policy fixtures",
+      "description": "**Goal** \u2014 Reserve secret-bearing invite routes for the secret rollout and supply a reusable agent wait-policy fixture.\n\n**Motivation** \u2014 The medium-risk writes still bypass the engine on REST.\n\n**Approach** \u2014 **The two token-answering invite routes are `gate-secret`.** This applies the 5b ruling (\"a route whose answer is a token or secret shown once\") to `POST /projects/:slug/invites` (its `INVITED` outcome carries `invitePath` with the raw token) and `POST /projects/:slug/invites/:id/resend` (it rotates the token and answers it). `DELETE /projects/:slug/invites/:id` answers nothing secret and is gated here. Here refers to this feature: US-009 gates invite.cancel; US-001 only classifies the deferred token-answering routes.\n\n**A test helper seeds the wait.** `seedWaitPolicy(db, key, projectId)` (in `approvals/test-helpers/approval-fixtures.ts`) upserts, on `selector`, the `ApprovalPolicy` row `{ selector: '<projectId|*>|<key>|type:AGENT', projectId, permissionPattern: key, principalType: 'AGENT', mode: 'agent', updatedByType: 'SYSTEM', updatedById: 'test' }` (the shape `assistant-direct-action.integration.spec.ts` writes inline) and answers `{ id }`. `selector` is unique, so an upsert lets two tests of one file seed the same key. The resolver reads policies per request (no cache), so no invalidation is needed.\n\nUS-001: `SECRET_GATE_ROUTES` gains `POST /projects/:slug/invites` and `POST /projects/:slug/invites/:id/resend`, and their `PENDING_GATE_ROUTES` rows are relabelled `gate-secret`. The rollout rule in `expectedPendingGateRoutes` already checks `SECRET_GATE_ROUTES` first, so it needs no change.\n\n**Each gating story removes its own `PENDING_GATE_ROUTES` rows**, as in 5b. US-001 relaxes the exact gated-route count to a lower bound (at least 41), and US-011 restores an exact count (62).\n\n**Scope** \u2014 In: pending-gate-routes.ts, permission-contract.spec.ts (eight secret labels), approval-fixtures.ts, a new seed-wait-policy.integration.spec.ts, and the temporary lower-bound/title change in permission-contract.integration.spec.ts. Out: actual route gating belongs to US-003\u2013US-010; final exact counts and OpenAPI belong to US-011. Gating the 8 `gate-secret` routes, including the two invite routes moved here.\n\n**Interface** \u2014 `seedWaitPolicy(db, key, projectId)`; answers `{ id }`. Accept the existing fixture DB/transaction shape and projectId null for global policies. Use the exact selector and row fields above. New DB fixture tests must be independent, delete policies/decisions/requests before each test, and run under the shared DB gate, not require DB in unit tests.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] SECRET_GATE_ROUTES holds exactly the six labels of 5b plus POST /projects/:slug/invites and POST /projects/:slug/invites/:id/resend.",
+        "AC-2 [unit] PENDING_GATE_ROUTES.get('POST /projects/:slug/invites/:id/resend') returns 'gate-secret'.",
+        "AC-3 [unit] PENDING_GATE_ROUTES.get('DELETE /projects/:slug/invites/:id') returns 'gate-core-domains'.",
+        "AC-4 [integration] Given the booted app's collected routes, PENDING_GATE_ROUTES equals expectedPendingGateRoutes of those routes.",
+        "AC-5 [integration] In seed-wait-policy.integration.spec.ts, seedWaitPolicy(db, 'label.create', P) leaves one ApprovalPolicy row matching { selector: '<P>|label.create|type:AGENT', principalType: 'AGENT', mode: 'agent' }.",
+        "AC-6 [integration] Calling seedWaitPolicy(db, 'label.create', P) twice leaves exactly one row with that selector.",
+        "AC-7 [integration] seedWaitPolicy(db, 'project.create', null) leaves a row matching { selector: '*|project.create|type:AGENT', projectId: null }."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "fixtures"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard allowlist and fixture changes across a few files; secret-route classification and approval policy creation require security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/pending-gate-routes.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/approvals/test-helpers/approval-fixtures.ts",
+        "apps/api/test/integration/fleet/assistant-direct-action.integration.spec.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/seed-wait-policy.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "SECRET_GATE_ROUTES gains the two invite labels; their rows are relabelled gate-secret"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the SECRET_GATE_ROUTES case lists 8 labels"
+        },
+        {
+          "path": "apps/api/src/approvals/test-helpers/approval-fixtures.ts",
+          "reason": "seedWaitPolicy"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the \"collects exactly 41 gated routes\" case becomes \"at least 41\" (its title follows); US-011 restores an exact count"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Compare only the tested VCS target during settlement (#346)",
+      "description": "**Goal** \u2014 Stop benign polling writes from failing approved VCS connection tests while retaining target, token and row-identity fencing.\n\n**Motivation** \u2014 #346 is bundled into this spec.\n\n**Approach** \u2014 **#346: settlement compares the tested target.** `prepareTestConnection` snapshots `{ id, provider, repoOwner, repoName, encryptedToken }` of the connection it tested, and settlement compares the same snapshot of the re-read row with `isDeepStrictEqual`. A missing row, a replaced row (new `id`), or a change to any of those fields throws `ValidationAppException({}, 'vcs')` as today. Changes to `lastSyncedAt`, `updatedAt`, `syncMode`, `pollingIntervalMs`, `allowedAuthors`, `webhookSecret` and `isActive` no longer fail it.\n\n**Scope** \u2014 In: existing vcs-connection.service.ts, vcs-connection.service.spec.ts, and gated-webhook-vcs-routes.integration.spec.ts. Keep the existing repoName-changed unit regression. Add one it.each row for repoOwner/provider/encryptedToken, and gone/replaced-row assertions. Cross the vcsTestTarget -> prepareTestConnection settlement -> rest:vcs.test seam with GitHubProvider.prototype.testConnection writing lastSyncedAt before returning { ok: true }. Out: ticket/domain gates are other stories. US-002 only: changing what `testTarget` checks, or moving the provider call inside the approval transaction.\n\n**Interface** \u2014 `vcsTestTarget(connection)` in `vcs/vcs-connection.service.ts` (module function, exported; not the private method `testTarget`, which runs the provider call): `{ id, provider, repoOwner, repoName, encryptedToken }`.\n`VcsConnectionService.prepareTestConnection(projectId, encryptionKey)`.\nSettlement target: `isDeepStrictEqual(current && vcsTestTarget(current), vcsTestTarget(connection))`. Preserve the callback's provider result and existing failure exception; do not put credentials in approval input/result. No new files. The integration test uses the already-shipped high-risk VCS gate and approval policy defaults, with isolated request/decision/policy cleanup and restored provider spy.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] The settlement callback of prepareTestConnection returns the provider's result when the re-read connection differs from the tested one only in lastSyncedAt and updatedAt.",
+        "AC-2 [unit] The settlement callback throws ValidationAppException with key 'vcs' when the re-read connection has a different repoOwner, provider or encryptedToken (one it.each case per field; the existing repoName case stays).",
+        "AC-3 [unit] The settlement callback throws ValidationAppException with key 'vcs' when the connection is gone.",
+        "AC-4 [unit] The settlement callback throws ValidationAppException with key 'vcs' when the connection was replaced by a row with another id and the same target.",
+        "AC-5 [integration] In gated-webhook-vcs-routes.integration.spec.ts, with GitHubProvider.prototype.testConnection writing a new lastSyncedAt to the connection row before returning { ok: true }, approving an agent's pending POST /api/projects/:slug/vcs/test returns a decision whose request is executed with result.ok true."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "vcs",
+        "bug-346"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small projection fix with asynchronous provider/settlement regression; credential and identity comparisons are security-critical."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/src/vcs/vcs-route.commands.ts",
+        "apps/api/src/vcs/vcs-connection.service.spec.ts",
+        "apps/api/test/integration/webhook/gated-webhook-vcs-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The prepareTestConnection settlement callback returns the provider's result when only syncMode, pollingIntervalMs, allowedAuthors, webhookSecret or isActive changes, with one case per field."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-connection.service.ts",
+          "reason": "vcsTestTarget; settlement compares the snapshots"
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-connection.service.spec.ts",
+          "reason": "the settlement cases below; the existing repoName-changed case stays"
+        },
+        {
+          "path": "apps/api/test/integration/webhook/gated-webhook-vcs-routes.integration.spec.ts",
+          "reason": "the polling-write regression case"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Gate ticket create, update and assign REST writes",
+      "description": "**Goal** \u2014 Apply approval policies to ticket creation, update and assignment through REST variants while retaining immediate default behavior.\n\n**Motivation** \u2014 A project owner who sets `ticket.* \u2192 agent` for agents makes the assistant and MCP tools wait, while the same agent calling `POST /projects/:slug/tickets` or `koda ticket create` writes at once.\n\n**Approach** \u2014 Each row is one `routeCommand`. \"Scope\" is the `projectId` passed to `ApprovalRouteGate.run` (`null` = global; \"project\" = `@CurrentProject()`'s id). The run calls the service the handler calls today, with `principal` the rebuilt `UserPrincipal | AgentPrincipal`. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a no-body command declares none. On `executed` the handler answers `JsonResponse.Ok(outcome.result)` with the route's status, as today.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/tickets | ticket.create | project | rest:tickets.create | `{ slug, ticket: parseBody(CreateTicketDto, \u2026) }` | `tickets.create(slug, ticket, principal)` |\n| PATCH /projects/:slug/tickets/:ref | ticket.update | project | rest:tickets.update | `{ slug, ref, patch: parseBody(UpdateTicketDto, \u2026) }` | `tickets.update(slug, ref, patch, principal)` |\n| POST /projects/:slug/tickets/:ref/assign | ticket.assign | project | rest:tickets.assign | `{ slug, ref, assignee: parseBody(AssignTicketDto, \u2026) }` | `tickets.assign(slug, ref, assignee, principal)` |\n\n- Id and string members are read with `parseRouteInput` (5b). A body member is read with `parseBody` of the route's DTO; a missing body member is parsed as `{}`.\n- **Only the HTTP handlers change**, as in 5b. The controllers' helper methods (`createTicket`, `updateTicket`, `assignTicket`, `verifyTicket`, \u2026, `CommentsController.create`/`update`, `LabelsController.create`/`update`/`assignLabel`) and their spec cases stay.\n- **The gate key is the route's key, not the ticket's edge key.** Two inputs move a ticket along an edge another route owns: `PATCH \u2026/tickets/:ref` with a `status` (gated under `ticket.update`; the service then checks the edge key), and `POST \u2026/verify` on a VERIFY_FIX ticket (gated under `ticket.transition.verify`; the service closes it through the `verify-fix.approve` edge). A policy on the edge's key does not make these two wait; a policy on the route's key does. Gating them by the effective edge would need the ticket read before the gate and is out of scope.\n\n**Scope** \u2014 In: extend TicketRouteCommands/TICKET_ROUTE_VARIANTS preserving delete, gate the three HTTP handlers with @ApprovalGated while retaining @Requires/@ApiResponses/parameter lists, remove exactly their pending rows, update commands/controller specs and create gated-ticket-write-routes.integration.spec.ts. Change permission-contract.spec.ts's old ticket-create allowlist anchor to POST /memory. The gate is already injected; no module import changes. Controller assign handler assertions become gate assertions, create/update gain cases, and service-call expectations live in commands specs. Out: transitions belong to US-004/005 and final counts/OpenAPI to US-011; do not gate status patches under the service edge's key.\n\n**Interface** \u2014 `ApprovalRouteGate.run({ key, variant, projectId, input, keyCheck? })`, `routeCommand(spec, loader)`, `parseBody`, `parseRouteInput`. Handler shape:\n```ts\nconst outcome = await this.routeGate.run<TicketResponseDto>({ key: 'ticket.create', variant: TICKET_ROUTE_VARIANTS.create, projectId: project.project.id, input: { slug, ticket: dto } });\nif (outcome.status === 'pending') throw new ApprovalPending(outcome.request);\nreturn JsonResponse.Ok(outcome.result);\n```\n\n**Test setup** \u2014 Agent has project.read, ticket.create, ticket.update and ticket.assign in P, no transition key; grantKeys then PermissionCache.invalidate. Seed the route's wait policy per waiting test using seedWaitPolicy; no policy means immediate execution with no request. Direct root still executes with no request under a policy. Each AC owns its rows and repeats prior-call setup when approving; delete every ApprovalPolicy plus decisions/requests in beforeEach, and use the DB gate. Approved service refusals retain failed result `{ error: 'execution-failed', name }`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/tickets by the agent under a wait policy returns 202 with data matching { permissionKey: 'ticket.create', projectId: P }.",
+        "AC-2 [integration] Approving the agent's pending ticket create leaves one ticket with that title whose createdByAgentId is the agent.",
+        "AC-3 [integration] Approving the agent's pending PATCH /api/projects/:slug/tickets/:ref { title: 'renamed' } leaves the ticket titled 'renamed'.",
+        "AC-4 [integration] Approving the agent's pending PATCH /api/projects/:slug/tickets/:ref { status: 'IN_PROGRESS' } on a CREATED ticket settles the request failed (the agent holds no edge key), with result { error: 'execution-failed', name }.",
+        "AC-5 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/assign { agentId: <the agent's id> } leaves assignedToAgentId equal to the agent.",
+        "AC-6 [integration] POST /api/projects/:slug/tickets by the agent with no policy seeded returns 201 and writes no ApprovalRequest row.",
+        "AC-7 [integration] POST /api/projects/:slug/tickets with the root token under a wait policy returns 201 and writes no ApprovalRequest row.",
+        "AC-8 [unit] After onModuleInit, the registry returns ticket.create, ticket.update and ticket.assign commands for rest:tickets.create, rest:tickets.update and rest:tickets.assign.",
+        "AC-9 [unit] The registered rest:tickets.assign command's execute calls tickets.assign('alpha', 'AL-1', { userId: 'cuser1' }, <principal>) for parsed input { slug: 'alpha', ref: 'AL-1', assignee: { userId: 'cuser1' } }, where principal is returned by the loader (the route specification's run callback).",
+        "AC-10 [unit] TicketsController.create calls routeGate.run with { key: 'ticket.create', variant: 'rest:tickets.create', projectId: <the project id>, input: { slug, ticket: <the dto> } }."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "tickets"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three handlers extend the existing ticket command class and gate wiring without a new abstraction; deferred authorization still mandates security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts",
+        "apps/api/src/approvals/test-helpers/approval-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/gated-ticket-write-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/tickets, PATCH /projects/:slug/tickets/:ref, POST /projects/:slug/tickets/:ref/assign"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its AC-11 (POST /projects/:slug/tickets is gate-core-domains) now asserts POST /memory is gate-core-domains"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.ts",
+          "reason": "create, update, assign commands"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "create, update, assign gated"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "the three controller.assign handler cases (about lines 526, 535, 545) assert the gate call; new cases for create and update; helper-method cases stay"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Gate ticket verify, start and fix transitions",
+      "description": "**Goal** \u2014 Route initial ticket workflow transitions through approval without moving body or service validation boundaries.\n\n**Motivation** \u2014 Any policy now applies on REST the same way it does for assistant and MCP writes.\n\n**Approach** \u2014 **A transition command answers the ticket.** The services answer `{ ticket, comment?, activity }`; the handler answers `result.ticket`. The command's run answers `result.ticket`, so `ApprovalRequest.result` and the executed body are the ticket the route answers today.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/tickets/:ref/verify | ticket.transition.verify | project | rest:tickets.verify | `{ slug, ref, body }` | `(await transitions.verify(slug, ref, body, principal)).ticket` |\n| POST /projects/:slug/tickets/:ref/start | ticket.transition.start | project | rest:tickets.start | `{ slug, ref }` | `(await transitions.start(slug, ref, principal)).ticket` |\n| POST /projects/:slug/tickets/:ref/fix | ticket.transition.fix | project | rest:tickets.fix | `{ slug, ref, body }` | `(await transitions.fix(slug, ref, body, principal)).ticket` |\n\nRequest checks the handler makes before its service call stay before the gate, so they answer as today and open no request: the comment-body check of verify, fix, verify-fix, close and reject (`requireCommentBody`, 400 `tickets`). Every check inside a service (edge keys, transitions, conflicts, row ownership) runs when the command runs, at once or after approval; a failing check settles the request `failed`. This is 5a's rule. Under a policy, an edge-key refusal or an invalid transition therefore answers 202 first and fails at execution.\n\nId and string members are read with `parseRouteInput` (5b). The transition `body` member is a required non-empty string (`parseRouteInput(input, ['slug', 'ref', 'body'])`).\n\n**Scope** \u2014 In: extend TicketRouteCommands with TicketTransitionsService injected after TicketsService, add verify/start/fix variants and identity toResult, gate only their HTTP handlers after applicable body checks, retain existing parameter order/Requires/ApiResponses and add @ApprovalGated, remove the three pending rows. Update commands and HTTP-handler unit specs (including existing start and verify cases) and create gated-ticket-transition-routes.integration.spec.ts. Preserve helper-method specs and previous variants. Out: verify-fix/close/reject belong to US-005; final exact counts/OpenAPI to US-011. POST verify on VERIFY_FIX is gated by ticket.transition.verify, not the effective edge key; changing that rule is out of scope.\n\n**Interface** \u2014 `TicketTransitionsService.verify/fix/close/reject(slug, ref, body, principal)`, `.start(slug, ref, principal)`, each answering `{ ticket, \u2026 }`. `ApprovalRouteGate.run({ key, variant, projectId, input, keyCheck? })`; set projectId to project.project.id, freeze the table inputs, throw new ApprovalPending(outcome.request) on pending and return JsonResponse.Ok(outcome.result) on executed.\n\n**Test setup** \u2014 Agent holds project.read plus ticket.transition.verify/start/fix in P. Root prepares each ticket's required status, each waiting test seeds its route-key policy, and each AC creates independent rows and repeats the pending call it approves. Delete every ApprovalPolicy/ApprovalDecision/ApprovalRequest before each test, reset throttle and invalidate PermissionCache after grants. Service refusal after approval must expose failed with `{ error: 'execution-failed', name }`, not a pre-gate domain error.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/tickets/:ref/verify { body: 'ok' } on a CREATED ticket by the agent under its wait policy returns 202 with data.permissionKey 'ticket.transition.verify'.",
+        "AC-2 [integration] After independently repeating AC-1's request, before approval, the ticket is still CREATED.",
+        "AC-3 [integration] Approving an independently created AC-1 request leaves the ticket VERIFIED with a comment whose body is 'ok'.",
+        "AC-4 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/start on a VERIFIED ticket leaves it IN_PROGRESS.",
+        "AC-5 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/fix { body: 'fixed' } on an IN_PROGRESS ticket leaves it VERIFY_FIX.",
+        "AC-6 [integration] POST /api/projects/:slug/tickets/:ref/verify { body: '  ' } by the agent under a wait policy returns 400 and writes no ApprovalRequest row.",
+        "AC-7 [integration] Approving the agent's pending verify after root verified the ticket while it waited settles the request failed, with result { error: 'execution-failed', name }.",
+        "AC-8 [unit] After onModuleInit, the registry returns commands for rest:tickets.verify, rest:tickets.start and rest:tickets.fix under their respective transition keys.",
+        "AC-9 [unit] The registered rest:tickets.verify command's execute calls transitions.verify('alpha', 'AL-1', 'ok', <principal>) through its run callback and returns the ticket of its result, with principal supplied by the loader.",
+        "AC-10 [unit] The rest:tickets.fix command's parse({ slug: 'alpha', ref: 'AL-1' }) throws ValidationAppException with key 'approvals.invalidInput'."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "tickets",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing transition service methods and gate adapters are reused in one module with one constructor extension; workflow access control requires isolated security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts",
+        "apps/api/src/tickets/ticket-route.commands.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/gated-ticket-transition-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops the verify, start and fix rows"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.ts",
+          "reason": "constructor gains TicketTransitionsService (after TicketsService); verify, start, fix commands"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "verify, start, fix gated after the body check"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "the controller.start cases (about lines 601 and 659) and the controller.verify case (about line 646) assert the gate call"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Gate ticket verify-fix, close and reject transitions",
+      "description": "**Goal** \u2014 Gate remaining ticket transitions, including permission-key selection for approve versus return.\n\n**Motivation** \u2014 Any policy now applies on REST the same way it does for assistant and MCP writes.\n\n**Approach** \u2014 **verify-fix gates the key its `approve` flag needs.** The route accepts either verify-fix key (`mode: 'any'`). The handler gates `ticket.transition.verify-fix.approve` when `approve` is `true` (or `'true'`) and `ticket.transition.verify-fix.return` otherwise. Each key registers its own command under the same variant `rest:tickets.verify-fix`; the `.approve` command calls `verifyFix(\u2026, true, \u2026)` and the `.return` command `verifyFix(\u2026, false, \u2026)`, so the input carries no flag. A caller holding only the other key gets 403 `permissions` from the route gate (today the service's edge check answers the same 403).\n\n- The verify-fix handler validates the body, reads `approve` as today, then gates `{ key: approve ? '\u2026verify-fix.approve' : '\u2026verify-fix.return', variant: 'rest:tickets.verify-fix', projectId, input: { slug, ref, body } }`.\n- **A transition command answers the ticket.** The services answer `{ ticket, comment?, activity }`; the handler answers `result.ticket`. The command's run answers `result.ticket`, so `ApprovalRequest.result` and the executed body are the ticket the route answers today.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/tickets/:ref/verify-fix | ticket.transition.verify-fix.approve (when approve) | project | rest:tickets.verify-fix | `{ slug, ref, body }` | `(await transitions.verifyFix(slug, ref, body, true, principal)).ticket` |\n| (same route) | ticket.transition.verify-fix.return (otherwise) | project | rest:tickets.verify-fix | `{ slug, ref, body }` | `(await transitions.verifyFix(slug, ref, body, false, principal)).ticket` |\n| POST /projects/:slug/tickets/:ref/close | ticket.transition.close | project | rest:tickets.close | `{ slug, ref, body }` | `(await transitions.close(slug, ref, body, principal)).ticket` |\n| POST /projects/:slug/tickets/:ref/reject | ticket.transition.reject | project | rest:tickets.reject | `{ slug, ref, body }` | `(await transitions.reject(slug, ref, body, principal)).ticket` |\n\n**Scope** \u2014 In: the existing ticket commands/controller and their specs; register four commands under three variants, preserve previous registrations, remove three HTTP-route allowlist rows, create gated-ticket-review-routes.integration.spec.ts. Keep @Requires mode any for verify-fix, all existing path/query/principal/project parameters in order, @ApiResponses, and helper methods. Add @ApprovalGated and preserve requireCommentBody before every gate. Existing close handler body cases assert gate calls; existing verify-fix/close blank-body unit cases still throw before gate and stay. Out: initial transitions belong to US-004; contract totals/OpenAPI belong to US-011. Do not freeze approve in input or treat two keys as two HTTP routes.\n\n**Interface** \u2014 `TicketTransitionsService.verifyFix(slug, ref, body, approve, principal)`, `.close(slug, ref, body, principal)`, `.reject(slug, ref, body, principal)`. Parse required transition strings using `parseRouteInput(input, ['slug', 'ref', 'body'])`; use identity toResult, project.project.id for scope, ApprovalPending on pending, and JsonResponse.Ok(outcome.result) on executed.\n\n**Test setup** \u2014 Each independent AC binds only its route's key plus project.read, invalidates PermissionCache, seeds that key's wait policy, and has root prepare a ticket at the appropriate status. Each AC approving another AC's request repeats its own call and rows. Delete all ApprovalPolicy/ApprovalDecision/ApprovalRequest rows before each integration test. A blank body still gives 400 tickets with no request; missing selected key gives 403 permissions with no request. Service failures remain deferred failed results, not new handler prechecks.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/tickets/:ref/verify-fix?approve=true { body: 'good' } on a VERIFY_FIX ticket by an agent holding ticket.transition.verify-fix.approve under a wait policy returns 202 with data.permissionKey 'ticket.transition.verify-fix.approve'.",
+        "AC-2 [integration] Approving an independently created AC-1 request leaves the ticket CLOSED.",
+        "AC-3 [integration] POST /api/projects/:slug/tickets/:ref/verify-fix { body: 'redo' } with no approve parameter by an agent holding ticket.transition.verify-fix.return under a wait policy returns 202 with data.permissionKey 'ticket.transition.verify-fix.return'.",
+        "AC-4 [integration] Approving an independently created AC-3 request leaves the ticket IN_PROGRESS.",
+        "AC-5 [integration] POST /api/projects/:slug/tickets/:ref/verify-fix?approve=true with a valid nonblank body { body: 'good' } by an agent holding only ticket.transition.verify-fix.return returns 403 with key 'permissions' and writes no ApprovalRequest row.",
+        "AC-6 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/close { body: 'done' } on an IN_PROGRESS ticket leaves it CLOSED.",
+        "AC-7 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/reject { body: 'no' } on a CREATED ticket leaves it REJECTED.",
+        "AC-8 [integration] POST /api/projects/:slug/tickets/:ref/close { body: '' } by the agent under a wait policy returns 400 and writes no ApprovalRequest row.",
+        "AC-9 [unit] After onModuleInit, the registry returns a ticket.transition.verify-fix.approve and a ticket.transition.verify-fix.return command for rest:tickets.verify-fix, and commands for rest:tickets.close and rest:tickets.reject.",
+        "AC-10 [unit] The registered .approve command's execute invokes its run callback and calls transitions.verifyFix('alpha', 'AL-1', 'good', true, <principal>), using the loader's principal.",
+        "AC-11 [unit] The registered .return command's execute invokes its run callback and calls transitions.verifyFix('alpha', 'AL-1', 'good', false, <principal>), using the loader's principal.",
+        "AC-12 [unit] TicketsController.verifyFix gates { key: 'ticket.transition.verify-fix.approve', variant: 'rest:tickets.verify-fix', input: { slug, ref, body } } for approve 'true' and true, and the .return key with the same variant and input for approve 'false' and undefined (one it.each row each)."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "tickets",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four registrations and three handlers extend the already-wired ticket class using existing transition methods; selecting the correct verify-fix key requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/tickets/tickets.controller.spec.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/gated-ticket-review-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops the verify-fix, close and reject rows"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.ts",
+          "reason": "verify-fix (two keys), close, reject commands"
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "verifyFix, close, reject gated after the body check"
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "the controller.close cases with a body (about lines 673, 681, 703) assert the gate call; the blank-body cases (verifyFix about line 636, close about lines 687 and 696) still throw before the gate and stay"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Gate comment creation and ownable updates",
+      "description": "**Goal** \u2014 Apply approval policies to comment create/update while retaining slug-less lookup privacy and row ownership rules.\n\n**Motivation** \u2014 The medium-risk writes still bypass the engine on REST.\n\n**Approach** \u2014 The comment update handler calls `resolveCommentProject(id, principal)` first, then gates with `projectId` its answer (as the 5b delete handler does). `comment.update` is ownable, so the route gate accepts `comment.update.own`; the row-level check runs in the service.\n\nRequest checks the handler makes before its service call stay before the gate, so they answer as today and open no request: the comment's project lookup of `PATCH /comments/:id` (`resolveCommentProject`, 404 `comments`), which the gate needs for its scope. Every check inside a service (edge keys, transitions, conflicts, row ownership) runs when the command runs, at once or after approval; a failing check settles the request `failed`.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/tickets/:ref/comments | comment.create | project | rest:comments.create | `{ slug, ref, comment: parseBody(CreateCommentDto, \u2026) }` | `comments.create(slug, ref, comment, principal)` |\n| PATCH /comments/:id | comment.update | the comment's project (resolveCommentProject) | rest:comments.update | `{ id, patch: parseBody(UpdateCommentDto, \u2026) }` | `comments.update(id, patch, principal)` |\n\n**Gated handlers keep their existing parameters, in order.** Unlike 5b, a handler keeps a `@Principal()` parameter it no longer reads (oxlint's `no-unused-vars` is off). A handler that needs the project and has no `@CurrentProject()` today appends `@CurrentProject() project: ProjectContext` as its last parameter: comments `createFromHttp`. Route parameters always stay declared, so the OpenAPI document keeps every path parameter.\n\n**Scope** \u2014 In: extend CommentRouteCommands/COMMENT_ROUTE_VARIANTS preserving delete; gate createFromHttp/updateFromHttp with @ApprovalGated and existing Requires/ApiResponses; add CurrentProject only to createFromHttp; drop their two pending rows, update commands/controller specs and create gated-comment-write-routes.integration.spec.ts. Keep CommentsController.create/update helper methods and their spec cases. The module already has the gate/auth wiring. Out: other entity routes are separate stories; final counts/OpenAPI belong to US-011. Do not move service author checks ahead of the gate or add a CurrentProject parameter to slug-less update.\n\n**Interface** \u2014 `CommentsService.create(slug, ref, dto, principal)`, `.update(id, dto, principal)`, `.resolveCommentProject(id, principal)`. `routeCommand(spec, loader)` with parseRouteInput for ids/slugs/refs and parseBody of the nested route DTO (missing nested body -> {}), identity toResult and the rebuilt requester principal. `ApprovalRouteGate.run({ key, variant, projectId, input, keyCheck? })`; throw ApprovalPending for pending, JsonResponse.Ok(outcome.result) for executed with existing statuses.\n\n**Test setup** \u2014 Agent holds project.read, comment.create and comment.update.own in P. Its own comment is created with no policy (201); waiting update seeds comment.update, not comment.update.own. grantKeys then PermissionCache.invalidate. Each AC has independent rows and repeats any earlier call it approves. Delete every ApprovalPolicy, ApprovalDecision and ApprovalRequest row before each integration test. Preserve 404 comments before gate for missing/non-member lookups, 403 permissions/no request for keyless actors, and failed `{ error: 'execution-failed', name }` on approved other-author writes with the original body unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/tickets/:ref/comments { body: 'hi' } by the agent under a wait policy returns 202 with data.permissionKey 'comment.create'.",
+        "AC-2 [integration] Approving an independently created AC-1 request leaves one comment on the ticket with body 'hi' and authorAgentId equal to the agent.",
+        "AC-3 [integration] PATCH /api/comments/:id { body: 'edited' } on the agent's own comment, under a wait policy for comment.update, returns 202 with data.projectId P.",
+        "AC-4 [integration] Approving an independently created AC-3 request leaves the comment's body 'edited'.",
+        "AC-5 [integration] Approving the agent's pending PATCH /api/comments/:id on a comment root wrote settles the request failed with result { error: 'execution-failed', name }, and that comment's body is unchanged.",
+        "AC-6 [integration] PATCH /api/comments/missing by the agent returns 404 with key 'comments' and writes no ApprovalRequest row.",
+        "AC-7 [integration] PATCH /api/comments/:id on a comment in P by an agent with no binding in P returns 404 with key 'comments' and writes no ApprovalRequest row.",
+        "AC-8 [integration] PATCH /api/comments/:id by an agent holding only project.read in P returns 403 with key 'permissions' and writes no ApprovalRequest row.",
+        "AC-9 [integration] POST /api/projects/:slug/tickets/:ref/comments with the root token under a wait policy returns 201 and writes no ApprovalRequest row.",
+        "AC-10 [unit] After onModuleInit, the registry returns a comment.create command for rest:comments.create and a comment.update command for rest:comments.update.",
+        "AC-11 [unit] CommentsController.updateFromHttp('c1', { body: 'x' }, principal) calls routeGate.run with { key: 'comment.update', variant: 'rest:comments.update', projectId: <resolveCommentProject's answer>, input: { id: 'c1', patch: { body: 'x' } } }."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "comments",
+        "ownership"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two handlers reuse the existing comment-delete scope lookup, command class and module wiring; ownable access and lookup privacy require security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/comments/comment-route.commands.ts",
+        "apps/api/src/comments/comments.controller.ts",
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts",
+        "apps/api/src/approvals/test-helpers/approval-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/comments/gated-comment-write-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/tickets/:ref/comments and PATCH /comments/:id"
+        },
+        {
+          "path": "apps/api/src/comments/comment-route.commands.ts",
+          "reason": "create, update commands"
+        },
+        {
+          "path": "apps/api/src/comments/comment-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/comments/comments.controller.ts",
+          "reason": "createFromHttp gated; updateFromHttp resolves the project, then gates"
+        },
+        {
+          "path": "apps/api/src/comments/comments.controller.spec.ts",
+          "reason": "new cases for createFromHttp and updateFromHttp; helper-method cases stay"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Gate label writes and ticket link addition",
+      "description": "**Goal** \u2014 Apply route policies to labels and links while retaining creator attribution and duplicate-link HTTP behavior.\n\n**Motivation** \u2014 The medium-risk writes still bypass the engine on REST.\n\n**Approach** \u2014 **The link command keeps the 200/201 split.** `TicketLinksService.create` answers `{ status, link }` (200 for an existing link). The run answers that pair; on `executed` the handler sets `res.statusCode` to 200 when `status` is 200 and answers `link`, as today. `toResult` stores `link`.\n\n**`creatorRef` moves to its own file.** The private `creatorRef` of `ticket-links.controller.ts` moves unchanged to `ticket-links/creator-ref.ts` (exported); the controller and `TicketLinkRouteCommands` import it there. Importing it from the controller would make the commands file and the controller import each other.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/labels | label.create | project | rest:labels.create | `{ slug, label: parseBody(CreateLabelDto, \u2026) }` | `labels.create(slug, label, principal)` |\n| PATCH /projects/:slug/labels/:id | label.update | project | rest:labels.update | `{ slug, id, patch: parseBody(UpdateLabelDto, \u2026) }` | `labels.update(slug, id, patch, principal)` |\n| POST /projects/:slug/tickets/:ref/labels | ticket.label.assign | project | rest:ticket-labels.assign | `{ slug, ref, assignment: parseBody(AssignLabelDto, \u2026) }` | `labels.assignToTicket(slug, ref, assignment, principal)` |\n| POST /projects/:slug/tickets/:ref/links | ticket.link.add | project | rest:ticket-links.add | `{ slug, ref, link: parseBody(CreateTicketLinkDto, \u2026) }` | `ticketLinks.create(slug, ref, link, creatorRef(principal))`, answering `{ status, link }`; `toResult: (r) => r.link` |\n\n**Gated handlers keep their existing parameters, in order.** Unlike 5b, a handler keeps a `@Principal()` parameter it no longer reads (oxlint's `no-unused-vars` is off). A handler that needs the project and has no `@CurrentProject()` today appends `@CurrentProject() project: ProjectContext` as its last parameter: labels `createFromHttp`, `updateFromHttp`, `assignLabelFromHttp`. Ticket links `create` ends with the optional `@Res() res?`, so its `project` parameter goes before `res`, and its spec cases pass a project. Route parameters always stay declared, so the OpenAPI document keeps every path parameter.\n\n**Scope** \u2014 In: extend LabelRouteCommands/LABEL_ROUTE_VARIANTS with create/update/assign and TicketLinkRouteCommands/TICKET_LINK_ROUTE_VARIANTS with add, retaining existing variants. Gate four HTTP handlers with @ApprovalGated and unchanged Requires/ApiResponses; remove their four pending rows. Move creatorRef unchanged, add its unit spec, update commands/controller unit specs and create gated-label-link-routes.integration.spec.ts. HTTP handler assertions move service-call expectations to command specs; label helper-method specs stay. Module wiring already exists. Out: other route domains and final OpenAPI/counts belong to other stories. US-007 only: an approved assignment of another project's label to a ticket; the service's project check refuses it at execution as it does today, and no AC pins it.\n\n**Interface** \u2014 `LabelsService.create(slug, dto, principal)`, `.update(slug, id, dto, principal)`, `.assignToTicket(slug, ref, dto, principal)`; `TicketLinksService.create(slug, ref, dto, creator)` answering `{ status, link }`; `creatorRef(principal)` exported unchanged. Required ids/slugs/refs use parseRouteInput; nested DTOs use parseBody with {} when missing. Label commands use identity toResult. projectId is project.project.id; throw ApprovalPending on pending and preserve JsonResponse envelopes and route statuses on executed. Keep cross-project label ownership and soft-deleted ticket validation inside services so a policy yields 202 then failed with `{ error: 'execution-failed', name }`.\n\n**Test setup** \u2014 Agent holds project.read, label.create, label.update, ticket.label.assign and ticket.link.add in P; grant then invalidate PermissionCache. Seed each waiting test's route-key policy. Each AC has independent rows/calls, with beforeEach deleting every ApprovalPolicy, ApprovalDecision and ApprovalRequest and resetting throttle; restore spies and close app. Duplicate-link root requests remain immediate 200, and deferred link creation records the agent, not the decider.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/:slug/labels { name: 'bug' } by the agent under a wait policy returns 202 with data.permissionKey 'label.create'.",
+        "AC-2 [integration] Approving an independently created AC-1 request leaves a label 'bug' in P.",
+        "AC-3 [integration] Approving the agent's pending PATCH /api/projects/:slug/labels/:id { name: 'defect' } leaves the label named 'defect'.",
+        "AC-4 [integration] Approving the agent's pending PATCH /api/projects/:slug/labels/:id for a label of another project settles the request failed with result { error: 'execution-failed', name }, and that label's name is unchanged.",
+        "AC-5 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/labels { labelId } leaves the ticket carrying the label.",
+        "AC-6 [integration] Approving the agent's pending POST /api/projects/:slug/tickets/:ref/links { url } leaves one link with that URL whose creator is the agent.",
+        "AC-7 [integration] Approving the agent's pending link add after root deleted the ticket while it waited settles the request failed, with result { error: 'execution-failed', name }.",
+        "AC-8 [integration] POST /api/projects/:slug/tickets/:ref/links with the root token for a URL already linked to the ticket returns 200 with that link and writes no ApprovalRequest row.",
+        "AC-9 [unit] After onModuleInit, the registries return commands for rest:labels.create (label.create), rest:labels.update (label.update), rest:ticket-labels.assign (ticket.label.assign) and rest:ticket-links.add (ticket.link.add).",
+        "AC-10 [unit] TicketLinksController.create with an executed outcome whose result is { status: 200, link } sets the reply's statusCode to 200 and returns JsonResponse.Ok(link), so the HTTP envelope's data is link as before.",
+        "AC-11 [unit] The rest:ticket-links.add command's toResult({ status: 201, link }) returns link.",
+        "AC-12 [unit] In creator-ref.spec.ts, creatorRef returns { type: 'AGENT', id } for an agent principal and { type: 'USER', id } for a user principal."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "labels",
+        "ticket-links"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four writes span two modules, creator attribution and distinct immediate/stored result shapes; authorization paths require security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/labels/labels.service.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-routes.integration.spec.ts",
+        "apps/api/src/labels/label-route.commands.ts",
+        "apps/api/src/ticket-links/ticket-links.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/ticket-links/creator-ref.ts",
+        "apps/api/src/ticket-links/creator-ref.spec.ts",
+        "apps/api/test/integration/tickets/gated-label-link-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/labels, PATCH /projects/:slug/labels/:id, POST /projects/:slug/tickets/:ref/labels, POST /projects/:slug/tickets/:ref/links"
+        },
+        {
+          "path": "apps/api/src/labels/label-route.commands.ts",
+          "reason": "create, update, assign commands"
+        },
+        {
+          "path": "apps/api/src/labels/label-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/labels/labels.controller.ts",
+          "reason": "createFromHttp, updateFromHttp, assignLabelFromHttp gated"
+        },
+        {
+          "path": "apps/api/src/labels/labels.controller.spec.ts",
+          "reason": "new cases for the three handlers; helper-method cases stay"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-link-route.commands.ts",
+          "reason": "add command"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-link-route.commands.spec.ts",
+          "reason": "the new registration and run"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.controller.ts",
+          "reason": "creatorRef moves out to creator-ref.ts; create gated; the 200 status mapping reads the executed result"
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.controller.spec.ts",
+          "reason": "the create cases (about lines 116-155) pass a project before `res`, assert the gate call and the 200/201 mapping; their service-call expectations move to the commands spec"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Gate global project creation and scoped project updates",
+      "description": "**Goal** \u2014 Enforce approval policies on project create/update without changing principal-free service contracts or existing conflict/brief behavior.\n\n**Motivation** \u2014 The medium-risk writes still bypass the engine on REST.\n\n**Approach** \u2014 **The project create command takes the body only.** `POST /projects` is global (`projectId: null`) and its service takes no principal.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects | project.create | null | rest:projects.create | `parseBody(CreateProjectDto, input)` | `projects.create(dto)` |\n| PATCH /projects/:slug | project.update | project | rest:projects.update | `{ slug, patch: parseBody(UpdateProjectDto, \u2026) }` | `projects.update(slug, patch)` |\n\n**The frozen input is ids, slugs and the validated body.** An input never carries a request header or config.\n\n**Gated handlers keep their existing parameters, in order.** A handler that needs the project and has no `@CurrentProject()` today appends `@CurrentProject() project: ProjectContext` as its last parameter: projects `update`. Route parameters always stay declared, so the OpenAPI document keeps every path parameter.\n\n**Scope** \u2014 In: extend ProjectRouteCommands/PROJECT_ROUTE_VARIANTS preserving delete; gate ProjectsController.create/update with @ApprovalGated and unchanged Requires/ApiResponses, append CurrentProject to update, remove their two pending rows, update commands/controller specs, and create gated-project-routes.integration.spec.ts. The gate/module wiring already exists. Out: member/invite writes belong to US-009; exact counts/OpenAPI to US-011. Do not inject a principal into the project service or preflight duplicate slugs before approval. Running a service's domain checks before a request opens, beyond the handler checks listed in Design.\n\n**Interface** \u2014 `ProjectsService.create(dto)`, `.update(slug, dto)`; `ApprovalRouteGate.run({ key, variant, projectId, input, keyCheck? })`. project.create freezes the validated DTO directly (no wrapper); project.update freezes { slug, patch } and uses project.project.id. Use parseRouteInput for slug, parseBody for DTOs (missing nested patch -> {}), identity toResult, ApprovalPending on pending, JsonResponse.Ok(outcome.result) on executed with existing 201/200 statuses.\n\n**Regression doubles** \u2014 `projects-brief.routes.spec.ts` \u2014 its ApprovalRouteGate double executes the real write: for variant rest:projects.update it calls ProjectsService.update(input.slug, input.patch) and answers { status: 'executed', result }, so the brief echo, stored-row and follow-up GET cases keep their assertions.\n`test/unit/projects/projects-conflict-responses.spec.ts` \u2014 its ApprovalRouteGate double executes the real write: rest:projects.create calls ProjectsService.create(input), rest:projects.update calls ProjectsService.update(input.slug, input.patch), each answering { status: 'executed', result } and letting a thrown exception propagate, so its 201/200/404/409 cases keep their assertions.\n\n**Test setup** \u2014 Use global grantKeys/seedWaitPolicy(null) for project.create and project.read + project.update with project-scoped seedWaitPolicy for update; invalidate PermissionCache after grants. Root acts directly and never opens a request under the policy. Each AC has independent names/slugs/keys and repeats any request it approves. Delete all ApprovalPolicy/ApprovalDecision/ApprovalRequest rows before each integration test. A slug taken while a request waits fails at execution with `{ error: 'execution-failed', name }`, preserving existing conflict semantics on the immediate path.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects { name, slug, key } by an agent holding global project.create under a global wait policy returns 202 with data matching { permissionKey: 'project.create', projectId: null }.",
+        "AC-2 [integration] After independently repeating AC-1's request, before approval, no project has that slug.",
+        "AC-3 [integration] Approving an independently created AC-1 request leaves one project with that slug.",
+        "AC-4 [integration] Approving the agent's pending project create after root took the slug while it waited settles the request failed, with result { error: 'execution-failed', name }.",
+        "AC-5 [integration] PATCH /api/projects/:slug { name: 'Renamed' } by an agent holding project.update in P under a wait policy returns 202 with data.projectId P.",
+        "AC-6 [integration] Approving an independently created AC-5 request leaves the project named 'Renamed'.",
+        "AC-7 [integration] POST /api/projects with the root token under a global wait policy returns 201 and writes no ApprovalRequest row.",
+        "AC-8 [unit] After onModuleInit, the registry returns commands for rest:projects.create (project.create), rest:projects.update (project.update) and rest:projects.delete (project.delete).",
+        "AC-9 [unit] ProjectsController.create(dto) calls routeGate.run with { key: 'project.create', variant: 'rest:projects.create', projectId: null, input: dto }."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "projects"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two handlers extend an existing project command class and gate, with routine write-through test-double updates; global/project access scopes require security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/test/integration/permissions/gated-admin-delete-routes.integration.spec.ts",
+        "apps/api/src/projects/project-route.commands.ts",
+        "apps/api/src/projects/projects-brief.routes.spec.ts",
+        "apps/api/test/unit/projects/projects-conflict-responses.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/projects/gated-project-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects and PATCH /projects/:slug"
+        },
+        {
+          "path": "apps/api/src/projects/project-route.commands.ts",
+          "reason": "create, update commands"
+        },
+        {
+          "path": "apps/api/src/projects/project-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.ts",
+          "reason": "create and update gated (update with @CurrentProject())"
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "the create (about line 175) and update (about line 257) cases assert the gate call instead of the service call"
+        },
+        {
+          "path": "apps/api/src/projects/projects-brief.routes.spec.ts",
+          "reason": "its ApprovalRouteGate double (about line 109) executes the real write: for variant rest:projects.update it calls ProjectsService.update(input.slug, input.patch) and answers { status: 'executed', result }, so the brief echo, stored-row and follow-up GET cases keep their assertions"
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-conflict-responses.spec.ts",
+          "reason": "its ApprovalRouteGate double (about line 99) executes the real write: rest:projects.create calls ProjectsService.create(input), rest:projects.update calls ProjectsService.update(input.slug, input.patch), each answering { status: 'executed', result } and letting a thrown exception propagate, so its 201/200/404/409 cases keep their assertions"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Gate member addition and invite cancellation",
+      "description": "**Goal** \u2014 Add route commands and DI wiring for membership grants and non-secret invite cancellation.\n\n**Motivation** \u2014 The medium-risk writes still bypass the engine on REST.\n\n**Approach** \u2014 Each row is one `routeCommand`. The run calls the service the handler calls today, with `principal` the rebuilt `UserPrincipal | AgentPrincipal`. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a no-body command declares none.\n\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/members | member.add | project | rest:project-members.add | `{ slug, member: parseBody(AddMemberDto, \u2026) }` | `members.add(slug, member, principal)` |\n| DELETE /projects/:slug/invites/:id | invite.cancel | project | rest:project-invites.cancel | `{ slug, id }` | `invites.cancel(slug, id, principal)`, answering `null` (no `toResult`); the handler answers `JsonResponse.Ok({})` on `executed`, as today |\n\n**The frozen input is ids, slugs and the validated body.** An input never carries a request header or config. `DELETE /projects/:slug/invites/:id` has no `Accept-Language` dependency, so nothing is lost.\n\n**Module wiring** \u2014 ProjectMembersModule imports ApprovalEngineModule and AuthRepositoryModule; provides MemberRouteCommands; ProjectMembersController gains ApprovalRouteGate. ProjectInvitesModule imports the same two modules; provides InviteRouteCommands; ProjectInvitesController gains ApprovalRouteGate. `AuthRepositoryModule` imports only `PrismaModule`, so no module cycle is added. Each gated handler gains `@ApprovalGated()`, keeps its `@Requires` and `@ApiResponse`s.\n\n**Gated handlers keep their existing parameters, in order.** Unlike 5b, a handler keeps a `@Principal()` parameter it no longer reads (oxlint's `no-unused-vars` is off). A handler that needs the project and has no `@CurrentProject()` today appends `@CurrentProject() project: ProjectContext` as its last parameter: members `add`; invites `cancel`. Route parameters always stay declared, so the OpenAPI document keeps every path parameter.\n\n**Scope** \u2014 In: new member-route.commands.ts and invite-route.commands.ts plus co-located command specs, module/provider/controller wiring and existing specs, remove two pending rows, create gated-member-invite-routes.integration.spec.ts. ProjectMembersModule unit tests import GlobalStubsModule instead of FakeGlobalsModule; the shared stubs include OutboxService, AfterCommitService and FLEET_CFG needed by the engine. Module unit tests compile/init without DB and resolve their new commands and registry entries. Add gate doubles in controller specs; add/cancel assert gate mappings while invite create assertions stay. Out: project create/update is US-008; watch is US-010; final contract/OpenAPI is US-011. Gating the 8 `gate-secret` routes, including the two invite routes moved here. Invite create/resend remain unchanged; never persist their raw invitePath in ApprovalRequest.result.\n\n**Interface** \u2014 `MemberRouteCommands`, `MEMBER_ROUTE_VARIANTS` in projects/members/member-route.commands.ts; `InviteRouteCommands`, `INVITE_ROUTE_VARIANTS` in projects/invites/invite-route.commands.ts. `ProjectMembersService.add(slug, dto, principal)`; `ProjectInvitesService.cancel(slug, id, principal)`. Register with routeCommand(spec, loader); parseRouteInput for slug/id and parseBody(AddMemberDto, missing member as {}) for body. Gate project.project.id, throw ApprovalPending on pending; return existing member envelope/201 or empty-object envelope/200 on executed. An approved member add whose role grants keys the requester lacks is failed with no binding; an approved cancel whose invite was accepted/cancelled meanwhile is failed. Domain checks remain in services.\n\n**Test setup** \u2014 P is web. The member agent holds the viewer role in P via grantRole plus member.add (and project.read), so it holds every viewer key; the invite agent holds project.read plus invite.cancel. Invalidate PermissionCache after bindings. Each member AC creates a separate MEMBER user through root POST /api/admin/users with unique email. Root creates each pending invite with POST /api/projects/<slug>/invites { email: <unique address with no account>, roleKey: 'viewer' }. Waiting tests seed the route-key policy. Each AC owns its rows and repeats any call it approves. Delete all ApprovalPolicy/ApprovalDecision/ApprovalRequest in beforeEach. Service failures after approval use `{ error: 'execution-failed', name }` and cannot write a binding or change a cross-project invite.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/projects/web/members { email: <the test's user> } by the member agent under a wait policy returns 202 with data.permissionKey 'member.add'.",
+        "AC-2 [integration] Approving an independently created AC-1 request makes the test's user a member of web with the viewer role.",
+        "AC-3 [integration] Approving the member agent's pending add { email: <the test's user>, roleKey: 'developer' } settles the request failed (the agent lacks the developer role's keys), and that user has no binding in web.",
+        "AC-4 [integration] DELETE /api/projects/web/invites/:id on a pending invite by the invite agent under a wait policy returns 202 with data.permissionKey 'invite.cancel'.",
+        "AC-5 [integration] Approving an independently created AC-4 request leaves the invite cancelled and the request's result null.",
+        "AC-6 [integration] Approving the invite agent's pending cancel after root cancelled the invite while it waited settles the request failed.",
+        "AC-7 [integration] Approving the invite agent's pending DELETE /api/projects/web/invites/:id whose id is an invite of project ops settles the request failed, and that invite stays pending.",
+        "AC-8 [integration] DELETE /api/projects/web/invites/:id with the root token returns 200 with data {} and writes no ApprovalRequest row.",
+        "AC-9 [unit] The registered rest:project-invites.cancel command's execute invokes its run callback, calls invites.cancel('alpha', 'i1', <principal>) for parsed input { slug: 'alpha', id: 'i1' }, and returns null, using the loader's principal.",
+        "AC-10 [unit] ProjectMembersModule compiled with GlobalStubsModule resolves MemberRouteCommands, and after init its registry returns a member.add command for rest:project-members.add.",
+        "AC-11 [unit] ProjectInvitesModule compiled with GlobalStubsModule resolves InviteRouteCommands, and after init its registry returns an invite.cancel command for rest:project-invites.cancel.",
+        "FM-1 [integration] Approving the invite agent's pending cancel after the invite was accepted while it waited settles the request failed."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "members",
+        "invites",
+        "di"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New registrations and DI across two modules plus grant escalation and invite state/scope fencing are security-critical."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/projects/members/project-members.module.ts",
+        "apps/api/src/projects/invites/project-invites.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/members/member-route.commands.ts",
+        "apps/api/src/projects/members/member-route.commands.spec.ts",
+        "apps/api/src/projects/invites/invite-route.commands.ts",
+        "apps/api/src/projects/invites/invite-route.commands.spec.ts",
+        "apps/api/test/integration/projects/gated-member-invite-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/members and DELETE /projects/:slug/invites/:id"
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides MemberRouteCommands"
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.module.spec.ts",
+          "reason": "its testing module imports GlobalStubsModule in place of the hand-rolled FakeGlobalsModule (GlobalStubsModule provides every stand-in it had, plus OutboxService, AfterCommitService and FLEET_CFG the engine needs); it also resolves MemberRouteCommands"
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; add gated"
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; the add cases assert the gate call"
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.module.ts",
+          "reason": "imports the two modules; provides InviteRouteCommands"
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.module.spec.ts",
+          "reason": "the module also resolves InviteRouteCommands"
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; cancel gated"
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.controller.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; the cancel case (about line 57) asserts the gate call; the create case stays"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Gate user-only ticket watch and unwatch",
+      "description": "**Goal** \u2014 Bring ticket watching into the route-gate contract without allowing agent watchers or introducing a reachable waiting path.\n\n**Motivation** \u2014 Every approvable REST write route is gated, split by risk; the deferred run is the command registry; a human acting directly satisfies any mode.\n\n**Approach** \u2014 **Watch keeps its user-only rule in both places.** The handler checks `caller(principal)` before the gate; the command's run refuses a principal that is not a user with `ForbiddenAppException({}, 'notifications')` and calls the service with the user's id. An agent can never reach a watch request, and a user acting directly always executes, so these two routes never answer 202 in practice. They are gated so the contract has no approvable write route outside the engine.\n\n**`userOf` is the commands file's own guard.** `ticket-watch-route.commands.ts` defines `userOf(principal: UserPrincipal | AgentPrincipal): UserPrincipal`, which throws `ForbiddenAppException({}, 'notifications')` for an agent principal (the controller's private `caller` rule).\n\n| Route | Key | Scope | Variant | Input | Run |\n| PUT /projects/:slug/tickets/:ref/watch | ticket.watch.set | project | rest:ticket-watch.set | `{ projectId, ref }` | `watch.watch(projectId, ref, userOf(principal).id)` |\n| DELETE /projects/:slug/tickets/:ref/watch | ticket.watch.unset | project | rest:ticket-watch.unset | `{ projectId, ref }` | `watch.unwatch(projectId, ref, userOf(principal).id)` |\n\n**Module wiring** \u2014 NotificationsModule imports AuthRepositoryModule (it already imports ApprovalEngineModule); provides TicketWatchRouteCommands. TicketWatchController gains ApprovalRouteGate. `AuthRepositoryModule` imports only `PrismaModule`, so no module cycle is added. Each gated handler gains `@ApprovalGated()`, keeps its `@Requires` and `@ApiResponse`s.\n\n**Scope** \u2014 In: create ticket-watch-route.commands.ts and its co-located unit spec, wire module/provider/controller gate and existing specs, remove the PUT/DELETE watch pending rows, create gated-ticket-watch-routes.integration.spec.ts. Keep existing handler parameters/order and watcher state read endpoint unchanged. User handler cases assert gate calls using executed gate doubles; the agent-refused case still throws before gate. The NotificationsModule unit test resolves the provider with GlobalStubsModule without DB. Out: other route domains and final contract/OpenAPI belong to other stories. US-010 only: a 202 path for watch and unwatch, which no caller can reach (an agent is refused first, a user executes at once); their `openapi.json` operations still list `202`, as every gated route does.\n\n**Interface** \u2014 `TicketWatchRouteCommands`, `TICKET_WATCH_ROUTE_VARIANTS`; `userOf(principal: UserPrincipal | AgentPrincipal): UserPrincipal`; `TicketWatchService.watch/unwatch(projectId, ref, userId)`. Parse projectId/ref with parseRouteInput; run as the loader's rebuilt requester; identity toResult. Gate project.project.id with input { projectId, ref }, after caller(principal); throw ApprovalPending on pending for the uniform handler shape and JsonResponse.Ok(outcome.result) on executed.\n\n**Test setup** \u2014 P is web; user dev is developer on web and holds both watch keys. Agent holds project.read plus ticket.watch.set/unset; grant then invalidate PermissionCache. Seed wait policies on agent refusal cases to prove caller refuses before any request. Each AC has its own ticket/calls; delete every ApprovalPolicy, ApprovalDecision and ApprovalRequest before each integration test and use the DB gate. Do not change sticky mute, assignment/mention or notification business rules.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] PUT /api/projects/web/tickets/:ref/watch with dev's token returns 200 with data.watching true and writes no ApprovalRequest row.",
+        "AC-2 [integration] DELETE /api/projects/web/tickets/:ref/watch with dev's token returns 200 with data.watching false.",
+        "AC-3 [integration] PUT /api/projects/web/tickets/:ref/watch by the agent under a wait policy returns 403 with key 'notifications' and writes no ApprovalRequest row.",
+        "AC-4 [integration] DELETE /api/projects/web/tickets/:ref/watch by the agent under a wait policy returns 403 with key 'notifications' and writes no ApprovalRequest row.",
+        "AC-5 [unit] After onModuleInit, the registry returns commands for rest:ticket-watch.set (ticket.watch.set) and rest:ticket-watch.unset (ticket.watch.unset).",
+        "AC-6 [unit] The registered rest:ticket-watch.set command's execute, with a user principal returned by the loader, invokes its run callback and calls watch.watch('p1', 'AL-1', <the user's id>) for parsed input { projectId: 'p1', ref: 'AL-1' }.",
+        "AC-7 [unit] The registered rest:ticket-watch.set command's execute, with an agent principal returned by the loader, rejects with ForbiddenAppException with key 'notifications' from its run callback and never calls watch.watch.",
+        "AC-8 [unit] TicketWatchController.watch calls routeGate.run with { key: 'ticket.watch.set', variant: 'rest:ticket-watch.set', projectId: <the project id>, input: { projectId, ref } } for a user principal.",
+        "AC-9 [unit] NotificationsModule compiles with GlobalStubsModule and resolves TicketWatchRouteCommands."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "notifications",
+        "watchers",
+        "di"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One new command provider follows the existing route-command pattern in a module already importing the engine; preserving user-only authorization requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/ticket-watch.service.ts",
+        "apps/api/src/notifications/ticket-watch.controller.ts",
+        "apps/api/src/notifications/notifications.module.ts",
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/notifications/notifications.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/notifications/ticket-watch-route.commands.ts",
+        "apps/api/src/notifications/ticket-watch-route.commands.spec.ts",
+        "apps/api/test/integration/notifications/gated-ticket-watch-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops PUT and DELETE /projects/:slug/tickets/:ref/watch"
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.module.ts",
+          "reason": "imports AuthRepositoryModule; provides TicketWatchRouteCommands"
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.module.spec.ts",
+          "reason": "the module also resolves TicketWatchRouteCommands"
+        },
+        {
+          "path": "apps/api/src/notifications/ticket-watch.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate; watch and unwatch gated after caller()"
+        },
+        {
+          "path": "apps/api/src/notifications/ticket-watch.controller.spec.ts",
+          "reason": "provides an ApprovalRouteGate double; the user watch and unwatch cases (about lines 29-31) assert the gate call; the agent-refused case still throws before the gate"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Publish the 62-route contract and OpenAPI pending responses",
+      "description": "**Goal** \u2014 Close the rollout contract at 62 gated routes, publish their 202 responses and pin two representative HTTP pending paths.\n\n**Motivation** \u2014 The contract counts 62 gated routes after this feature (41 + 21), and openapi.json shows 202 on each.\n\n**Approach** \u2014 US-011: the allowlist holds 25 `gate-core-domains`, 36 `gate-fleet` and 8 `gate-secret` rows.\n\n**Each gating story removes its own `PENDING_GATE_ROUTES` rows**, as in 5b. US-001 relaxes the exact gated-route count to a lower bound (at least 41), and US-011 restores an exact count (62).\n\n**Policy lifecycle in tests.** Each new integration file deletes every `ApprovalPolicy` row in `beforeEach` (with the request and decision rows), so an AC with no policy runs with none. The two `endpoint.e2e.spec.ts` cases (US-011) delete their policy row in a `finally`, as 5b's e2e case does, because that file is one sequential lifecycle and its later `POST \u2026/labels` case expects 201.\n\n**Scope** \u2014 In: update permission-contract.integration.spec.ts's exact gated-count assertion/title to 62; permission-contract.spec.ts pins final feature counts; approval-openapi.contract.spec.ts lists all 62 gated operations and compares the complete 202 set with those plus reindex; regenerate root openapi.json with bun run api:export-spec from repo root. Add two endpoint.e2e.spec.ts 202 cases: scoped agent label.create and scoped own-comment update using comment.update.own with policy on comment.update. No new files. Keep workdir apps/api as required even though the generated artifact is at repo root. Out: route implementation belongs to US-003\u2013US-010, VCS fix to US-002. `endpoint.e2e.spec.ts` coverage for every gated route: US-011 adds two representative 202 cases. Gating the 8 `gate-secret` routes, including the two invite routes moved here.\n\n**Interface** \u2014 `collectPermissionDeclarations`, `findContractViolations`, `expectedPendingGateRoutes`; `gatedOperations` in src/approvals/approval-openapi.contract.spec.ts. Regenerated operation paths use /api and OpenAPI {parameter} syntax. The set of operations with 202 is exactly 62 unique gated method/path pairs plus `post /api/projects/{slug}/knowledge/repos/{repoId}/reindex`; verify-fix counts once, watch/unwatch count separately despite their unreachable pending paths. `post /api/projects/{slug}/invites` remains without 202.\n\n**Implementation/verification** \u2014 Modify only the existing contract/endpoint specs and generated OpenAPI artifact. Export using bun run api:export-spec, never hand-edit JSON or generated CLI files. Run AC-4\u2013AC-6 in src/approvals/approval-openapi.contract.spec.ts; booted-app contract checks cover all ungated/non-allowlisted approvable writes, not only examples. Endpoint tests grant project.read plus the required key, invalidate PermissionCache, seedWaitPolicy, assert exactly 202, and finally delete only their policy row so the sequential lifecycle is preserved. DB checks run outside the sandbox with compose Postgres started via bun run test:db:up in apps/api; type-check and lint are verification gates, not ACs. This story is intentionally retained as a contract/test-artifact story under the binding decomposition.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Over the booted app, the collected routes contain exactly 62 gated routes.",
+        "AC-2 [integration] Over the booted app, findContractViolations reports no violation.",
+        "AC-3 [unit] PENDING_GATE_ROUTES holds exactly 25 gate-core-domains, 36 gate-fleet and 8 gate-secret entries.",
+        "AC-4 [unit] openapi.json's post /api/projects/{slug}/tickets operation has a 202 response.",
+        "AC-5 [unit] openapi.json's post /api/projects/{slug}/invites operation has no 202 response.",
+        "AC-6 [unit] The operations of openapi.json with a 202 response are exactly the 62 gated ones plus post /api/projects/{slug}/knowledge/repos/{repoId}/reindex.",
+        "AC-7 [integration] In endpoint.e2e.spec.ts, POST /api/projects/:slug/labels with the key of an agent granted label.create in the project, under a wait policy deleted in a finally, returns exactly 202.",
+        "AC-8 [integration] In endpoint.e2e.spec.ts, PATCH /api/comments/:id on the agent's own comment, with the key of an agent granted comment.update.own in the project, under a wait policy for comment.update deleted in a finally, returns exactly 202.",
+        "FM-1 [integration] Given an approvable write route that is neither gated nor allowlisted, findContractViolations returns an ungated-approvable-write violation for that route."
+      ],
+      "tags": [
+        "permissions",
+        "approval-gate",
+        "api",
+        "security",
+        "openapi",
+        "contract"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008",
+        "US-009",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing collectors, Swagger export and endpoint fixtures need count/set updates and two pending cases, not a new integration; security contract assertions retain isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/scripts/export-spec.cjs",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "asserts exactly 62 gated routes (title updated)"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the allowlist counts per feature"
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec from the repo root; the 21 gated operations gain a 202 response"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "gatedOperations lists the 62 gated operations; its 202-set case asserts exactly those plus the reindex operation"
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the two 202 cases below"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository inspection and architecture: This is an enhancement of the existing P3 approval engine, not a new authorization system. Codebase-memory MCP is unavailable in this session; navigation used direct reads, Glob and Grep against the supplied execution repository. The detected Express/Next.js metadata is not authoritative: API guidance specifies NestJS 12/Fastify, Prisma 7/PostgreSQL and Vitest, and web is Nuxt; apps/api/package.json:39-77 confirms the API dependencies. Only API implementation and the root OpenAPI artifact change. Read .nax/mono/apps/api/context.md and the nathapp-nestjs-patterns skill before writing NestJS code. All stories use three-session-tdd because they affect access control, approval contracts or credential-target validation. No implementation or test execution was performed while drafting this PRD.\n\nExisting seams: apps/api/src/approvals/route/approval-route-gate.ts:9-69 defines RouteGateCall and run<TResult>; it obtains the actor from action context, refuses RUNNER, validates possession of the route key or its ownable form through PermissionService.canHoldKey, and delegates to ApprovalGate. Do not bypass this route seam, derive a new actor from request input, or disable its key check. apps/api/src/approvals/approval-gate.service.ts:45-89 selects a registered variant, parses frozen input, resolves policy per action, executes with no request when mode is none, and treats a directly acting USER as satisfying every mode. Only a non-human under a requiring policy opens a pending request. apps/api/src/approvals/route/route-command.ts:12-66 adapts a route specification into registry parse/execute/prepare/toResult behavior and reloads the requester via ActorPrincipalLoader, both immediately and during deferred execution; preserve attribution, do not execute as the approving root user. apps/api/src/approvals/route/parse-body.ts:17-34 mirrors whitelist DTO validation and produces a JSON-serializable plain object, throwing approvals.invalidInput. apps/api/src/approvals/route/parse-route-input.ts:5-23 reads required own non-empty string properties. Missing nested DTO bodies must be passed to parseBody as {}. apps/api/src/approvals/route/approval-gated.decorator.ts:24-59 catches only ApprovalPending, returns a JSON envelope with status 202 and request summary, and supplies both contract metadata and Swagger 202. Retain every existing Requires/guard/ApiResponse declaration when adding ApprovalGated. Every body-returning command uses identity toResult unless specifically overridden; omitted toResult stores null. Service failures during approval settle failed with result { error: 'execution-failed', name }, as apps/api/src/approvals/approval-execution.service.ts:177,229 already implements. Domain failures must remain in services, not be hoisted ahead of the gate.\n\nUS-001 rollout and fixture impact: apps/api/src/permissions/pending-gate-routes.ts:5-12 currently lists six secret routes; invite create/resend still occur in ROUTE_ASSIGNMENTS at :59-60 and cancel at :15. Move exactly the two token-answering POSTs to gate-secret and add them to SECRET_GATE_ROUTES; do not gate their handlers. apps/api/src/permissions/test-helpers/permission-contract.ts:175-225 detects ungated approvable writes and stale allowlist entries, and :241-265 derives expected pending assignments with SECRET_GATE_ROUTES taking precedence. No algorithm change is required there. apps/api/test/integration/permissions/permission-contract.integration.spec.ts:66-71 currently expects exactly 41; temporarily use at least 41, then restore exactly 62 in US-011. apps/api/src/approvals/test-helpers/approval-fixtures.ts:6-23 already exposes grantKeys for a PrismaClient or transaction; add seedWaitPolicy alongside it, upserting selector and returning { id }. Keep policy defaults untouched. The existing unit allowlist anchor asserting ticket POST is pending must switch to POST /memory in US-003. Final rollout arithmetic: 48 core-domain entries minus two moved secrets minus 21 gated routes = 25; fleet remains 36; secrets become eight; gated route count rises 41 to 62. Verify-fix registers two commands but is ONE HTTP route.\n\nUS-002 bug seam: apps/api/src/vcs/vcs-connection.service.ts:253-261 calls the provider before returning a settlement callback and currently compares complete connection objects. Export a pure vcsTestTarget projection of id, provider, repoOwner, repoName, encryptedToken, comparing projected snapshots on settlement; a missing row must still fail. Polling metadata and non-target configuration no longer invalidate the provider result. The private testTarget at :280-310 decrypts credentials and performs provider HTTP and must not change or move inside the approval transaction. apps/api/src/vcs/vcs-route.commands.ts:30-44 wires rest:vcs.test prepare to prepareTestConnection and immediate run to testConnection, using config rather than frozen headers/keys. Existing regression anchor apps/api/src/vcs/vcs-connection.service.spec.ts:96-106 rejects repoName changes; retain it and add timestamps, owner/provider/token, gone row and replacement identity cases. Extend test/integration/webhook/gated-webhook-vcs-routes.integration.spec.ts with the provider stub that writes lastSyncedAt before returning ok. Never log or store encryptedToken snapshots in request results.\n\nUS-003/004/005 ticket impact: apps/api/src/tickets/ticket-route.commands.ts:9-26 currently registers only rest:tickets.delete; extend the same class and variant map, preserving delete. apps/api/src/tickets/tickets.module.ts:20-23 already imports ApprovalEngineModule/AuthRepositoryModule and provides the commands; US-004 adds TicketTransitionsService after TicketsService in the commands constructor, updating direct instantiation in ticket-route.commands.spec.ts:13. apps/api/src/tickets/tickets.controller.ts:64-120 exposes helper methods used by direct unit tests; leave all helpers and their assertions unchanged. Modify HTTP handlers only. The nine ticket HTTP writes include three ordinary writes and six transitions. Existing transition handlers at :273-421 use requireCommentBody; keep its 400 tickets refusal before opening a request on verify/fix/verify-fix/close/reject. Start needs no body. Transition services return { ticket, comment?, activity }; commands must return ticket. Verify-fix retains Requires mode any, but the gate must check the selected approve/return key, based on true or 'true', without freezing an approve flag. apps/api/src/tickets/tickets.service.ts:268-292 explicitly defers and checks edge authorization for status patches before writes; gate PATCH under ticket.update regardless of the requested edge. Similarly POST verify on VERIFY_FIX stays gated under ticket.transition.verify even if the service takes verify-fix.approve. A missing edge key or stale transition under policy first yields 202 then failed at execution, never a pre-gate domain lookup. Ticket command/controller specs shift service expectations to commands and assert gate/executed/pending mappings in handlers without shifting parameter positions. Three new DB integration files isolate ordinary writes, initial transitions and review transitions. Serialize US-003 -> US-004 -> US-005 because they share the controller and commands.\n\nUS-006 comment impact: apps/api/src/comments/comment-route.commands.ts:9-34 and comments.controller.ts:29-36 already provide the gate/delete variant. Extend create and update variants, with createFromHttp gaining CurrentProject last. The slug-less update handler at comments.controller.ts:108-126 must call resolveCommentProject before the gate, following deleteFromHttp at :139-149. CommentsService.resolveCommentProject at comments.service.ts:51-81 obscures missing/deleted/non-member comments as 404 comments; its update at :202-212 retains row-level ownership checks. A holder of comment.update.own may open comment.update under a policy, but another author's comment fails only when approved execution reaches the service. An actor with no route key gets 403 permissions and no request; non-members retain the prior 404 rather than leaking existence. CommentsModule already registers engine/auth/commands (comments.module.ts:14-20). Preserve controller create/update helper methods.\n\nUS-007 label/link impact: apps/api/src/labels/label-route.commands.ts:8-35 has delete/remove registrations and labels.controller.ts:89-201 already has gate wiring; add three variants and gate only createFromHttp/updateFromHttp/assignLabelFromHttp, appending CurrentProject after the existing principal. LabelsService.update at labels.service.ts:82-99 refuses cross-project labels; keep that check at execution. apps/api/src/ticket-links/ticket-link-route.commands.ts:8-27 has remove only; add the add variant. ticket-links.controller.ts:44-48 defines private creatorRef returning USER/AGENT refs or undefined; move it unchanged, exported, to creator-ref.ts to avoid a controller-command import cycle. Its POST at :66-77 currently returns link and maps duplicate-link status 200; commands must return { status, link }, controllers unwrap the pair and preserve 200/201, while toResult stores link alone. Insert CurrentProject before optional Res, the only deliberate positional exception, and update all controller create test calls. Existing modules already import engine/auth and provide their commands (labels.module.ts:12-15; ticket-links.module.ts:18-21).\n\nUS-008 project impact: apps/api/src/projects/project-route.commands.ts:8-27 registers delete, and projects.controller.ts:49-55 already injects the gate. Create at :67-70 is globally scoped and takes only a DTO; update at :119-125 adds CurrentProject last and freezes { slug, patch }. Service signatures remain principal-free. In addition to commands/controller tests, projects-brief.routes.spec.ts:109 and test/unit/projects/projects-conflict-responses.spec.ts:99 currently use inert executed-null gate doubles; make those doubles invoke the appropriate real ProjectsService methods for create/update so existing brief persistence/echo/follow-up GET and 201/200/404/409 anchors still exercise writes. Do not accidentally mask duplicate slug errors. ProjectsModule already supplies engine/auth/commands (projects.module.ts:19,35).\n\nUS-009/010 DI impact: apps/api/src/projects/members/project-members.module.ts:10-14 and projects/invites/project-invites.module.ts:20-29 need engine/auth repository imports and new command providers. Their controllers at project-members.controller.ts:32 and project-invites.controller.ts:27 gain ApprovalRouteGate; only add/cancel gate and append CurrentProject. Member escalation enforcement already resides in ProjectMembersService.add at :62-85 through roles.assertMayGrant; do not pre-execute or bypass it. Invite cancellation at project-invites.service.ts:127-135 uses project-scoped lookup and conflict checks; command returns null, no toResult, immediate HTTP body remains {}. Invite create/resend retain token and locale behavior; cancel has no Accept-Language input. Replace FakeGlobalsModule in project-members.module.spec.ts:17-45 with GlobalStubsModule; invites already uses that shared stub at project-invites.module.spec.ts:16. Compile modules/init registry in no-DB unit tests. apps/api/src/auth/auth-repository.module.ts:13-18 imports only PrismaModule and exports ActorPrincipalLoader, avoiding a new AuthModule cycle. NotificationsModule already imports ApprovalEngineModule (notifications.module.ts:37) but gains AuthRepositoryModule and TicketWatchRouteCommands. ticket-watch.controller.ts:14-16 defines caller, and :52-64 retains user-only watch/unwatch; call caller before gate, then duplicate that defense as userOf inside commands so an agent cannot execute a forged command either. Users execute directly under any policy, so no real watch 202 path exists despite required OpenAPI 202 declarations. Existing watcher sticky mute/domain semantics and read endpoint remain untouched. Module unit tests resolve the new provider; service-command and handler expectations remain distinct.\n\nUS-011 contract and generation: apps/api/src/approvals/approval-openapi.contract.spec.ts:12-54 enumerates 41 gated operations, and :95-98 compares all 202 operations against those plus the existing reindex operation. Append exactly 21 unique method/path operations, including watch/unwatch; do not count both verify-fix keys twice or add secret invite POSTs. apps/api/scripts/export-spec.cjs:7-21 loads the built AppModule, sets /api, exports Swagger and writes root openapi.json, so regenerate using bun run api:export-spec from repository root rather than editing the artifact. Do not edit CLI generated code; no web/CLI source changes are requested. Root guidance normally requires bun run generate if a CLI-facing contract change requires client regeneration; this feature explicitly excludes CLI changes and requires only spec export, so flag any genuinely necessary downstream generation rather than manually expanding scope. US-011 keeps workdir apps/api per the binding table despite the explicitly required root artifact. Endpoint lifecycle tests add just label-create and own-comment-update 202 examples, cleaning each policy in finally so later label creation still gets 201.\n\nTesting and isolation: Existing pattern test/integration/tickets/gated-ticket-routes.integration.spec.ts:1-64 supplies bootHttpApp/data/resetThrottle/fixtureDb/seedFleetHttpWorld/seedFleetHttpAgent, PermissionCache invalidation and approval decision HTTP requests. Its older multi-AC tests and absence of policy cleanup are not templates for new tests: every new integration file deletes ApprovalDecision, ApprovalRequest and every ApprovalPolicy in beforeEach; each AC has its own test, rows and unique names/slugs/emails/refs. 'Approve AC-n' means repeat its setup and call in that test, not depend on another test's state. Grant project.read plus only the relevant keys via grantKeys and invalidate PermissionCache; seedWaitPolicy is required because every new route key stays medium/default none. Use root decisions POST /api/approvals/:id/decisions { decision: 'approve' }. Follow .nax/rules/api-test-isolation.md:15-67 for test order independence, restored mocks/env, app/client shutdown and DB shared-module-cache safety. Module wiring stays co-located *.module.spec.ts, with GlobalStubsModule and no Postgres. Vitest uses vi rather than jest. apps/api/package.json:12-23 defines test, test:scoped, test:integration, type-check/lint and DB setup. Start compose via bun run test:db:up in apps/api and run targeted DB tests through test:scoped outside NAX_SANDBOXED; DB skip is not verification. KODA_DB_TESTS=1 enables DB runs, with a private container for concurrent worktrees and no simultaneous force-resets of one test DB. The final quality verification includes bun run --cwd apps/api type-check and lint, plus scoped unit/DB/e2e checks and spec regeneration; these are not acceptance criteria.\n\nMigration/backward compatibility: No Prisma schema, catalog default, role model or data backfill is needed. Roll out by relabeling secret routes and introducing the wait-policy fixture first; independent VCS fix can run in parallel. Gate each route slice and remove its pending rows atomically in that slice. Preserve all existing HTTP statuses/bodies in default immediate execution, path declarations/parameter order, controller helpers, service auth/domain invariants, and existing 5a/5b variants. Policies intentionally change agent REST writes from immediate success/domain errors to 202 then executed/failed; callers must use existing approval request/decision flows. The only pre-gate handler checks remain transition body validation, comment membership/project resolution and watcher user-only validation. Deferred input is validated DTOs, ids and slugs, never request headers/config/secrets. Final US-011 closes counts/OpenAPI/representative endpoint seams after all implementations. A policy on an effective edge key intentionally does not delay a different route key. Risks to review are incorrect project/global scope, lost .own handling, approving as the decider rather than requester, premature domain checks, result shape/status regressions, unregistered commands from DI gaps, allowlist drift, secret persistence and VCS false positives/false negatives. Shared pending-gate-routes.ts is touched by independent slices; coordinate merges without deleting other slices' remaining entries.\n\nRefine-pass audit: All 104 numbered spec ACs remain in their original stories: US-001 AC-1..7; US-002 AC-1..5; US-003 AC-1..10; US-004 AC-1..10; US-005 AC-1..12; US-006 AC-1..11; US-007 AC-1..12; US-008 AC-1..9; US-009 AC-1..11; US-010 AC-1..9; US-011 AC-1..8. Qualifiers retained include original six secret labels, existing repoName rejection, same-target replacement identity, missing edge keys, unchanged other-author comment/cross-project label/invite, existing duplicate-link status, .own versus route-key policy, and finally policy cleanup. Binding IDs, workdirs and dependency arrays are unchanged. All 12 feature-level exclusions remain verbatim, including story-qualified exclusions that were explicitly placed in the feature-level Out of Scope section. No story-local deferral was newly hoisted. Negative paths are pinned by US-001 AUDIT-1 (stale secret allowlist entry), US-002 AC-2..4, US-003 AC-4, US-004 AC-6/7/10, US-005 AC-5/8, US-006 AC-5..8, US-007 AC-4/7, US-008 AC-4, US-009 AC-3/6/7 plus FM-1, US-010 AC-3/4/7, US-011 AC-5 plus FM-1. US-001's added negative assertion uses existing findContractViolations behavior and its existing unit spec; it does not gate a secret route or create a new helper. Context lists now include every spec-recommended context file, notably both US-007 service files and US-008's gated-admin-delete integration baseline, with at most five entries each. Review confirmed registry commands expose execute, not run (approval-command.registry.ts:56 and route/route-command.ts:47-50; ticket-route.commands.spec.ts:19); run is the internal route-spec callback. Command service-forwarding ACs now name the observable execute entry point without changing their run-callback assertions. TicketLinksController.create returns JsonResponse.Ok(link), not a raw link object, so its unit AC explicitly pins the envelope while retaining HTTP data semantics and 200 status. Verify-fix wrong-key tests supply a valid nonblank body to exercise authorization rather than the earlier body refusal. Existing adapters/modules make the single-module rollout slices medium complexity; only label/link and member/invite multi-module work remain complex. All strategies remain three-session-tdd because the security override applies, not because of AC count. No schema or implementation-file scope was added by this audit.",
+  "outOfScope": [
+    "The other 25 `gate-core-domains` routes (5c-2) and the 36 `gate-fleet` routes (5d).",
+    "Gating the 8 `gate-secret` routes, including the two invite routes moved here.",
+    "Changing any catalog default: these keys stay `none`.",
+    "Running a service's domain checks before a request opens, beyond the handler checks listed in Design.",
+    "Assistant or MCP writes on these keys: they keep their primary command.",
+    "Any change to `apps/web` or `apps/cli`.",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.",
+    "Gating `PATCH /projects/:slug/tickets/:ref` with a `status`, or `POST /projects/:slug/tickets/:ref/verify` on a VERIFY_FIX ticket, under the key of the edge the service takes: both are gated under the route's own key (Design).",
+    "US-007 only: an approved assignment of another project's label to a ticket; the service's project check refuses it at execution as it does today, and no AC pins it.",
+    "US-002 only: changing what `testTarget` checks, or moving the provider call inside the approval transaction.",
+    "`endpoint.e2e.spec.ts` coverage for every gated route: US-011 adds two representative 202 cases.",
+    "US-010 only: a 202 path for watch and unwatch, which no caller can reach (an agent is refused first, a user executes at once); their `openapi.json` operations still list `202`, as every gated route does."
+  ],
+  "routingProfile": "native-codex"
+}
