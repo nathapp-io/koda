@@ -32,7 +32,7 @@ describe('PermissionsApiModule', () => {
     expect(moduleRef.get(PermissionRouteCommands)).toBeInstanceOf(PermissionRouteCommands);
   });
 
-  it('AC-15: after onModuleInit the registry answers role.manage for every role variant', async () => {
+  it('AC-15: after onModuleInit the registry answers each role and binding variant under its gate key', async () => {
     moduleRef = await build();
     expect(moduleRef.get(ApprovalCommandRegistry).get('role.manage', PERMISSION_ROUTE_VARIANTS.roleCreate))
       .toBeUndefined();
@@ -40,8 +40,13 @@ describe('PermissionsApiModule', () => {
     await moduleRef.init();
 
     const registry = moduleRef.get(ApprovalCommandRegistry);
-    for (const variant of Object.values(PERMISSION_ROUTE_VARIANTS)) {
+    for (const variant of [PERMISSION_ROUTE_VARIANTS.roleCreate, PERMISSION_ROUTE_VARIANTS.roleUpdate, PERMISSION_ROUTE_VARIANTS.roleDelete]) {
       expect(registry.get('role.manage', variant)).toMatchObject({ key: 'role.manage', variant });
+    }
+    for (const key of ['role.binding.owner', 'role.binding.global', 'role.binding.manage']) {
+      for (const variant of [PERMISSION_ROUTE_VARIANTS.bindingCreate, PERMISSION_ROUTE_VARIANTS.bindingDelete]) {
+        expect(registry.get(key, variant)).toMatchObject({ key, variant });
+      }
     }
   });
 });
