@@ -59,7 +59,6 @@ POST /projects/:slug/threads/:id/publish=gate-fleet
 POST /projects/:slug/threads/:id/run=gate-fleet
 POST /projects/:slug/threads/:id/stop=gate-fleet
 POST /projects/:slug/vcs=gate-secret
-POST /projects/:slug/vcs/sync-pr=gate-core-domains
 POST /projects/:slug/vcs/webhook-secret/rotate=gate-secret
 POST /projects/:slug/webhooks=gate-secret
 POST /threads=gate-fleet

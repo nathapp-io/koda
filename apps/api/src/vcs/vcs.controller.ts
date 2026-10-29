@@ -266,6 +266,7 @@ export class VcsController {
    */
   @Post('/sync-pr')
   @Requires('vcs.sync.pr')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
   @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
@@ -274,22 +275,15 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncPr(
     @Param('slug') slug: string,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
-      this.throwEncryptionKeyNotConfigured();
-    }
-
-    // Get the full connection with all fields
-    const connection = await this.vcsService.getFullByProject(project.id);
-
-    // Run PR sync
-    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
-
-    return JsonResponse.Ok({ updated: result.updated });
+    if (!this.vcsConfig.encryptionKey) this.throwEncryptionKeyNotConfigured();
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run<{ updated: number }>({
+      key: 'vcs.sync.pr', variant: VCS_ROUTE_VARIANTS.syncPr,
+      projectId, input: { slug, projectId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok({ updated: outcome.result.updated });
   }
 }

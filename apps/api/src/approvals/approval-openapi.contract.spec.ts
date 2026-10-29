@@ -84,6 +84,7 @@ const gatedOperations = [
   ['post', '/api/memory'],
   ['post', '/api/memory/decisions'],
   ['post', '/api/memory/extract'],
+  ['post', '/api/projects/{slug}/vcs/sync-pr'],
   ['post', '/api/projects/{slug}/vcs/sync'],
   ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
 ] as const;

@@ -24,6 +24,22 @@ export interface SyncPrStatusResult {
   skipped: number;
 }
 
+/** Ephemeral provider results; never stored in an approval request. */
+export type FetchedPrStatus = { link: TicketLinkData } & (
+  { kind: 'status'; status: VcsPrStatus } | { kind: 'missing' } | { kind: 'error'; error: unknown }
+);
+export interface PrExtractionTarget {
+  project: { id: string; key: string };
+  ticket: VcsTicketDomain;
+  connection: VcsConnectionDomain;
+  encryptionKey: string;
+  branchName: string;
+  prNumber: number;
+}
+export interface ApplyPrStatusesResult extends SyncPrStatusResult {
+  extractions: PrExtractionTarget[];
+}
+
 /**
  * Permissions P2 US-004: the merge step's one key, on the link write and on the auto-transition.
  * `runAsSystemWriter` derives the `vcs` component from it, and the entry is the same whoever saw the
@@ -77,88 +93,77 @@ export class VcsPrSyncService {
     encryptionKey: string,
     auditKey: VcsPrStateAuditKey,
   ): Promise<SyncPrStatusResult> {
-    // Decrypt the token
-    const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+    const fetched = await this.fetchPrStatuses(project, connection, encryptionKey);
+    const result = await this.applyPrStatuses(project, connection, encryptionKey, fetched, auditKey, { isolate: true });
+    this.startExtractions(result.extractions);
+    return { updated: result.updated, skipped: result.skipped };
+  }
 
-    // Create VCS provider
-    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
-
-    // Query TicketLink entries with active PRs and their linked tickets
-    const ticketLinks = await this.vcsRepo.findActiveTicketLinksWithPrs(project.id, connection);
-
-    let updated = 0;
-    let skipped = 0;
-
-    // Process each TicketLink
-    for (const link of ticketLinks) {
-      if (link.prNumber === null || link.prNumber === undefined) {
-        continue;
-      }
-      const prNumber = link.prNumber;
-
+  async fetchPrStatuses(
+    project: { id: string; key: string }, connection: VcsConnectionDomain, encryptionKey: string,
+  ): Promise<FetchedPrStatus[]> {
+    const provider = providerForConnection(connection, decryptToken(connection.encryptedToken, encryptionKey), this.vcsConfig);
+    const links = await this.vcsRepo.findActiveTicketLinksWithPrs(project.id, connection);
+    const fetched: FetchedPrStatus[] = [];
+    for (const link of links) {
+      if (link.prNumber == null) continue;
       try {
-        const prStatus = await provider.getPullRequestStatus(prNumber);
-
-        // Map VcsPrStatus to prState
-        const newPrState = mapPrState(prStatus);
-
-        // Update if state differs
-        if (newPrState !== link.prState) {
-          // merged/closed are terminal: an out-of-order or stale event must
-          // never regress them (e.g. a delayed 'opened' event after a merge).
-          const terminal = link.prState === 'merged' || link.prState === 'closed';
-          if (!terminal) {
-            const outcome = newPrState === 'merged'
-              ? await this.applyMergedPr(link, prStatus)
-              : await this.writePrState(link.id, newPrState, project.id, auditKey);
-            if (outcome === 'updated') {
-              updated++;
-            }
-
-            // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
-            // to pick up new commits from the PR
-            if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
-              const ticketData = link.ticket;
-              const ticketForExtraction: VcsTicketDomain = {
-                id: ticketData.id,
-                number: ticketData.number,
-                externalVcsId: ticketData.externalVcsId,
-              };
-
-              this.vcsLinkExtractorService.extractLinksFromPr(
-                { id: project.id, key: project.key },
-                ticketForExtraction,
-                connection,
-                encryptionKey,
-                prStatus.branchName,
-                prStatus.number,
-              ).catch((err) => {
-                this.logger.warn(
-                  `[vcs-pr-sync] Failed to extract links for ticket ${ticketData.id}: ${err instanceof Error ? err.message : String(err)}`,
-                );
-              });
-            }
-          }
-        }
+        fetched.push({ link, kind: 'status', status: await provider.getPullRequestStatus(link.prNumber) });
       } catch (error) {
-        if (error instanceof NotFoundAppException) {
-          // 404: mark as closed. Keep a failed write isolated to this link.
-          try {
-            if ((await this.writePrState(link.id, 'closed', project.id, auditKey)) === 'updated') {
-              updated++;
-            }
-          } catch (writeError) {
-            skipped++;
-            this.logger.warn(`[vcs-pr-sync] Failed to close missing PR for link ${link.id}: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
-          }
-        } else {
-          // General API error: skip this PR
-          skipped++;
-        }
+        fetched.push(error instanceof NotFoundAppException ? { link, kind: 'missing' } : { link, kind: 'error', error });
       }
     }
+    return fetched;
+  }
 
-    return { updated, skipped };
+  /** Strict apply runs inside the approval owner's transaction: no failure may be swallowed. */
+  async applyPrStatuses(
+    project: { id: string; key: string }, connection: VcsConnectionDomain, encryptionKey: string,
+    fetched: FetchedPrStatus[], auditKey: VcsPrStateAuditKey, options: { isolate: boolean },
+  ): Promise<ApplyPrStatusesResult> {
+    let updated = 0;
+    let skipped = 0;
+    const extractions: PrExtractionTarget[] = [];
+    for (const item of fetched) {
+      const { link } = item;
+      try {
+        if (item.kind === 'error') throw item.error;
+        if (item.kind === 'missing') {
+          if (await this.writePrState(link.id, 'closed', project.id, auditKey) === 'updated') updated++;
+          continue;
+        }
+        const prStatus = item.status;
+        const next = mapPrState(prStatus);
+        if (next === link.prState || link.prState === 'merged' || link.prState === 'closed') continue;
+        const outcome = next === 'merged'
+          ? await this.applyMergedPr(link, prStatus, { rethrow: !options.isolate })
+          : await this.writePrState(link.id, next, project.id, auditKey);
+        if (outcome === 'updated') updated++;
+        if (link.ticket && prStatus.branchName) {
+          extractions.push({
+            project, connection, encryptionKey,
+            ticket: { id: link.ticket.id, number: link.ticket.number, externalVcsId: link.ticket.externalVcsId },
+            branchName: prStatus.branchName, prNumber: prStatus.number,
+          });
+        }
+      } catch (error) {
+        if (!options.isolate) throw error;
+        skipped++;
+        this.logger.warn(`[vcs-pr-sync] Failed to sync link ${link.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { updated, skipped, extractions };
+  }
+
+  /** Called only outside a deferred execution transaction. Failures remain warning-only. */
+  startExtractions(targets: PrExtractionTarget[]): void {
+    for (const target of targets) {
+      this.vcsLinkExtractorService?.extractLinksFromPr(
+        target.project, target.ticket, target.connection, target.encryptionKey, target.branchName, target.prNumber,
+      ).catch((error: unknown) => {
+        this.logger.warn(`[vcs-pr-sync] Failed to extract links for ticket ${target.ticket.id}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
   }
 
   /**
@@ -185,14 +190,15 @@ export class VcsPrSyncService {
    * Fleet C9 §3.5 (D457): the one merge step for the VCS poll, the webhook and the fleet
    * PR-state refresher. The conditional write runs first; only the writer that moved the link
    * to `merged` transitions the ticket, so two paths that see one merge yield one VERIFY_FIX
-   * and one FIX_REPORT comment. Transition failures are logged inside and never undo the write.
+   * and one FIX_REPORT comment. By default transition failures are logged without undoing the write;
+   * deferred approval execution opts into rethrow so its owning transaction rolls everything back.
    *
    * Permissions P2 US-004: the step runs as `SYSTEM/vcs`, whatever context saw the merge, and each
    * write records its own entry in its own transaction — the link writes `pr <before> -> merged`, the
    * auto-transition writes `status: IN_PROGRESS -> VERIFY_FIX` on the ticket. `runAsSystem` keeps the
    * enclosing correlation id, so both entries still join the request or tick that saw the merge.
    */
-  async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus): Promise<PrStateWriteResult> {
+  async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus, options: { rethrow: boolean } = { rethrow: false }): Promise<PrStateWriteResult> {
     return runAsSystemWriter(this, async () => {
       const outcome = await this.audit.audited(
         () => this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged'),
@@ -206,7 +212,7 @@ export class VcsPrSyncService {
           }
           : [],
       );
-      if (outcome.result === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
+      if (outcome.result === 'updated') await this.handleMergedPrAutoTransition(link, prStatus, options);
       return outcome.result;
     });
   }
@@ -222,12 +228,12 @@ export class VcsPrSyncService {
    * Permissions P2 US-004: the transition, the FIX_REPORT comment and the VCS_PR_MERGED activity share
    * one transaction with the ticket's audit entry, so a rejected record rolls all three back.
    *
-   * Note: Failures in this auto-transition do NOT prevent the caller
-   * from updating prState - this method handles its own errors internally.
+   * By default failures are isolated; `{ rethrow: true }` propagates them to the transaction owner.
    */
   async handleMergedPrAutoTransition(
     link: TicketLinkData,
     prStatus: VcsPrStatus,
+    options: { rethrow: boolean } = { rethrow: false },
   ): Promise<void> {
     // If ticket is not IN_PROGRESS, skip auto-transition
     if (!link.ticket || link.ticket.status !== TicketStatus.IN_PROGRESS) {
@@ -259,6 +265,7 @@ export class VcsPrSyncService {
         }),
       );
     } catch (error) {
+      if (options.rethrow) throw error;
       // Log the error but don't rethrow - auto-transition failure should not
       // prevent prState from being updated
       if (error instanceof ValidationAppException) {

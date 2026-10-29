@@ -13,7 +13,7 @@ describe('VcsRouteCommands', () => {
     const config: IVcsConfig = { encryptionKey: 'k1', defaultPollingIntervalMs: 300000, githubApiUrl: '', gitlabApiUrl: '' };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     const apply = vi.fn().mockResolvedValue({ issuesSynced: 1 });
-    const manual = { syncIssue: vi.fn().mockResolvedValue({ issuesSynced: 1 }), syncAll: vi.fn().mockResolvedValue({ issuesSynced: 1 }), prepareSyncIssue: vi.fn().mockResolvedValue(apply), prepareSyncAll: vi.fn().mockResolvedValue(apply) };
+    const manual = { startPrExtractions: vi.fn(), syncPr: vi.fn(), prepareSyncPr: vi.fn(), syncIssue: vi.fn().mockResolvedValue({ issuesSynced: 1 }), syncAll: vi.fn().mockResolvedValue({ issuesSynced: 1 }), prepareSyncIssue: vi.fn().mockResolvedValue(apply), prepareSyncAll: vi.fn().mockResolvedValue(apply) };
     new VcsRouteCommands(registry, service as unknown as VcsConnectionService, loader as unknown as ActorPrincipalLoader, config, manual as unknown as VcsManualSync).onModuleInit();
     const command = registry.get('vcs.connection.test', VCS_ROUTE_VARIANTS.test);
     if (!command) throw new Error('Missing test command');
@@ -42,6 +42,18 @@ describe('VcsRouteCommands', () => {
     expect(await mutate()).toEqual({ issuesSynced: 1 });
     expect(apply).toHaveBeenCalledOnce();
     expect(loader.forContext).toHaveBeenCalledTimes(3);
+  });
+  it('PR AC-10: sync-pr stores only updated and maps the extraction follow-up', async () => {
+    const { registry, manual } = build();
+    const command = registry.get('vcs.sync.pr', 'rest:vcs.sync-pr');
+    if (!command?.toResult || !command.afterCommit) throw new Error('Missing sync-pr hooks');
+    const result = { updated: 1, skipped: 0, extractions: [{ ticket: { id: 't' } }] };
+    expect(command.toResult(result)).toEqual({ updated: 1 });
+    expect(command.parse({ slug: 'alpha', projectId: 'p', token: 'secret' })).toEqual({ slug: 'alpha', projectId: 'p' });
+    expect(command.prepare).toBeTypeOf('function');
+    expect(command.afterCommit).toBeTypeOf('function');
+    await command.afterCommit({ slug: 'alpha', projectId: 'p' }, undefined, result);
+    expect(manual.startPrExtractions).toHaveBeenCalledExactlyOnceWith(result);
   });
   it('AC-11: registers both exact variants', () => {
     const { registry } = build();

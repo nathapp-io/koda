@@ -5716,6 +5716,12 @@ describeIntegration('VCS manual issue sync lifecycle', () => {
     expect(data(await post('/7').expect(200))).toMatchObject({ issuesSynced: 1, tickets: [{ ref: `SYNC${String.fromCharCode(64 + sequence)}-1`, title: 'Issue 7' }] });
     await post('/7').expect(409);
   });
+  it('PR sync returns only updated and a removed connection remains 404', async () => {
+    const syncPr = () => request(server()).post(`/api/projects/${slug}/vcs/sync-pr`).set(root());
+    expect(data(await syncPr().expect(200))).toEqual({ updated: 0 });
+    await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
+    await syncPr().expect(404);
+  });
   it('full import returns a summary and a removed connection remains 404', async () => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(8)], cursor: null, capped: false });
     expect(data(await post().expect(200))).toMatchObject({ issuesSynced: 1, issuesSkipped: 0, tickets: [{ title: 'Issue 8' }] });

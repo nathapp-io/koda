@@ -289,18 +289,20 @@ describe('VcsController', () => {
 
   describe('syncPr', () => {
     it('should run PR sync and return updated count', async () => {
-      mockPrSyncService.syncPrStatus.mockResolvedValue({ updated: 5, skipped: 1 });
+      gate.run.mockResolvedValue({ status: 'executed', result: { updated: 5, skipped: 1, extractions: ['private'] } });
 
-      const result = await controller.syncPr('test-project');
-      expect(result.data).toMatchObject({ updated: 5 });
-      expect(mockPrSyncService.syncPrStatus).toHaveBeenCalled();
+      const result = await controller.syncPr('test-project', projectContext());
+      expect(result.data).toEqual({ updated: 5 });
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'vcs.sync.pr', variant: 'rest:vcs.sync-pr', projectId: 'proj-1', input: { slug: 'test-project', projectId: 'proj-1' } });
+      expect(mockPrSyncService.syncPrStatus).not.toHaveBeenCalled();
     });
 
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncPr('test-project')).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncPr('test-project', projectContext())).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
     });
   });
 });

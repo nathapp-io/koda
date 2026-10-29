@@ -6,11 +6,12 @@ import { routeCommand } from '../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { VCS_CFG, type IVcsConfig } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
+import type { ApplyPrStatusesResult } from './vcs-pr-sync.service';
 import { VcsManualSync } from './vcs-manual-sync.service';
 import { SyncResultDto } from './dto/sync-result.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 
-export const VCS_ROUTE_VARIANTS = { delete: 'rest:vcs.delete', test: 'rest:vcs.test', syncIssue: 'rest:vcs.sync-issue', syncAll: 'rest:vcs.sync-all' } as const;
+export const VCS_ROUTE_VARIANTS = { delete: 'rest:vcs.delete', test: 'rest:vcs.test', syncIssue: 'rest:vcs.sync-issue', syncAll: 'rest:vcs.sync-all', syncPr: 'rest:vcs.sync-pr' } as const;
 
 @Injectable()
 export class VcsRouteCommands implements OnModuleInit {
@@ -23,6 +24,14 @@ export class VcsRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    this.commands.register(routeCommand<{ slug: string; projectId: string }, ApplyPrStatusesResult>({
+      key: 'vcs.sync.pr', variant: VCS_ROUTE_VARIANTS.syncPr,
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId']),
+      run: (_principal, input) => this.manualSync.syncPr(input.slug),
+      prepare: (_principal, input) => this.manualSync.prepareSyncPr(input.slug),
+      afterCommit: (_principal, _input, result) => this.manualSync.startPrExtractions(result),
+      toResult: (result) => ({ updated: result.updated }),
+    }, this.loader));
     this.commands.register(routeCommand<{ slug: string; projectId: string; issueNumber: string }, SyncResultDto>({
       key: 'vcs.sync.issue', variant: VCS_ROUTE_VARIANTS.syncIssue,
       parse: (input) => parseRouteInput(input, ['slug', 'projectId', 'issueNumber']),

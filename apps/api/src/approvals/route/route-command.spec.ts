@@ -13,6 +13,23 @@ const principal: UserPrincipal = {
 const input = { key: 'qa' };
 
 describe('routeCommand', () => {
+  it('PR AC-6: afterCommit reloads the requester and forwards input and raw result', async () => {
+    const reloaded = { ...principal, name: 'reloaded' };
+    const forContext = vi.fn().mockResolvedValueOnce(principal).mockResolvedValueOnce(reloaded);
+    const afterCommit = vi.fn().mockResolvedValue(undefined);
+    const command = routeCommand({ key: 'vcs.sync.pr', variant: 'rest:x', parse: () => input, run: async () => ({ updated: 1 }), afterCommit }, { forContext });
+    const result = await command.execute(input);
+    expect(command.afterCommit).toBeTypeOf('function');
+    if (!command.afterCommit) throw new Error('Missing hook');
+    await command.afterCommit(input, undefined, result);
+    expect(afterCommit).toHaveBeenCalledExactlyOnceWith(reloaded, input, result);
+    expect(forContext).toHaveBeenCalledTimes(2);
+  });
+
+  it('PR AC-7: omits afterCommit entirely without a spec hook', () => {
+    const command = routeCommand({ key: 'vcs.sync.pr', variant: 'rest:x', parse: () => input, run: async () => 1 }, { forContext: async () => principal });
+    expect(command).not.toHaveProperty('afterCommit');
+  });
   it('AC-4: keeps the spec key and variant on the command', () => {
     const command = routeCommand(
       { key: 'role.manage', variant: 'rest:x', parse: (raw) => raw as { key: string }, run: async () => 'done' },

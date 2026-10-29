@@ -21,6 +21,8 @@ export interface RouteCommandSpec<TInput, TResult> {
   run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>;
   /** External reads outside the approval transaction; the returned callback rechecks targets. */
   prepare?(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<() => Promise<TResult>>;
+  /** Runs only after deferred execution commits, with its ephemeral raw result. */
+  afterCommit?(principal: UserPrincipal | AgentPrincipal, input: TInput, result: TResult): Promise<void>;
   /** What `ApprovalRequest.result` stores; omitted means null. */
   toResult?(result: TResult): unknown;
   /**
@@ -57,6 +59,10 @@ export function routeCommand<TInput, TResult>(
         return mutate();
       };
     };
+  }
+  const { afterCommit } = spec;
+  if (afterCommit !== undefined) {
+    command.afterCommit = async (input, _decision, result) => afterCommit(await loader.forContext(), input, result);
   }
   const { toResult } = spec;
   if (toResult !== undefined) command.toResult = (result) => toResult(result);

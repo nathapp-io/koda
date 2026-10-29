@@ -2,6 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { VcsManualSync } from './vcs-manual-sync.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { VcsConnectionService } from './vcs-connection.service';
+import type { VcsPrSyncService } from './vcs-pr-sync.service';
 import type { VcsSyncService } from './vcs-sync.service';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import type { IVcsConfig } from '../config/vcs.config';
@@ -15,10 +16,14 @@ describe('VcsManualSync', () => {
   let connection: VcsConnectionDomain;
   let sync: { syncIssues: ReturnType<typeof vi.fn>; syncIssue: ReturnType<typeof vi.fn>; fullSync: ReturnType<typeof vi.fn>; filterByAllowedAuthors: ReturnType<typeof vi.fn> };
   let service: VcsManualSync;
+  const prSync = { syncPrStatus: vi.fn(), fetchPrStatuses: vi.fn(), applyPrStatuses: vi.fn(), startExtractions: vi.fn() };
   let connections: { getFullByProject: ReturnType<typeof vi.fn> };
   let config: IVcsConfig;
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    prSync.fetchPrStatuses.mockResolvedValue([]);
+    prSync.applyPrStatuses.mockResolvedValue({ updated: 1, skipped: 0, extractions: [] });
+    prSync.syncPrStatus.mockResolvedValue({ updated: 1, skipped: 0 });
     connection = { id: 'c', projectId: 'p', provider: 'github', repoOwner: 'acme', repoName: 'repo', encryptedToken: 'enc', allowedAuthors: '[]', syncMode: 'off', pollingIntervalMs: 300000, webhookSecret: null, lastSyncedAt: null, isActive: true, createdAt: new Date(), updatedAt: new Date() };
     provider.fetchIssues.mockResolvedValue({ issues: [issue] });
     provider.fetchIssue.mockResolvedValue(issue);
@@ -30,7 +35,30 @@ describe('VcsManualSync', () => {
       connections as unknown as VcsConnectionService,
       sync as unknown as VcsSyncService,
       config,
+      prSync as unknown as VcsPrSyncService,
     );
+  });
+  it('PR prepare fetches before strict apply and leaves extraction to afterCommit', async () => {
+    const apply = await service.prepareSyncPr('alpha');
+    expect(prSync.fetchPrStatuses).toHaveBeenCalledExactlyOnceWith({ id: 'p', key: 'ALPHA' }, connection, 'key');
+    expect(prSync.applyPrStatuses).not.toHaveBeenCalled();
+    const result = await apply();
+    expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
+    expect(prSync.applyPrStatuses).toHaveBeenCalledExactlyOnceWith({ id: 'p', key: 'ALPHA' }, connection, 'key', [], 'vcs.sync.pr', { isolate: false });
+    expect(prSync.startExtractions).not.toHaveBeenCalled();
+    await service.startPrExtractions(result);
+    expect(prSync.startExtractions).toHaveBeenCalledExactlyOnceWith(result.extractions);
+  });
+  it('PR preparation refuses changed connection before strict apply', async () => {
+    const apply = await service.prepareSyncPr('alpha');
+    connection.repoName = 'changed';
+    await expect(apply()).rejects.toThrow(ValidationAppException);
+    expect(prSync.applyPrStatuses).not.toHaveBeenCalled();
+  });
+  it('immediate PR sync uses the best effort service without scheduling twice', async () => {
+    expect(await service.syncPr('alpha')).toEqual({ updated: 1, skipped: 0, extractions: [] });
+    expect(prSync.syncPrStatus).toHaveBeenCalledExactlyOnceWith({ id: 'p', key: 'ALPHA' }, connection, 'key', 'vcs.sync.pr');
+    expect(prSync.startExtractions).not.toHaveBeenCalled();
   });
   it('a deleted connection is target drift during apply', async () => {
     const apply = await service.prepareSyncAll('alpha');

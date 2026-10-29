@@ -6,6 +6,7 @@ import { VCS_CFG, type IVcsConfig } from '../config/vcs.config';
 import { decryptToken } from '../common/utils/encryption.util';
 import { VcsConnectionService, vcsTestTarget } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
+import { VcsPrSyncService, type ApplyPrStatusesResult } from './vcs-pr-sync.service';
 import { providerForConnection } from './provider-for-connection';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import type { VcsIssue } from './types';
@@ -19,6 +20,7 @@ export class VcsManualSync {
     private readonly connections: VcsConnectionService,
     private readonly sync: VcsSyncService,
     @Inject(VCS_CFG) private readonly config: IVcsConfig,
+    private readonly prSync: VcsPrSyncService,
   ) {}
 
   private encryptionKey(): string {
@@ -87,6 +89,26 @@ export class VcsManualSync {
       const result = await this.sync.syncIssues(project, filtered, connection, 'vcs.sync.all', { isolate: false });
       return this.summary(project, result);
     };
+  }
+
+  async syncPr(slug: string): Promise<ApplyPrStatusesResult> {
+    const { project, connection, key } = await this.target(slug);
+    const result = await this.prSync.syncPrStatus(project, connection, key, 'vcs.sync.pr');
+    // Immediate sync already started its background extractions.
+    return { ...result, extractions: [] };
+  }
+
+  async prepareSyncPr(slug: string): Promise<() => Promise<ApplyPrStatusesResult>> {
+    const { project, connection, key } = await this.target(slug);
+    const fetched = await this.prSync.fetchPrStatuses(project, connection, key);
+    return async () => {
+      await this.assertTarget(project.id, connection, false);
+      return this.prSync.applyPrStatuses(project, connection, key, fetched, 'vcs.sync.pr', { isolate: false });
+    };
+  }
+
+  async startPrExtractions(result: ApplyPrStatusesResult): Promise<void> {
+    this.prSync.startExtractions(result.extractions);
   }
 
   private summary(project: { key: string }, result: Awaited<ReturnType<VcsSyncService['fullSync']>>): SyncResultDto {
