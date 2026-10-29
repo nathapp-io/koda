@@ -17,7 +17,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
 PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
 PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
@@ -31,7 +30,6 @@ POST /fleet/ingest/backfill=gate-fleet
 POST /fleet/ingest/jobs/:jobId/rerun=gate-fleet
 POST /fleet/ingest/rerun-outdated=gate-fleet
 POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
-POST /projects/:slug/fleet/jobs/:id/cancel=gate-fleet
 POST /projects/:slug/fleet/repos/:repoId/config-edits=gate-fleet
 POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate=gate-fleet
 POST /projects/:slug/fleet/schedules=gate-fleet

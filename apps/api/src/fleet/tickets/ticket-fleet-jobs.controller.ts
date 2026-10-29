@@ -3,6 +3,10 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { TICKET_FLEET_JOB_ROUTE_VARIANTS } from './ticket-fleet-job-route.commands';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
@@ -20,7 +24,10 @@ import { FleetTicketsService } from './fleet-tickets.service';
 // Permissions P1d (US-003): each route declares `ProjectMembershipGuard, RequiresGuard` in one
 // `@UseGuards`, so the membership guard resolves `request.projectContext` before the key check.
 export class TicketFleetJobsController {
-  constructor(private readonly service: FleetTicketsService) {}
+  constructor(
+    private readonly service: FleetTicketsService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
@@ -37,11 +44,16 @@ export class TicketFleetJobsController {
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.ticket-job.unlink')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay' })
   @ApiResponse({ status: 204, description: 'Unlinked' })
   @ApiResponse({ status: 403, description: 'fleet.ticket-job.unlink is missing' })
   @ApiResponse({ status: 404, description: 'Ticket not found, or the job is not linked to it' })
   async unlink(@Param('ref') ref: string, @Param('jobId') jobId: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal): Promise<void> {
-    await this.service.unlink(ctx.project.id, ref, jobId, principal.id);
+    const outcome = await this.routeGate.run({
+      key: 'fleet.ticket-job.unlink', variant: TICKET_FLEET_JOB_ROUTE_VARIANTS.unlink, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, ref, jobId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
   }
 }

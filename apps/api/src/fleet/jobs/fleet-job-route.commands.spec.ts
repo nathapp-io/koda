@@ -2,6 +2,7 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
+import type { PermissionService } from '../../permissions/permission.service';
 import type { FleetJobsService } from './fleet-jobs.service';
 import { FleetJobRouteCommands, FLEET_JOB_ROUTE_VARIANTS } from './fleet-job-route.commands';
 
@@ -11,14 +12,30 @@ function build() {
   const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
   const loader = { forContext: vi.fn().mockResolvedValue(principal) };
   const result = { job: { id: 'j1' }, placement: {} };
-  const jobs = { dispatch: vi.fn().mockResolvedValue(result), requeue: vi.fn().mockResolvedValue(result) };
-  new FleetJobRouteCommands(registry, jobs as unknown as FleetJobsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+  const permissions = { can: vi.fn().mockResolvedValue({ allowed: false }) };
+  const jobs = { cancel: vi.fn().mockResolvedValue({ state: 'CANCELLED' }), dispatch: vi.fn().mockResolvedValue(result), requeue: vi.fn().mockResolvedValue(result) };
+  new FleetJobRouteCommands(registry, jobs as unknown as FleetJobsService, loader as unknown as ActorPrincipalLoader, permissions as unknown as PermissionService).onModuleInit();
   const dispatch = registry.get('fleet.job.dispatch', FLEET_JOB_ROUTE_VARIANTS.dispatch);
   const requeue = registry.get('fleet.job.requeue', FLEET_JOB_ROUTE_VARIANTS.requeue);
   if (!dispatch?.toResult || !requeue?.toResult) throw new Error('Missing fleet route command or result mapper');
-  return { registry, dispatch, requeue, principal, loader, jobs, result };
+  return { registry, dispatch, requeue, principal, loader, jobs, result, permissions };
 }
 describe('FleetJobRouteCommands', () => {
+  it('US-003 AC-12/13: cancel rechecks authority as the requester and skips the engine key recheck', async () => {
+    const { registry, jobs, permissions, principal } = build();
+    const command = registry.get('fleet.job.cancel', 'rest:fleet-jobs.cancel');
+    expect(command).toMatchObject({ key: 'fleet.job.cancel', skipKeyRecheck: true });
+    if (!command) throw new Error('Missing cancel command');
+    const input = command.parse({ slug: 'web', projectId: 'p1', id: 'j1' });
+    expect(await command.execute(input)).toEqual({ state: 'CANCELLED' });
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'fleet.job.cancel', { projectId: 'p1' });
+    expect(jobs.cancel).toHaveBeenCalledExactlyOnceWith('a1', 'p1', 'j1', false);
+    expect(command.toResult?.({ state: 'CANCELLED' })).toEqual({ state: 'CANCELLED' });
+    permissions.can.mockResolvedValue({ allowed: true });
+    await command.execute(input);
+    expect(jobs.cancel).toHaveBeenLastCalledWith('a1', 'p1', 'j1', true);
+    expect(() => command.parse({ slug: 'web', projectId: 'p1', id: '' })).toThrow(ValidationAppException);
+  });
   it('AC-10: registers both REST variants', () => {
     const { dispatch, requeue } = build();
     expect(dispatch).toMatchObject({ key: 'fleet.job.dispatch', variant: 'rest:fleet-jobs.dispatch' });

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { KodaPageQuery, parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../permissions/permission.service';
@@ -60,13 +60,21 @@ export class FleetJobsController {
   // Permissions P1d (US-003): the requester may always cancel its own job, so the key is checked here
   // (after the service's row lookup, which keeps the 404s) and the service decides on ownership.
   @Requires('fleet.job.cancel', { enforcedBy: 'service' })
+  @ApprovalGated()
   @ApiOperation({ summary: 'Cancel a job (fleet.job.cancel, or the requester)' })
   @ApiResponse({ status: 200, type: FleetJobDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds fleet.job.cancel nor requested the job' })
   @ApiResponse({ status: 409, description: 'Job already finished' })
   async cancel(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const requesterId = await this.jobs.requesterOf(ctx.project.id, id);
     const canOperate = (await this.permissions.can(principal, 'fleet.job.cancel', { projectId: ctx.project.id })).allowed;
-    return JsonResponse.Ok(await this.jobs.cancel(principal.id, ctx.project.id, id, canOperate));
+    if (!canOperate && requesterId !== principal.id) throw new ForbiddenAppException({}, 'permissions');
+    const outcome = await this.routeGate.run<FleetJobDto>({
+      key: 'fleet.job.cancel', variant: FLEET_JOB_ROUTE_VARIANTS.cancel, projectId: ctx.project.id, keyCheck: false,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/requeue')

@@ -310,6 +310,11 @@ export class FleetJobsService {
     if (outcome === 'conflict' || outcome === 'invalid') throw new ConflictAppException({ outcome }, 'fleet.configRequeue');
   }
 
+  /** Resolve the requester before opening a cancellation approval request. */
+  async requesterOf(projectId: string, jobId: string): Promise<string> {
+    return (await this.findInProject(projectId, jobId)).requestedById;
+  }
+
   async get(projectId: string, id: string): Promise<FleetJobDto> {
     const job = await this.findInProject(projectId, id);
     return this.withDetail(job);
