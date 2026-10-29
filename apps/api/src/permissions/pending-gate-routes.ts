@@ -11,6 +11,9 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
   'PATCH /projects/:slug/webhooks/:id',
   'POST /projects/:slug/invites',
   'POST /projects/:slug/invites/:id/resend',
+  'POST /agents',
+  'POST /agents/:slug/rotate-key',
+  'POST /admin/users',
 ]);
 
 const ROUTE_ASSIGNMENTS = `
@@ -28,11 +31,10 @@ PATCH /threads/:id=gate-fleet
 POST /admin/outbox/:eventId/retry=gate-core-domains
 POST /admin/skills/sources=gate-core-domains
 POST /admin/skills/sources/:id/update=gate-core-domains
-POST /admin/users=gate-core-domains
-POST /agents=gate-core-domains
-POST /agents/:slug/rotate-key=gate-core-domains
+POST /admin/users=gate-secret
+POST /agents=gate-secret
+POST /agents/:slug/rotate-key=gate-secret
 POST /code-intel/index=gate-core-domains
-POST /context/:slug/query=gate-core-domains
 POST /fleet/enrollments=gate-secret
 POST /fleet/ingest/backfill=gate-fleet
 POST /fleet/ingest/jobs/:jobId/rerun=gate-fleet
@@ -53,10 +55,8 @@ POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/kb/documents=gate-core-domains
-POST /projects/:slug/kb/evaluate/retrieval=gate-core-domains
 POST /projects/:slug/kb/import/graphify=gate-core-domains
 POST /projects/:slug/kb/optimize=gate-core-domains
-POST /projects/:slug/kb/search=gate-core-domains
 POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet
 POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet

@@ -412,9 +412,16 @@ function classifyRisk(key: string): PermissionRisk {
   return 'medium';
 }
 
-/** A key whose last segment is `read`: reads are never approvable (design §4). */
-function isReadKey(key: string): boolean {
-  return key.slice(key.lastIndexOf('.') + 1) === 'read';
+/** POST-shaped read actions whose names do not end in `.read`. */
+export const READ_ACTION_KEYS: ReadonlySet<string> = new Set([
+  'kb.search',
+  'context.query',
+  'retrieval.evaluate',
+]);
+
+/** Read keys are low risk and never approvable (design §4). */
+export function isReadKey(key: string): boolean {
+  return key.slice(key.lastIndexOf('.') + 1) === 'read' || READ_ACTION_KEYS.has(key);
 }
 
 /** Keys whose decision needs the decider's input, so nobody-asked (`none`) cannot run them. */

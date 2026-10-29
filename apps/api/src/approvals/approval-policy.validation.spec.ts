@@ -22,6 +22,13 @@ describe('validateApprovalPolicy', () => {
     expect(validateApprovalPolicy({ ...BASE, permissionPattern: 'ticket.read' })).toBe('pattern');
   });
 
+  it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
+    'US-001 AC-10: refuses a policy for non-approvable read key %s',
+    (key) => {
+      expect(validateApprovalPolicy({ ...BASE, permissionPattern: key })).toBe('pattern');
+    },
+  );
+
   it('AC-3: refuses a prefix wildcard that matches no approvable key', () => {
     expect(validateApprovalPolicy({ ...BASE, permissionPattern: 'ti.*' })).toBe('pattern');
   });

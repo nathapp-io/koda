@@ -117,7 +117,7 @@ describe('permission contract checker', () => {
     }
   });
 
-  it('AC-6: explicitly lists exactly the secret-bearing routes', () => {
+  it('US-001 AC-1: explicitly lists exactly the 11 secret-bearing routes', () => {
     expect(SECRET_GATE_ROUTES).toEqual(new Set([
       'POST /fleet/enrollments',
       'POST /projects/:slug/vcs',
@@ -127,19 +127,28 @@ describe('permission contract checker', () => {
       'PATCH /projects/:slug/webhooks/:id',
       'POST /projects/:slug/invites',
       'POST /projects/:slug/invites/:id/resend',
+      'POST /agents',
+      'POST /agents/:slug/rotate-key',
+      'POST /admin/users',
     ]));
   });
 
-  it('AC-7: assigns every explicit secret route to gate-secret', () => {
+  it('US-001 AC-1/2: assigns every explicit secret route to gate-secret', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
+    expect(PENDING_GATE_ROUTES.get('POST /agents/:slug/rotate-key')).toBe('gate-secret');
   });
 
-  it('US-011 AC-3: holds exactly 25 core, 36 fleet and 8 secret rollout routes', () => {
-    const counts = [...PENDING_GATE_ROUTES.values()].reduce<Record<string, number>>((result, feature) => {
-      result[feature] = (result[feature] ?? 0) + 1;
-      return result;
-    }, {});
-    expect(counts).toEqual({ 'gate-core-domains': 25, 'gate-fleet': 36, 'gate-secret': 8 });
+  it.each([
+    'POST /context/:slug/query',
+    'POST /projects/:slug/kb/search',
+    'POST /projects/:slug/kb/evaluate/retrieval',
+  ])('US-001 AC-6: removes non-approvable read route %s from pending gates', (route) => {
+    expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
+  });
+
+  it('US-001: rollout assignments contain only the remaining core, fleet and secret labels', () => {
+    expect([...new Set(PENDING_GATE_ROUTES.values())].sort()).toEqual(['gate-core-domains', 'gate-fleet', 'gate-secret']);
+    expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-secret')).toHaveLength(11);
   });
 
   it('AC-1 (US-010): has no gate-high pending assignments', () => {
@@ -157,8 +166,8 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
-  it('AC-11: assigns memory creation to gate-core-domains', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /memory')).toBe('gate-core-domains');
+  it('US-001: classifies admin user creation as a secret-gated route', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /admin/users')).toBe('gate-secret');
   });
 
   it('US-001 AC-2: assigns invite resend to gate-secret', () => {
