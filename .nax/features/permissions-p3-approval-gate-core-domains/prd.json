@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T03:24:58.352Z",
+  "updatedAt": "2026-10-29T03:40:35.744Z",
   "userStories": [
     {
       "id": "US-001",
@@ -105,14 +105,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends existing agent route commands and the existing AfterCommitService without new engine abstractions; authentication-cache revocation still mandates security-isolated TDD."
+        "reasoning": "Extends existing agent route commands and the existing AfterCommitService without new engine abstractions; authentication-cache revocation still mandates security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/agents/agents.service.ts",
@@ -178,7 +181,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6b9077c7615547ca83642b96e2a5234a5266f1c6"
     },
     {
       "id": "US-003",
