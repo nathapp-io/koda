@@ -17,7 +17,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /projects/:slug/skills/:skillId=gate-core-domains
 DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
 PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
 PATCH /projects/:slug/threads/:id=gate-fleet
@@ -29,7 +28,6 @@ POST /admin/skills/sources/:id/update=gate-core-domains
 POST /admin/users=gate-secret
 POST /agents=gate-secret
 POST /agents/:slug/rotate-key=gate-secret
-POST /code-intel/index=gate-core-domains
 POST /fleet/enrollments=gate-secret
 POST /fleet/ingest/backfill=gate-fleet
 POST /fleet/ingest/jobs/:jobId/rerun=gate-fleet
@@ -77,7 +75,6 @@ POST /threads/:id/messages=gate-fleet
 POST /threads/:id/stop=gate-fleet
 PUT /fleet/test-hooks/repos/:repoId/nax-files=gate-fleet
 PUT /projects/:slug/knowledge/patterns=gate-fleet
-PUT /projects/:slug/skills/:skillId=gate-core-domains
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {

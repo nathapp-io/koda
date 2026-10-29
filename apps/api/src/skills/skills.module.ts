@@ -1,3 +1,4 @@
+import { ProjectSkillRouteCommands } from './project-skill-route.commands';
 import { SkillSourceRouteCommands } from './skill-source-route.commands';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
@@ -18,6 +19,7 @@ import { SkillsService } from './skills.service';
   controllers: [AdminSkillsController, ProjectSkillsController],
   providers: [
     SkillSourceRouteCommands,
+    ProjectSkillRouteCommands,
     PrismaSkillCatalogRepository,
     { provide: SKILL_CATALOG_REPOSITORY, useExisting: PrismaSkillCatalogRepository },
     { provide: SKILL_RESOLVER, useClass: GitHubSkillResolver },

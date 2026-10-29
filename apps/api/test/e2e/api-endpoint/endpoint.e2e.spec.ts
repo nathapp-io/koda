@@ -3604,6 +3604,37 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ id: string; enabled: boolean }>(res)).toMatchObject({ id: skillId, enabled: true });
     });
 
+    it('PUT /api/projects/:slug/skills/:skillId — human bypasses a wait policy without an approval row', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const skillId = await seedSkill(uniqueName());
+      const policy = await seedWaitPolicy(db, 'skill.project.enable', project.id);
+      const before = await db.approvalRequest.count();
+      try {
+        const res = await request(httpServer).put(`/api/projects/${projectSlug}/skills/${skillId}`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
+        expect(body<{ enabled: boolean }>(res).enabled).toBe(true);
+        expect(await db.approvalRequest.count()).toBe(before);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
+    it('POST /api/code-intel/index — 201 preserves the indexing result', async () => {
+      const res = await request(httpServer).post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectSlug, repoId: 'e2e-gated-index', commitHash: 'c1', files: [{ path: 'a.ts', content: 'export function indexed() {}' }] })
+        .expect(201);
+      expect(body<{ symbolsIndexed: number; filesIndexed: number }>(res)).toMatchObject({ symbolsIndexed: 1, filesIndexed: 1 });
+    });
+
+    it('POST /api/code-intel/index — 400 rejects an invalid file', async () => {
+      await request(httpServer).post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectSlug, repoId: 'e2e-invalid-index', commitHash: 'c1', files: [{ path: '', content: 42 }] })
+        .expect(400);
+    });
+
     it('PUT /api/projects/:slug/skills/:skillId — 404 for an unknown skill', async () => {
       const res = await request(httpServer)
         .put(`/api/projects/${projectSlug}/skills/e2e-unknown-skill-id`)

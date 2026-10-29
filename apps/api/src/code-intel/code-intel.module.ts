@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { CodeIntelRouteCommands } from './code-intel-route.commands';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ConfigModule } from '@nestjs/config';
@@ -16,12 +19,13 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { CodeIntelOutboxSubscriber } from './code-intel-outbox.subscriber';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, RagModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, RagModule, ProjectAccessModule],
   controllers: [CodeIntelController],
   providers: [
     PrismaCodeIntelRepository,
     { provide: CODE_INTEL_REPOSITORY, useExisting: PrismaCodeIntelRepository },
     AstIndexService,
+    CodeIntelRouteCommands,
     SymbolStore,
     CodeGraphService,
     CodeCommitOutboxHandler,

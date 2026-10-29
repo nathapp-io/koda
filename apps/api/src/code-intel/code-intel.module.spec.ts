@@ -1,3 +1,4 @@
+import { CodeIntelRouteCommands } from './code-intel-route.commands';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CodeIntelModule } from './code-intel.module';
 import { SymbolStore } from './symbol-store';
@@ -19,11 +20,10 @@ describe('CodeIntelModule (DI wiring)', () => {
   });
 
   it('compiles with the global stub providers and no database', async () => {
-    await expect(
-      Test.createTestingModule({
-        imports: [GlobalStubsModule, CodeIntelModule],
-      }).compile(),
-    ).resolves.toBeDefined();
+    moduleRef = await Test.createTestingModule({
+      imports: [GlobalStubsModule, CodeIntelModule],
+    }).compile();
+    expect(moduleRef).toBeDefined();
   });
 
   describe('providers', () => {
@@ -31,6 +31,10 @@ describe('CodeIntelModule (DI wiring)', () => {
       moduleRef = await Test.createTestingModule({
         imports: [GlobalStubsModule, CodeIntelModule],
       }).compile();
+    });
+
+    it('AC-12: resolves CodeIntelRouteCommands without a database', () => {
+      expect(moduleRef.get(CodeIntelRouteCommands)).toBeInstanceOf(CodeIntelRouteCommands);
     });
 
     it('registers SymbolStore', () => {
