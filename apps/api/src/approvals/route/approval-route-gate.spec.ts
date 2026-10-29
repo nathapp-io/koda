@@ -2,8 +2,11 @@
  * US-003 AC-7..AC-11 and AC-13 — `ApprovalRouteGate.run` gates a REST entry point: it refuses a
  * non-principal actor, refuses a caller that does not hold the key (so no request is opened for a
  * write that would fail at execution), then hands the call to the engine's gate.
+ *
+ * US-004 AC-1..AC-3 — a call carrying a non-empty `redeem` is a redemption instead: the route gate
+ * runs it through `ApprovalExecutionService.redeem` and never reaches the engine's gate.
  */
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import {
   runAsSystem,
   runWithActionContext,
@@ -11,6 +14,9 @@ import {
 } from '../../action-context/action-context';
 import { NO_APPROVAL } from '../../action-context/action-context';
 import type { ApprovalGate, GateOutcome } from '../approval-gate.service';
+import { approvalOf, type ApprovalExecutionService } from '../approval-execution.service';
+import { approvalInputHash } from '../approval-input';
+import { ApprovalRedeemMismatchError } from '../domain/approval.errors';
 import type { ApprovalRequestRecord } from '../domain/approval.domain';
 import type { PermissionService } from '../../permissions/permission.service';
 import { ApprovalRouteGate, type RouteGateCall } from './approval-route-gate';
@@ -27,11 +33,12 @@ const record: ApprovalRequestRecord = {
 interface Harness {
   gate: { gate: ReturnType<typeof vi.fn> };
   permissions: { effectiveKeys: ReturnType<typeof vi.fn>; canHoldKey: ReturnType<typeof vi.fn> };
+  execution: { redeem: ReturnType<typeof vi.fn> };
   routeGate: ApprovalRouteGate;
 }
 
 /** The gate and permission service as the route gate sees them, holding `keys` at every scope. */
-function harness(keys: string[] = [], outcome?: GateOutcome<unknown>): Harness {
+function harness(keys: string[] = [], outcome?: GateOutcome<unknown>, redeemed?: Redeemed): Harness {
   const gate = { gate: vi.fn().mockResolvedValue(outcome ?? { status: 'pending', request: record }) };
   const effectiveKeys = vi.fn().mockResolvedValue(new Set(keys));
   const canHoldKey = vi.fn(async (
@@ -46,13 +53,17 @@ function harness(keys: string[] = [], outcome?: GateOutcome<unknown>): Harness {
     return held.has(key) || held.has(`${key}.own`);
   });
   const permissions = { effectiveKeys, canHoldKey };
+  // US-004: the redemption answers the request it ran and the command's raw result.
+  const execution = { redeem: vi.fn().mockResolvedValue(redeemed ?? { request: redeemable(), result: 'raw' }) };
 
   return {
     gate,
     permissions,
+    execution,
     routeGate: new ApprovalRouteGate(
       gate as unknown as ApprovalGate,
       permissions as unknown as PermissionService,
+      execution as unknown as ApprovalExecutionService,
     ),
   };
 }
@@ -63,6 +74,33 @@ function asActor<T>(actor: ActionActor, call: () => Promise<T>): Promise<T> {
 
   return runWithActionContext({ actor, origin }, call);
 }
+
+/** What `ApprovalExecutionService.redeem` answers (US-004). */
+interface Redeemed {
+  request: ApprovalRequestRecord;
+  result: unknown;
+}
+
+/** The brief's US-004 fixture: an approved redeem request opened by AGENT/a1 for `agent.create`. */
+function redeemable(patch: Partial<ApprovalRequestRecord> = {}): ApprovalRequestRecord {
+  const input = { name: 'a' };
+  return {
+    id: 'r1', permissionKey: 'agent.create', variant: 'rest:test.redeem', redeem: true, projectId: null,
+    actor: { type: 'AGENT', id: 'a1' }, onBehalfOf: null, origin: 'rest', correlationId: 'correlation',
+    input, inputHash: approvalInputHash(input), requiredMode: 'agent', policyId: null, onTimeout: 'reject',
+    approverMustHoldAction: true, requireDistinctApprover: false, status: 'approved', satisfiedBy: 'human',
+    approverType: 'USER', approverId: 'u1', expiresAt: new Date('2026-11-02T00:00:00.000Z'),
+    decidedAt: new Date('2026-10-01T00:00:00.000Z'), settledAt: null, result: null,
+    createdAt: new Date('2026-10-01T00:00:00.000Z'), ...patch,
+  };
+}
+
+/** The redemption call a gated route hands the route gate. */
+function redeemCall(patch: Partial<RouteGateCall> = {}): RouteGateCall {
+  return { key: 'agent.create', variant: 'rest:test.redeem', projectId: null, input: { name: 'a' }, ...patch };
+}
+
+const redeemAgent: ActionActor = { type: 'AGENT', id: 'a1' };
 
 const agent: ActionActor = { type: 'AGENT', id: 'agent' };
 const input: Record<string, unknown> = { key: 'qa' };
@@ -167,5 +205,66 @@ describe('ApprovalRouteGate', () => {
 
     expect(error).toBeInstanceOf(ForbiddenAppException);
     expect(h.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, 'global');
+  });
+
+  describe('US-004 — a call carrying a redeem header', () => {
+    it('AC-1: redeems the request and answers its raw result with the request\'s approval', async () => {
+      const request = redeemable();
+      const h = harness(['agent.create'], undefined, { request, result: 'kr_secret' });
+
+      const outcome = await asActor(redeemAgent, () => h.routeGate.run<string>(redeemCall({ redeem: 'r1' })));
+
+      expect(h.execution.redeem).toHaveBeenCalledExactlyOnceWith('r1', {
+        key: 'agent.create', variant: 'rest:test.redeem', projectId: null, input: { name: 'a' },
+      });
+      expect(h.gate.gate).not.toHaveBeenCalled();
+      expect(outcome).toEqual({ status: 'executed', result: 'kr_secret', approval: approvalOf(request) });
+    });
+
+    it('AC-2: gates the call when there is no redeem header or an empty one', async () => {
+      const h = harness(['agent.create']);
+
+      await asActor(redeemAgent, () => h.routeGate.run(redeemCall()));
+      await asActor(redeemAgent, () => h.routeGate.run(redeemCall({ redeem: '' })));
+
+      expect(h.gate.gate).toHaveBeenCalledTimes(2);
+      expect(h.gate.gate).toHaveBeenCalledWith('agent.create', { name: 'a' }, {
+        projectId: null, variant: 'rest:test.redeem',
+      });
+      expect(h.execution.redeem).not.toHaveBeenCalled();
+    });
+
+    it('AC-3: refuses a redeem by a caller that does not hold the key', async () => {
+      const h = harness(['agent.read']);
+
+      const error = await asActor(redeemAgent, () => h.routeGate.run(redeemCall({ redeem: 'r1' })))
+        .catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('permissions');
+      expect((error as ForbiddenAppException).httpStatus).toBe(403);
+      expect(h.execution.redeem).not.toHaveBeenCalled();
+      expect(h.gate.gate).not.toHaveBeenCalled();
+    });
+
+    it('answers a refused redemption with the approval boundary\'s HTTP error', async () => {
+      const h = harness(['agent.create']);
+      h.execution.redeem.mockRejectedValue(new ApprovalRedeemMismatchError('r1'));
+
+      const error = await asActor(redeemAgent, () => h.routeGate.run(redeemCall({ redeem: 'r1' })))
+        .catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(AppException);
+      expect((error as AppException).prefix).toBe('approvals.redeemMismatch');
+      expect((error as AppException).getStatus()).toBe(409);
+    });
+
+    it('propagates the command\'s own error unchanged', async () => {
+      const h = harness(['agent.create']);
+      const conflict = new Error('slug already taken');
+      h.execution.redeem.mockRejectedValue(conflict);
+
+      await expect(asActor(redeemAgent, () => h.routeGate.run(redeemCall({ redeem: 'r1' })))).rejects.toBe(conflict);
+    });
   });
 });

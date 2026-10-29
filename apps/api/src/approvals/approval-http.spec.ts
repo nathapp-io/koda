@@ -1,7 +1,8 @@
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { validateSync } from 'class-validator';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { parseQuery } from '../common/dto/koda-page.query';
-import { ApprovalCancelForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRequestNotFoundError } from './domain/approval.errors';
+import { ApprovalCancelForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRedeemMismatchError, ApprovalRequestNotFoundError } from './domain/approval.errors';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { rethrowApprovalError } from './approval-http-errors';
 import { ApprovalDecisionDto, ApprovalRequestDto, ApprovalRequestSummaryDto } from './dto/approval-request.dto';
@@ -56,6 +57,19 @@ describe('approval HTTP boundary', () => {
     expect((raised as ForbiddenAppException).getStatus()).toBe(403);
     expect((raised as ForbiddenAppException).prefix).toBe('approvals.cancelForbidden');
     expect((raised as ForbiddenAppException).args).toEqual({});
+  });
+  it('US-004 AC-14: maps a redeem mismatch to a 409 redeemMismatch conflict', () => {
+    let raised: unknown;
+    try {
+      rethrowApprovalError(new ApprovalRedeemMismatchError('r1'));
+    } catch (error) {
+      raised = error;
+    }
+
+    expect(raised).toBeInstanceOf(ConflictAppException);
+    expect((raised as ConflictAppException).getStatus()).toBe(409);
+    expect((raised as ConflictAppException).prefix).toBe('approvals.redeemMismatch');
+    expect((raised as ConflictAppException).args).toEqual({});
   });
   it.each(['not-accepted', 'too-large', 'invalid'] as const)('AC-13: maps invalid decision params (%s) to a validation refusal', (reason) => {
     let raised: unknown;

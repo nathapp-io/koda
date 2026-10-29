@@ -13,6 +13,10 @@
   "requestNotFound": { "404": "审批请求不存在" },
   "notPending": { "409": "审批请求已{status}" },
   "expired": { "409": "审批请求已过期" },
+  "redeemMismatch": {
+    "409": "此调用无法用于兑换该审批请求",
+    "-2": "此调用无法用于兑换该审批请求"
+  },
   "decideForbidden": { "403": "您不能决定此审批请求：{reason}" },
   "invalidDecisionParams": { "400": "无效的决定参数：{reason}", "-2": "无效的决定参数：{reason}" },
   "cancelForbidden": {

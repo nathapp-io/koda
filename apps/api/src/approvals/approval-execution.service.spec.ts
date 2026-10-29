@@ -11,15 +11,19 @@ import { Logger } from '@nestjs/common';
 import { FleetJobLivePublisher } from '../fleet/jobs/fleet-job-live.publisher';
 import { RunnerNotifier } from '../fleet/jobs/runner-notifier';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
-import { currentContext, type ActionContext } from '../action-context/action-context';
+import { currentContext, runWithActionContext, type ActionActor, type ActionContext } from '../action-context/action-context';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
 import { holdsNarrowedDecide, type PermissionService } from '../permissions/permission.service';
 import { AfterCommitService } from '../permissions/after-commit.service';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from './approval-command.registry';
-import { ApprovalExecutionService } from './approval-execution.service';
+import { ApprovalExecutionService, type RedeemCall } from './approval-execution.service';
 import { approvalInputHash } from './approval-input';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord } from './domain/approval.domain';
-import { ApprovalRequestNotPendingError } from './domain/approval.errors';
+import {
+  ApprovalRedeemMismatchError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError,
+} from './domain/approval.errors';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { configurableTestCommand } from './test-helpers/test-approval-command';
 
@@ -43,7 +47,11 @@ function approving(patch: Partial<ApprovalDecisionRecord> = {}): ApprovalDecisio
   };
 }
 
-function setup(patch: Partial<ApprovalRequestRecord> = {}) {
+function setup(
+  patch: Partial<ApprovalRequestRecord> = {},
+  // The command the registry holds: a case that exercises a variant registers it under that pair.
+  spec: { key: string; variant?: string } = { key: 'label.delete' },
+) {
   const request = approved(patch);
   const state = { current: request };
   const reasons: Array<string | undefined> = [];
@@ -59,7 +67,7 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
   const permissions = { effectiveKeys: vi.fn().mockResolvedValue(new Set(['label.delete'])) };
   const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => true) };
   const registry = new ApprovalCommandRegistry();
-  const test = configurableTestCommand('label.delete');
+  const test = configurableTestCommand(spec.key, spec.variant === undefined ? {} : { variant: spec.variant });
   registry.register(test.command);
   const events = { record: vi.fn().mockImplementation(async () => { reasons.push(currentBookkeepingReason()); }) };
   // The real deferral queue: the execution transaction owns it, exactly as it does in production.
@@ -772,5 +780,179 @@ describe('ApprovalExecutionService', () => {
     expect(results[0]).toMatchObject({ status: 'fulfilled', value: { status: 'failed', result: { error: 'execution-failed' } } });
     expect(results[1]).toMatchObject({ status: 'rejected' });
     expect((results[1] as PromiseRejectedResult).reason).toBeInstanceOf(ApprovalRequestNotPendingError);
+  });
+
+  describe('US-004 — redeeming an approved redeem request', () => {
+    const redeemInput = { name: 'a' };
+    const requester: ActionActor = { type: 'AGENT', id: 'a1' };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** The brief's fixture: an approved redeem request for `agent.create` opened by AGENT/a1 at rest. */
+    function redeemFixture(patch: Partial<ApprovalRequestRecord> = {}) {
+      const s = setup({
+        permissionKey: 'agent.create', variant: 'rest:test.redeem', projectId: null, origin: 'rest',
+        actor: requester, redeem: true, input: redeemInput, inputHash: approvalInputHash(redeemInput), ...patch,
+      }, { key: 'agent.create', variant: 'rest:test.redeem' });
+      s.test.state.redeem = { calls: [], drop: [], answer: null, withoutRedact: true };
+      return s;
+    }
+
+    function redeemCall(patch: Partial<RedeemCall> = {}): RedeemCall {
+      return { key: 'agent.create', variant: 'rest:test.redeem', projectId: null, input: redeemInput, ...patch };
+    }
+
+    /** Runs the redemption in the caller's own action context, as the REST route does. */
+    function asRequester<T>(call: () => Promise<T>, actor: ActionActor = requester): Promise<T> {
+      return runWithActionContext({ actor, origin: 'rest' }, call);
+    }
+
+    /** The error a redemption threw, so a case asserts the answer instead of a rejection wrapper. */
+    async function refusal(run: () => Promise<unknown>): Promise<unknown> {
+      return run().catch((thrown: unknown) => thrown);
+    }
+
+    it.each([{ type: 'AGENT', id: 'a2' }, { type: 'USER', id: 'u1' }] as ActionActor[])(
+      'AC-4: reads another principal\'s request (%j) as missing', async (actor) => {
+        const s = redeemFixture();
+
+        const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now), actor));
+
+        expect(error).toBeInstanceOf(ApprovalRequestNotFoundError);
+        expect(s.test.state.calls).toEqual([]);
+        expect(s.repo.transition).not.toHaveBeenCalled();
+      });
+
+    it('AC-5: refuses a request that is not a redeem request', async () => {
+      const s = redeemFixture({ redeem: undefined });
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBeInstanceOf(ApprovalRedeemMismatchError);
+      expect(s.test.state.calls).toEqual([]);
+      expect(s.repo.transition).not.toHaveBeenCalled();
+    });
+
+    it.each([{ variant: 'rest:other' }, { key: 'agent.key.rotate' }, { projectId: 'p1' }] as Partial<RedeemCall>[])(
+      'AC-6: refuses a call that is not the request\'s own pair (%j)', async (patch) => {
+        const s = redeemFixture();
+
+        const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(patch), now)));
+
+        expect(error).toBeInstanceOf(ApprovalRedeemMismatchError);
+        expect(s.test.state.calls).toEqual([]);
+        expect(s.repo.transition).not.toHaveBeenCalled();
+      });
+
+    it.each(['pending', 'executed'] as const)('AC-7: refuses a %s request', async (status) => {
+      const s = redeemFixture({ status });
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBeInstanceOf(ApprovalRequestNotPendingError);
+      expect((error as ApprovalRequestNotPendingError).status).toBe(status);
+      expect(s.test.state.calls).toEqual([]);
+    });
+
+    it('AC-8: refuses a redemption at the end of the window', async () => {
+      const s = redeemFixture({ expiresAt: now });
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBeInstanceOf(ApprovalRequestExpiredError);
+      expect(s.test.state.calls).toEqual([]);
+      expect(s.repo.transition).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: refuses a body whose redacted form is not the stored input', async () => {
+      const s = redeemFixture();
+      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+      const execute = vi.spyOn(s.test.command, 'execute');
+
+      const error = await refusal(() =>
+        asRequester(() => s.service.redeem('r1', redeemCall({ input: { name: 'b', secret: 's' } }), now)));
+
+      expect(error).toBeInstanceOf(ApprovalRedeemMismatchError);
+      expect(execute).not.toHaveBeenCalled();
+      expect(s.repo.transition).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: executes the re-sent body and answers the raw result', async () => {
+      const s = redeemFixture();
+      s.test.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+      s.test.state.toResult = (result) => ({ stored: result });
+      const sent = { name: 'a', secret: 's' };
+
+      const redeemed = await asRequester(() => s.service.redeem('r1', redeemCall({ input: sent }), now));
+
+      expect(s.test.state.calls).toEqual([sent]);
+      expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', {
+        status: 'executed', settledAt: now, result: { stored: 'done' },
+      });
+      expect(redeemed.request).toMatchObject({ id: 'r1', status: 'executed', result: { stored: 'done' } });
+      expect(redeemed.result).toBe('done');
+    });
+
+    it('AC-11: settles failed and rejects with the command\'s own error', async () => {
+      const s = redeemFixture();
+      const conflict = new ConflictAppException({}, 'agents');
+      s.test.command.execute = vi.fn().mockRejectedValue(conflict);
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBe(conflict);
+      expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', {
+        status: 'failed', settledAt: now, result: { error: 'execution-failed', name: conflict.name },
+      });
+    });
+
+    it('AC-12: propagates the parse error and leaves the request approved', async () => {
+      const s = redeemFixture();
+      const invalid = new ValidationAppException({}, 'agents');
+      const parse = vi.spyOn(s.test.command, 'parse').mockImplementation(() => { throw invalid; });
+      const execute = vi.spyOn(s.test.command, 'execute');
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBe(invalid);
+      expect(parse).toHaveBeenCalledOnce();
+      expect(execute).not.toHaveBeenCalled();
+      // No transition at all: the request stays approved for a corrected retry.
+      expect(s.repo.transition).not.toHaveBeenCalled();
+    });
+
+    it('AC-13: runs afterCommit once with the raw result, after the request was executed', async () => {
+      const s = redeemFixture();
+      s.test.state.afterCommit = { calls: [], throws: null };
+      // How many afterCommit calls had happened when the execution transaction resolved: none.
+      const atResolved: number[] = [];
+      s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+        const value = await fn();
+        atResolved.push(s.test.state.afterCommit?.calls.length ?? -1);
+        return value;
+      });
+
+      await asRequester(() => s.service.redeem('r1', redeemCall(), now));
+
+      expect(s.test.state.afterCommit.calls).toEqual([{ input: redeemInput, decision: undefined, result: 'done' }]);
+      expect(atResolved).toEqual([0]);
+    });
+
+    it('AC-15: settles failed and rejects with the prepare error without running the command', async () => {
+      const s = redeemFixture();
+      const conflict = new ConflictAppException({}, 'agents');
+      s.test.command.prepare = vi.fn().mockRejectedValue(conflict);
+      const execute = vi.spyOn(s.test.command, 'execute');
+
+      const error = await refusal(() => asRequester(() => s.service.redeem('r1', redeemCall(), now)));
+
+      expect(error).toBe(conflict);
+      expect(execute).not.toHaveBeenCalled();
+      expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', {
+        status: 'failed', settledAt: now, result: { error: 'execution-failed', name: conflict.name },
+      });
+    });
   });
 });
