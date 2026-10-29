@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T04:54:33.701Z",
+  "updatedAt": "2026-10-29T05:18:13.838Z",
   "userStories": [
     {
       "id": "US-001",
@@ -654,14 +654,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Creates VcsManualSync and a fetch/apply isolation seam with target/author race checks using the existing prepare engine; credentialed access control mandates strict security TDD."
+        "reasoning": "Creates VcsManualSync and a fetch/apply isolation seam with target/author race checks using the existing prepare engine; credentialed access control mandates strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-sync.service.ts",
@@ -717,7 +720,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7e9abb35161030f670353c1a85b08ce875ee65e1"
     },
     {
       "id": "US-009",
