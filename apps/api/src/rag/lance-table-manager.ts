@@ -498,9 +498,21 @@ export class LanceTableManager {
    * writers against the same table, so without this, interleaved writes can
    * race each other and corrupt table state.
    */
-  async exclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
+  private readonly blockedWrites = new Set<string>();
+
+  /** Unresolved durable undo receipts fence every writer until recovery succeeds. */
+  blockWrites(tableName: string, blocked: boolean): void {
+    if (blocked) this.blockedWrites.add(tableName);
+    else this.blockedWrites.delete(tableName);
+  }
+
+  async exclusive<T>(tableName: string, fn: () => Promise<T>, options?: { recovery: true; additionRecovery?: true }): Promise<T> {
     const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
+    const guarded = () => {
+      if (this.blockedWrites.has(tableName) && !options?.additionRecovery) throw new Error('KB table has an unresolved addition receipt');
+      return fn();
+    };
+    const run = previous.then(guarded, guarded);
     const tracked = run.catch(() => undefined);
     this.writeLocks.set(tableName, tracked);
     // Once this write settles, drop the entry if no later write has queued

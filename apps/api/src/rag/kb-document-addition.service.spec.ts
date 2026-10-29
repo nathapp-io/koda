@@ -1,3 +1,4 @@
+import { KbAdditionJournal } from './kb-addition-journal';
 import { KbDocumentAddition } from './kb-document-addition.service';
 import { RagService } from './rag.service';
 import { PermissionService } from '../permissions/permission.service';
@@ -19,7 +20,11 @@ describe('KbDocumentAddition', () => {
     rag.indexDocument.mockResolvedValue('row1');
     permissions.can.mockResolvedValue({ allowed: false });
     audit.audited.mockImplementation(async (work, entry) => { await work(); return entry(); });
-    addition = new KbDocumentAddition(rag as unknown as RagService, permissions as unknown as PermissionService, audit as unknown as AuditRecorder);
+    const journal = {
+      run: vi.fn(async (_projectId, work) => work({})),
+      prepare: vi.fn(async (projectId, source, sourceId) => ({ id: 'intent1', key: 'kb.document.add', projectId, resourceType: 'kb-document', resourceId: `${source}:${sourceId}` })),
+    };
+    addition = new KbDocumentAddition(rag as unknown as RagService, permissions as unknown as PermissionService, audit as unknown as AuditRecorder, journal as unknown as KbAdditionJournal);
   });
   it('AC-7: embeds in prepare and writes once with the vector and trusted creator in callback', async () => {
     const apply = await addition.prepare(principal, 'p1', dto);

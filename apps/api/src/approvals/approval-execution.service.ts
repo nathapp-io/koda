@@ -182,7 +182,7 @@ export class ApprovalExecutionService {
       // work: a role or binding command's permission-cache invalidation is deferred here and runs
       // once the commit ended. Flushed before it, a concurrent read would recompute the pre-commit
       // keys and cache them under the new generation, keeping revoked access for one TTL.
-      const settled = await this.afterCommit.scope(() => withCommittedEffects(() => this.txManager.run(async () => {
+      const transaction = () => this.afterCommit.scope(() => withCommittedEffects(() => this.txManager.run(async () => {
         try {
           const locked = await this.requests.lockById(request.id);
           if (!locked) throw new ApprovalRequestNotFoundError(request.id);
@@ -225,6 +225,7 @@ export class ApprovalExecutionService {
         }
       })));
 
+      const settled = await (command.withExecution ? command.withExecution(parsed, transaction) : transaction());
       return { settled, raw };
     } catch (error) {
       if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;

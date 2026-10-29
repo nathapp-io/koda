@@ -56,6 +56,10 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
   prepare?(input: TInput, decision?: TDecision): Promise<() => Promise<TResult>>;
   /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */
   execute(input: TInput, decision?: TDecision): Promise<TResult>;
+  /** Optional cross-store resource boundary around the entire execution transaction (not prepare).
+   * Must release/resolve resources after commit or rollback; it must not open an outer PG transaction.
+   */
+  withExecution?<T>(input: TInput, transaction: () => Promise<T>): Promise<T>;
   /** What `ApprovalRequest.result` stores; omitted means null. */
   toResult?(result: TResult): unknown;
   /** Runs after the execution transaction committed, under the request's context; a throw is logged only. */

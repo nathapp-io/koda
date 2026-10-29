@@ -49,6 +49,20 @@ function dedupeLinks(links: GraphDiffWrite['links']): GraphDiffWrite['links'] {
 export class PrismaRagRepository implements IRagRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
+  /** Held by the write transaction; resolution waits even after an indeterminate COMMIT reply. */
+  async lockAdditionIntent(id: string): Promise<void> {
+    await this.prisma.client.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${id}, 0))`;
+  }
+
+  /** The audit and approval settlement share one transaction, so audit presence proves both committed. */
+  async withAdditionCommitProof(id: string, resolve: (committed: boolean) => Promise<void>): Promise<void> {
+    await this.prisma.withTransaction(async () => {
+      await this.lockAdditionIntent(id);
+      const entry = await this.prisma.client.auditEntry.findUnique({ where: { id }, select: { id: true } });
+      await resolve(entry !== null);
+    }, { isolationLevel: 'ReadCommitted' });
+  }
+
   async findProjectGraphifyEnabled(
     projectId: string,
   ): Promise<{ graphifyEnabled: boolean } | null> {

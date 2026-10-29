@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { KbDocumentWriteSession } from './rag.service';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
@@ -40,6 +41,7 @@ function parseRowMetadata(metadata: unknown): Record<string, unknown> {
 @Injectable()
 export class VectorStore implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VectorStore.name);
+  private readonly writeSession = new AsyncLocalStorage<{ projectId: string; table: LanceTable; active: boolean; session?: KbDocumentWriteSession }>();
   /**
    * Shared LanceDB connection/table/mutex owner. In production, RagModule
    * provides ONE LanceTableManager instance that is injected into both
@@ -253,8 +255,14 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       model: this.embeddingService?.modelName ?? '',
     };
 
-    const table = await this.getOrCreateTable(projectId);
-    await this.lanceTable.addRecord(tableName, table, record);
+    const held = this.writeSession.getStore();
+    const table = held?.active && held.projectId === projectId ? held.table : await this.getOrCreateTable(projectId);
+    if (held?.active && held.projectId === projectId) {
+      await table.delete(sourceRowFilter(doc.source, doc.sourceId));
+      await table.add([record]);
+    } else {
+      await this.lanceTable.addRecord(tableName, table, record);
+    }
 
     if (this.lanceTable.available && this.optimizeStrategy) {
       await this.optimizeStrategy.onInsert(projectId, table);
@@ -491,21 +499,42 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  blockDocumentWrites(projectId: string, blocked: boolean): void {
+    this.lanceTable.blockWrites(`project_${projectId}`, blocked);
+  }
+
   /** Runs an ownership recheck and its mutations in the shared project-table write critical section. */
-  async withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true }): Promise<T> {
-    // Recovery owns an already-authorized, durable row-id intent. A later project soft-delete must
-    // not prevent its audit from being repaired. It never widens to source ids or runs new writes.
+  async withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true; additionRecovery?: true }): Promise<T> {
+    const current = this.writeSession.getStore();
+    if (current?.active && current.projectId === projectId && current.session) return work(current.session);
+    // Recovery owns an already-authorized durable intent. A later project soft-delete must not
+    // prevent repair. Only addition recovery may bypass the table's unresolved-undo fence;
+    // its pair restoration is safe because that fence prevents any intervening writer.
     const table = options?.recovery
       ? await this.lanceTable.getOrCreateTable(`project_${projectId}`)
       : await this.getOrCreateTable(projectId);
     return this.lanceTable.exclusive(`project_${projectId}`, async () => {
+      const held: { projectId: string; table: LanceTable; active: boolean; session?: KbDocumentWriteSession } = { projectId, table, active: true };
       let active = true;
       const check = (...values: string[]) => {
         if (!active) throw new Error('KB write session used outside its lock');
         if (values.some(value => !isSafeFilterValue(value))) throw new ValidationAppException();
       };
       try {
-        return await work({
+        const session: KbDocumentWriteSession = {
+          capturePair: async (source, sourceId) => {
+            check(source, sourceId);
+            const count = await table.countRows();
+            if (!count) return [];
+            const rows = await whereIfSupported(table.query(), sourceRowFilter(source, sourceId)).limit(count).toArray();
+            return rows.filter(row => row.source === source && row.source_id === sourceId)
+              .map(row => ({ ...row, vector: Array.from(row.vector) }));
+          },
+          restorePair: async (source, sourceId, rows) => {
+            check(source, sourceId);
+            await table.delete(sourceRowFilter(source, sourceId));
+            if (rows.length) await table.add(rows);
+          },
           deleteBySource: async (source, sourceId) => {
             if (options?.recovery) throw new Error('Recovery may delete only captured row ids');
             check(source, sourceId);
@@ -522,9 +551,11 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
             check(...ids);
             for (const id of ids) await table.delete(`id = '${id}'`);
           },
-        });
-      } finally { active = false; }
-    });
+        };
+        held.session = session;
+        return await this.writeSession.run(held, () => work(session));
+      } finally { active = false; held.active = false; }
+    }, options);
   }
 
   /**

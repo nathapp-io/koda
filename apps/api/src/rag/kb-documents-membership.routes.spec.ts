@@ -1,3 +1,4 @@
+import { KbAdditionJournal } from './kb-addition-journal';
 import { KbDocumentAddition } from './kb-document-addition.service';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { KbDocumentDeletion } from './kb-document-deletion.service';
@@ -117,6 +118,10 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
           }),
         }), inject: [KbDocumentAddition] },
         KbDocumentAddition,
+        { provide: KbAdditionJournal, useValue: {
+          run: async (_projectId: string, work: (session: unknown) => Promise<unknown>) => work({}),
+          prepare: async () => ({ id: 'intent1', key: 'kb.document.add', resourceType: 'kb-document', resourceId: 'doc:doc-1' }),
+        } },
       ],
     }).compile();
 

@@ -31,10 +31,12 @@ export class KbRouteCommands implements OnModuleInit {
       },
       run: (principal, input) => this.addition.add(principal, input.projectId, input.document),
       prepare: (principal, input) => this.addition.prepare(principal, input.projectId, input.document),
+      withExecution: (input, transaction) => this.addition.withExecution(input.projectId, transaction),
       toResult: result => result,
     }, this.loader));
     this.commands.register(routeCommand<KbDeleteInput, { deleted: boolean }>({
       key: 'kb.document.delete', variant: KB_ROUTE_VARIANTS.delete,
+      withExecution: (input, transaction) => this.deletion.withExecution(input.projectId, transaction),
       parse: input => {
         const ids = parseRouteInput(input, ['projectId', 'sourceId']);
         const query = parseBody(DeleteKbDocumentQuery, input);

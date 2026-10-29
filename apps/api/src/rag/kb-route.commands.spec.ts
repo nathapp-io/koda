@@ -12,7 +12,7 @@ describe('KbRouteCommands', () => {
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
     const result = { indexed: true, id: 'row1', sourceId: 's1' };
     const apply = vi.fn().mockResolvedValue(result);
-    const addition = { add: vi.fn().mockResolvedValue(result), prepare: vi.fn().mockResolvedValue(apply) };
+    const addition = { add: vi.fn().mockResolvedValue(result), prepare: vi.fn().mockResolvedValue(apply), withExecution: vi.fn(async (_projectId: string, transaction: () => Promise<unknown>) => transaction()) };
     new KbRouteCommands(registry, {} as KbDocumentDeletion, loader as unknown as ActorPrincipalLoader, addition as unknown as KbDocumentAddition).onModuleInit();
     const command = registry.get('kb.document.add', KB_ROUTE_VARIANTS.add);
     if (!command?.prepare || !command.toResult) throw new Error('KB add command incomplete');
@@ -30,6 +30,11 @@ describe('KbRouteCommands', () => {
     expect(await callback()).toEqual(result);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(command.toResult(result)).toEqual(result);
+    if (!command.withExecution) throw new Error('Addition transaction boundary missing');
+    const transaction = vi.fn().mockResolvedValue('settled');
+    expect(await command.withExecution(input, transaction)).toBe('settled');
+    expect(addition.withExecution).toHaveBeenCalledWith('p1', transaction);
+    expect(transaction).toHaveBeenCalledTimes(1);
   });
   it('AC-11: registers, validates and executes deletion with a stored result', async () => {
     const registry = new ApprovalCommandRegistry();
