@@ -49,9 +49,12 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
    */
   onReject?(input: TInput, decision: TDecision | undefined): Promise<void>;
   /**
-   * External read-only work before the execution transaction. Returns an ephemeral mutation callback;
-   * it must re-read targets before writing. Never persisted, including any credentials it closes over.
-   * Immediate callers use execute, which performs the same preparation itself.
+   * External read-only work before the execution transaction. May also perform work in a store the
+   * execution transaction cannot roll back, when that work maintains its own cross-store consistency.
+   * Such completed store work is not undone if the post-prepare key re-check refuses execution.
+   * Returns an ephemeral mutation callback; it must re-read targets before writing. Never persisted,
+   * including any credentials it closes over. Immediate callers use execute, which performs the same
+   * preparation itself.
    */
   prepare?(input: TInput, decision?: TDecision): Promise<() => Promise<TResult>>;
   /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */

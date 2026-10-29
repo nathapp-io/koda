@@ -309,13 +309,14 @@ describe('RagController', () => {
   });
 
   describe('importGraphify', () => {
-    it('returns immediately when nodes array is empty', async () => {
+    it('AC-9: returns immediately when nodes array is empty without gating', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
 
       const result = await controller.importGraphify('alpha', { nodes: [], links: [] });
 
       expect(ragService.importGraphify).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ imported: 0, cleared: 0 });
+      expect(result.data).toEqual({ imported: 0, cleared: 0 });
+      expect(gate.run).not.toHaveBeenCalled();
     });
 
     it('throws ValidationAppException when graphify is disabled for project', async () => {
@@ -326,35 +327,44 @@ describe('RagController', () => {
           'alpha',
           { nodes: [{ id: 'n1', label: 'Foo' }], links: [] },
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({ response: { prefix: 'rag.graphifyDisabled' } });
+      expect(gate.run).not.toHaveBeenCalled();
     });
 
-    it('imports nodes and returns the import result (timestamp updated inside service)', async () => {
+    it('gates graphify with frozen input and wraps the import result', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
-      ragService.importGraphify.mockResolvedValue({ imported: 1, cleared: 0 } as any);
+      gate.run.mockResolvedValue({ status: 'executed', result: { imported: 1, cleared: 0 } });
 
       const result = await controller.importGraphify(
         'alpha',
         { nodes: [{ id: 'n1', label: 'Foo' }], links: [] },
       );
 
-      expect(ragService.importGraphify).toHaveBeenCalledWith('proj-1', [{ id: 'n1', label: 'Foo' }], []);
+      expect(gate.run).toHaveBeenCalledWith({ key: 'kb.graphify.import', variant: 'rest:kb.graphify-import', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1', graph: { nodes: [{ id: 'n1', label: 'Foo' }], links: [] } } });
+      expect(ragService.importGraphify).not.toHaveBeenCalled();
       // graphifyLastImportedAt is now updated inside RagService.importGraphify,
       // not in the controller, so the repository mock is not called here.
       expect(mockUpdateGraphifyLastImportedAt).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ imported: 1, cleared: 0 });
+      expect(result.data).toEqual({ imported: 1, cleared: 0 });
     });
   });
 
+  it.each(['graphify', 'optimize'])('maps pending %s to ApprovalPending', async kind => {
+    mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
+    gate.run.mockResolvedValue({ status: 'pending', request: { id: 'r1' } });
+    await expect(kind === 'graphify' ? controller.importGraphify('alpha', { nodes: [{ id: 'n1', label: 'Foo' }] }) : controller.optimizeTable('alpha')).rejects.toBeInstanceOf(ApprovalPending);
+  });
+
   describe('optimizeTable', () => {
-    it('calls ragService.optimizeTable and returns optimized true', async () => {
+    it('gates optimize and wraps the optimized result', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.optimizeTable.mockResolvedValue(undefined);
+      gate.run.mockResolvedValue({ status: 'executed', result: { optimized: true } });
 
       const result = await controller.optimizeTable('alpha');
 
-      expect(ragService.optimizeTable).toHaveBeenCalledWith('proj-1');
-      expect((result as any).data).toEqual({ optimized: true });
+      expect(gate.run).toHaveBeenCalledWith({ key: 'kb.optimize', variant: 'rest:kb.optimize', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1' } });
+      expect(ragService.optimizeTable).not.toHaveBeenCalled();
+      expect(result.data).toEqual({ optimized: true });
     });
   });
 });

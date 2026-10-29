@@ -174,6 +174,7 @@ export class RagController {
   }
 
   @Post('import/graphify')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('kb.graphify.import')
@@ -190,19 +191,16 @@ export class RagController {
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
 
-    const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
-    await this.audit.audited(async () => undefined, () => ({
-      key: 'kb.graphify.import',
-      resourceType: 'project',
-      resourceId: project.id,
-      projectId: project.id,
-      summary: `imported ${importResult.imported} nodes, cleared ${importResult.cleared}`,
-    }));
-
-    return JsonResponse.Ok(importResult);
+    const outcome = await this.routeGate.run<{ imported: number; cleared: number }>({
+      key: 'kb.graphify.import', variant: KB_ROUTE_VARIANTS.graphifyImport, projectId: project.id,
+      input: { slug, projectId: project.id, graph: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('optimize')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('kb.optimize')
@@ -212,14 +210,11 @@ export class RagController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async optimizeTable(@Param('slug') slug: string) {
     const project = await this.resolveProject(slug);
-    await this.ragService.optimizeTable(project.id);
-    await this.audit.audited(async () => undefined, () => ({
-      key: 'kb.optimize',
-      resourceType: 'project',
-      resourceId: project.id,
-      projectId: project.id,
-      summary: 'kb table optimized',
-    }));
-    return JsonResponse.Ok({ optimized: true });
+    const outcome = await this.routeGate.run<{ optimized: boolean }>({
+      key: 'kb.optimize', variant: KB_ROUTE_VARIANTS.optimize, projectId: project.id,
+      input: { slug, projectId: project.id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

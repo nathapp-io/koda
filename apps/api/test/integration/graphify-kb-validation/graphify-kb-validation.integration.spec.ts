@@ -478,6 +478,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
   describe('US-003: RagController.importGraphify — controller behavior with mocked services', () => {
     let controller: RagController;
+    let module: TestingModule;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let mockRagService: Record<string, Mock>;
     let mockTxClient: { project: { update: Mock } };
@@ -534,7 +535,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
       const mockPrismaService = { client: mockPrismaClient };
 
-      const module: TestingModule = await Test.createTestingModule({
+      module = await Test.createTestingModule({
         controllers: [RagController],
         providers: [
           { provide: RagService, useValue: mockRagService },
@@ -550,14 +551,18 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
           { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
           { provide: AuditRecorder, useValue: mockAuditRecorder },
           { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
-          { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: { deleted: true } }) } },
+          { provide: ApprovalRouteGate, useValue: { run: vi.fn(async ({ variant, input }: { variant: string; input: { projectId: string; graph: ImportGraphifyDto } }) => {
+            if (variant !== 'rest:kb.graphify-import') throw new Error(`Unexpected variant: ${variant}`);
+            return { status: 'executed', result: await mockRagService.importGraphify(input.projectId, input.graph.nodes, input.graph.links ?? []) };
+          }) } },
         ],
       }).compile();
 
       controller = module.get<RagController>(RagController);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+      await module?.close();
       vi.clearAllMocks();
     });
 
