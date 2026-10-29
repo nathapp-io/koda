@@ -1,3 +1,4 @@
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { AdminUsersController } from './admin-users.controller';
@@ -21,10 +22,11 @@ describe('US-010 permission keys on the admin user routes', () => {
 
 describe('AdminUsersController', () => {
   const service = { list: vi.fn(), create: vi.fn(), update: vi.fn() };
-  const controller = new AdminUsersController(service as never);
+  const gate = { run: vi.fn() };
+  const controller = new AdminUsersController(service as never, gate as never);
   const page = { total: 1, current: 2, size: 5, hasNext: false, hasPrev: true, records: [{ id: 'u1' }] };
 
-  afterEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
 
   it('parses paging strings and forwards the email filter', async () => {
     service.list.mockResolvedValue(page);
@@ -33,9 +35,17 @@ describe('AdminUsersController', () => {
     expect(res).toEqual(expect.objectContaining({ ret: 0, data: page }));
   });
 
-  it('passes the acting principal id to update', async () => {
-    service.update.mockResolvedValue({ id: 'u2' });
-    await controller.update('u2', { disabled: true }, { id: 'u1', actorType: 'user' } as never);
-    expect(service.update).toHaveBeenCalledWith('u1', 'u2', { disabled: true });
+  it('maps pending updates to ApprovalPending', async () => {
+    gate.run.mockResolvedValue({ status: 'pending', request: { id: 'approval-1' } });
+    await expect(controller.update('u2', { disabled: true }, { id: 'u1' } as never)).rejects.toBeInstanceOf(ApprovalPending);
+    expect(service.update).not.toHaveBeenCalled();
+  });
+
+  it('gates the update and retains the response envelope', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { id: 'u2' } });
+    const result = await controller.update('u2', { disabled: true }, { id: 'u1', actorType: 'user' } as never);
+    expect(gate.run).toHaveBeenCalledWith({ key: 'user.update', variant: 'rest:admin-users.update', projectId: null, input: { id: 'u2', patch: { disabled: true } } });
+    expect(result).toMatchObject({ ret: 0, data: { id: 'u2' } });
+    expect(service.update).not.toHaveBeenCalled();
   });
 });

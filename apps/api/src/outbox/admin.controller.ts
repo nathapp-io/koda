@@ -1,5 +1,9 @@
 import { Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { OUTBOX_ROUTE_VARIANTS } from './outbox-route.commands';
 import { OutboxAdminService } from './outbox-admin.service';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxListQueryDto } from './dto/outbox-list-query.dto';
@@ -16,7 +20,7 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RequiresGuard)
 export class AdminController {
-  constructor(private readonly outboxAdmin: OutboxAdminService) {}
+  constructor(private readonly outboxAdmin: OutboxAdminService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get('outbox')
   @HttpCode(200)
@@ -34,6 +38,7 @@ export class AdminController {
   }
 
   @Post('outbox/:eventId/retry')
+  @ApprovalGated()
   @HttpCode(200)
   @Requires('outbox.retry')
   @ApiOperation({ summary: 'Retry a dead outbox event' })
@@ -45,6 +50,9 @@ export class AdminController {
     @Principal() _principal: KodaPrincipal,
     @Param('eventId') eventId: string,
   ) {
-    await this.outboxAdmin.retry(eventId);
+    const outcome = await this.routeGate.run({
+      key: 'outbox.retry', variant: OUTBOX_ROUTE_VARIANTS.retry, projectId: null, input: { eventId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
   }
 }

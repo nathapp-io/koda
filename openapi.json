@@ -310,6 +310,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "Forbidden - user.update is missing, or the caller cannot demote or disable themselves"
           },
@@ -474,6 +492,24 @@
           "200": {
             "description": "Agent updated successfully"
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -622,6 +658,24 @@
         "responses": {
           "200": {
             "description": "Capabilities updated successfully"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -1882,6 +1936,24 @@
         "responses": {
           "200": {
             "description": "Agent updated successfully"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -5145,6 +5217,24 @@
         "responses": {
           "200": {
             "description": "Event reset to pending"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "403": {
             "description": "Forbidden - outbox.retry is missing"
@@ -14043,92 +14133,6 @@
           "updatedAt"
         ]
       },
-      "UpdateUserDto": {
-        "type": "object",
-        "properties": {
-          "disabled": {
-            "type": "boolean",
-            "description": "Disabling revokes every session of the user"
-          }
-        }
-      },
-      "CreateAgentDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Agent name"
-          },
-          "slug": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
-            "description": "Agent slug (unique identifier, lowercase alphanumeric with hyphens)",
-            "example": "good-slug-1"
-          },
-          "maxConcurrentTickets": {
-            "type": "number",
-            "minimum": 1,
-            "description": "Maximum concurrent tickets the agent can handle"
-          },
-          "capabilities": {
-            "description": "Agent capabilities (e.g. typescript, nestjs)",
-            "example": [
-              "typescript",
-              "nestjs"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "name",
-          "slug"
-        ]
-      },
-      "UpdateAgentDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Agent name"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "ACTIVE",
-              "PAUSED",
-              "OFFLINE"
-            ],
-            "description": "Agent status (ACTIVE, PAUSED, OFFLINE)"
-          },
-          "maxConcurrentTickets": {
-            "type": "number",
-            "description": "Max concurrent tickets agent can handle"
-          }
-        }
-      },
-      "UpdateCapabilitiesDto": {
-        "type": "object",
-        "properties": {
-          "capabilities": {
-            "description": "Agent capabilities (e.g. typescript, react, nodejs)",
-            "example": [
-              "typescript",
-              "nestjs",
-              "react"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "capabilities"
-        ]
-      },
       "ApprovalRequestSummaryDto": {
         "type": "object",
         "properties": {
@@ -14248,6 +14252,92 @@
           "decidedAt",
           "settledAt",
           "createdAt"
+        ]
+      },
+      "UpdateUserDto": {
+        "type": "object",
+        "properties": {
+          "disabled": {
+            "type": "boolean",
+            "description": "Disabling revokes every session of the user"
+          }
+        }
+      },
+      "CreateAgentDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name"
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Agent slug (unique identifier, lowercase alphanumeric with hyphens)",
+            "example": "good-slug-1"
+          },
+          "maxConcurrentTickets": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Maximum concurrent tickets the agent can handle"
+          },
+          "capabilities": {
+            "description": "Agent capabilities (e.g. typescript, nestjs)",
+            "example": [
+              "typescript",
+              "nestjs"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ]
+      },
+      "UpdateAgentDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "PAUSED",
+              "OFFLINE"
+            ],
+            "description": "Agent status (ACTIVE, PAUSED, OFFLINE)"
+          },
+          "maxConcurrentTickets": {
+            "type": "number",
+            "description": "Max concurrent tickets agent can handle"
+          }
+        }
+      },
+      "UpdateCapabilitiesDto": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "description": "Agent capabilities (e.g. typescript, react, nodejs)",
+            "example": [
+              "typescript",
+              "nestjs",
+              "react"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "capabilities"
         ]
       },
       "AddDocumentDto": {

@@ -2,7 +2,7 @@ import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
 import { UsersAdminService } from './users-admin.service';
-import { MembershipService } from '../permissions/membership.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { UserAdminRecord } from './domain/user-admin.domain';
 
@@ -16,6 +16,7 @@ describe('UsersAdminService', () => {
   let cache: { invalidate: Mock };
   let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock };
   let service: UsersAdminService;
+  let afterCommit: AfterCommitService;
   let mockAuditRecorder: { record: Mock };
   /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
   let stored: UserAdminRecord;
@@ -42,7 +43,8 @@ describe('UsersAdminService', () => {
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     mockAuditRecorder = { record: vi.fn() };
-    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never, mockAuditRecorder as never);
+    afterCommit = new AfterCommitService();
+    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never, mockAuditRecorder as never, afterCommit);
   });
 
   it('AC-16/18: create records only created, never account secrets', async () => {
@@ -130,6 +132,23 @@ describe('UsersAdminService', () => {
   });
 
   describe('update', () => {
+    it('AC-11: defers both auth cache evictions until the outer scope returns', async () => {
+      await afterCommit.scope(async () => {
+        await service.update('u1', 'u2', { disabled: true });
+        expect(repo.updateUser).toHaveBeenCalled();
+        expect(cache.invalidate).not.toHaveBeenCalled();
+      });
+      expect(cache.invalidate).toHaveBeenCalledTimes(2);
+      expect(cache.invalidate).toHaveBeenCalledWith('USER:u2', { mode: 'tag' });
+      expect(cache.invalidate).toHaveBeenCalledWith(['user-auth-state', 'u2']);
+    });
+    it('drops auth cache evictions when the outer transaction rolls back', async () => {
+      await expect(afterCommit.scope(async () => {
+        await service.update('u1', 'u2', { disabled: true });
+        throw new Error('rollback');
+      })).rejects.toThrow('rollback');
+      expect(cache.invalidate).not.toHaveBeenCalled();
+    });
     /**
      * US-005: `disabled` is the only patchable field, so a self-disable is the only self-patch the
      * rule refuses. A patch that asks for a role changes nothing, so it is not a refusal.

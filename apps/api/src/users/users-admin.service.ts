@@ -11,6 +11,7 @@ import { remapPage } from '../common/dto/koda-page.query';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
 import { MembershipService } from '../permissions/membership.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { PrismaUsersRepository } from './prisma-users.repository';
 import { UserListFilters } from './domain/user-admin.domain';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -30,6 +31,7 @@ export class UsersAdminService {
     private readonly cache: CacheManager,
     private readonly membership: MembershipService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   async list(filters: UserListFilters, page: IPageOption): Promise<IPageResult<UserAdminDto>> {
@@ -115,8 +117,13 @@ export class UsersAdminService {
     // Tag invalidation covers Redis deployments (tag registry); under the
     // MEMORY strategy there is no registry and tag mode is a no-op, so the
     // cached 60 s auth-state entry is also evicted by its direct key.
-    await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
-    await this.cache.invalidate(userAuthStateCacheKey(userId));
+    const evict = async () => {
+      await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
+      await this.cache.invalidate(userAuthStateCacheKey(userId));
+    };
+    // Approval execution owns an outer transaction; never let a concurrent request cache
+    // the pre-commit auth state. Without an outer scope our own write has already committed.
+    if (!this.afterCommit.defer(evict)) await evict();
     return UserAdminDto.from(updated);
   }
 }

@@ -5608,3 +5608,45 @@ describeIntegration('budget approval lifecycle', () => {
     });
   }
 });
+
+/** Admin writes keep their response shapes and domain/transport refusals after gating. */
+describeIntegration('admin write approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['user.update', 'outbox.retry'], null);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+
+  it('user update waits, executes on approval, and still refuses self-disable', async () => {
+    await seedWaitPolicy(db, 'user.update', null);
+    const pending = data<{ id: string }>(await request(server()).patch(`/api/admin/users/${world.ids.dev}`)
+      .set(auth(agent.apiKey)).send({ disabled: true }).expect(202));
+    const decided = data<{ status: string }>(await request(server()).post(`/api/approvals/${pending.id}/decisions`)
+      .set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+    expect(decided.status).toBe('executed');
+    expect((await db.user.findUniqueOrThrow({ where: { id: world.ids.dev } })).disabled).toBe(true);
+    const refused = await request(server()).patch(`/api/admin/users/${world.ids.root}`)
+      .set(auth(world.tokens.root)).send({ disabled: true }).expect(403);
+    refusal(refused, 'users.self.40003');
+  });
+  it('outbox retry executes with empty 200 for root but rejects agent keys', async () => {
+    await seedWaitPolicy(db, 'outbox.retry', null);
+    const event = await db.outboxEvent.create({ data: { projectId: world.projectId, type: 'ticket_event', eventId: 'retry-smoke', status: 'dead' } });
+    await request(server()).post(`/api/admin/outbox/${event.id}/retry`).set(auth(agent.apiKey)).expect(401);
+    const retried = await request(server()).post(`/api/admin/outbox/${event.id}/retry`).set(auth(world.tokens.root)).expect(200);
+    expect(retried.text).toBe('');
+    expect((await db.outboxEvent.findUniqueOrThrow({ where: { id: event.id } })).status).toBe('pending');
+  });
+});
