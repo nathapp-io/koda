@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T04:30:37.601Z",
+  "updatedAt": "2026-10-29T04:38:01.812Z",
   "userStories": [
     {
       "id": "US-001",
@@ -497,14 +497,17 @@
         "refactor"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Mechanically extracts existing controller logic into an injectable service with unchanged algorithms; moving authorization and attribution code mandates the security override despite no intended behavior change."
+        "reasoning": "Mechanically extracts existing controller logic into an injectable service with unchanged algorithms; moving authorization and attribution code mandates the security override despite no intended behavior change.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/memory.controller.ts",
@@ -539,7 +542,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ebebd65586b9d1c9654c2b63b0176b64147fccb3"
     },
     {
       "id": "US-007",
