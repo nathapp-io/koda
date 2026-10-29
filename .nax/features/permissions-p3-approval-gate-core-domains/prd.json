@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T06:37:34.334Z",
+  "updatedAt": "2026-10-29T06:58:11.257Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1043,14 +1043,17 @@
       "dependencies": [
         "US-011"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds two commands over existing graph recovery/store services with a deliberate non-rollbackable prepare boundary, not a new recovery algorithm; access control mandates security-isolated TDD."
+        "reasoning": "Adds two commands over existing graph recovery/store services with a deliberate non-rollbackable prepare boundary, not a new recovery algorithm; access control mandates security-isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/rag/rag.service.ts",
@@ -1096,7 +1099,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "58eae732a6a55b8105ea25b9ef0764cfdfa593ac"
     },
     {
       "id": "US-013",
