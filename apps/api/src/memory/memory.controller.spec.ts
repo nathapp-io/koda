@@ -94,6 +94,47 @@ describe('MemoryController gated writes', () => {
     expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'writer-1', ownerType: 'USER' }), expect.anything());
   });
 
+  it('create honors privileged attribution and reports the exact gate call', async () => {
+    const { controller, repository, permissions, gate, invoke, item } = setupController();
+    permissions.can.mockImplementation(async () => ({ allowed: true, reason: 'granted' }));
+    const principal = makePrincipal('global-writer');
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p', ownerId: 'chosen-owner' };
+
+    const result = await invoke(principal, () => controller.createMemory(input, principal));
+
+    expect(result).toEqual(JsonResponse.Ok(item));
+    expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'chosen-owner', ownerType: null }), expect.anything());
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'memory.create', variant: 'rest:memory.create', projectId: 'p1', input: { memory: input } });
+  });
+
+  it('create records agent attribution as AGENT', async () => {
+    const { controller, repository, invoke, item } = setupController();
+    const principal: KodaPrincipal = { actorType: 'agent', id: 'agent-7', slug: 'agent-seven', status: 'ACTIVE', capabilities: [], blacklisted: false, revoked: false, authorities: [], name: undefined };
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' };
+
+    const result = await invoke(principal, () => controller.createMemory(input, principal));
+
+    expect(result).toEqual(JsonResponse.Ok(item));
+    expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'agent-7', ownerType: 'AGENT' }), expect.anything());
+  });
+
+  it('create runs replacement authorization and the audit hook through the real service', async () => {
+    const { controller, repository, permissions, audit, invoke, item } = setupController();
+    repository.upsert.mockImplementation(async (_input: unknown, options?: { beforeSupersede?: (existing: typeof item) => Promise<void>; onWritten?: (written: { item: typeof item; superseded: null }) => Promise<void> }) => {
+      await options?.beforeSupersede?.({ ...item, ownerId: 'other', ownerType: 'USER' });
+      await options?.onWritten?.({ item, superseded: null });
+      return item;
+    });
+    permissions.can.mockImplementation(async (_actor, key, context) =>
+      context?.resource ? { allowed: true, reason: 'granted' } : key === 'memory.update' ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' });
+    const principal = makePrincipal();
+
+    await invoke(principal, () => controller.createMemory({ projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' }, principal));
+
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'memory.update', expect.objectContaining({ projectId: 'p1', resource: expect.anything() }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.create', resourceId: item.id }));
+  });
+
   it('create propagates real service validation failures without writing', async () => {
     const { controller, repository, invoke } = setupController();
     const principal = makePrincipal();
@@ -103,7 +144,7 @@ describe('MemoryController gated writes', () => {
   });
 
   it('recordDecision executes the matching service method with caller attribution and passes its result through', async () => {
-    const { controller, extraction, invoke } = setupController();
+    const { controller, extraction, gate, invoke } = setupController();
     const principal = makePrincipal('decision-writer');
     const decision = { projectId: 'p1', actorId: 'spoofed', topic: 'architecture', decision: 'keep it simple' };
 
@@ -111,6 +152,29 @@ describe('MemoryController gated writes', () => {
 
     expect(result).toEqual(JsonResponse.Ok({ canonicalId: 'canonical-1', memoryId: 'memory-1' }));
     expect(extraction.recordDecision).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'decision-writer', topic: 'architecture' }), expect.anything(), expect.anything());
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.decision.record', variant: 'rest:memory.decisions.record', projectId: 'p1', input: { decision },
+    });
+  });
+
+  it('recordDecision honors privileged actor attribution and records replacement audit hooks', async () => {
+    const { controller, extraction, permissions, audit, gate, invoke } = setupController();
+    permissions.can.mockImplementation(async () => ({ allowed: true, reason: 'granted' }));
+    extraction.recordDecision.mockImplementation(async (input: unknown, _repository: unknown, options?: { beforeSupersede?: (existing: { id: string }) => Promise<void>; onWritten?: (written: { item: { id: string; kind: string }; superseded: null }) => Promise<void> }) => {
+      await options?.beforeSupersede?.({ id: 'prior-decision' });
+      await options?.onWritten?.({ item: { id: 'new-decision', kind: MemoryKind.DECISION }, superseded: null });
+      return { canonicalId: 'new-decision', memoryId: 'new-decision' };
+    });
+    const principal = makePrincipal('privileged-writer');
+    const decision = { projectId: 'p1', actorId: 'chosen-actor', topic: 'architecture', decision: 'approved' };
+
+    const result = await invoke(principal, () => controller.recordDecision(decision, principal));
+
+    expect(result).toEqual(JsonResponse.Ok({ canonicalId: 'new-decision', memoryId: 'new-decision' }));
+    expect(extraction.recordDecision).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'chosen-actor', ownerType: null }), expect.anything(), expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.decision.record', resourceId: 'new-decision' }));
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'memory.update', expect.objectContaining({ projectId: 'p1', resource: expect.anything() }));
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'memory.decision.record', variant: 'rest:memory.decisions.record', projectId: 'p1', input: { decision } });
   });
 
   it('recordDecision propagates a real service failure', async () => {
@@ -123,7 +187,7 @@ describe('MemoryController gated writes', () => {
   });
 
   it('extract filters decision items, persists facts and records its audit hook through the real service', async () => {
-    const { controller, extraction, repository, audit, invoke, item } = setupController();
+    const { controller, extraction, repository, audit, gate, invoke, item } = setupController();
     const fact = { projectId: 'p1', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'open', confidence: 0.9 };
     const decision = { projectId: 'p1', kind: MemoryKind.DECISION, subject: 'agent:victim', predicate: 'decision', object: 'forged', confidence: 1 };
     extraction.extractFromEvent.mockReturnValue([decision, fact]);
@@ -138,6 +202,9 @@ describe('MemoryController gated writes', () => {
     expect(result).toEqual(JsonResponse.Ok({ items: [fact] }));
     expect(repository.upsert).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.extract', resourceId: item.id }));
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.extract', variant: 'rest:memory.extract', projectId: 'p1', input: { event: { projectId: 'p1', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} } },
+    });
   });
 
   it('extract propagates ticket validation failures from the real service', async () => {
