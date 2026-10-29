@@ -34,6 +34,7 @@ import { AfterCommitService } from '../permissions/after-commit.service';
 import request from 'supertest';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
+import { CreateAgentDto } from './dto/create-agent.dto';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
@@ -228,7 +229,17 @@ describe('POST /api/agents (US-003)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [AgentsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        // US-006: POST /agents is gated now, so the double runs the module's real service — the HTTP
+        // assertions below keep testing the service, not a stub of it.
+        {
+          provide: ApprovalRouteGate,
+          useValue: {
+            run: vi.fn(async (call: { key: string; input: { agent: CreateAgentDto } }) => ({
+              status: 'executed' as const,
+              result: await testingModule.get(AgentsService).generateApiKey(call.input.agent),
+            })),
+          },
+        },
         AgentsService,
         AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },

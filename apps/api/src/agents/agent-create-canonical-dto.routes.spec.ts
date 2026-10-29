@@ -83,7 +83,17 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
     testingModule = await Test.createTestingModule({
       controllers: [AgentsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        // US-006: POST /agents is gated now, so the double runs the module's real service and the
+        // assertions below keep exercising the DTO/pipe contract against real behaviour.
+        {
+          provide: ApprovalRouteGate,
+          useValue: {
+            run: vi.fn(async (call: { key: string; input: { agent: CreateAgentDto } }) => ({
+              status: 'executed' as const,
+              result: await testingModule.get(AgentsService).generateApiKey(call.input.agent),
+            })),
+          },
+        },
         AgentsService,
         AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },

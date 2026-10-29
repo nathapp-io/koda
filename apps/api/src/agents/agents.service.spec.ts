@@ -643,6 +643,22 @@ describe('AgentsService', () => {
       });
       expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
     });
+    it('AC-14: rotation evicts only its own agent, after the scope callback returns', async () => {
+      mockAgentRepo.updateApiKeyHash.mockResolvedValue({ ...mockAgent, id: 'agent-rotate' });
+      await afterCommit.scope(async () => {
+        await service.generateApiKey('agent-rotate');
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag.mock.calls).toEqual([['AGENT:agent-rotate']]);
+    });
+    it('AC-14: creation evicts only the new agent, after the scope callback returns', async () => {
+      mockAgentRepo.create.mockResolvedValue(mockAgent);
+      await afterCommit.scope(async () => {
+        await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent' });
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag.mock.calls).toEqual([[`AGENT:${mockAgent.id}`]]);
+    });
     it('AC-13: capabilities update defers auth eviction until scope callback returns', async () => {
       mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
       await afterCommit.scope(async () => {
