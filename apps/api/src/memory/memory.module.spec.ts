@@ -3,6 +3,7 @@ import { MemoryModule } from './memory.module';
 import { MemoryReadController } from './memory-read.controller';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryWriteService } from './memory-write.service';
+import { MemoryRouteCommands } from './memory-route.commands';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
@@ -32,8 +33,9 @@ describe('MemoryModule (DI wiring)', () => {
       }).compile();
     });
 
-    it('AC-8 resolves MemoryWriteService', () => {
+    it('AC-8 resolves MemoryWriteService and MemoryRouteCommands', () => {
       expect(moduleRef.get(MemoryWriteService)).toBeInstanceOf(MemoryWriteService);
+      expect(moduleRef.get(MemoryRouteCommands)).toBeInstanceOf(MemoryRouteCommands);
     });
 
     it('registers MemoryReadController', () => {

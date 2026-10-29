@@ -1,4 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { MemoryRouteCommands } from './memory-route.commands';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectsModule } from '../projects/projects.module';
 import { ProjectAccessModule } from '../projects/project-access.module';
@@ -29,7 +32,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
   // in context.module.ts); attempts to make any single edge on this cycle plain while
   // keeping the others as forwardRef reproduce a circular-dependency failure, so this
   // forwardRef is left in place.
-  imports: [PrismaModule, forwardRef(() => ProjectsModule), ProjectAccessModule, OutboxModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, forwardRef(() => ProjectsModule), ProjectAccessModule, OutboxModule],
   controllers: [TimelineController, MemoryController, MemoryReadController],
   providers: [
     PrismaTimelineRepository,
@@ -43,6 +46,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     // tools). It reads the repository and the global PermissionService, so it adds no import edge.
     MemoryWriteGuard,
     MemoryWriteService,
+    MemoryRouteCommands,
     MemoryGovernanceService,
     MemoryGovernanceProcessor,
     ExtractionService,
