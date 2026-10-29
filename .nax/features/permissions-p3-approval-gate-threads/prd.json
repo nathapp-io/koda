@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-threads",
   "branchName": "feat/permissions-p3-approval-gate-threads",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T14:20:24.679Z",
+  "updatedAt": "2026-10-29T14:28:42.438Z",
   "userStories": [
     {
       "id": "US-001",
@@ -558,14 +558,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds one established global gate variant with home-project grant revocation and response mapping; access control triggers strict TDD."
+        "reasoning": "Adds one established global gate variant with home-project grant revocation and response mapping; access control triggers strict TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/workspace-thread-route.commands.ts",
@@ -591,7 +594,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "681860eb9db99b543b6ac8654894219a894891c2"
     },
     {
       "id": "US-009",
