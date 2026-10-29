@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-core",
   "branchName": "feat/permissions-p3-approval-gate-secret-core",
   "createdAt": "2026-11-09T09:00:00.000Z",
-  "updatedAt": "2026-10-29T16:59:55.663Z",
+  "updatedAt": "2026-10-29T17:04:29.541Z",
   "userStories": [
     {
       "id": "US-001",
@@ -119,14 +119,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Four existing source files need an early return, conditional deadline patches and a repository filter; no new execution primitive or caller wiring is needed, while access-control semantics still require strict isolated TDD."
+        "reasoning": "Four existing source files need an early return, conditional deadline patches and a repository filter; no new execution primitive or caller wiring is needed, while access-control semantics still require strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-execution.service.ts",
@@ -173,7 +176,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8f8f6b4776e071ce3ce14974bfa6225b52e87dc6"
     },
     {
       "id": "US-003",
