@@ -29,8 +29,20 @@ describe('approval HTTP boundary', () => {
       id: 'request', permissionKey: 'label.delete', projectId: 'p', actorType: 'AGENT', actorId: 'agent',
       onBehalfOfType: 'USER', onBehalfOfId: 'user', origin: 'rest', requiredMode: 'human', status: 'executed',
       satisfiedBy: 'human', approverType: 'USER', approverId: 'approver', expiresAt: date.toISOString(),
-      decidedAt: date.toISOString(), settledAt: date.toISOString(), createdAt: date.toISOString(),
+      decidedAt: date.toISOString(), settledAt: date.toISOString(), createdAt: date.toISOString(), redeem: false,
     });
+  });
+  it('AC-1: summary serializes redeem true', () => {
+    expect(ApprovalRequestSummaryDto.from({ ...record, redeem: true }).redeem).toBe(true);
+  });
+  it('AC-2: summary defaults an absent redeem flag to false', () => {
+    expect(ApprovalRequestSummaryDto.from(record).redeem).toBe(false);
+  });
+  it('AC-3: detail serializes redeem and the stored redacted input', () => {
+    const request = { ...record, redeem: true, input: { name: 'agent' } };
+    const detail = ApprovalRequestDto.from({ request, decisions: [] });
+    expect(detail.redeem).toBe(true);
+    expect(detail.input).toEqual({ name: 'agent' });
   });
   it('detail retains result and serializes decisions without internal requestId', () => {
     const decision = { id: 'decision', requestId: record.id, deciderType: 'USER' as const, deciderId: 'user', decision: 'reject' as const, comment: null, decidedAt: date, params: null };

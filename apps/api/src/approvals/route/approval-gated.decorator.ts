@@ -7,13 +7,14 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { ApiExtraModels, ApiResponse, getSchemaPath } from '@nestjs/swagger';
+import { ApiExtraModels, ApiHeader, ApiResponse, getSchemaPath } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalRequestSummaryDto } from '../dto/approval-request.dto';
 import { ApprovalPending } from './approval-pending';
 
 /** Metadata a contract test reads to tell a gated handler from an ungated one (US-010). */
 export const APPROVAL_GATED_METADATA = 'koda:approval-gated';
+export const APPROVAL_REDEEM_HEADER = 'x-koda-approval-request';
 
 /**
  * US-003: answers a thrown `ApprovalPending` with 202 and the request summary.
@@ -40,8 +41,13 @@ export class ApprovalPendingFilter implements ExceptionFilter<ApprovalPending> {
  * writing. Applied to the handler, so the filter runs before the global one, and documented here so
  * the operation's 202 shows up in the exported contract.
  */
-export function ApprovalGated(): MethodDecorator {
+export function ApprovalGated(options?: { redeem?: boolean }): MethodDecorator {
   return applyDecorators(
+    ...(options?.redeem ? [ApiHeader({
+      name: 'X-Koda-Approval-Request',
+      required: false,
+      description: 'Approval request id to redeem an approved request.',
+    })] : []),
     SetMetadata(APPROVAL_GATED_METADATA, true),
     UseFilters(ApprovalPendingFilter),
     ApiExtraModels(ApprovalRequestSummaryDto),
