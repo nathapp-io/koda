@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { currentContext } from '../../action-context/action-context';
+import { ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import { PermissionService, type PermissionScope } from '../../permissions/permission.service';
 import { ApprovalGate, type GateOutcome } from '../approval-gate.service';
 import { approvalOf, ApprovalExecutionService } from '../approval-execution.service';
@@ -75,13 +76,28 @@ export class ApprovalRouteGate {
         const { request, result } = await this.execution.redeem(redeem, { key, variant, projectId, input });
         return { status: 'executed', result: result as TResult, approval: approvalOf(request) };
       } catch (error) {
-        rethrowApprovalError(error);
+        rethrowApprovalError(unavailableActorAsAuth(error));
       }
     }
 
-    return this.gate.gate<TResult>(key, input, { projectId, variant });
+    try {
+      return await this.gate.gate<TResult>(key, input, { projectId, variant });
+    } catch (error) {
+      throw unavailableActorAsAuth(error);
+    }
   }
+}
 
+/**
+ * A caller that lost its principal between the guard and the command — disabled, deleted or paused
+ * while the request was in flight — is an authentication refusal, not a server fault. The command
+ * rebuilds the principal from the action context, so a write racing a disable can read the row after
+ * it changed; the guard answers the next request with 401 (`auth`), and this answers this one the same
+ * way instead of letting the bare `ActorUnavailableError` become a 500. The deferred path is
+ * untouched: there the engine settles its request `failed` with the error's name.
+ */
+function unavailableActorAsAuth(error: unknown): unknown {
+  return error instanceof ActorUnavailableError ? new AuthException({}, 'auth') : error;
 }
 
 /** A global write reads the principal's global keys; a project write, that project's keys. */

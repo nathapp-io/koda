@@ -19,6 +19,7 @@ import { approvalInputHash } from '../approval-input';
 import { ApprovalRedeemMismatchError } from '../domain/approval.errors';
 import type { ApprovalRequestRecord } from '../domain/approval.domain';
 import type { PermissionService } from '../../permissions/permission.service';
+import { ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import { ApprovalRouteGate, type RouteGateCall } from './approval-route-gate';
 
 const record: ApprovalRequestRecord = {
@@ -205,6 +206,34 @@ describe('ApprovalRouteGate', () => {
 
     expect(error).toBeInstanceOf(ForbiddenAppException);
     expect(h.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, 'global');
+  });
+
+  /**
+   * The command rebuilds its principal from the action context, so a request racing a disable (or a
+   * delete, or a pause) can read the row after it changed. That is the caller's session ending, which
+   * the guard answers with 401 `auth` — never the unmapped 500 a bare `ActorUnavailableError` becomes.
+   */
+  it('answers a caller whose principal disappeared with the guard\'s 401', async () => {
+    const h = harness(['role.manage']);
+    h.gate.gate.mockRejectedValue(new ActorUnavailableError({ type: 'USER', id: 'u1' }));
+
+    const error = await asActor(agent, () => h.routeGate.run(call())).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(AppException);
+    expect((error as AppException).prefix).toBe('auth');
+    expect((error as AppException).getStatus()).toBe(401);
+  });
+
+  it('answers a redemption whose requester disappeared with the same 401', async () => {
+    const h = harness(['agent.create']);
+    h.execution.redeem.mockRejectedValue(new ActorUnavailableError({ type: 'USER', id: 'u1' }));
+
+    const error = await asActor(redeemAgent, () => h.routeGate.run(redeemCall({ redeem: 'r1' })))
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(AppException);
+    expect((error as AppException).prefix).toBe('auth');
+    expect((error as AppException).getStatus()).toBe(401);
   });
 
   describe('US-004 — a call carrying a redeem header', () => {
