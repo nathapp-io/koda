@@ -22,6 +22,7 @@ import { MembershipService } from '../permissions/membership.service';
 import { PermissionService } from '../permissions/permission.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 describe('AgentsService create path (US-003)', () => {
   let testingModule: TestingModule;
@@ -108,6 +109,7 @@ describe('AgentsService create path (US-003)', () => {
     testingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
+        AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: agentRepo },
         { provide: AUTH_CFG, useValue: authConfig },

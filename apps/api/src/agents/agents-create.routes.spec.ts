@@ -30,6 +30,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService, PrismaTransactionManager, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import request from 'supertest';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -229,6 +230,7 @@ describe('POST /api/agents (US-003)', () => {
       providers: [
         { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         AgentsService,
+        AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         PrismaAgentRepository,
         { provide: PrismaService, useValue: prisma },

@@ -12,6 +12,7 @@ import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import request from 'supertest';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -138,6 +139,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       providers: [
         { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         AgentsService,
+        AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: agentRepo },
         {

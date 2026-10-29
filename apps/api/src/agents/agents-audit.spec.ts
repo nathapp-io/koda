@@ -6,6 +6,7 @@ import { AUTH_CFG } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { PermissionService } from '../permissions/permission.service';
 import { AuditRecorder, AuditEntriesOf } from '../audit/audit-recorder.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 const agent = { id: 'agent-id', slug: 'audit-agent', name: 'Agent', status: 'ACTIVE', apiKeyHash: 'hash', maxConcurrentTickets: 3, createdAt: new Date(), updatedAt: new Date(), capabilities: [] };
 
@@ -45,6 +46,7 @@ describe('AgentsService audit boundaries', () => {
     membership.removeAllBindings.mockReset().mockResolvedValue(undefined);
     module = await Test.createTestingModule({ providers: [
       AgentsService,
+      AfterCommitService,
       { provide: PrismaAgentRepository, useValue: repo },
       { provide: AUTH_CFG, useValue: { apiKeySecret: 'test-secret' } },
       { provide: TRANSACTION_MANAGER, useValue: { run: (fn: () => Promise<unknown>) => fn() } },
