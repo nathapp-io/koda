@@ -8,6 +8,7 @@ import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../
 import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
 import { AgentsService } from '../../../src/agents/agents.service';
+import { PrismaAgentRepository } from '../../../src/agents/prisma-agent.repository';
 import { lockProjectAgents } from '../../../src/common/utils/advisory-lock';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -105,28 +106,51 @@ describeIntegration('gated project-agent updates', () => {
       await tx.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: targetAgent.id, projectId: world.projectId } });
     });
     await lockHeld;
+    const repository = app.get(PrismaAgentRepository, { strict: false });
+    const realLock = repository.lockProjectAgents.bind(repository);
+    let updatePid: number | undefined;
+    const lockSpy = vi.spyOn(repository, 'lockProjectAgents').mockImplementationOnce(async (projectId) => {
+      // fixtureDb follows the ambient transaction client used by the repository.
+      // Capture identity before the real lock call, not from whichever waiter appears first.
+      const [backend] = await db.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      updatePid = backend.pid;
+      await realLock(projectId);
+    });
     let updateSettled = false;
     const update = service.updateRosteredAgent('web', targetAgent.slug, { status: 'PAUSED' }, world.projectId, targetAgent.id)
       .finally(() => { updateSettled = true; });
-    let waiterPid: number | undefined;
-    for (let attempt = 0; attempt < 50 && waiterPid === undefined; attempt += 1) {
-      const waiters = await db.$queryRaw<Array<{ pid: number }>>`SELECT activity.pid
-        FROM pg_locks AS lock
-        JOIN pg_stat_activity AS activity USING (pid)
-        WHERE lock.locktype = 'advisory'
-          AND lock.classid = 72402::oid
-          AND lock.objid = hashtext(${world.projectId})::oid
-          AND lock.granted = false
-          AND activity.wait_event_type = 'Lock'
-          AND activity.query LIKE '%pg_advisory_xact_lock%'`;
-      waiterPid = waiters[0]?.pid;
-      if (waiterPid === undefined) await new Promise((resolve) => setTimeout(resolve, 10));
+    // Attach the rejection assertion immediately to avoid an unhandled rejection during cleanup.
+    const updateRejected = expect(update).rejects.toMatchObject({ prefix: 'projectAgents' });
+    try {
+      let waiterPid: number | undefined;
+      for (let attempt = 0; attempt < 50 && waiterPid === undefined; attempt += 1) {
+        if (updatePid !== undefined) {
+          const waiters = await db.$queryRaw<Array<{ pid: number }>>`SELECT activity.pid
+            FROM pg_locks AS lock
+            JOIN pg_stat_activity AS activity USING (pid)
+            WHERE lock.pid = ${updatePid}
+              AND lock.locktype = 'advisory'
+              AND lock.classid = 72402::oid
+              AND lock.objid = hashtext(${world.projectId})::oid
+              AND lock.granted = false
+              AND activity.wait_event_type = 'Lock'
+              AND activity.query LIKE '%pg_advisory_xact_lock%'`;
+          waiterPid = waiters[0]?.pid;
+        }
+        if (waiterPid === undefined) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(updatePid).toEqual(expect.any(Number));
+      expect(waiterPid).toBe(updatePid);
+      expect(updateSettled).toBe(false);
+    } finally {
+      release();
+      try {
+        await removal;
+        await updateRejected;
+      } finally {
+        lockSpy.mockRestore();
+      }
     }
-    expect(waiterPid).toEqual(expect.any(Number));
-    expect(updateSettled).toBe(false);
-    release();
-    await removal;
-    await expect(update).rejects.toMatchObject({ prefix: 'projectAgents' });
     expect((await db.agent.findUniqueOrThrow({ where: { id: targetAgent.id } })).status).toBe('ACTIVE');
   });
 
