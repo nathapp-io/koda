@@ -110,7 +110,9 @@ describeIntegration('gated workspace thread session routes (US-007)', () => {
     const ask = pending(await request(server()).post(`/api/threads/${thread.id}/stop`).set(auth(agent.apiKey)), 'thread.stop');
     await db.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agent.id, projectId: world.projectId } });
     await app.get(PermissionCache).invalidate();
-    expect((await approve(ask.id)).status).toBe('failed');
+    expect(await approve(ask.id)).toMatchObject({
+      status: 'failed', result: { error: 'execution-failed', name: 'ForbiddenAppException' },
+    });
     expect(await db.fleetCommand.count({ where: { jobId: job.id, type: 'THREAD_STOP_TURN' } })).toBe(0);
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'thread.cap.update', 'thread.stop', 'thread.end-session', 'thread.answer'], world.projectId);
     await app.get(PermissionCache).invalidate();
