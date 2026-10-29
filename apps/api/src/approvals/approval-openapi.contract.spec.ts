@@ -81,6 +81,11 @@ const gatedOperations = [
   ['put', '/api/projects/{slug}/skills/{skillId}'],
   ['delete', '/api/projects/{slug}/skills/{skillId}'],
   ['post', '/api/code-intel/index'],
+  ['post', '/api/memory'],
+  ['post', '/api/memory/decisions'],
+  ['post', '/api/memory/extract'],
+  ['post', '/api/projects/{slug}/vcs/sync'],
+  ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
