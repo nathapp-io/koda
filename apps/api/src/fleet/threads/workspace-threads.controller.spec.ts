@@ -7,16 +7,50 @@ import { WorkspaceThreadsController } from './workspace-threads.controller';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { PermissionService } from '../../permissions/permission.service';
 import { validateCreateWorkspaceThread } from './thread-input';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 
 // Principal injection reads request.user, as CombinedAuthGuard does in production.
+describe('WorkspaceThreadsController gated stop', () => {
+  it('AC-8: pre-reads the owned thread and gates stop in its home project', async () => {
+    const thread = { id: 't1', projectId: 'p1' };
+    const service = { requireOwnedThread: vi.fn().mockResolvedValue(thread), stop: vi.fn() };
+    const routeGate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: {} }) };
+    const controller = new WorkspaceThreadsController(service as unknown as WorkspaceThreadsService, routeGate as unknown as ApprovalRouteGate);
+    const principal = { actorType: 'agent', id: 'a1' } as never;
+
+    await controller.stop('t1', principal);
+
+    expect(service.requireOwnedThread).toHaveBeenCalledWith('a1', 't1');
+    expect(routeGate.run).toHaveBeenCalledWith({ key: 'thread.stop', variant: 'rest:workspace-threads.stop', projectId: 'p1', input: { id: 't1' } });
+  });
+});
+describe('WorkspaceThreadsController gated message send', () => {
+  it('AC-6: preserves the 200 duplicate response and omits the deduplicated flag', async () => {
+    const message = { id: 'm1', content: 'hello' };
+    const response = { status: vi.fn() };
+    const routeGate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { message, jobId: null, deduplicated: true } }) };
+    const controller = new WorkspaceThreadsController({} as WorkspaceThreadsService, routeGate as unknown as ApprovalRouteGate);
+
+    const result = await controller.send('t1', { text: 'hello', clientMessageId: 'c1' }, { actorType: 'agent', id: 'a1' } as never, response);
+
+    expect(routeGate.run).toHaveBeenCalledWith({ key: 'thread.workspace.message.send', variant: 'rest:workspace-threads.message', projectId: null, input: { id: 't1', message: { text: 'hello', clientMessageId: 'c1' } } });
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(result).toEqual(expect.objectContaining({ data: { message, jobId: null } }));
+    expect(result).not.toEqual(expect.objectContaining({ data: expect.objectContaining({ deduplicated: true }) }));
+  });
+});
+
 describe('workspace POST body whitelist', () => {
   let app: NestFastifyApplication;
   let module: TestingModule;
+  let service: { create: ReturnType<typeof vi.fn> };
   beforeEach(async () => {
+    service = { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) };
     module = await Test.createTestingModule({
       controllers: [WorkspaceThreadsController],
       providers: [
-        { provide: WorkspaceThreadsService, useValue: { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) } },
+        { provide: WorkspaceThreadsService, useValue: service },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn(async (call: { input: { thread: unknown } }) => ({ status: 'executed', result: await service.create({ actorType: 'user', id: 'u', role: 'MEMBER' }, call.input.thread) })) } },
         // US-003: the routes carry `RequiresGuard`, which reads the global PermissionService.
         { provide: PermissionService, useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } },
       ],

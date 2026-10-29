@@ -1,5 +1,5 @@
 /** Routes whose approval gates are assigned to a later permissions rollout feature. */
-export type PendingGateFeature = 'gate-secret' | 'gate-fleet';
+export type PendingGateFeature = 'gate-secret';
 
 /** Explicitly identified secret-bearing routes remain outside the high-risk rollout. */
 export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
@@ -17,39 +17,21 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
-PATCH /threads/:id=gate-fleet
 POST /admin/users=gate-secret
 POST /agents=gate-secret
 POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/threads=gate-fleet
-POST /projects/:slug/threads/:id/answer=gate-fleet
-POST /projects/:slug/threads/:id/archive=gate-fleet
-POST /projects/:slug/threads/:id/discard=gate-fleet
-POST /projects/:slug/threads/:id/end-session=gate-fleet
-POST /projects/:slug/threads/:id/messages=gate-fleet
-POST /projects/:slug/threads/:id/plan=gate-fleet
-POST /projects/:slug/threads/:id/publish=gate-fleet
-POST /projects/:slug/threads/:id/run=gate-fleet
-POST /projects/:slug/threads/:id/stop=gate-fleet
 POST /projects/:slug/vcs=gate-secret
 POST /projects/:slug/vcs/webhook-secret/rotate=gate-secret
 POST /projects/:slug/webhooks=gate-secret
-POST /threads=gate-fleet
-POST /threads/:id/answer=gate-fleet
-POST /threads/:id/archive=gate-fleet
-POST /threads/:id/end-session=gate-fleet
-POST /threads/:id/messages=gate-fleet
-POST /threads/:id/stop=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {
-  return value === 'gate-secret' || value === 'gate-fleet';
+  return value === 'gate-secret';
 }
 
 export const PENDING_GATE_ROUTES: ReadonlyMap<string, PendingGateFeature> = new Map(

@@ -4,6 +4,7 @@ import { WorkspaceThreadsService } from './workspace-threads.service';
 import type { PermissionService } from '../../permissions/permission.service';
 import type { PermissionDecision } from '../../permissions/permissions.types';
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 
 const allow = (): PermissionDecision => ({ allowed: true, reason: 'granted' });
 const deny = (): PermissionDecision => ({ allowed: false, reason: 'not-granted' });
@@ -16,7 +17,7 @@ describe('workspace turn boundaries', () => {
     const cancel = vi.fn(async () => undefined);
     const service = new WorkspaceThreadsService(repository as never, {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'home' }]) } as never,
-      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never, { can } as unknown as PermissionService, { cancel } as never);
+      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never, { can } as unknown as PermissionService, { cancel } as never, new AfterCommitService());
     return { service, repository, can, cancel };
   }
   /** US-003: hosting is the `thread.create` key of the thread's home project, and its refusal is `permissions`. */
@@ -60,7 +61,7 @@ describe('workspace turn boundaries', () => {
       {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
       { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never,
-      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never,
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(),
     );
     const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@test.com' };
     await service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'cm' });
@@ -74,7 +75,7 @@ describe('workspace turn boundaries', () => {
       {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
       { resolveMembership: vi.fn(async () => null) } as never,
-      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never,
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never, new AfterCommitService(),
     );
     const agent: AgentPrincipal = { actorType: 'agent', id: 'ag', slug: 'ag', status: 'ACTIVE', agentRoles: [], capabilities: [] };
     await service.sendMessage(agent, 't', { text: 'hi', clientMessageId: 'cm' });

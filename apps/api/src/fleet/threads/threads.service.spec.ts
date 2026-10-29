@@ -1,3 +1,7 @@
+import { Logger } from '@nestjs/common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
+import { AfterCommitService } from '../../permissions/after-commit.service';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { ConfigType } from '@nestjs/config';
 import { fleetConfig } from '../../config/fleet.config';
 import { SkillsService } from '../../skills/skills.service';
@@ -22,6 +26,30 @@ const record: ChatThreadRecord = {
   activeJob: null, writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
 };
 
+describe('ThreadsService.prepareSendMessage', () => {
+  function build() {
+    const threads = { get: vi.fn().mockResolvedValue(record), sendMessage: vi.fn().mockResolvedValue({ message: { id: 'm1' }, jobId: 'j1', deduplicated: false }) };
+    const brief = briefStub('ctx');
+    const service = new ThreadsService(threads as unknown as ChatThreadRepository, {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>, {} as FleetJobsService, brief, new AfterCommitService());
+    return { service, threads, brief };
+  }
+  it('message AC-7: rejects invalid text before reading repository context', async () => {
+    const { service, brief } = build();
+    await expect(service.prepareSendMessage('p1', 't1', 'u1', { text: '', clientMessageId: 'c1' }, true)).rejects.toBeInstanceOf(ValidationAppException);
+    await expect(service.prepareSendMessage('p1', 't1', 'u1', { text: '', clientMessageId: 'c1' }, true)).rejects.toMatchObject({ response: { prefix: 'threads.input' } });
+    expect(brief.resolveRepoContext).not.toHaveBeenCalled();
+  });
+  it('message AC-8: resolves context once before returning the repository mutation', async () => {
+    const { service, threads, brief } = build();
+    const mutate = await service.prepareSendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' }, true);
+    expect(brief.resolveRepoContext).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(threads.sendMessage).not.toHaveBeenCalled();
+    await mutate();
+    expect(threads.sendMessage).toHaveBeenCalledExactlyOnceWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: 'ctx', canOperate: true });
+    expect(brief.resolveRepoContext).toHaveBeenCalledOnce();
+  });
+});
+
 describe('ThreadsService.list', () => {
   it('US-001 AC10: answers { items, threadsEnabled } with threadsEnabled read from the config at each call', async () => {
     const threads = { list: vi.fn().mockResolvedValue([record]) } as unknown as ChatThreadRepository;
@@ -33,6 +61,7 @@ describe('ThreadsService.list', () => {
       config,
       {} as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     const open = await service.list('p1', undefined, 0, 20);
@@ -63,6 +92,7 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     const thread = await service.get('p1', 't1');
@@ -90,6 +120,7 @@ describe('ThreadsService.get pending actions (S5b US-004)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     const thread = await service.get('p1', 't1');
@@ -110,6 +141,7 @@ describe('ThreadsService.plan (US-006)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     await service.plan('p1', 't1', 'u1', {});
@@ -123,7 +155,7 @@ describe('ThreadsService.plan (US-006)', () => {
     const dispatch = vi.fn();
     const threads = { get: vi.fn().mockResolvedValue({ ...record, specPublished: true, runnerId: null }) } as unknown as ChatThreadRepository;
     const service = new ThreadsService(threads, {} as unknown as IFleetRepoRepository, {} as unknown as SkillsService,
-      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService, briefStub());
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService, briefStub(), new AfterCommitService());
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.runnerMissing' });
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -138,6 +170,7 @@ describe('ThreadsService.plan (US-006)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPublished', httpStatus: 409 });
     expect(dispatch).not.toHaveBeenCalled();
@@ -153,6 +186,7 @@ describe('ThreadsService.run (US-007)', () => {
     { threadsEnabled: enabled } as unknown as ConfigType<typeof fleetConfig>,
     { dispatch } as unknown as FleetJobsService,
     briefStub(),
+    new AfterCommitService(),
   );
 
   it('AC-1: dispatches a RUN on the feature branch pinned to the thread runner, with the default cap and thread id', async () => {
@@ -268,6 +302,7 @@ describe('ThreadsService.create (US-003)', () => {
       { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
     return { service, create, findAnchor, findById, snapshotForProject };
   };
@@ -325,6 +360,7 @@ describe('ThreadsService.discard (US-004)', () => {
     { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
     {} as unknown as FleetJobsService,
     briefStub(),
+    new AfterCommitService(),
   );
 
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
@@ -377,6 +413,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       { resolveRepoContext } as unknown as ProjectBriefService,
+      new AfterCommitService(),
     );
     return { service, order, resolveRepoContext, findAnchor, sendMessage, get };
   };
@@ -451,6 +488,7 @@ describe('ThreadsService canOperate (US-002)', () => {
     { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
     { dispatch: vi.fn() } as unknown as FleetJobsService,
     briefStub(),
+    new AfterCommitService(),
   );
 
   it('forwards canOperate to updateCap, stop, endSession, answer, publish and sendMessage', async () => {
@@ -508,6 +546,7 @@ describe('ThreadsService canOperate (US-002)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     await service.plan('p1', 't1', 'u1', {}, true);
@@ -524,9 +563,67 @@ describe('ThreadsService canOperate (US-002)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
+      new AfterCommitService(),
     );
 
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'permissions' });
     expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('ThreadsService archive after commit', () => {
+  function build(jobId: string | null = 'j1') {
+    const afterCommit = new AfterCommitService();
+    const archive = vi.fn().mockResolvedValue(jobId);
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const service = new ThreadsService({ archive } as unknown as ChatThreadRepository,
+      {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>,
+      { cancel } as unknown as FleetJobsService, briefStub(), afterCommit);
+    return { afterCommit, archive, cancel, service };
+  }
+
+  it('AC-11: defers cancellation until the scope returns, but cancels immediately without a scope', async () => {
+    const { afterCommit, archive, cancel, service } = build();
+    await afterCommit.scope(async () => {
+      await service.archive('p1', 't1', 'u1', true);
+      expect(cancel).not.toHaveBeenCalled();
+    });
+    expect(archive).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', true);
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('u1', 'p1', 'j1', true);
+    cancel.mockClear();
+    await service.archive('p1', 't1', 'u1', true);
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('u1', 'p1', 'j1', true);
+  });
+
+  it('AC-14: logs deferred non-conflict failures without rejecting; immediate failures propagate', async () => {
+    const { afterCommit, cancel, service } = build();
+    const error = new Error('cancel failed');
+    cancel.mockRejectedValue(error);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    warn.mockClear();
+    try {
+      await expect(afterCommit.scope(() => service.archive('p1', 't1', 'u1', true))).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledExactlyOnceWith('archive cancel of job j1 failed: Error: cancel failed');
+      await expect(service.archive('p1', 't1', 'u1', true)).rejects.toBe(error);
+    } finally { warn.mockRestore(); }
+  });
+
+  it('drops cancellation on rollback and skips threads without a live job', async () => {
+    const { afterCommit, cancel, service } = build();
+    await expect(afterCommit.scope(async () => {
+      await service.archive('p1', 't1', 'u1', true);
+      throw new Error('rollback');
+    })).rejects.toThrow('rollback');
+    expect(cancel).not.toHaveBeenCalled();
+    const idle = build(null);
+    await idle.service.archive('p1', 't1', 'u1', true);
+    expect(idle.cancel).not.toHaveBeenCalled();
+  });
+
+  it('ignores a conflict on either cancellation path', async () => {
+    const { afterCommit, cancel, service } = build();
+    cancel.mockRejectedValue(new ConflictAppException({}, 'threads.archived'));
+    await expect(service.archive('p1', 't1', 'u1', true)).resolves.toBeUndefined();
+    await expect(afterCommit.scope(() => service.archive('p1', 't1', 'u1', true))).resolves.toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ConfigType } from '@nestjs/config';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -17,6 +18,8 @@ import { FleetJobsService } from '../jobs/fleet-jobs.service';
 
 @Injectable()
 export class ThreadsService {
+  private readonly logger = new Logger(ThreadsService.name);
+
   constructor(
     @Inject(CHAT_THREAD_REPOSITORY) private readonly threads: ChatThreadRepository,
     @Inject(FLEET_REPO_REPOSITORY) private readonly repos: IFleetRepoRepository,
@@ -24,6 +27,7 @@ export class ThreadsService {
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly fleetJobs: FleetJobsService,
     private readonly projectBrief: ProjectBriefService,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
@@ -88,11 +92,16 @@ export class ThreadsService {
   async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {
     const jobId = await this.threads.archive({ kind: 'project', projectId }, threadId, userId, canArchive);
     if (!jobId) return;
-    try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
-    catch (error) {
-      if (!(error instanceof ConflictAppException)) throw error;
-      // The terminal transition may win after archive commits.
-    }
+    const cancel = async () => {
+      try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
+      catch (error) {
+        // The terminal transition may win after archive commits.
+        if (!(error instanceof ConflictAppException)) throw error;
+      }
+    };
+    // The archive is committed when deferred tasks run: cancellation cannot fail that commit.
+    const deferred = () => cancel().catch((error: unknown) => this.logger.warn(`archive cancel of job ${jobId} failed: ${String(error)}`));
+    if (!this.afterCommit.defer(deferred)) await cancel();
   }
 
   async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto, canOperate = false): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
@@ -143,6 +152,11 @@ export class ThreadsService {
   }
 
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto, canOperate = false): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+    return (await this.prepareSendMessage(projectId, threadId, userId, input, canOperate))();
+  }
+
+  /** Resolve external context before the deferred execution transaction; the repository rechecks under its lock. */
+  async prepareSendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto, canOperate = false): Promise<() => Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>> {
     if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
         typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
       throw new ValidationAppException({ reason: 'message' }, 'threads.input');
@@ -151,7 +165,7 @@ export class ThreadsService {
     // run inside it. A missing thread skips the resolution entirely: the repository answers its own not-found.
     const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     const repoContext = thread ? await this.projectBrief.resolveRepoContext(await this.repoIdForThread(projectId, thread)) : undefined;
-    return this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate });
+    return () => this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate });
   }
 
   /**

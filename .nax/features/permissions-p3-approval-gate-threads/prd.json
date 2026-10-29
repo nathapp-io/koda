@@ -1,0 +1,695 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-gate-threads",
+  "branchName": "feat/permissions-p3-approval-gate-threads",
+  "createdAt": "2026-10-29T00:00:00.000Z",
+  "updatedAt": "2026-10-29T14:47:51.325Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Gated project thread create, cap update and archive, and the archive cancel after commit",
+      "description": "**Goal** — Gate the three project thread writes and make archive cancellation safe after deferred execution commits.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — The following design instructions apply verbatim:\n- **Request checks the handler makes today stay before the gate**, so they answer as today and open no request. The thread handlers make none today except `canOperate` (below); every check runs in the service, so it runs inside the command, at once or after approval, and a failing check settles the request `failed`. This is 5a's rule.\n- **`canOperate` is the requester's at execution.** The project handlers compute `canOperate` today with a private helper (`permissions.can(principal, <key>, { projectId })`). Each command computes it again when it runs, as 5d-1's schedule commands compute `canAdminister`. The helper and the controller's `PermissionService` leave `ThreadsController`, which gains `ApprovalRouteGate`. (Their final removal belongs to US-005; retain them for remaining ungated handlers now.)\n- **The archive answers the archived thread from the command.** The project and workspace archive handlers answer `threads.get(…)` after the archive today. The archive commands run the archive and then the read, and answer the read, so a deferred archive stores the thread detail as its result.\n- **The archive cancel is deferred.** `ThreadsService.archive` and `WorkspaceThreadsService.archive` hand their `fleetJobs.cancel(…)` (with its `ConflictAppException` catch) to `AfterCommitService.defer(task)`, and run it at once when `defer` answers false. Both services gain `AfterCommitService` (last constructor parameter) and a `private readonly logger = new Logger(<the class>.name)` field. `AfterCommitService` is global (`PermissionsModule`). `AfterCommitService.scope` runs its tasks with no catch, and a throw there escapes the execution's commit, so the deferred task catches and logs every failure (Design snippet); the immediate path keeps today's behaviour (a non-conflict failure propagates). The commands do not use `routeCommand`'s `afterCommit` hook, because the cancel belongs to the service and must also run on the immediate path. (Implement the project service in this story; workspace follows in US-006.)\n- **A deferred create that loses the unique feature race fails the request.** `ThreadsService.create` catches the `repo_feature` unique violation and throws 409 `threads.featureTaken`. Inside the execution transaction the violation aborts the transaction, and the request settles `failed`. 5d-1's deferred dispatch behaves the same way.\n- **The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n- **Each gating story removes its own `PENDING_GATE_ROUTES` rows.** US-001 relaxes the exact gated-route count to a lower bound (at least 97), and the allowlist count case to the `gate-secret` count. US-009 restores both exactly and removes the `gate-fleet` label.\n- **Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points, not the supporting service and commands changes explicitly assigned here; assistant/MCP primary commands and SSE routes remain unchanged.\n\n**Interface** — Create `ThreadRouteCommands`, `THREAD_ROUTE_VARIANTS` in `fleet/threads/thread-route.commands.ts`. Each row is one `routeCommand`; principal is rebuilt by ActorPrincipalLoader.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/threads | thread.create | project | rest:threads.create | { slug, projectId, thread: parseBody(CreateThreadDto, …) } | threads.create(projectId, principal.id, thread) |\n| PATCH /projects/:slug/threads/:id | thread.cap.update | project | rest:threads.update | { slug, projectId, id, patch: parseBody(UpdateThreadDto, …) } | threads.updateCap(projectId, id, principal.id, patch.maxCostUsd, <canOperate>) |\n| POST /projects/:slug/threads/:id/archive | thread.archive | project | rest:threads.archive | { slug, projectId, id } | threads.archive(projectId, id, principal.id, <canOperate>), then threads.get(projectId, id) |\n`<canOperate>` = `(await permissions.can(principal, <the row's key>, { projectId })).allowed` at execution. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`).\n\n```ts\nconst outcome = await this.routeGate.run<ChatThreadRecord>({ key: 'thread.cap.update', variant: THREAD_ROUTE_VARIANTS.update, projectId: ctx.project.id, input: { slug: ctx.project.slug, projectId: ctx.project.id, id, patch: dto } });\nif (outcome.status === 'pending') throw new ApprovalPending(outcome.request);\nreturn JsonResponse.Ok(outcome.result);\n```\nThe deferred archive cancel:\n```ts\nconst cancel = async () => {\n  try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }\n  catch (error) { if (!(error instanceof ConflictAppException)) throw error; }\n};\n// After commit the archive is done: a failed cancel is logged, never thrown out of the commit.\nconst deferred = () => cancel().catch((error: unknown) => this.logger.warn(`archive cancel of job ${jobId} failed: ${String(error)}`));\nif (!this.afterCommit.defer(deferred)) await cancel();\n```\nA create body is `{ kind: 'REPO', repoId: world.repoId, feature: <unique>, title: <unique>, backend: { kind: 'native', model: 'm1' } }`. ThreadsModule imports ApprovalEngineModule and AuthRepositoryModule and provides ThreadRouteCommands; commands constructor takes ApprovalCommandRegistry, ThreadsService, PermissionService and ActorPrincipalLoader as ScheduleRouteCommands does. ThreadsController gains ApprovalRouteGate last, becoming (threads, permissions, routeGate). Each gated handler gains @ApprovalGated() and keeps @Requires, @HttpCode and @ApiResponses. ThreadsService gains AfterCommitService last; update every direct service construction with new AfterCommitService() as seventh argument. Extend the DB-free module spec to resolve ThreadRouteCommands, update constructor metadata and controller gate mapping cases, and move service invocation assertions into the commands spec. Temporarily assert only the 11 gate-secret rows, remove the old project-create gate-fleet assertion, and use at least 97 gated routes.\n\n**Scope** — In: the three routes, project archive deferral, commands/DI/controller/service tests and their three allowlist removals. Out: remaining project routes (US-002–US-005), workspace archive deferral (US-006), and final 115/OpenAPI closure (US-009).\n- Retrying an archive cancel that failed after commit; the deferred task logs it (Design).\n- Running a service's domain checks before a request opens, beyond the workspace pre-read in Design.\n- Changing any catalog default: these keys stay `none`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] When the keyed agent holding thread.create, thread.cap.update and thread.archive in P posts a unique create body to /api/projects/web/threads under a thread.create wait policy, then the response is 202 with data matching { permissionKey: 'thread.create', projectId: <P's id> }, and no ChatThread with that feature exists.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request through POST /api/approvals/:id/decisions { decision: 'approve' }, then exactly one ChatThread with that feature exists with createdById equal to the agent's id.",
+        "AC-3 [integration] When the keyed agent patches a thread of dev with { maxCostUsd: 7 } under a thread.cap.update wait policy, then the route answers 202 and approving that request leaves maxCostUsd 7.",
+        "AC-4 [integration] When root approves the pending { maxCostUsd: 7 } patch of a thread of dev from an agent holding only thread.cap.update.own and project.read in P, then the request settles failed and the thread keeps its maxCostUsd.",
+        "AC-5 [integration] When the keyed agent posts /api/projects/web/threads/:id/archive for a thread of dev under a wait policy, then the route answers 202 and approving the request leaves the thread ARCHIVED and request.result.status ARCHIVED.",
+        "AC-6 [integration] When root approves the keyed agent's pending archive of a thread of dev with a live job, then the committed archive is followed by that job's cancelRequestedAt being set and exactly one CANCEL FleetCommand for it.",
+        "AC-7 [integration] When dev creates a unique thread under a wait policy and the keyed agent creates another with no policy seeded, then each answers 201 and writes no ApprovalRequest row.",
+        "AC-8 [integration] When an agent holding only project.read in P posts /api/projects/web/threads, then it answers 403 with key permissions and writes no ApprovalRequest row.",
+        "AC-9 [unit] When ThreadRouteCommands.onModuleInit runs, then the registry answers thread.create for rest:threads.create, thread.cap.update for rest:threads.update and thread.archive for rest:threads.archive.",
+        "AC-10 [unit] When rest:threads.update runs as principal a1 with permissions.can denying thread.cap.update in p1 for input { slug: 'web', projectId: 'p1', id: 't1', patch: { maxCostUsd: 7 } }, then it calls threads.updateCap('p1', 't1', 'a1', 7, false).",
+        "AC-11 [unit] When ThreadsService.archive('p1', 't1', 'u1', true) receives job j1 from the repository, then inside AfterCommitService.scope it calls fleetJobs.cancel('u1', 'p1', 'j1', true) only after the scope callback returns, while outside any scope it calls cancel before archive answers.",
+        "AC-12 [unit] When ThreadsController.update('t1', { maxCostUsd: 7 }, <ctx of P>, principal) runs, then routeGate.run receives { key: 'thread.cap.update', variant: 'rest:threads.update', projectId: <P's id>, input: { slug: 'web', projectId: <P's id>, id: 't1', patch: { maxCostUsd: 7 } } } and the handler answers the executed result.",
+        "AC-13 [integration] When root approves the keyed agent's pending create after a ChatThread with the same repository and feature was inserted while it waited, then the request settles failed and exactly one ChatThread has that feature.",
+        "AC-14 [unit] When fleetJobs.cancel rejects a non-conflict error during ThreadsService.archive('p1', 't1', 'u1', true), then inside AfterCommitService.scope archive resolves without throwing and logger.warn is called once, while outside any scope the same rejection propagates."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces REST commands and DI wiring plus transaction-sensitive archive effects; access control requires strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/schedules/schedule-route.commands.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/test/integration/fleet/permissions-project-threads.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-project-thread-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/threads, PATCH /projects/:slug/threads/:id and POST /projects/:slug/threads/:id/archive"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the \"AC-3: keeps exactly 18 fleet and 11 secret rollout assignments\" case asserts only the gate-secret count (11), until US-009; the \"AC-12: assigns project thread creation to gate-fleet\" case is deleted (its row leaves in US-001)"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the \"collects exactly 97 gated routes\" case becomes \"at least 97\" (its title follows); US-009 restores an exact count"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides ThreadRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.module.spec.ts",
+          "reason": "also resolves ThreadRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.keys.spec.ts",
+          "reason": "the constructor-dependency case expects `['ThreadsService', 'PermissionService', 'ApprovalRouteGate']`; its title no longer calls PermissionService the authorization dependency"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate (last); create, update and archive gated; the private canOperate helper stays until US-005 removes its last use"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.ts",
+          "reason": "constructor gains AfterCommitService (last); archive defers its cancel when a scope is open"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "every construction (lines 29, 59, 86, 106, 125, 134, 149, 264, 321, 373, 440, 504 and 520) passes `new AfterCommitService()` as the 7th argument; existing assertions still hold (no scope is open there); the deferred-cancel cases"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7aaf9d20cc69e97649743c1a35aff5328a50efbe"
+    },
+    {
+      "id": "US-002",
+      "title": "Gated project thread plan and run",
+      "description": "**Goal** — Extend ThreadRouteCommands to gate plan and run under their thread-specific keys.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **`canOperate` is the requester's at execution.** The project handlers compute `canOperate` today with a private helper (`permissions.can(principal, <key>, { projectId })`). Each command computes it again when it runs, as 5d-1's schedule commands compute `canAdminister`.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points; the route-command registration and tests assigned here are also in scope, while non-HTTP primary commands and SSE routes are unchanged.\nBinding ruling: `POST /projects/:slug/threads/:id/plan` and `/run` gate under `thread.plan` and `thread.run` only. Both routes also require `fleet.job.dispatch`, but a policy naming `fleet.job.dispatch` does not make them wait (Out of Scope), as 5c-1's edge keys.\nBinding ruling: a deferred send, plan, run or discard places its job inside the execution transaction, as 5d-1's deferred dispatch does.\n\n**Interface** — Extend existing ThreadRouteCommands and THREAD_ROUTE_VARIANTS with plan/run, and extend its existing commands spec.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/threads/:id/plan | thread.plan | project | rest:threads.plan | { slug, projectId, id, plan: parseBody(PlanThreadDto, …) } | threads.plan(projectId, id, principal.id, plan, <canOperate>) |\n| POST /projects/:slug/threads/:id/run | thread.run | project | rest:threads.run | { slug, projectId, id, run: parseBody(RunThreadDto, …) } | threads.run(projectId, id, principal.id, run, <canOperate>) |\n`<canOperate>` = `(await permissions.can(principal, <the row's key>, { projectId })).allowed` at execution; principal is the rebuilt UserPrincipal | AgentPrincipal. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Each gated handler gains @ApprovalGated(), keeps @Requires (including fleet.job.dispatch), @HttpCode and @ApiResponses, throws new ApprovalPending(outcome.request) on pending, and forwards executed results. Domain checks stay inside the service so stale specPublished fails execution with 409 threads.notPublished. Remove only plan/run from PENDING_GATE_ROUTES. A plannable thread is a thread of the agent with specPublished true and runnerId an online runner. A completed plan is a FleetJob with command PLAN, the thread's threadId, repoId and feature, planFrom the thread's specPath and state COMPLETED, following permissions-project-threads.integration.spec.ts.\n\n**Scope** — In: plan/run gate commands, handlers, registration/run cases and isolated HTTP integration tests. Out: session operations (US-003), publish/discard (US-004), message preparation (US-005), and final contracts (US-009).\n- A policy naming `fleet.job.dispatch` on `POST /projects/:slug/threads/:id/plan` and `/run`: they gate under `thread.plan` and `thread.run` only (ruling 2026-10-29).\n- A transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does).",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding project.read, thread.plan, thread.run and fleet.job.dispatch in P and its plannable thread with specPublished true and an online runner, when it posts {} to /api/projects/web/threads/:id/plan under a thread.plan wait policy, then it answers 202 with data matching { permissionKey: 'thread.plan', projectId: <P's id> } and no PLAN FleetJob exists for the thread.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then exactly one PLAN FleetJob exists for the thread with requestedById equal to the agent's id and request.result.job.id equal to its id.",
+        "AC-3 [integration] When root approves the agent's pending plan after specPublished was set false while it waited, then the request settles failed and no PLAN job exists for the thread.",
+        "AC-4 [integration] Given a plannable thread whose latest PLAN job is COMPLETED, when the agent posts {} to /api/projects/web/threads/:id/run under a thread.run wait policy, then it answers 202 with data.permissionKey thread.run.",
+        "AC-5 [integration] When root approves a newly opened equivalent of AC-4's request, then one RUN FleetJob exists for the thread.",
+        "AC-6 [integration] When the agent posts plan on a plannable thread with a wait policy for fleet.job.dispatch only, then it answers 201 and writes no ApprovalRequest row.",
+        "AC-7 [unit] When ThreadRouteCommands.onModuleInit runs, then the registry answers thread.plan for rest:threads.plan and thread.run for rest:threads.run.",
+        "AC-8 [unit] When rest:threads.run runs as principal a1 whose can('thread.run') is allowed with input { slug: 'web', projectId: 'p1', id: 't1', run: { maxCostUsd: 3 } }, then it calls threads.run('p1', 't1', 'a1', { maxCostUsd: 3 }, true)."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends established commands for two dispatching routes; permission-key and own-row decisions require security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.spec.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-thread-handoff-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/threads/:id/plan and POST /projects/:slug/threads/:id/run"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.ts",
+          "reason": "plan and run gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "106b2d053dc26362c8e9a025b591b944e025ce80"
+    },
+    {
+      "id": "US-003",
+      "title": "Gated project thread stop, end-session and answer",
+      "description": "**Goal** — Route project live-session controls through registered approval commands while preserving execution-time session fences.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **`canOperate` is the requester's at execution.** The project handlers compute `canOperate` today with a private helper (`permissions.can(principal, <key>, { projectId })`). Each command computes it again when it runs, as 5d-1's schedule commands compute `canAdminister`.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points; supporting route-command changes and tests are in scope, while non-HTTP primary commands and SSE routes remain unchanged.\n\n**Interface** — Extend ThreadRouteCommands/THREAD_ROUTE_VARIANTS and their existing spec.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/threads/:id/stop | thread.stop | project | rest:threads.stop | { slug, projectId, id } | threads.stop(projectId, id, principal.id, <canOperate>), answering {} |\n| POST /projects/:slug/threads/:id/end-session | thread.end-session | project | rest:threads.end-session | { slug, projectId, id } | threads.endSession(projectId, id, principal.id, <canOperate>), answering {} |\n| POST /projects/:slug/threads/:id/answer | thread.answer | project | rest:threads.answer | { slug, projectId, id, answer: parseBody(AnswerQuestionDto, …) } | threads.answer(projectId, id, principal.id, answer, <canOperate>), answering {} |\n`<canOperate>` = `(await permissions.can(principal, <the row's key>, { projectId })).allowed` at execution; principal is rebuilt by ActorPrincipalLoader. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Each handler gains @ApprovalGated(), keeps @Requires, @HttpCode and @ApiResponses, and throws ApprovalPending for pending. Service/repository checks remain inside the command. A stopped/completed/missing live session after approval fails rather than enqueuing a command. Answers retain pending-question and assertOwnLiveSession checks. Remove these three allowlist rows.\nUse agent-owned thread and RUNNING THREAD/SESSION fixtures with requestedById the agent and requestedByType AGENT; answer fixtures also have pendingQuestion { requestId: 'q1' }.\n\n**Scope** — In: three project session routes and their command/handler/integration cases. Out: project publish/discard (US-004), sends (US-005), workspace session controls (US-007), and final contract changes (US-009).\n- Running a service's domain checks before a request opens, beyond the workspace pre-read in Design.\n- Bounding the size of a frozen input: a message or answer text (up to 32 KiB) is stored whole in `ApprovalRequest.input` when a request waits.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding project.read, thread.stop, thread.end-session and thread.answer in P and its own thread/live SESSION job requested by that agent, when it posts /api/projects/web/threads/:id/stop under a wait policy, then it answers 202 with data matching { permissionKey: 'thread.stop', projectId: <P's id> } and no THREAD_STOP_TURN FleetCommand exists for that job.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then one THREAD_STOP_TURN FleetCommand exists for the live job and request.result is {}.",
+        "AC-3 [integration] When root approves the agent's pending POST /api/projects/web/threads/:id/end-session, then one THREAD_CLOSE FleetCommand exists for its live job.",
+        "AC-4 [integration] Given pendingQuestion { requestId: 'q1' }, when root approves the agent's pending POST /api/projects/web/threads/:id/answer { requestId: 'q1', text: 'yes' }, then one THREAD_ANSWER FleetCommand exists for the live job whose payload carries requestId q1.",
+        "AC-5 [integration] When root approves the agent's pending stop after the live job was set COMPLETED while it waited, then the request settles failed.",
+        "AC-6 [integration] When root posts stop under a wait policy, then it answers 200 with data {} and writes no ApprovalRequest row.",
+        "AC-7 [unit] When ThreadRouteCommands.onModuleInit runs, then the registry answers thread.stop for rest:threads.stop, thread.end-session for rest:threads.end-session and thread.answer for rest:threads.answer.",
+        "AC-8 [unit] When rest:threads.answer runs as principal a1 whose can('thread.answer') is denied, then it calls threads.answer('p1', 't1', 'a1', { requestId: 'q1', text: 'yes' }, false) and answers {}."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard command extension for three session operations with requester/ownership access control; security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.spec.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-thread-session-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/threads/:id/stop, …/end-session and …/answer"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.ts",
+          "reason": "stop, end-session and answer gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2ee389e4707ffdd94a403d45459e2cc119ffb00b"
+    },
+    {
+      "id": "US-004",
+      "title": "Gated project thread publish and discard",
+      "description": "**Goal** — Gate publish/discard while retaining repository state validation on both immediate and approved execution.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **`canOperate` is the requester's at execution.** The project handlers compute `canOperate` today with a private helper (`permissions.can(principal, <key>, { projectId })`). Each command computes it again when it runs, as 5d-1's schedule commands compute `canAdminister`.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points; the supporting route commands and tests are also in scope, while non-HTTP primary commands and SSE routes remain unchanged.\nA transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does). This remains out of scope; retain placement inside the deferred execution transaction.\n\n**Interface** — Extend ThreadRouteCommands and THREAD_ROUTE_VARIANTS and their existing spec.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/threads/:id/publish | thread.publish | project | rest:threads.publish | { slug, projectId, id } | threads.publish(projectId, id, principal.id, <canOperate>) |\n| POST /projects/:slug/threads/:id/discard | thread.discard | project | rest:threads.discard | { slug, projectId, id } | threads.discard(projectId, id, principal.id, <canOperate>) |\n`<canOperate>` = `(await permissions.can(principal, <the row's key>, { projectId })).allowed` at execution; principal is rebuilt. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Read all route strings with parseRouteInput. Keep handler parameters, @Requires/@HttpCode/@ApiResponses; add @ApprovalGated(), routeGate.run and pending ApprovalPending mapping. Remove the publish/discard pending rows. Preserve repository runner liveness, threadWrite, ownership and active-session rules and existing activity actorType USER behavior.\nPublish's numbered AC-4 and AC-7 pin its 202 and command run; thread-publish.integration.spec.ts retains existing successful publish coverage through the same repository shape. In addition, FM-1 explicitly pins the failure table's approved-publish runner-offline behavior; AC-3 pins the equivalent discard failure. Use independent agent-owned threads pinned to online threadWrite runners, mirroring thread-discard.integration.spec.ts.\n\n**Scope** — In: project publish/discard gates and execution result mapping. Out: project message preparation (US-005), workspace gates (US-006–US-008), and final contract/OpenAPI (US-009).\n- A transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does).\n- The activity rows of the send, discard and publish writes still record `actorType: 'USER'` for an agent actor, as today.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding project.read, thread.publish and thread.discard in P and its own thread pinned to an online threadWrite runner, when it posts /api/projects/web/threads/:id/discard under a wait policy, then it answers 202 with data matching { permissionKey: 'thread.discard', projectId: <P's id> } and no THREAD FleetJob exists for the thread.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then one THREAD FleetJob exists for the thread whose turn action is DISCARD and request.result.jobId equals its id.",
+        "AC-3 [integration] When root approves the agent's pending discard after runner.lastSeenAt was set an hour back while it waited, then the request settles failed and no THREAD job exists for the thread.",
+        "AC-4 [integration] When the agent posts /api/projects/web/threads/:id/publish under a wait policy, then it answers 202 with data.permissionKey thread.publish.",
+        "AC-5 [integration] When root posts discard under a wait policy, then it answers 200 and writes no ApprovalRequest row.",
+        "AC-6 [unit] When ThreadRouteCommands.onModuleInit runs, then the registry answers thread.publish for rest:threads.publish and thread.discard for rest:threads.discard.",
+        "AC-7 [unit] When rest:threads.publish runs as principal a1 whose can('thread.publish') is allowed, then it calls threads.publish('p1', 't1', 'a1', true)."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuses the registry pattern for two sensitive writes while preserving runner and ownership checks; access control mandates isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.spec.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/test/integration/fleet/thread-discard.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-thread-publish-discard-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/threads/:id/publish and …/discard"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.ts",
+          "reason": "publish and discard gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dfa7208b5d06930d42c41ecce9958f3d61be8580"
+    },
+    {
+      "id": "US-005",
+      "title": "Gated project message send, with the repository read in `prepare`",
+      "description": "**Goal** — Gate the project message route and split external repository-context reads from its deferred mutation transaction.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **The project send splits like the drift check.** `ThreadsService.prepareSendMessage(projectId, threadId, userId, input, canOperate)` (new) validates the input (400 `threads.input`), reads the thread and resolves its repository context, and answers a callback that calls the repository's `sendMessage({ …, repoContext, canOperate })` (`ChatThreadRepository`, not `ThreadsService.sendMessage`). `canOperate` is computed before the `prepare`; a grant downgraded from any-row to `.own` between the prepare and the transaction is not re-read (accepted: the in-transaction creator check still applies to a `.own` holder). `sendMessage` becomes `(await this.prepareSendMessage(…))()`. The send transaction re-reads the thread under its row lock, so no target re-check is added to the callback.\n**The message send keeps its 200 for a duplicate.** The send commands answer the service's `{ message, jobId, deduplicated }`; `toResult` stores `{ message, jobId }`. On `executed`, the handler sets status 200 when `outcome.result.deduplicated`, then answers `{ message, jobId }`, as today.\n**`canOperate` is the requester's at execution.** The project handlers compute `canOperate` today with a private helper (`permissions.can(principal, <key>, { projectId })`). Each command computes it again when it runs, as 5d-1's schedule commands compute `canAdminister`. The helper and the controller's `PermissionService` leave `ThreadsController`, which gains `ApprovalRouteGate`.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points, not the explicitly required service preparation extraction and route-command changes; non-HTTP primary command registrations and SSE routes remain unchanged.\n\n**Interface** — New `ThreadsService.prepareSendMessage(projectId, threadId, userId, input, canOperate)` returns a Promise of the repository-send callback, retaining the existing send result type `{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }`. Extend ThreadRouteCommands/THREAD_ROUTE_VARIANTS with `message`.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /projects/:slug/threads/:id/messages | thread.message.send | project | rest:threads.message | { slug, projectId, id, message: parseBody(SendMessageDto, …) } | prepare: threads.prepareSendMessage(projectId, id, principal.id, message, <canOperate>); run: threads.sendMessage(…) with the same arguments; toResult: { message, jobId } |\nThe project message command's `prepare` answers the service's callback; `run` (the immediate path's `execute`) calls `sendMessage`, which runs the same prepare and callback. `<canOperate>` = `(await permissions.can(principal, <the row's key>, { projectId })).allowed` at execution. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Add @ApprovalGated(), routeGate.run and ApprovalPending mapping without moving handler parameters or altering existing @Requires/@HttpCode/@ApiResponses. Remove PermissionService and canOperate from ThreadsController now that the final write is gated, leaving constructor (threads, routeGate); update controller dependency metadata. Remove only the messages allowlist row. Preserve input validation, repoIdForThread and no-context-read missing-thread behavior. Preparation throws settle failed with { error: 'execution-failed', name }; no message exists when preparing fails. Deferred send places its job inside the execution transaction.\nIntegration tests spy ProjectBriefService.prototype.resolveRepoContext in beforeEach to return 'ctx' and restore in afterEach. Each AC owns its own thread/clientMessageId and repeats any prerequisite send/approval setup itself. Extend existing commands and service specs; AC-8's threads.sendMessage refers to the injected ChatThreadRepository double, not recursive ThreadsService invocation.\n\n**Scope** — In: project send gate, prepare split, deduplication HTTP/result projection, and final controller permission-helper removal. Out: workspace send (US-008) and final OpenAPI/contracts (US-009).\n- Deduplicating waiting sends: a message re-sent with the same `clientMessageId` and a different text while a send of it waits opens a second request; an identical body folds into the first (ruling 2026-10-29).\n- A transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does).\n- Bounding the size of a frozen input: a message or answer text (up to 32 KiB) is stored whole in `ApprovalRequest.input` when a request waits.\n- The activity rows of the send, discard and publish writes still record `actorType: 'USER'` for an agent actor, as today.\n- Assistant or MCP thread writes: they keep their primary command.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding project.read and thread.message.send in P and its own thread, when it posts { text: 'hello', clientMessageId: <unique> } to /api/projects/web/threads/:id/messages under a wait policy, then it answers 202 with data matching { permissionKey: 'thread.message.send', projectId: <P's id> } and no ChatMessage with that client message id exists.",
+        "AC-2 [integration] When the equivalent of AC-1's pending send has opened but has not been approved, then ProjectBriefService.resolveRepoContext has not been called.",
+        "AC-3 [integration] When root approves a newly opened equivalent of AC-1's request, then one user ChatMessage with that client message id exists and request.result.message.id equals its id.",
+        "AC-4 [integration] When root approves the agent's pending send while resolveRepoContext rejects, then the request settles failed with result.error execution-failed and result.name equal to the thrown error's name, and no ChatMessage with that client message id exists.",
+        "AC-5 [integration] When root approves the agent's pending send after its wait policy was deleted and the agent sent the same clientMessageId again with response 201 while it waited, then the request settles executed with result.jobId null, result.message equal to the earlier message, and exactly one ChatMessage with that client message id exists.",
+        "AC-6 [integration] When root sends a message under a wait policy, then it answers 201 and writes no ApprovalRequest row, and repeating the same send answers 200.",
+        "AC-7 [unit] When ThreadsService.prepareSendMessage('p1', 't1', 'u1', { text: '', clientMessageId: 'c1' }, true) runs, then it throws ValidationAppException with key threads.input and never calls resolveRepoContext.",
+        "AC-8 [unit] When the callback returned by prepareSendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' }, true) runs, then it calls the injected ChatThreadRepository threads.sendMessage with the resolved repoContext and canOperate true, with resolveRepoContext called once before the callback ran.",
+        "AC-9 [unit] When ThreadRouteCommands.onModuleInit runs, then the registry answers thread.message.send for rest:threads.message with a prepare callback.",
+        "AC-10 [unit] When rest:threads.message.toResult receives { message: m, jobId: 'j1', deduplicated: false }, then it returns { message: m, jobId: 'j1' }.",
+        "FM-1 [integration] Given no wait policy, when the agent posts { text: '', clientMessageId: <unique valid id> } to its project thread's messages route, then it answers 400 with key threads.input as today.",
+        "FM-2 [integration] Given a thread.message.send wait policy, when the agent posts { text: '', clientMessageId: <unique valid id> } to its project thread's messages route and root approves the resulting 202 request, then the request settles failed with result.error execution-failed and no ChatMessage for that clientMessageId exists."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Splits provider reads and locked mutations across deferred execution while preserving authorization and deduplication; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/threads/project-brief.service.ts",
+        "apps/api/src/fleet/repo-config/config-jobs.service.ts",
+        "apps/api/test/integration/fleet/fleet-project-thread-send.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-thread-message-route.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/threads/:id/messages"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.ts",
+          "reason": "sendMessage gated; the private canOperate helper is removed and the constructor drops PermissionService (no use is left), becoming (threads, ApprovalRouteGate)"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.ts",
+          "reason": "prepareSendMessage; sendMessage runs it"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "the prepareSendMessage cases; existing sendMessage assertions still hold"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.keys.spec.ts",
+          "reason": "the constructor-dependency case expects `['ThreadsService', 'ApprovalRouteGate']`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "31f151da339afab010a9492cb52dd03ea75910b4"
+    },
+    {
+      "id": "US-006",
+      "title": "Gated workspace thread create and archive, and the archive cancel after commit",
+      "description": "**Goal** — Register global workspace create/archive commands and defer live-job archive cancellation until commit.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **The archive answers the archived thread from the command.** The project and workspace archive handlers answer `threads.get(…)` after the archive today. The archive commands run the archive and then the read, and answer the read, so a deferred archive stores the thread detail as its result.\n**The archive cancel is deferred.** `ThreadsService.archive` and `WorkspaceThreadsService.archive` hand their `fleetJobs.cancel(…)` (with its `ConflictAppException` catch) to `AfterCommitService.defer(task)`, and run it at once when `defer` answers false. Both services gain `AfterCommitService` (last constructor parameter) and a `private readonly logger = new Logger(<the class>.name)` field. `AfterCommitService` is global (`PermissionsModule`). `AfterCommitService.scope` runs its tasks with no catch, and a throw there escapes the execution's commit, so the deferred task catches and logs every failure (Design snippet); the immediate path keeps today's behaviour (a non-conflict failure propagates). The commands do not use `routeCommand`'s `afterCommit` hook, because the cancel belongs to the service and must also run on the immediate path. (The project implementation already exists from US-001; apply the same behavior to workspace here.)\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points, not the workspace service archive deferral, command registration and tests assigned here; non-HTTP primary commands and SSE routes remain unchanged.\n`POST /threads`, `POST /threads/:id/messages` and `POST /threads/:id/archive` declare the workspace keys (`thread.workspace.*`, held globally by the Member role) and gate with `projectId: null`; they read nothing first.\n\n**Interface** — Create `WorkspaceThreadRouteCommands`, `WORKSPACE_THREAD_ROUTE_VARIANTS` in `fleet/threads/workspace-thread-route.commands.ts`, with ApprovalCommandRegistry, WorkspaceThreadsService and ActorPrincipalLoader; no PermissionService dependency is needed in workspace commands.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /threads | thread.workspace.create | null | rest:workspace-threads.create | { thread: parseBody(CreateWorkspaceThreadDto, …) } | workspace.create(principal, thread) |\n| POST /threads/:id/archive | thread.workspace.archive | null | rest:workspace-threads.archive | { id } | workspace.archive(principal, id), then workspace.get(principal.id, id) |\nPrincipal is rebuilt UserPrincipal | AgentPrincipal. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Add @ApprovalGated() and throw ApprovalPending for pending; preserve @Requires, @HttpCode, @ApiResponses and handler parameter order.\nThe deferred archive cancel (workspace supplies principal.id and thread.projectId as userId/projectId):\n```ts\nconst cancel = async () => {\n  try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }\n  catch (error) { if (!(error instanceof ConflictAppException)) throw error; }\n};\n// After commit the archive is done: a failed cancel is logged, never thrown out of the commit.\nconst deferred = () => cancel().catch((error: unknown) => this.logger.warn(`archive cancel of job ${jobId} failed: ${String(error)}`));\nif (!this.afterCommit.defer(deferred)) await cancel();\n```\nThreadsModule gains the WorkspaceThreadRouteCommands provider; the engine/auth imports came from US-001. WorkspaceThreadsController gains ApprovalRouteGate last, leaving (threads, routeGate). WorkspaceThreadsService gains AfterCommitService ninth; update both service-spec constructions and all three workspace-turns.spec.ts constructions with new AfterCommitService(). Extend the DB-free module spec to resolve the provider and constructor metadata spec. Preserve the body-whitelist HTTP case by providing an ApprovalRouteGate double whose run returns { status: 'executed', result: await <the service double>.create(principal, call.input.thread) }. Remove only create/archive workspace allowlist rows. Services keep home-project hosting and workspace ownership checks inside the command.\n\n**Scope** — In: workspace create/archive, service-owned cancel deferral, DI and related tests. Out: home-scoped update/session routes (US-007), workspace send (US-008), final contracts (US-009), and pre-reading global workspace routes.\n- Retrying an archive cancel that failed after commit; the deferred task logs it (Design).\n- Running a service's domain checks before a request opens, beyond the workspace pre-read in Design.\n- Changing any catalog default: these keys stay `none`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding global thread.workspace.create and thread.workspace.archive and thread.create plus project.read in P, when it posts { title: <unique>, backend: { kind: 'native', model: 'm1' }, homeProject: 'web' } to /api/threads under a global thread.workspace.create wait policy, then it answers 202 with data matching { permissionKey: 'thread.workspace.create', projectId: null } and no ChatThread with that title exists.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then exactly one WORKSPACE ChatThread with that title exists on P with createdById equal to the agent's id.",
+        "AC-3 [integration] When the agent posts /api/threads/:id/archive for its workspace thread under a global wait policy, then it answers 202 and approving that request leaves the thread ARCHIVED.",
+        "AC-4 [integration] When root approves the agent's pending archive of a workspace thread of dev, then the request settles failed and the thread stays ACTIVE.",
+        "AC-5 [integration] When root approves the agent's pending archive of its workspace thread with a live job, then cancellation is requested after the archive commits, leaving cancelRequestedAt set and one CANCEL FleetCommand for that job.",
+        "AC-6 [integration] When dev creates a workspace thread under a global wait policy and the agent creates another with no policy seeded, then each answers 201 and writes no ApprovalRequest row.",
+        "AC-7 [unit] When WorkspaceThreadRouteCommands.onModuleInit runs, then the registry answers thread.workspace.create for rest:workspace-threads.create and thread.workspace.archive for rest:workspace-threads.archive.",
+        "AC-8 [unit] When WorkspaceThreadsService.archive(principal, 't1') receives job j1 from the repository inside AfterCommitService.scope, then fleetJobs.cancel is called only after the scope callback returns.",
+        "AC-9 [unit] When WorkspaceThreadsController.create(body, principal) runs, then routeGate.run receives { key: 'thread.workspace.create', variant: 'rest:workspace-threads.create', projectId: null, input: { thread: body } }.",
+        "AC-10 [unit] When fleetJobs.cancel rejects a non-conflict error during WorkspaceThreadsService.archive(principal, 't1') inside AfterCommitService.scope, then archive resolves without throwing and the service's logger.warn is called once.",
+        "FM-1 [integration] Given an agent holding global thread.workspace.archive and no wait policy, when it posts /api/threads/:id/archive against another principal's workspace thread, then it answers 404 with key threads.notFound from inside the command and writes no ApprovalRequest row.",
+        "REG-1 [unit] Given principal.id a1, its workspace thread with projectId p1 and repository archive returning j1 outside any AfterCommitService.scope, when WorkspaceThreadsService.archive(principal, 't1') runs, then it calls fleetJobs.cancel('a1', 'p1', 'j1', true) before archive resolves, preserving the immediate cancellation behavior."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads",
+        "workspace"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Mirrors the already established project commands and US-001 archive deferral for two workspace routes; no new engine abstraction is needed, but global/home authorization requires the security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/workspace-threads.service.ts",
+        "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/test/integration/fleet/permissions-workspace-threads.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.ts",
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-workspace-thread-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /threads and POST /threads/:id/archive"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.module.ts",
+          "reason": "provides WorkspaceThreadRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.module.spec.ts",
+          "reason": "also resolves WorkspaceThreadRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts",
+          "reason": "the constructor-dependency case expects `['WorkspaceThreadsService', 'ApprovalRouteGate']`"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate (last); create and archive gated"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.spec.ts",
+          "reason": "the testing module also provides an `ApprovalRouteGate` double whose `run` answers `{ status: 'executed', result: await <the service double>.create(principal, call.input.thread) }`, so the AC-5 body-whitelist case still answers 400"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.ts",
+          "reason": "constructor gains AfterCommitService (last); archive defers its cancel when a scope is open"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+          "reason": "both constructions (lines 52 and 147) pass `new AfterCommitService()` as the 9th argument; the deferred-cancel cases"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-turns.spec.ts",
+          "reason": "every construction (lines 17, 58 and 72) passes `new AfterCommitService()` as the 9th argument; no assertion changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fef40f6f2d2b4fd264e364c882f64d7ce294d433"
+    },
+    {
+      "id": "US-007",
+      "title": "Gated workspace cap update, stop, end-session and answer",
+      "description": "**Goal** — Gate workspace cap update, stop, end-session and answer using the owned thread's home-project scope and service execution rechecks.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — **The workspace scope reads the thread first where the key lives in the home project.** `PATCH /threads/:id`, `POST /threads/:id/stop`, `/end-session` and `/answer` declare `thread.cap.update`, `thread.stop`, `thread.end-session` and `thread.answer` with `enforcedBy: 'service'`; the service checks them in the thread's home project (`assertThreadKey`). Their handlers call `WorkspaceThreadsService.requireOwnedThread(principal.id, id)` (404 `threads.notFound` for a thread that is not the caller's workspace thread, as today), then gate with `projectId: thread.projectId`. `POST /threads`, `POST /threads/:id/messages` and `POST /threads/:id/archive` declare the workspace keys (`thread.workspace.*`, held globally by the Member role) and gate with `projectId: null`; they read nothing first.\n**Request checks the handler makes today stay before the gate**, so they answer as today and open no request. The thread handlers make none today except `canOperate` (below); every check runs in the service, so it runs inside the command, at once or after approval, and a failing check settles the request `failed`. This is 5a's rule. The one addition is the workspace pre-read the scope needs (next bullet). It changes two orderings: `WorkspaceThreadsService.updateCap` and `.answer` validate their body (400 `threads.input`) before `requireOwnedThread` today, so a malformed body aimed at a thread that is not the caller's now answers 404 instead of 400; and on the caller's own thread under a wait policy, a malformed cap or answer body opens a request that settles `failed`.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points; the supporting command registration and tests are also in scope, while existing service checks, non-HTTP primary commands and SSE routes remain unchanged.\n\n**Interface** — Extend WorkspaceThreadRouteCommands and WORKSPACE_THREAD_ROUTE_VARIANTS and their existing spec.\n| Route | Key | Scope | Variant | Input | Run |\n| PATCH /threads/:id | thread.cap.update | home | rest:workspace-threads.update | { id, patch: parseBody(UpdateThreadDto, …) } | workspace.updateCap(principal, id, patch.maxCostUsd); skipKeyRecheck: true |\n| POST /threads/:id/stop | thread.stop | home | rest:workspace-threads.stop | { id } | workspace.stop(principal, id), answering {}; skipKeyRecheck: true |\n| POST /threads/:id/end-session | thread.end-session | home | rest:workspace-threads.end-session | { id } | workspace.endSession(principal, id), answering {}; skipKeyRecheck: true |\n| POST /threads/:id/answer | thread.answer | home | rest:workspace-threads.answer | { id, answer: parseBody(AnswerQuestionDto, …) } | workspace.answer(principal, id, answer), answering {}; skipKeyRecheck: true |\nPrincipal is rebuilt. Every body-returning command declares `toResult: (result) => result` unless the row says otherwise; a command whose route answers `{}` runs the service, answers `{}` and declares `toResult: (result) => result`. On `executed` the handler answers `JsonResponse.Ok(outcome.result)`. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). The four commands skip only the engine execution key recheck: do not skip ApprovalRouteGate's initial key check, and do not remove the services' assertThreadKey.\n```ts\nconst thread = await this.threads.requireOwnedThread(principal.id, id);\nconst outcome = await this.routeGate.run<Record<string, never>>({ key: 'thread.stop', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.stop, projectId: thread.projectId, input: { id } });\n```\nMap pending to new ApprovalPending(outcome.request); add @ApprovalGated() while retaining @Requires(..., { enforcedBy: 'service' }), statuses, response decorators and method parameter order. Drop just these four allowlist rows. Use agent-owned workspace fixtures with home P; SESSION live jobs requested by that agent, AGENT attribution, and pendingQuestion q1 for answer. Removing thread.stop binding and invalidating the permission cache must fail in the service after approval, not bypass the home key.\n\n**Scope** — In: four home-scoped workspace routes and their ordering/revocation cases. Out: global workspace create/archive (US-006), global workspace send (US-008), and final contract/OpenAPI (US-009).\n- Running a service's domain checks before a request opens, beyond the workspace pre-read in Design.\n- Bounding the size of a frozen input: a message or answer text (up to 32 KiB) is stored whole in `ApprovalRequest.input` when a request waits.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding project.read, thread.cap.update, thread.stop, thread.end-session and thread.answer in P and its own workspace thread, when it patches /api/threads/:id { maxCostUsd: 7 } under a thread.cap.update wait policy in P, then it answers 202 with data matching { permissionKey: 'thread.cap.update', projectId: <P's id> }.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then the thread's maxCostUsd is 7.",
+        "AC-3 [integration] When root approves the agent's pending POST /api/threads/:id/stop on its workspace thread with its live SESSION job, then one THREAD_STOP_TURN FleetCommand exists for that job.",
+        "AC-4 [integration] Given pendingQuestion { requestId: 'q1' } and an agent-requested live SESSION job, when root approves the agent's pending POST /api/threads/:id/answer { requestId: 'q1', text: 'yes' }, then one THREAD_ANSWER FleetCommand exists for that live job.",
+        "AC-5 [integration] When the agent posts /api/threads/:id/stop against a workspace thread of dev under the same home-project policy, then it answers 404 with key threads.notFound and writes no ApprovalRequest row.",
+        "AC-6 [integration] When root approves the agent's pending stop after its thread.stop binding in P was removed and permission cache invalidated while waiting, then the request settles failed from the service's 403 permissions refusal and no THREAD_STOP_TURN command exists for the live job.",
+        "AC-7 [unit] When WorkspaceThreadRouteCommands.onModuleInit runs, then the registry answers thread.cap.update for rest:workspace-threads.update, thread.stop for rest:workspace-threads.stop, thread.end-session for rest:workspace-threads.end-session and thread.answer for rest:workspace-threads.answer, each with skipKeyRecheck true.",
+        "AC-8 [unit] Given requireOwnedThread returns { id: 't1', projectId: 'p1' }, when WorkspaceThreadsController.stop('t1', principal) runs, then routeGate.run receives { key: 'thread.stop', variant: 'rest:workspace-threads.stop', projectId: 'p1', input: { id: 't1' } }.",
+        "AC-9 [integration] When the agent patches /api/threads/:id {} against a workspace thread of dev under the same policy, then it answers 404 with key threads.notFound and writes no ApprovalRequest row, with the pre-read winning over the body check.",
+        "FM-1 [integration] Given the caller holds the route's home-project key and no wait policy is seeded, when it submits {} to PATCH /api/threads/:id or POST /api/threads/:id/answer for its own workspace thread in separate cases, then each route answers 400 with key threads.input as today.",
+        "FM-2 [integration] Given the agent holds the route's home-project key under its wait policy, when it submits {} to PATCH /api/threads/:id or POST /api/threads/:id/answer for its own workspace thread in separate cases, then each route opens a 202 request that settles failed with result.error execution-failed on approved execution."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads",
+        "workspace"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends four existing service calls with the shipped owned-thread pre-read and skipKeyRecheck mechanisms, without new infrastructure; the home-project authorization boundary requires strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.ts",
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.spec.ts",
+        "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+        "apps/api/src/fleet/threads/workspace-threads.service.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-workspace-thread-session-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops PATCH /threads/:id, POST /threads/:id/stop, …/end-session and …/answer"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+          "reason": "update, stop, end-session and answer read the owned thread, then gate in its home project"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c5af263297806c944e3ed504360ca07cf5da5267"
+    },
+    {
+      "id": "US-008",
+      "title": "Gated workspace message send",
+      "description": "**Goal** — Gate workspace sends globally while retaining home-project hosting rechecks and duplicate-send response behavior.\n\n**Motivation** — 5a to 5d-1 gated 97 routes. The thread writes still bypass the engine on REST: a policy `thread.message.send → agent` makes nothing wait, because no thread route asks the gate.\n\n**Approach** — `POST /threads`, `POST /threads/:id/messages` and `POST /threads/:id/archive` declare the workspace keys (`thread.workspace.*`, held globally by the Member role) and gate with `projectId: null`; they read nothing first.\n**The message send keeps its 200 for a duplicate.** The send commands answer the service's `{ message, jobId, deduplicated }`; `toResult` stores `{ message, jobId }`. On `executed`, the handler sets status 200 when `outcome.result.deduplicated`, then answers `{ message, jobId }`, as today.\n**The frozen input is ids, slugs and the validated body.** Project inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Workspace inputs carry the thread id, and the body where there is one.\n**Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This limits the gated entry points; the supporting route command and tests are also in scope, while existing workspace service checks, non-HTTP primary commands and SSE routes remain unchanged.\n\n**Interface** — Extend WorkspaceThreadRouteCommands/WORKSPACE_THREAD_ROUTE_VARIANTS and their spec with `message`.\n| Route | Key | Scope | Variant | Input | Run |\n| POST /threads/:id/messages | thread.workspace.message.send | null | rest:workspace-threads.message | { id, message: parseBody(SendMessageDto, …) } | workspace.sendMessage(principal, id, message); toResult: { message, jobId } |\nThe command has no prepare. Principal is rebuilt UserPrincipal | AgentPrincipal, and the existing service reads/checks ownership, reach and thread.create in the home project at execution. Id and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Keep the send handler's (id, body, principal, response) order, existing @Requires, @HttpCode and @ApiResponses; add @ApprovalGated(), routeGate.run and pending ApprovalPending mapping. On executed duplicate call response.status(200), then JsonResponse.Ok({ message, jobId }); otherwise keep 201. Remove the workspace message allowlist row. A deferred send places its job inside the execution transaction, as 5d-1's deferred dispatch does.\nUse global thread.workspace.message.send plus thread.create/project.read in P, independent agent-owned workspace fixtures and unique clientMessageId. Remove only the home-project thread.create binding to prove service execution-time hosting refusal.\n\n**Scope** — In: global workspace send command/handler and revocation/deduplication behavior. Out: project prepareSendMessage (US-005), home-scoped session commands (US-007), and exact contract/OpenAPI closure (US-009).\n- Deduplicating waiting sends: a message re-sent with the same `clientMessageId` and a different text while a send of it waits opens a second request; an identical body folds into the first (ruling 2026-10-29).\n- A transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does).\n- Bounding the size of a frozen input: a message or answer text (up to 32 KiB) is stored whole in `ApprovalRequest.input` when a request waits.\n- The activity rows of the send, discard and publish writes still record `actorType: 'USER'` for an agent actor, as today.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Given an agent holding global thread.workspace.message.send and thread.create plus project.read in P and its own workspace thread, when it posts { text: 'hello', clientMessageId: <unique> } to /api/threads/:id/messages under a global wait policy, then it answers 202 with data matching { permissionKey: 'thread.workspace.message.send', projectId: null } and no ChatMessage with that client message id exists.",
+        "AC-2 [integration] When root approves a newly opened equivalent of AC-1's request, then one user ChatMessage with that client message id exists with authorUserId equal to the agent's id.",
+        "AC-3 [integration] When root approves the agent's pending send after its thread.create binding in P was removed and permission cache invalidated while waiting, then the request settles failed from the service's 403 permissions refusal and no ChatMessage with that client message id exists.",
+        "AC-4 [integration] When the agent sends the same body with no policy seeded, then it answers 201 and writes no ApprovalRequest row, and repeating it answers 200.",
+        "AC-5 [unit] When WorkspaceThreadRouteCommands.onModuleInit runs, then the registry answers thread.workspace.message.send for rest:workspace-threads.message with no prepare.",
+        "AC-6 [unit] Given routeGate.run answers { status: 'executed', result: { message: m, jobId: null, deduplicated: true } }, when WorkspaceThreadsController.send('t1', body, principal, response) runs, then it calls response.status(200) and answers { message: m, jobId: null }."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "threads",
+        "workspace"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds one established global gate variant with home-project grant revocation and response mapping; access control triggers strict TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.ts",
+        "apps/api/src/fleet/threads/workspace-thread-route.commands.spec.ts",
+        "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+        "apps/api/src/fleet/threads/workspace-threads.service.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-workspace-thread-message-route.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /threads/:id/messages"
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+          "reason": "send gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "681860eb9db99b543b6ac8654894219a894891c2"
+    },
+    {
+      "id": "US-009",
+      "title": "Contract, OpenAPI and endpoint coverage",
+      "description": "**Goal** — Close gate-fleet by enforcing exactly 115 gated routes, leaving only the 11 gate-secret exceptions and publishing thread 202 responses.\n\n**Motivation** — `PENDING_GATE_ROUTES` lists the 18 thread routes under `gate-fleet`.\n\n**Approach** — **Each gating story removes its own `PENDING_GATE_ROUTES` rows.** US-001 relaxes the exact gated-route count to a lower bound (at least 97), and the allowlist count case to the `gate-secret` count. US-009 restores both exactly and removes the `gate-fleet` label.\n- US-009: the allowlist holds the 11 `gate-secret` rows, and nothing else; `PendingGateFeature` is `'gate-secret'` only.\nThe contract counts 115 gated routes after this feature (97 + 18). The allowlist holds only the 11 gate-secret rows, and PendingGateFeature loses its gate-fleet member.\n\n**Interface** — `PendingGateFeature` target: `'gate-secret'`; `isPendingGateFeature` accepts only it. `PENDING_GATE_ROUTES` target: 11 `gate-secret`. `findContractViolations` reports no violation over the booted app.\nModify pending-gate-routes.ts, permission-contract.spec.ts (counts 11 secret/size 11, delete the now-vacuous every-fleet-route-is-thread test), permission-contract.integration.spec.ts (exactly 115, not the temporary lower bound), approval-openapi.contract.spec.ts (add all 18 operations to gatedOperations, update title/count from 97 to 115), regenerate root openapi.json, and add two exact-202 cases in endpoint.e2e.spec.ts. No new files are created.\nAll added OpenAPI operations use the /api prefix: POST /api/projects/{slug}/threads; PATCH /api/projects/{slug}/threads/{id}; POST /api/projects/{slug}/threads/{id}/plan, /run, /stop, /end-session, /answer, /archive, /publish, /discard and /messages; POST /api/threads; PATCH /api/threads/{id}; POST /api/threads/{id}/messages, /archive, /stop, /end-session and /answer. Keep existing success responses as well as the new pending response. The two endpoint cases are project create with an agent granted thread.create in its project, and workspace create with an agent granted global thread.workspace.create; each deletes its own wait policy in finally. Domain creation need not execute in these pending endpoint cases.\nVerification note: `openapi.json` is regenerated with `bun run api:export-spec` (repo root); `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint` pass. AC-4 and AC-5 live in `src/approvals/approval-openapi.contract.spec.ts`.\n\n**Scope** — In: exact permission/allowlist contract closure, OpenAPI generation and two representative endpoint 202 cases, as the binding ninth story. Out: implementing any missing thread command/handler (belongs to US-001–US-008).\n- The 11 `gate-secret` routes.\n- Regenerating `apps/cli/src/generated` for the new 202 responses: only `openapi.json` is regenerated, as in 5c-2 and 5d-1.\n- Changing any catalog default: these keys stay `none`.\n- `endpoint.e2e.spec.ts` coverage for every gated route: US-009 adds two representative 202 cases.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] When route declarations are collected over the booted app, then exactly 115 routes are gated.",
+        "AC-2 [integration] When findContractViolations runs on the booted app declarations, then it reports no violation.",
+        "AC-3 [unit] When PENDING_GATE_ROUTES is inspected, then it contains exactly the 11 gate-secret entries and nothing else.",
+        "AC-4 [unit] When openapi.json operations post /api/projects/{slug}/threads/{id}/messages and post /api/threads are inspected, then each has a 202 response.",
+        "AC-5 [unit] When all openapi.json operations with a 202 response are collected, then they are exactly the 115 gated operations.",
+        "AC-6 [integration] When endpoint.e2e.spec.ts posts /api/projects/:slug/threads using the key of an agent granted thread.create in the project under a wait policy deleted in finally, then the response is exactly 202.",
+        "AC-7 [integration] When endpoint.e2e.spec.ts posts /api/threads using the key of an agent granted global thread.workspace.create under a global wait policy deleted in finally, then the response is exactly 202."
+      ],
+      "tags": [
+        "permissions-p3-approval-gate-threads",
+        "api",
+        "security",
+        "approval",
+        "openapi",
+        "contract"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Binding contract closure changes rollout validation and the published approval API surface; security contract coverage uses strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/scripts/export-spec.cjs",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/permissions/pending-gate-routes.ts",
+        "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "PendingGateFeature is 'gate-secret' only; isPendingGateFeature accepts only it"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gated-route count is exactly 115"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the counts case asserts 11 gate-secret entries and size 11; the \"AC-4: every fleet rollout route is a thread route\" case is deleted (no gate-fleet entry is left)"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "gatedOperations gains the 18 operations; the 'AC-6: 202 responses exist on exactly the 97 gated operations' case's title and `toHaveLength(97)` become 115"
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the 18 gated operations list 202"
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "two 202 cases (US-009 AC-6, AC-7)"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "02c47197f5d91b0b528bf0102ed0600577251157"
+    }
+  ],
+  "analysis": "EXPLORATION AND SOURCE OF TRUTH\nThe codebase-memory MCP tools are unavailable in this session; discovery used direct reads and text search within the supplied repository root. This is an enhancement to the existing permissions P3 gate, not a new engine. Read .nax/mono/apps/api/context.md and .nax/rules/api-test-isolation.md before implementing; read the nathapp-nestjs-patterns skill before writing NestJS code. The detected Express/Next.js labels in the supplied context are inaccurate: the API guidance specifies NestJS 12 + Fastify, Prisma 7 and Vitest (.nax/mono/apps/api/context.md:23), and the workspace controller's HTTP unit harness actually constructs FastifyAdapter (apps/api/src/fleet/threads/workspace-threads.controller.spec.ts:2). No web implementation is involved. Only this PRD was authored during planning; implementation and test execution are still required.\n\nCURRENT ROUTE SURFACE\nThreadsController has 11 write handlers and three reads, with constructor (threads, permissions) at apps/api/src/fleet/threads/threads.controller.ts:35. Its project membership guard precedes RequiresGuard, preserving project resolution and initial permission checks; create is at :44, cap update :87, plan :99, run :111, stop :123, endSession :136, answer :150, archive :163, publish :177, discard :189 and sendMessage :203. The private any-row canOperate helper at :238 currently executes in the controller and must move into the route commands as each route is gated. Keep the original handler parameters and their ordering, including principal parameters that become unused. Do not change read or SSE handlers. Plan/run retain Requires(['thread.plan'/'thread.run', 'fleet.job.dispatch']) but only their thread key drives approval. WorkspaceThreadsController starts with constructor (threads) at apps/api/src/fleet/threads/workspace-threads.controller.ts:34. Global-key writes are create :43, send :97 and archive :110. Its four home-project keys are already declared enforcedBy: 'service': update :121, stop :132, end-session :144 and answer :156; those handlers must first requireOwnedThread and then gate at that row's projectId. Do not pass keyCheck: false just because execution uses skipKeyRecheck: true: ApprovalRouteGate's initial key check is an important anti-inbox-abuse boundary (apps/api/src/approvals/route/approval-route-gate.ts:43).\n\nEXISTING ENGINE SEAMS (REUSE, DO NOT REDESIGN)\nScheduleRouteCommands demonstrates registration in onModuleInit, parseRouteInput, DTO parseBody, rebuilt principal and execution-time permissions.can at apps/api/src/fleet/schedules/schedule-route.commands.ts:21-77. New ThreadRouteCommands and WorkspaceThreadRouteCommands must register rest variants without displacing primary assistant/MCP commands. routeCommand supports prepare, skipKeyRecheck and result projection (apps/api/src/approvals/route/route-command.ts:13-75); execute loads ActorPrincipalLoader.forContext on every immediate/deferred run, and a prepared callback reloads the principal after provider work. Project inputs freeze slug, projectId, id where relevant and the whitelisted DTO body. Workspace inputs freeze id/body only; global keys gate with projectId null, four service-enforced keys with the pre-read home project. parseBody uses class-validator/class-transformer and whitelists DTO fields (apps/api/src/approvals/route/parse-body.ts:18-37); current message, cap and answer DTOs use @Allow rather than domain validators (apps/api/src/fleet/threads/dto/thread.dto.ts:84-111), so malformed domain data can correctly open a waiting request and fail at execution. Do not relocate those service checks into controllers or command parsers. Id/string members go through parseRouteInput and absent body members through parseBody(Dto, {}). Every command explicitly projects its result; void service calls return {}. Send commands return the raw deduplicated flag for immediate HTTP status selection but persist only { message, jobId }.\nApprovalGate parses before resolving policy, immediately executes mode none and direct USER actors, and otherwise creates/folds pending requests (apps/api/src/approvals/approval-gate.service.ts:39-93, :106-146). Identical frozen input folds through findPendingDuplicate; different text with the same clientMessageId is a distinct request. ApprovalExecutionService runs prepare before the execution transaction and turns preparation errors into failed requests with { error: 'execution-failed', name } (apps/api/src/approvals/approval-execution.service.ts:182-190). The transaction is afterCommit.scope(() => withCommittedEffects(() => txManager.run(...))) at :198. It locks the request, rechecks authority after slow prepare, locks a rest input's slug to the immutable request project (:225-229), runs the callback/execute, and settles in the same transaction. Domain failures roll back and settle failed separately (:249-259). Preserve all engine behavior; no engine changes are required.\n\nSERVICE AND TRANSACTION IMPACT\nThreadsService currently takes six dependencies (apps/api/src/fleet/threads/threads.service.ts:20-27); WorkspaceThreadsService takes eight (apps/api/src/fleet/threads/workspace-threads.service.ts:30-39). Append AfterCommitService, respectively seventh/ninth, and add private readonly logger = new Logger(Class.name). PermissionsModule already globally provides/exports AfterCommitService (apps/api/src/permissions/permissions.module.ts:41, :56, :61). AfterCommitService.scope flushes only after its callback resolves, drops tasks on rejection and does not catch task failures (apps/api/src/permissions/after-commit.service.ts:31-36); defer returns false with no scope (:43-48). Therefore both archive services must queue a wrapper that catches/logs every non-conflict cancellation failure, while immediate cancel preserves current non-conflict propagation and ConflictAppException suppression. Current cancels are inline in ThreadsService.archive (:88-96) and WorkspaceThreadsService.archive (:168-177). Commands archive then read thread detail, persisting the archived detail; cancel is service-owned, not a routeCommand afterCommit hook.\nThreadsService.create already translates repo_feature unique violations to threads.featureTaken (apps/api/src/fleet/threads/threads.service.ts:44-49); a deferred competing create must fail, not retry in an aborted execution transaction. Ownership and lifecycle guards stay in services/repositories. ThreadsService.plan/run (:98-135) use canOperate and FleetJobsService.dispatch; deferred dispatch/placement joins the execution transaction. ChatThreadRepository.command locks job then thread, validates pending question/live session/requester and enqueues runner commands (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:195-233). Archive returns the live job selected under the row lock (:236-253). Publish and discard check online runner/threadWrite and enqueue or create jobs (:256-350). Their placement calls at :307/:348 occur after their local txManager.run but still inside an enclosing deferred execution transaction; do not move those calls out or extend the execution timeout.\nThreadsService.sendMessage validates, reads the thread, resolves repo context and calls ChatThreadRepository.sendMessage at apps/api/src/fleet/threads/threads.service.ts:145-156. Extract prepareSendMessage returning a callback that calls the REPOSITORY, not recursively the service. Keep sendMessage as (await this.prepareSendMessage(...))(). Resolve context once before the callback, before the deferred execution transaction, and never when merely opening a request. Preserve repoIdForThread's REPO/PROJECT anchor behavior (:162-165; line numbers may shift). ProjectBriefService resolves GitHub context with a bounded cache and normally degrades provider failures to unavailable text (apps/api/src/fleet/threads/project-brief.service.ts:41-80); failure ACs deliberately inject a rejecting spy to prove the execution boundary rather than changing that fallback. The repository rereads thread and deduplication under locks, preserves requester fences and creates/places jobs (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:352-423); no new target check belongs in the callback. Compute canOperate before prepare; the accepted any-row-to-own downgrade window does not recompute this boolean, although the engine still rechecks key possession. Workspace send needs no prepare: requireOwnedThread, current reach and home-project thread.create are checked at execution (apps/api/src/fleet/threads/workspace-threads.service.ts:149-165). Workspace assertThreadKey uses a typed creator resource at :184-190; skipKeyRecheck is only for the four home-scoped commands, whose service must still recheck the permission.\n\nMODULES, IMPORTERS AND UNIT REGRESSIONS\nThreadsModule currently imports ProjectsModule, ProjectAccessModule, SkillsModule, FleetReposModule, ThreadStoreModule, FleetJobsModule, GitBrokerModule, AuthModule and LiveModule and exports ThreadsService (apps/api/src/fleet/threads/threads.module.ts:19-26). Add ApprovalEngineModule/AuthRepositoryModule and the two commands providers at the assigned stories; they add no new ThreadsModule cycle. Existing ThreadStoreModule/FleetJobsModule cycle is already exercised by the database-free unit compilation (apps/api/src/fleet/threads/threads.module.spec.ts:13-19, :22-38); extend that test to resolve each commands provider. Direct importer search found ThreadsService used by its module/controller/unit tests and WorkspaceThreadsService additionally used by WorkspaceThreadEventsGuard (apps/api/src/fleet/threads/workspace-thread-events.controller.ts:39); do not change that events fence. No production caller constructs these services directly, but many unit tests do. Update all 13 ThreadsService constructions in threads.service.spec.ts and both workspace service constructions plus three workspace-turns.spec.ts constructions with new AfterCommitService(). Existing no-scope assertions must remain unchanged. Controller key specs pin constructor design:paramtypes: project currently ['ThreadsService', 'PermissionService'] (apps/api/src/fleet/threads/threads.controller.keys.spec.ts:63-66), workspace currently ['WorkspaceThreadsService'] (apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts:60-63). Project temporarily gains gate last, then loses PermissionService/helper in US-005; workspace gains gate last in US-006. Controller direct cases must assert gate call/executed/pending mapping and move old service-call assertions into commands specs. Workspace HTTP body-whitelist test must receive a gate double delegating to its service double so undeclared repoId still answers 400 (apps/api/src/fleet/threads/workspace-threads.controller.spec.ts:16-33). Reuse existing files for controller cases, rather than adding unplanned test files.\n\nROLLOUT CONTRACT AND OPENAPI\nPENDING_GATE_ROUTES has exactly 18 gate-fleet thread rows and 11 gate-secret rows, with a two-member PendingGateFeature type and validator (apps/api/src/permissions/pending-gate-routes.ts:2, :19-64). Each story removes only its own rows alongside ApprovalGated metadata. US-001 changes the intermediate gated-route assertion from exactly 97 to at least 97 (apps/api/test/integration/permissions/permission-contract.integration.spec.ts:65-67); unit assignment counts temporarily assert only 11 secret rows and remove the project-create gate-fleet assertion (apps/api/src/permissions/test-helpers/permission-contract.spec.ts:158-164, :210). US-009 restores exact 115, sets allowlist size exactly 11, removes the vacuous fleet-route test (:167), narrows type/validator to gate-secret and checks no contract violations. Contract collector already tests missing gates and stale allowlist entries (apps/api/src/permissions/test-helpers/permission-contract.spec.ts:70-101); no weakening or new exemption is permitted. Approval OpenAPI contract enumerates existing 97 operations (apps/api/src/approvals/approval-openapi.contract.spec.ts:12); add all 18 and assert exactly 115 operations with 202. Regenerate only root openapi.json through bun run api:export-spec; export script builds a Swagger document with /api prefix and writes ../../../openapi.json (apps/api/scripts/export-spec.cjs:8-21). US-009 retains workdir apps/api as binding even though its generated artifact is at repository root. Add exactly two representative endpoint pending cases near the existing fleet approval cases (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:5859-5899), with wait policy deletion in finally. Do not regenerate CLI output.\n\nTEST PLAN AND ISOLATION\nEvery story is security/access-control related and uses three-session-tdd, regardless of size; US-009 is a binding contract/test story and must not be merged or dropped. Follow the nine-story dependency DAG exactly. Existing behavior anchors include permissions-project-threads.integration.spec.ts, permissions-workspace-threads.integration.spec.ts, fleet-project-thread-send.integration.spec.ts, thread-discard.integration.spec.ts, thread-publish.integration.spec.ts, service specs, controller keys/body-whitelist specs, threads.module.spec.ts and after-commit.service.spec.ts. New integration specs are the eight files assigned in expectedFiles; commands specs belong beside source. Use the approved gating fixture pattern from gated-fleet-job-routes.integration.spec.ts. seedFleetHttpWorld supplies root, dev and project web/P; seedFleetHttpAgent MUST NOT be followed by rosterFleetAgent, which silently grants developer thread keys. Call grantKeys(db, principal, entries, P.id) for the named project keys plus project.read, and grantKeys(db, principal, entries, null) for global bindings; the helper's fourth argument is required, not omitted (apps/api/src/approvals/test-helpers/approval-fixtures.ts:36-53). Invalidate PermissionCache after each grant/removal. Unit module wiring remains DB-free with GlobalStubsModule. For thread/job fixtures mirror threadRow/runner/liveJob at apps/api/test/integration/fleet/permissions-project-threads.integration.spec.ts:110-140. Agent-owned fixture threads use createdByType AGENT; live answer sessions must also use requestedById agent and requestedByType AGENT, pendingQuestion { requestId: 'q1' }, SESSION turn and online threadWrite runner. Plannable threads have published spec/runner and run has a completed PLAN. Workspace rows have kind WORKSPACE, projectId P, no repo/baseRef/feature. Set threadsEnabled true in beforeAll and restore in afterAll. Clean policy/decision/request and created thread/fleet rows before each test, unique feature/title/clientMessageId per test, and repeat the original HTTP call within each approval AC's own setup; never share rows between ACs. Restore every prototype spy with vi.restoreAllMocks afterEach and close app/client. Clear the global logger spy before checking warn counts. Run bun run test:db:up then bun run test:scoped <target integration files> in apps/api; a skipped DB test is not verification. KODA_DB_TESTS=1 and no NAX_SANDBOXED=1 are needed for host DB checks; missing Postgres outside the sandbox fails loudly. Do not run DB-mode processes concurrently against the shared schema. Follow existing Vitest globals/vi.hoisted and lazy await import patterns, never jest or require for TS modules. Finish with root spec export, API type-check/lint and relevant regression tests, not quality-gate ACs.\n\nRISKS, COMPATIBILITY AND MIGRATION\nNo Prisma schema/data migration, policy backfill or catalog default change is required: all 18 route keys remain medium/none. With no named policy every route keeps its current success status/body and no ApprovalRequest; direct humans satisfy any mode. The new observable API branch is policy-selected agent 202 with pending summary. Agents missing route keys still get permissions 403 before a request. Awaiting approval is not authority: ownership, current live state, host permissions, publication, runner liveness, unique feature races and revoked grants can make execution fail. The deliberate workspace ordering change is 404 for another principal's cap/answer thread before malformed-body 400; malformed own bodies can open requests and fail later. Global workspace routes do NOT pre-read ownership; under wait policy they can open a request that fails with the service's 404. The highest transaction risks are accidentally performing GitHub reads inside execution, cancel errors escaping an already committed archive, recursive prepare/send callbacks, wrong home/global scope, stale canOperate captured in controller, accidentally bypassed execution-time service key checks, and runner notification before commit. Preserve existing committed-effect notifications and accept placement under the execution transaction/default timeout. Input text stays frozen whole up to 32 KiB; job/message attribution remains as today, including the explicitly deferred activity actorType issue. Roll out incrementally per story with temporary lower-bound contracts, then close the fleet allowlist and OpenAPI counts together in US-009. The serialized project and workspace chains share threads.module.ts and pending-gate-routes.ts, so coordinate those edits rather than overwriting sibling changes. No web, CLI, runner, SSE or assistant/MCP primary-command registration changes belong in this feature; supporting shared service changes explicitly assigned by the spec do remain in scope.\n\nREFINE-PASS AUDIT AND TRACEABILITY\nAll 79 numbered spec ACs remain in acceptanceCriteria of their original stories, with their original IDs: US-001 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-002 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]; US-003 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]; US-004 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7]; US-005 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10]; US-006 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10]; US-007 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9]; US-008 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6]; US-009 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7]. Qualifiers retained include matching pending key/project summaries, unchanged caps/ACTIVE threads, no premature writes/no ApprovalRequest, original requester/message attribution, stored result IDs/status/{}, command payload requestId, one-context-read timing before callback, explicit no-prepare/skipKeyRecheck settings, duplicate-send 200, pre-read winning over body validation, and finally-cleaned endpoint policies. AC-8 of US-005 explicitly names the injected ChatThreadRepository, avoiding confusion with the service method of the same name. Additional FM criteria directly enumerate the spec's failure table; REG-1 in US-006 makes the explicitly specified immediate archive behavior observable.\nFailure-table traceability, in row order: no-policy agent -> US-001 AC-7 / US-006 AC-6; direct human -> US-001 AC-7 / US-005 AC-6 / US-006 AC-6; missing key -> US-001 AC-8; feature race -> US-001 AC-13; own-only foreign cap -> US-001 AC-4; project live-job archive cancel -> US-001 AC-6; unpublished plan -> US-002 AC-3; no live job for session control -> US-003 AC-5 and FM-1; offline publish/discard -> US-004 AC-3 and FM-1; prepare failure -> US-005 AC-4; service-invalid project send -> US-005 FM-1/FM-2; already-sent clientMessageId -> US-005 AC-5; workspace live-job archive cancel -> US-006 AC-5; foreign workspace ownership -> US-006 AC-4/FM-1 and US-007 AC-5/AC-9/FM-3; malformed workspace cap/answer -> US-007 FM-1/FM-2/FM-3 and AC-9; revoked home stop -> US-007 AC-6; revoked home hosting -> US-008 AC-3; unlisted ungated write -> US-009 FM-1. Every story therefore has an explicit negative path. Failure scenarios use valid surrounding fixtures so an earlier unrelated guard does not satisfy the test accidentally. For a missing-session answer, supply its matching pendingQuestion because the repository checks threads.noQuestion before threads.noSession (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:207-213). An offline publish test supplies writtenPaths and an otherwise publishable REPO thread. Service errors after approval are observed as request failure, not as a promised HTTP 400/403/409 response from the approval endpoint (apps/api/src/approvals/approval-execution.service.ts:249-259).\nContext alignment checked against every spec Context Files subsection: US-001 retains service, schedule commands, after-commit and project ownership integration fixture; US-002 retains upstream commands and FleetJobsService; US-003 retains upstream commands and repository; US-004 retains upstream commands, repository and discard integration; US-005 retains upstream commands, ProjectBriefService, ConfigJobsService and send integration; US-006 retains workspace service and workspace permissions integration; US-007 and US-008 retain their upstream workspace commands; US-009 retains exporter and permission-contract helper. Each contextFiles list is at most five; newly authored files remain only in expectedFiles, while dependency outputs are legitimate downstream contexts. All nine IDs, titles, workdirs and the binding dependency DAG are unchanged. US-006 and US-007 use medium complexity because they reuse shipped patterns rather than creating new engine mechanisms; every story retains three-session-tdd under the mandatory access-control security override.\nAll 13 feature exclusions are retained verbatim in the top-level outOfScope array, in original order: secret routes; dispatch-only policies on plan/run; waiting-send deduplication; transaction timeout changes; CLI regeneration; catalog default changes; pre-gate domain checks; assistant/MCP writes; web/CLI/SSE changes; frozen-input size bounding; activity actorType correction; post-commit cancellation retries; endpoint cases for every route. Nearby stories echo the relevant exclusions in Scope Out without moving another story's work into feature-level exclusions. Scope clarification distinguishes gated HTTP entry points from necessary shared service/command changes. Regression anchors remain in US-001 AC-7/AC-11/AC-14, US-002 AC-6, US-003 AC-6, US-004 AC-5, US-005 AC-6/AC-8, US-006 AC-6/REG-1, US-007 FM-1/AC-9, US-008 AC-4/AC-6 and US-009 AC-3. All criteria describe observable responses, thrown exceptions, stored state, registry command properties, mock call arguments/timing or logs; no quality gate is an AC. This is a source-level PRD audit, not executed runtime verification.",
+  "outOfScope": [
+    "The 11 `gate-secret` routes.",
+    "A policy naming `fleet.job.dispatch` on `POST /projects/:slug/threads/:id/plan` and `/run`: they gate under `thread.plan` and `thread.run` only (ruling 2026-10-29).",
+    "Deduplicating waiting sends: a message re-sent with the same `clientMessageId` and a different text while a send of it waits opens a second request; an identical body folds into the first (ruling 2026-10-29).",
+    "A transaction timeout other than Prisma's default for the execution transaction: a deferred send, plan, run, publish or discard places its job inside it (ruling 2026-10-29; publish places on its new-job branch as discard does).",
+    "Regenerating `apps/cli/src/generated` for the new 202 responses: only `openapi.json` is regenerated, as in 5c-2 and 5d-1.",
+    "Changing any catalog default: these keys stay `none`.",
+    "Running a service's domain checks before a request opens, beyond the workspace pre-read in Design.",
+    "Assistant or MCP thread writes: they keep their primary command.",
+    "Any change to `apps/web` or `apps/cli`, or to the thread event (SSE) routes.",
+    "Bounding the size of a frozen input: a message or answer text (up to 32 KiB) is stored whole in `ApprovalRequest.input` when a request waits.",
+    "The activity rows of the send, discard and publish writes still record `actorType: 'USER'` for an agent actor, as today.",
+    "Retrying an archive cancel that failed after commit; the deferred task logs it (Design).",
+    "`endpoint.e2e.spec.ts` coverage for every gated route: US-009 adds two representative 202 cases."
+  ],
+  "routingProfile": "native-codex-ds"
+}

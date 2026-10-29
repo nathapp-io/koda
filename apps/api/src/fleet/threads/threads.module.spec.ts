@@ -6,6 +6,8 @@ import { ThreadsService } from './threads.service';
 import { CHAT_THREAD_REPOSITORY } from './domain/chat-thread.domain';
 import { ProjectBriefService } from './project-brief.service';
 import { ThreadsModule } from './threads.module';
+import { ThreadRouteCommands } from './thread-route.commands';
+import { WorkspaceThreadRouteCommands } from './workspace-thread-route.commands';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { WorkspaceThreadsController } from './workspace-threads.controller';
 import { WorkspaceThreadEventsController, WorkspaceThreadEventsGuard } from './workspace-thread-events.controller';
@@ -30,6 +32,8 @@ describe('ThreadsModule', () => {
       expect(moduleRef.get(ThreadEventsController)).toBeDefined();
       expect(moduleRef.get(ThreadEventsGuard)).toBeDefined();
       expect(moduleRef.get(ThreadsService)).toBeDefined();
+      expect(moduleRef.get(ThreadRouteCommands)).toBeInstanceOf(ThreadRouteCommands);
+      expect(moduleRef.get(WorkspaceThreadRouteCommands)).toBeInstanceOf(WorkspaceThreadRouteCommands);
       expect(moduleRef.get(CHAT_THREAD_REPOSITORY)).toBeDefined();
       expect(moduleRef.get(ProjectBriefService)).toBeInstanceOf(ProjectBriefService);
     } finally {
