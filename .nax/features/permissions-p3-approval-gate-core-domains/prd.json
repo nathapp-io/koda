@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T04:15:34.558Z",
+  "updatedAt": "2026-10-29T04:30:37.601Z",
   "userStories": [
     {
       "id": "US-001",
@@ -404,14 +404,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds access-controlled registry wiring across skills and code-intel with project scope and transactional audit preservation; security override applies."
+        "reasoning": "Adds access-controlled registry wiring across skills and code-intel with project scope and transactional audit preservation; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/skills/skills.service.ts",
@@ -469,7 +472,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e8e53c662ad0b588607abac8665583fa34d8cf50"
     },
     {
       "id": "US-006",
