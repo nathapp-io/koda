@@ -21,6 +21,7 @@ import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 export class UpdateCapabilitiesDto {
   @ApiProperty({ example: ['typescript', 'nestjs'] })
@@ -40,6 +41,7 @@ export class AgentsService {
     // service asks the one permission decision point. Required, and before the two optional seams.
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -227,7 +229,7 @@ export class AgentsService {
       () => this.agentRepo.update(slug, data),
       (agent) => ({ key: 'agent.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: fieldsSummary(data) }),
     );
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
+    await this.invalidateAfterCommit(updated.id);
     return AgentResponseDto.from(updated);
   }
 
@@ -241,7 +243,7 @@ export class AgentsService {
 
     // Return updated agent with capabilities
     const updated = await this.agentRepo.findById(agentId);
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    await this.invalidateAfterCommit(agentId);
     return AgentResponseDto.from(updated);
   }
 
@@ -273,8 +275,13 @@ export class AgentsService {
       },
       (deleted) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: deleted.id, projectId: null, summary: `deleted ${deleted.slug}` }),
     ));
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${id}`);
+    await this.invalidateAfterCommit(id);
     return AgentResponseDto.from(agent);
+  }
+
+  private async invalidateAfterCommit(agentId: string): Promise<void> {
+    const task = async () => this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    if (!this.afterCommit.defer(task)) await task();
   }
 
   private static readonly PRIORITY_RANK: Record<string, number> = {

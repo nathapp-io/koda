@@ -8,11 +8,25 @@ describe('AgentRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { slug: 'alpha' };
-    const service = { removeById: vi.fn().mockResolvedValue(result) };
+    const service = { removeById: vi.fn().mockResolvedValue(result), update: vi.fn().mockResolvedValue(result), updateCapabilities: vi.fn().mockResolvedValue(result) };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new AgentRouteCommands(registry, service as unknown as AgentsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
   }
+  it('AC-7: registers update and capabilities commands', () => {
+    const { registry } = build();
+    expect(registry.get('agent.update', 'rest:agents.update')).toMatchObject({ key: 'agent.update' });
+    expect(registry.get('agent.capabilities.update', 'rest:agents.update-capabilities')).toMatchObject({ key: 'agent.capabilities.update' });
+  });
+  it('AC-9: capabilities update executes against the frozen id without looking up slug', async () => {
+    const { registry, service } = build();
+    const command = registry.get('agent.capabilities.update', 'rest:agents.update-capabilities');
+    if (!command) throw new Error('Missing command');
+    const input = command.parse({ slug: 'bot', agentId: 'a1', capabilities: { capabilities: ['ts'] } });
+    await command.execute(input);
+    expect(service.updateCapabilities).toHaveBeenCalledWith('a1', { capabilities: ['ts'] });
+    expect(service).not.toHaveProperty('findBySlug');
+  });
   it('AC-9: registers the exact deletion variant', () => {
     const { registry } = build();
     expect(registry.get('agent.delete', AGENT_ROUTE_VARIANTS.delete)).toMatchObject({ key: 'agent.delete', variant: 'rest:agents.delete' });

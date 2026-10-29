@@ -13,6 +13,7 @@ import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 describe('AgentsService', () => {
   let service: AgentsService;
@@ -116,6 +117,7 @@ describe('AgentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
+        AfterCommitService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -242,6 +244,7 @@ describe('AgentsService', () => {
         const moduleWithoutSecret: TestingModule = await Test.createTestingModule({
           providers: [
             AgentsService,
+            AfterCommitService,
             { provide: AuditRecorder, useValue: mockAuditRecorder },
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },

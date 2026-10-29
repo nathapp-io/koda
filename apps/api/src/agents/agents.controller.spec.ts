@@ -341,6 +341,12 @@ describe('AgentsController', () => {
   });
 
   describe('PATCH /api/agents/:slug', () => {
+    it('AC-8: gates the immutable route input', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const update = { name: 'x' };
+      await controller.update('bot', update, mockMemberUser);
+      expect(gate.run).toHaveBeenCalledWith({ key: 'agent.update', variant: 'rest:agents.update', projectId: null, input: { slug: 'bot', patch: update } });
+    });
     it('should update agent for ADMIN user', async () => {
       const updateDto = {
         name: 'Updated Agent',
