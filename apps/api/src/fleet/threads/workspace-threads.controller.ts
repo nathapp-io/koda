@@ -134,8 +134,15 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Update the cost cap of one of the caller’s workspace chat threads (thread.cap.update: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.cap.update nor created the thread' })
+  @ApprovalGated()
   async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    return JsonResponse.Ok(await this.threads.updateCap(principal, id, dto.maxCostUsd));
+    const thread = await this.threads.requireOwnedThread(principal.id, id);
+    const outcome = await this.routeGate.run<Awaited<ReturnType<WorkspaceThreadsService['updateCap']>>>({
+      key: 'thread.cap.update', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.update, projectId: thread.projectId,
+      input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/stop')
@@ -145,8 +152,13 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Stop the live turn of a workspace chat thread (thread.stop: the creator, or the any-row key)' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.stop nor created the thread' })
+  @ApprovalGated()
   async stop(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    await this.threads.stop(principal, id);
+    const thread = await this.threads.requireOwnedThread(principal.id, id);
+    const outcome = await this.routeGate.run<Record<string, never>>({
+      key: 'thread.stop', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.stop, projectId: thread.projectId, input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok({});
   }
 
@@ -157,8 +169,13 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Close the live session of a workspace chat thread (thread.end-session: the creator, or the any-row key)' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.end-session nor created the thread' })
+  @ApprovalGated()
   async endSession(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    await this.threads.endSession(principal, id);
+    const thread = await this.threads.requireOwnedThread(principal.id, id);
+    const outcome = await this.routeGate.run<Record<string, never>>({
+      key: 'thread.end-session', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.endSession, projectId: thread.projectId, input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok({});
   }
 
@@ -169,8 +186,14 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Answer a pending question of a workspace chat thread (thread.answer: the creator, or the any-row key)' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  @ApprovalGated()
   async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    await this.threads.answer(principal, id, dto);
+    const thread = await this.threads.requireOwnedThread(principal.id, id);
+    const outcome = await this.routeGate.run<Record<string, never>>({
+      key: 'thread.answer', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.answer, projectId: thread.projectId,
+      input: { id, answer: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok({});
   }
 }

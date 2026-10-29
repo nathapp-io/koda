@@ -4,6 +4,22 @@ import { WorkspaceThreadsService } from './workspace-threads.service';
 import { WorkspaceThreadRouteCommands, WORKSPACE_THREAD_ROUTE_VARIANTS } from './workspace-thread-route.commands';
 
 describe('WorkspaceThreadRouteCommands', () => {
+  it('AC-7: registers the four home-scoped route commands with execution key rechecks skipped', () => {
+    const registry = new ApprovalCommandRegistry();
+    const service = { create: vi.fn(), archive: vi.fn(), get: vi.fn(), updateCap: vi.fn(), stop: vi.fn(), endSession: vi.fn(), answer: vi.fn() } as unknown as WorkspaceThreadsService;
+    const commands = new WorkspaceThreadRouteCommands(registry, service, {} as ActorPrincipalLoader);
+    commands.onModuleInit();
+
+    for (const [key, variant] of [
+      ['thread.cap.update', 'rest:workspace-threads.update'],
+      ['thread.stop', 'rest:workspace-threads.stop'],
+      ['thread.end-session', 'rest:workspace-threads.end-session'],
+      ['thread.answer', 'rest:workspace-threads.answer'],
+    ]) {
+      expect(registry.get(key, variant)).toMatchObject({ key, variant, skipKeyRecheck: true });
+    }
+  });
+
   it('AC-7: registers the global workspace create and archive route variants', () => {
     const registry = new ApprovalCommandRegistry();
     const service = { create: vi.fn(), archive: vi.fn(), get: vi.fn() } as unknown as WorkspaceThreadsService;

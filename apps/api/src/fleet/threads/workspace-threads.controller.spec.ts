@@ -10,6 +10,20 @@ import { validateCreateWorkspaceThread } from './thread-input';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 
 // Principal injection reads request.user, as CombinedAuthGuard does in production.
+describe('WorkspaceThreadsController gated stop', () => {
+  it('AC-8: pre-reads the owned thread and gates stop in its home project', async () => {
+    const thread = { id: 't1', projectId: 'p1' };
+    const service = { requireOwnedThread: vi.fn().mockResolvedValue(thread), stop: vi.fn() };
+    const routeGate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: {} }) };
+    const controller = new WorkspaceThreadsController(service as unknown as WorkspaceThreadsService, routeGate as unknown as ApprovalRouteGate);
+    const principal = { actorType: 'agent', id: 'a1' } as never;
+
+    await controller.stop('t1', principal);
+
+    expect(service.requireOwnedThread).toHaveBeenCalledWith('a1', 't1');
+    expect(routeGate.run).toHaveBeenCalledWith({ key: 'thread.stop', variant: 'rest:workspace-threads.stop', projectId: 'p1', input: { id: 't1' } });
+  });
+});
 describe('workspace POST body whitelist', () => {
   let app: NestFastifyApplication;
   let module: TestingModule;
