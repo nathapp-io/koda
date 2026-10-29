@@ -5,7 +5,9 @@
  */
 import 'reflect-metadata';
 import { EXCEPTION_FILTERS_METADATA, FILTER_CATCH_EXCEPTIONS } from '@nestjs/common/constants';
-import type { ArgumentsHost } from '@nestjs/common';
+import { Controller, Get, type ArgumentsHost } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { getSchemaPath } from '@nestjs/swagger';
 import type { HttpAdapterHost } from '@nestjs/core';
@@ -28,6 +30,15 @@ const record: ApprovalRequestRecord = {
   expiresAt: new Date('2026-10-02T00:00:00.000Z'), decidedAt: null, settledAt: null, result: null,
   createdAt: new Date('2026-10-01T00:00:00.000Z'),
 };
+
+@Controller('probe')
+class ValidationProbe {
+  @Get()
+  @ApprovalGated({ redeem: true })
+  fail(): never {
+    throw new ValidationAppException({}, 'validation');
+  }
+}
 
 class GatedProbe {
   @ApprovalGated()
@@ -102,9 +113,15 @@ describe('@ApprovalGated()', () => {
     expect(APPROVAL_REDEEM_HEADER).toBe('x-koda-approval-request');
   });
 
-  it('REG-1: ValidationAppException is not caught by the pending filter', () => {
-    expect(Reflect.getMetadata(FILTER_CATCH_EXCEPTIONS, ApprovalPendingFilter)).toEqual([ApprovalPending]);
-    expect(new ValidationAppException({}, 'validation').getStatus()).toBe(400);
+  it('REG-1: redeem-gated validation errors retain their HTTP 400 response', async () => {
+    const module = await Test.createTestingModule({ controllers: [ValidationProbe] }).compile();
+    const app = module.createNestApplication();
+    try {
+      await app.init();
+      await request(app.getHttpServer()).get('/probe').expect(400);
+    } finally {
+      await app.close();
+    }
   });
 
   it('AC-15: documents the 202 answer with the request summary model', () => {
