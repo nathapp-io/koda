@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-threads",
   "branchName": "feat/permissions-p3-approval-gate-threads",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T13:55:46.232Z",
+  "updatedAt": "2026-10-29T14:20:24.679Z",
   "userStories": [
     {
       "id": "US-001",
@@ -496,14 +496,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends four existing service calls with the shipped owned-thread pre-read and skipKeyRecheck mechanisms, without new infrastructure; the home-project authorization boundary requires strict security TDD."
+        "reasoning": "Extends four existing service calls with the shipped owned-thread pre-read and skipKeyRecheck mechanisms, without new infrastructure; the home-project authorization boundary requires strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/workspace-thread-route.commands.ts",
@@ -529,7 +532,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c5af263297806c944e3ed504360ca07cf5da5267"
     },
     {
       "id": "US-008",
