@@ -118,7 +118,7 @@ describe('permission contract checker', () => {
     }
   });
 
-  it('US-001 AC-1: explicitly lists exactly the 9 secret-bearing routes', () => {
+  it('US-001 AC-1: explicitly lists exactly the 8 secret-bearing routes', () => {
     expect(SECRET_GATE_ROUTES).toEqual(new Set([
       'POST /fleet/enrollments',
       'POST /projects/:slug/vcs',
@@ -128,13 +128,11 @@ describe('permission contract checker', () => {
       'PATCH /projects/:slug/webhooks/:id',
       'POST /projects/:slug/invites',
       'POST /projects/:slug/invites/:id/resend',
-      'POST /admin/users',
     ]));
   });
 
   it('US-001 AC-1/2: assigns every explicit secret route to gate-secret', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
-    expect(PENDING_GATE_ROUTES.get('POST /admin/users')).toBe('gate-secret');
   });
 
   it('US-006: the agent credential routes are gated, so they leave the pending rollout lists', () => {
@@ -142,6 +140,11 @@ describe('permission contract checker', () => {
       expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
       expect(SECRET_GATE_ROUTES.has(route)).toBe(false);
     }
+  });
+
+  it('US-007: the gated admin user create leaves the pending rollout lists', () => {
+    expect(PENDING_GATE_ROUTES.has('POST /admin/users')).toBe(false);
+    expect(SECRET_GATE_ROUTES.has('POST /admin/users')).toBe(false);
   });
 
   it.each([
@@ -168,9 +171,25 @@ describe('permission contract checker', () => {
     ]) expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
-  it('US-009 AC-3: pending gate assignments contain exactly the 9 secret routes', () => {
-    expect(PENDING_GATE_ROUTES.size).toBe(9);
-    expect([...PENDING_GATE_ROUTES.values()]).toEqual(Array(9).fill('gate-secret'));
+  /**
+   * US-007 AC-13: the allowlist is now exactly the routes 6b still owes. Stated as literals so the
+   * assertion cannot pass by moving both sides together.
+   */
+  it('US-007 AC-13: pending gate assignments hold exactly the 8 remaining secret routes', () => {
+    const remaining = [
+      'POST /fleet/enrollments',
+      'POST /projects/:slug/vcs',
+      'PATCH /projects/:slug/vcs',
+      'POST /projects/:slug/vcs/webhook-secret/rotate',
+      'POST /projects/:slug/webhooks',
+      'PATCH /projects/:slug/webhooks/:id',
+      'POST /projects/:slug/invites',
+      'POST /projects/:slug/invites/:id/resend',
+    ];
+
+    expect(PENDING_GATE_ROUTES.size).toBe(8);
+    expect([...PENDING_GATE_ROUTES.values()]).toEqual(Array(8).fill('gate-secret'));
+    expect([...PENDING_GATE_ROUTES.keys()].sort()).toEqual([...remaining].sort());
     expect(new Set(PENDING_GATE_ROUTES.keys())).toEqual(SECRET_GATE_ROUTES);
   });
 
@@ -197,10 +216,6 @@ describe('permission contract checker', () => {
 
   it('AC-10: has no pending entry for gated project deletion', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
-  });
-
-  it('US-001: classifies admin user creation as a secret-gated route', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /admin/users')).toBe('gate-secret');
   });
 
   it('US-001 AC-2: assigns invite resend to gate-secret', () => {

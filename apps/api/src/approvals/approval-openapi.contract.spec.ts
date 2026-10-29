@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+type OpenApiOperation = {
+  responses?: Record<string, unknown>;
+  parameters?: { name?: string; in?: string }[];
+};
 type OpenApiDocument = {
-  paths: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
+  paths: Record<string, Record<string, OpenApiOperation>>;
 };
 
 const openapi = JSON.parse(
@@ -65,6 +69,11 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/kb/import/graphify'],
   ['post', '/api/projects/{slug}/kb/optimize'],
   ['delete', '/api/agents/{slug}'],
+  // `gate-secret` pilots (US-006, US-007): redeem routes, so their 202 releases a request that runs
+  // nothing and carries the `X-Koda-Approval-Request` header.
+  ['post', '/api/agents'],
+  ['post', '/api/agents/{slug}/rotate-key'],
+  ['post', '/api/admin/users'],
   ['delete', '/api/admin/skills/sources/{id}'],
   ['post', '/api/admin/skills/sources'],
   ['post', '/api/admin/skills/sources/{id}/update'],
@@ -136,7 +145,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 115 gated operations', () => {
+describe('OpenAPI contract for 118 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -177,8 +186,18 @@ describe('OpenAPI contract for 115 gated operations', () => {
     expect(openapi.paths['/api/memory']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-6: secret agent creation has no 202 response', () => {
-    expect(openapi.paths['/api/agents']?.post?.responses).not.toHaveProperty('202');
+  it('AC-14 (US-007): the three redeem pilots document a 202 and the redemption header', () => {
+    for (const [method, path] of [
+      ['post', '/api/agents'],
+      ['post', '/api/agents/{slug}/rotate-key'],
+      ['post', '/api/admin/users'],
+    ] as const) {
+      const operation = openapi.paths[path]?.[method];
+      expect(operation?.responses, `${method} ${path} 202`).toHaveProperty('202');
+      expect(operation?.parameters ?? [], `${method} ${path} header`).toContainEqual(
+        expect.objectContaining({ name: 'X-Koda-Approval-Request', in: 'header' }),
+      );
+    }
   });
 
   it('AC-7: POST knowledge-base search has no 202 response', () => {
@@ -194,9 +213,9 @@ describe('OpenAPI contract for 115 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('US-009 AC-5: 202 responses exist on exactly the 115 gated operations', () => {
+  it('AC-15 (US-007): 202 responses exist on exactly the 118 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(115);
+    expect(expected).toHaveLength(118);
     expect(operationsWith202()).toEqual(expected);
   });
 });

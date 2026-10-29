@@ -236,7 +236,25 @@
       },
       "post": {
         "operationId": "AdminUsersController_create",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "x-koda-approval-request",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -254,6 +272,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserAdminDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -352,7 +388,25 @@
     "/api/agents": {
       "post": {
         "operationId": "AgentsController_generateApiKey",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "x-koda-approval-request",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -366,6 +420,24 @@
         "responses": {
           "201": {
             "description": "Agent created with API key"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -709,11 +781,46 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "x-koda-approval-request",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "API key rotated successfully"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -14926,67 +15033,6 @@
           "password"
         ]
       },
-      "CreateUserDto": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string",
-            "maxLength": 254,
-            "format": "email",
-            "example": "dev@example.com"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100,
-            "example": "Dev User"
-          },
-          "password": {
-            "type": "string",
-            "minLength": 8,
-            "description": "Temporary password, handed over out of band",
-            "example": "StrongPass123!"
-          }
-        },
-        "required": [
-          "email",
-          "name",
-          "password"
-        ]
-      },
-      "UserAdminDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "nullable": true
-          },
-          "disabled": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "disabled",
-          "createdAt",
-          "updatedAt"
-        ]
-      },
       "ApprovalRequestSummaryDto": {
         "type": "object",
         "properties": {
@@ -15025,6 +15071,9 @@
           },
           "origin": {
             "type": "string"
+          },
+          "redeem": {
+            "type": "boolean"
           },
           "requiredMode": {
             "type": "string",
@@ -15097,6 +15146,7 @@
           "onBehalfOfType",
           "onBehalfOfId",
           "origin",
+          "redeem",
           "requiredMode",
           "status",
           "satisfiedBy",
@@ -15106,6 +15156,67 @@
           "decidedAt",
           "settledAt",
           "createdAt"
+        ]
+      },
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "example": "dev@example.com"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Dev User"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Temporary password, handed over out of band",
+            "example": "StrongPass123!"
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "password"
+        ]
+      },
+      "UserAdminDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "disabled",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "UpdateUserDto": {
@@ -23717,6 +23828,9 @@
           "origin": {
             "type": "string"
           },
+          "redeem": {
+            "type": "boolean"
+          },
           "requiredMode": {
             "type": "string",
             "enum": [
@@ -23802,6 +23916,7 @@
           "onBehalfOfType",
           "onBehalfOfId",
           "origin",
+          "redeem",
           "requiredMode",
           "status",
           "satisfiedBy",

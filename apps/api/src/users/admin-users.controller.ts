@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -6,7 +6,7 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
-import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalGated, APPROVAL_REDEEM_HEADER } from '../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { USER_ROUTE_VARIANTS } from './user-route.commands';
@@ -37,7 +37,14 @@ export class AdminUsersController {
     return JsonResponse.Ok(toPageResult(page));
   }
 
+  /**
+   * Permissions P3 `gate-secret` (US-007): the temporary password is a credential, so an agent under a
+   * wait policy opens a request that stores only the identity it creates. Approving it runs nothing;
+   * the requester redeems it with `X-Koda-Approval-Request` and the password it re-sends is the one
+   * that lands. A human executes at once, so the admin's own create is unchanged.
+   */
   @Post()
+  @ApprovalGated({ redeem: true })
   @HttpCode(201)
   @UseGuards(RequiresGuard)
   @Requires('user.create')
@@ -45,8 +52,12 @@ export class AdminUsersController {
   @ApiResponse({ status: 201, type: UserAdminDto })
   @ApiResponse({ status: 403, description: 'Forbidden - user.create is missing' })
   @ApiResponse({ status: 409, description: 'Email already in use' })
-  async create(@Body() dto: CreateUserDto) {
-    return JsonResponse.Ok(await this.users.create(dto));
+  async create(@Body() dto: CreateUserDto, @Headers(APPROVAL_REDEEM_HEADER) redeem?: string) {
+    const outcome = await this.routeGate.run<UserAdminDto>({
+      key: 'user.create', variant: USER_ROUTE_VARIANTS.create, projectId: null, input: { user: dto }, redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Patch(':id')
