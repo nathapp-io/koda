@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-threads",
   "branchName": "feat/permissions-p3-approval-gate-threads",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T13:19:54.558Z",
+  "updatedAt": "2026-10-29T13:28:09.687Z",
   "userStories": [
     {
       "id": "US-001",
@@ -189,14 +189,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard command extension for three session operations with requester/ownership access control; security override applies."
+        "reasoning": "Standard command extension for three session operations with requester/ownership access control; security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/thread-route.commands.ts",
@@ -222,7 +225,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2ee389e4707ffdd94a403d45459e2cc119ffb00b"
     },
     {
       "id": "US-004",
