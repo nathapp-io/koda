@@ -124,6 +124,14 @@ describeDb('approval repositories through AppModule', () => {
     expect((await requests.findDue(now, 10)).map((r) => r.id)).toEqual([older.id, due.id]);
     expect(await requests.findDue(now, 1)).toHaveLength(1);
   });
+  it('US-003 AC-1/2: findDue includes only expired approved redeem requests', async () => {
+    const redeemDue = await create({ status: 'approved', redeem: true, expiresAt: new Date(now.getTime() - 1) });
+    await create({ status: 'approved', expiresAt: new Date(now.getTime() - 1) });
+    await create({ status: 'approved', redeem: true, expiresAt: new Date(now.getTime() + 1) });
+
+    expect((await requests.findDue(now, 100)).map((row) => row.id)).toEqual([redeemDue.id]);
+  });
+
   it('US-002 AC-6: stale approved selection excludes redeem requests', async () => {
     const before = new Date(now.getTime());
     const ordinary = await create({ status: 'approved', decidedAt: new Date(before.getTime() - 2_000) });

@@ -139,7 +139,21 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
    */
   private async settleOne(due: ApprovalRequestRecord, now: Date): Promise<ApprovalRequestRecord | null> {
     const locked = await this.requests.lockById(due.id);
-    if (!locked || locked.status !== 'pending' || locked.expiresAt.getTime() > now.getTime()) return null;
+    if (!locked || locked.expiresAt.getTime() > now.getTime()) return null;
+    const redeemExpiry = locked.status === 'approved' && locked.redeem === true;
+    if (locked.status !== 'pending' && !redeemExpiry) return null;
+
+    if (redeemExpiry) {
+      const settled = await this.requests.transition(locked.id, 'approved', { status: 'expired', settledAt: now });
+      if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+      await this.events.record(settled);
+      await this.audit.record({
+        key: 'system.approval.expire', resourceType: 'approval-request', resourceId: locked.id,
+        projectId: locked.projectId, summary: `redeem expired ${locked.permissionKey}`,
+      });
+      return settled;
+    }
+
     // An ended job's cancellation backlog belongs to the fleet continuation, not timeout policy.
     if (!await this.requests.canSettleTimeout(locked.id)) return null;
 

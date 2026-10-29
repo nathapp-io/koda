@@ -345,6 +345,39 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     expect(warn.mock.calls.map(([message]) => String(message))).toEqual(['Approval request r1 not executed: commit failed']);
   });
 
+  it('US-003 AC-3: expires a due approved redeem regardless of onTimeout and never executes it', async () => {
+    const due = request({ status: 'approved', redeem: true, onTimeout: 'approve' });
+    const b = build({ due: [due] });
+
+    expect(await b.sweeper.tick(NOW)).toEqual({ expired: 1, approved: 0, failed: 0 });
+    expect(b.requests.transition).toHaveBeenCalledWith('r1', 'approved', { status: 'expired', settledAt: NOW });
+    expect(b.execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('US-003 AC-4: audits an expired redeem with its permission key', async () => {
+    const due = request({ status: 'approved', redeem: true, permissionKey: 'agent.create' });
+    const b = build({ due: [due] });
+    await b.sweeper.tick(NOW);
+    expect(b.audit.record).toHaveBeenCalledWith({
+      key: 'system.approval.expire', resourceType: 'approval-request', resourceId: 'r1', projectId: 'p1',
+      summary: 'redeem expired agent.create',
+    });
+  });
+
+  it('US-003 AC-5: records the expired redeem event', async () => {
+    const due = request({ status: 'approved', redeem: true });
+    const b = build({ due: [due] });
+    await b.sweeper.tick(NOW);
+    expect(b.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'expired' }));
+  });
+
+  it('US-003 AC-6: ignores a redeem row redeemed before it is locked', async () => {
+    const due = request({ status: 'approved', redeem: true });
+    const b = build({ due: [due], locked: request({ status: 'executed', redeem: true }) });
+    expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, approved: 0, failed: 0 });
+    expect(b.requests.transition).not.toHaveBeenCalled();
+  });
+
   it('settles at most MAX_PER_TICK of 101 due requests in one tick', async () => {
     const due = Array.from({ length: MAX_PER_TICK + 1 }, (_, index) => request({ id: `r${String(index).padStart(3, '0')}` }));
     const b = build({ due });

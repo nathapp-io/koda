@@ -124,7 +124,7 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     // Filter BEFORE LIMIT so a large cancellation backlog cannot starve unrelated timeouts. All joins use primary keys.
     const rows = await this.prisma.client.$queryRaw<ApprovalRequest[]>`
       SELECT r.* FROM "ApprovalRequest" r
-      WHERE r."status" = 'pending' AND r."expiresAt" <= ${now}
+      WHERE (r."status" = 'pending' OR (r."status" = 'approved' AND r."redeem")) AND r."expiresAt" <= ${now}
         AND NOT EXISTS (
           SELECT 1 FROM "FleetApprovalAsk" a JOIN "FleetJob" j ON j."id" = a."jobId"
           WHERE a."requestId" = r."id" AND a."kind" = 'bash' AND j."state" <> 'RUNNING'
