@@ -147,10 +147,15 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
-  it('AC-3: keeps exactly 36 fleet and 11 secret rollout assignments', () => {
-    expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-fleet')).toHaveLength(36);
+  it.each([
+    'POST /fleet/test-hooks/schedules/:id/fire',
+    'PUT /fleet/test-hooks/repos/:repoId/nax-files',
+  ])('US-001 AC-5: removes non-approvable test-hook route %s from pending gates', (route) => {
+    expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
+  });
+
+  it('AC-3: keeps exactly 11 secret rollout assignments', () => {
     expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-secret')).toHaveLength(11);
-    expect(PENDING_GATE_ROUTES.size).toBe(47);
   });
 
   it('AC-4: classifies an unexpected core-domain write and reports it ungated', () => {

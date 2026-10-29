@@ -30,7 +30,6 @@ POST /fleet/enrollments=gate-secret
 POST /fleet/ingest/backfill=gate-fleet
 POST /fleet/ingest/jobs/:jobId/rerun=gate-fleet
 POST /fleet/ingest/rerun-outdated=gate-fleet
-POST /fleet/test-hooks/schedules/:id/fire=gate-fleet
 POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
 POST /projects/:slug/fleet/jobs=gate-fleet
 POST /projects/:slug/fleet/jobs/:id/cancel=gate-fleet
@@ -62,7 +61,6 @@ POST /threads/:id/archive=gate-fleet
 POST /threads/:id/end-session=gate-fleet
 POST /threads/:id/messages=gate-fleet
 POST /threads/:id/stop=gate-fleet
-PUT /fleet/test-hooks/repos/:repoId/nax-files=gate-fleet
 PUT /projects/:slug/knowledge/patterns=gate-fleet
 `;
 

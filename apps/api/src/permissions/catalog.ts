@@ -424,6 +424,12 @@ export function isReadKey(key: string): boolean {
   return key.slice(key.lastIndexOf('.') + 1) === 'read' || READ_ACTION_KEYS.has(key);
 }
 
+/** Test-hook permissions cannot be approved because their routes are unreachable in production. */
+export const TEST_HOOK_KEYS: ReadonlySet<string> = new Set([
+  'testhook.schedule.fire',
+  'testhook.nax-files.seed',
+]);
+
 /** Keys whose decision needs the decider's input, so nobody-asked (`none`) cannot run them. */
 const DECIDER_INPUT_KEYS: ReadonlySet<string> = new Set(['fleet.budget.override']);
 
@@ -431,7 +437,7 @@ function buildEntry(key: string): PermissionCatalogEntry {
   const access = classifyAccess(key);
   const ownable = access === 'role' && OWNABLE_KEYS.has(key);
   const risk = classifyRisk(key);
-  const approvable = access === 'role' && risk !== 'low' && !isReadKey(key);
+  const approvable = access === 'role' && risk !== 'low' && !isReadKey(key) && !TEST_HOOK_KEYS.has(key);
 
   return {
     key,

@@ -22,6 +22,10 @@ describe('validateApprovalPolicy', () => {
     expect(validateApprovalPolicy({ ...BASE, permissionPattern: 'ticket.read' })).toBe('pattern');
   });
 
+  it('US-001 AC-6: refuses a policy for non-approvable test-hook key', () => {
+    expect(validateApprovalPolicy({ ...BASE, permissionPattern: 'testhook.schedule.fire' })).toBe('pattern');
+  });
+
   it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
     'US-001 AC-10: refuses a policy for non-approvable read key %s',
     (key) => {
