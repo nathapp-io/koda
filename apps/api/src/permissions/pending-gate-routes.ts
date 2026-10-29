@@ -17,7 +17,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
 PATCH /threads/:id=gate-fleet
@@ -27,9 +26,7 @@ POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet
-POST /projects/:slug/threads/:id/archive=gate-fleet
 POST /projects/:slug/threads/:id/discard=gate-fleet
 POST /projects/:slug/threads/:id/end-session=gate-fleet
 POST /projects/:slug/threads/:id/messages=gate-fleet

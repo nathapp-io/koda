@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { ThreadRouteCommands } from './thread-route.commands';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../auth/auth.module';
 import { LiveModule } from '../../live/live.module';
@@ -18,9 +21,9 @@ import { WorkspaceThreadEventsController, WorkspaceThreadEventsGuard } from './w
 
 @Module({
   // GitBrokerModule exports GitHubAppClient, which ProjectBriefService reads the repository context with (1c-D3).
-  imports: [ProjectsModule, ProjectAccessModule, SkillsModule, FleetReposModule, ThreadStoreModule, FleetJobsModule, GitBrokerModule, AuthModule, LiveModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, ProjectsModule, ProjectAccessModule, SkillsModule, FleetReposModule, ThreadStoreModule, FleetJobsModule, GitBrokerModule, AuthModule, LiveModule],
   controllers: [WorkspaceThreadsController, WorkspaceThreadEventsController, ThreadsController, ThreadEventsController],
-  providers: [WorkspaceThreadsService, WorkspaceThreadEventsGuard, ThreadsService, ThreadEventsGuard, ProjectBriefService],
+  providers: [ThreadRouteCommands, WorkspaceThreadsService, WorkspaceThreadEventsGuard, ThreadsService, ThreadEventsGuard, ProjectBriefService],
   exports: [ThreadsService],
 })
 export class ThreadsModule {}

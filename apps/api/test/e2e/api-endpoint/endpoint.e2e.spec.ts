@@ -5856,6 +5856,53 @@ describeIntegration('project fleet decide approval lifecycle', () => {
   });
 });
 
+/** The project thread HTTP writes share the engine's immediate and deferred paths. */
+describeIntegration('project thread approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  let reader: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const path = '/api/projects/web/threads';
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    app.get<IFleetConfig>(FLEET_CFG).threadsEnabled = true;
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    reader = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'thread.create', 'thread.cap.update', 'thread.archive'], world.projectId);
+    await grantKeys(db, { type: 'AGENT', id: reader.id }, ['project.read'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+    for (const key of ['thread.create', 'thread.cap.update', 'thread.archive']) await seedWaitPolicy(db, key, world.projectId);
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+
+  it('create, cap update and archive wait, execute on approval, and refuse a keyless actor', async () => {
+    const thread = { kind: 'REPO', repoId: world.repoId, feature: 'thread-approval-e2e', title: 'Gated thread', backend: { kind: 'native', model: 'm1' } };
+    const approve = async (id: string) => data<{ status: string; result: { id: string; maxCostUsd: string; status: string } }>(await request(server())
+      .post(`/api/approvals/${id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+    refusal(await request(server()).post(path).set(auth(reader.apiKey)).send(thread).expect(403), 'permissions.40003');
+    expect(await db.approvalRequest.count()).toBe(0);
+    const create = data<{ id: string }>(await request(server()).post(path).set(auth(agent.apiKey)).send(thread).expect(202));
+    expect(await db.chatThread.count({ where: { feature: thread.feature } })).toBe(0);
+    const created = await approve(create.id);
+    expect(created.status).toBe('executed');
+    const id = created.result.id;
+    refusal(await request(server()).patch(`${path}/${id}`).set(auth(reader.apiKey)).send({ maxCostUsd: 7 }).expect(403), 'permissions.40003');
+    const patch = data<{ id: string }>(await request(server()).patch(`${path}/${id}`).set(auth(agent.apiKey)).send({ maxCostUsd: 7 }).expect(202));
+    expect((await approve(patch.id)).result.maxCostUsd).toBe('7');
+    refusal(await request(server()).post(`${path}/${id}/archive`).set(auth(reader.apiKey)).expect(403), 'permissions.40003');
+    const archive = data<{ id: string }>(await request(server()).post(`${path}/${id}/archive`).set(auth(agent.apiKey)).expect(202));
+    expect((await approve(archive.id)).result.status).toBe('ARCHIVED');
+    expect((await db.chatThread.findUniqueOrThrow({ where: { id } })).status).toBe('ARCHIVED');
+  });
+});
+
 /** Representative global and project-scoped approval-gated fleet operations. */
 describeIntegration('fleet ingest and knowledge approval endpoints', () => {
   let app: NathApplication;

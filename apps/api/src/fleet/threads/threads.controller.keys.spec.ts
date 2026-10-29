@@ -63,6 +63,6 @@ describe('ThreadsController route keys (US-002)', () => {
   it('keeps the CASL factory out of the controller: PermissionService is the authorization dependency', () => {
     const deps = Reflect.getMetadata('design:paramtypes', ThreadsController) as unknown[];
 
-    expect(deps.map((dep) => (dep as { name: string }).name)).toEqual(['ThreadsService', 'PermissionService']);
+    expect(deps.map((dep) => (dep as { name: string }).name)).toEqual(['ThreadsService', 'PermissionService', 'ApprovalRouteGate']);
   });
 });

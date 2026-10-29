@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ConfigType } from '@nestjs/config';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -17,6 +18,8 @@ import { FleetJobsService } from '../jobs/fleet-jobs.service';
 
 @Injectable()
 export class ThreadsService {
+  private readonly logger = new Logger(ThreadsService.name);
+
   constructor(
     @Inject(CHAT_THREAD_REPOSITORY) private readonly threads: ChatThreadRepository,
     @Inject(FLEET_REPO_REPOSITORY) private readonly repos: IFleetRepoRepository,
@@ -24,6 +27,7 @@ export class ThreadsService {
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly fleetJobs: FleetJobsService,
     private readonly projectBrief: ProjectBriefService,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
@@ -88,11 +92,16 @@ export class ThreadsService {
   async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {
     const jobId = await this.threads.archive({ kind: 'project', projectId }, threadId, userId, canArchive);
     if (!jobId) return;
-    try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
-    catch (error) {
-      if (!(error instanceof ConflictAppException)) throw error;
-      // The terminal transition may win after archive commits.
-    }
+    const cancel = async () => {
+      try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
+      catch (error) {
+        // The terminal transition may win after archive commits.
+        if (!(error instanceof ConflictAppException)) throw error;
+      }
+    };
+    // The archive is committed when deferred tasks run: cancellation cannot fail that commit.
+    const deferred = () => cancel().catch((error: unknown) => this.logger.warn(`archive cancel of job ${jobId} failed: ${String(error)}`));
+    if (!this.afterCommit.defer(deferred)) await cancel();
   }
 
   async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto, canOperate = false): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {

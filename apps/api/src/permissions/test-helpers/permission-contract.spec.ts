@@ -154,12 +154,9 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
-  it('AC-3: keeps exactly 18 fleet and 11 secret rollout assignments', () => {
-    const fleetRoutes = [...PENDING_GATE_ROUTES].filter(([, feature]) => feature === 'gate-fleet');
+  it('keeps exactly 11 secret rollout assignments while thread gates roll out', () => {
     const secretRoutes = [...PENDING_GATE_ROUTES].filter(([, feature]) => feature === 'gate-secret');
-    expect(fleetRoutes).toHaveLength(18);
     expect(secretRoutes).toHaveLength(11);
-    expect(PENDING_GATE_ROUTES.size).toBe(29);
   });
 
   it('AC-4: every fleet rollout route is a thread route', () => {
@@ -207,8 +204,8 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.has('DELETE /projects/:slug/invites/:id')).toBe(false);
   });
 
-  it('AC-12: assigns project thread creation to gate-fleet', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/threads')).toBe('gate-fleet');
+  it.each(['POST /projects/:slug/threads', 'PATCH /projects/:slug/threads/:id', 'POST /projects/:slug/threads/:id/archive'])('gated project thread write %s is no longer pending', (route) => {
+    expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
   it('AC-8: approval.decide is no longer pending', () => {

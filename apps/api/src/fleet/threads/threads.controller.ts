@@ -1,3 +1,8 @@
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { THREAD_ROUTE_VARIANTS } from './thread-route.commands';
+import type { ChatThreadRecord, ChatThreadDetail } from './domain/chat-thread.domain';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -32,7 +37,7 @@ import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/threads')
 export class ThreadsController {
-  constructor(private readonly threads: ThreadsService, private readonly permissions: PermissionService) {}
+  constructor(private readonly threads: ThreadsService, private readonly permissions: PermissionService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Post()
   @HttpCode(201)
@@ -41,8 +46,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Create a chat thread (thread.create)' })
   @ApiResponse({ status: 201, type: ThreadDto })
   @ApiResponse({ status: 403, description: 'thread.create is missing' })
+  @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.threads.create(ctx.project.id, principal.id, dto));
+    const outcome = await this.routeGate.run<ChatThreadRecord>({
+      key: 'thread.create', variant: THREAD_ROUTE_VARIANTS.create, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, thread: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get()
@@ -84,9 +95,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Update a chat thread cost cap (thread.cap.update: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: ThreadDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.cap.update nor created the thread' })
+  @ApprovalGated()
   async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.cap.update', ctx);
-    return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd, canOperate));
+    const outcome = await this.routeGate.run<ChatThreadRecord>({
+      key: 'thread.cap.update', variant: THREAD_ROUTE_VARIANTS.update, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/plan')
@@ -160,10 +176,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Archive a chat thread (thread.archive: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: ThreadDetailDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.archive nor created the thread' })
+  @ApprovalGated()
   async archive(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.archive', ctx);
-    await this.threads.archive(ctx.project.id, id, principal.id, canOperate);
-    return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
+    const outcome = await this.routeGate.run<ChatThreadDetail>({
+      key: 'thread.archive', variant: THREAD_ROUTE_VARIANTS.archive, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/publish')
