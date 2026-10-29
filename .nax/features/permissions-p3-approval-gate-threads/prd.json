@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-threads",
   "branchName": "feat/permissions-p3-approval-gate-threads",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T13:44:12.129Z",
+  "updatedAt": "2026-10-29T13:55:46.232Z",
   "userStories": [
     {
       "id": "US-001",
@@ -399,14 +399,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Mirrors the already established project commands and US-001 archive deferral for two workspace routes; no new engine abstraction is needed, but global/home authorization requires the security TDD override."
+        "reasoning": "Mirrors the already established project commands and US-001 archive deferral for two workspace routes; no new engine abstraction is needed, but global/home authorization requires the security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/workspace-threads.service.ts",
@@ -462,7 +465,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fef40f6f2d2b4fd264e364c882f64d7ce294d433"
     },
     {
       "id": "US-007",
