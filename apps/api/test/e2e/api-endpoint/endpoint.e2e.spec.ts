@@ -5855,3 +5855,48 @@ describeIntegration('project fleet decide approval lifecycle', () => {
     expect(await db.approvalRequest.count()).toBe(2);
   });
 });
+
+/** Representative global and project-scoped approval-gated fleet operations. */
+describeIntegration('fleet ingest and knowledge approval endpoints', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'fleet.ingest.backfill'], null);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.knowledge.patterns.update'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+
+  it('AC-7: global ingest backfill returns exactly 202 under a global wait policy', async () => {
+    const policy = await seedWaitPolicy(db, 'fleet.ingest.backfill', null);
+    try {
+      await app.get(MembershipService).invalidatePermissions();
+      await request(server()).post('/api/fleet/ingest/backfill').set(auth(agent.apiKey)).expect(202);
+    } finally {
+      await db.approvalPolicy.delete({ where: { id: policy.id } });
+      await app.get(MembershipService).invalidatePermissions();
+    }
+  });
+
+  it('AC-8: project knowledge patterns returns exactly 202 under a project wait policy', async () => {
+    const policy = await seedWaitPolicy(db, 'fleet.knowledge.patterns.update', world.projectId);
+    try {
+      await app.get(MembershipService).invalidatePermissions();
+      await request(server()).put('/api/projects/web/knowledge/patterns').set(auth(agent.apiKey))
+        .send({ patterns: ['docs/**/*.md'] }).expect(202);
+    } finally {
+      await db.approvalPolicy.delete({ where: { id: policy.id } });
+      await app.get(MembershipService).invalidatePermissions();
+    }
+  });
+});

@@ -50,6 +50,7 @@ const gatedOperations = [
   ['post', '/api/fleet/ingest/backfill'],
   ['post', '/api/fleet/ingest/jobs/{jobId}/rerun'],
   ['post', '/api/fleet/ingest/rerun-outdated'],
+  ['post', '/api/projects/{slug}/fleet/approvals/{id}/decide'],
   ['put', '/api/projects/{slug}/knowledge/patterns'],
   ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'],
   ['delete', '/api/comments/{id}'],
@@ -166,8 +167,13 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-8: 202 responses exist on exactly the gated operations', () => {
+  it('AC-5: POST /api/projects/{slug}/fleet/jobs has a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/fleet/jobs']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('AC-6: 202 responses exist on exactly the 97 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
+    expect(expected).toHaveLength(97);
     expect(operationsWith202()).toEqual(expected);
   });
 });
