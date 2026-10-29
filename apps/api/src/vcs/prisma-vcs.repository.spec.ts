@@ -13,13 +13,14 @@ describe('PrismaVcsRepository', () => {
   const mockCreate = vi.fn();
   const mockFindMany = vi.fn();
   const mockUpdate = vi.fn();
+  const mockUpdateMany = vi.fn();
   const mockCommentCreate = vi.fn();
   const mockActivityCreate = vi.fn();
   const mockQueryRaw = vi.fn();
 
   const mockPrisma = {
     client: {
-      ticket: { findFirst: mockFindFirst, create: mockCreate, update: mockUpdate },
+      ticket: { findFirst: mockFindFirst, create: mockCreate, update: mockUpdate, updateMany: mockUpdateMany },
       ticketLink: { findMany: mockFindMany, update: mockUpdate, upsert: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
       comment: { create: mockCommentCreate },
       ticketActivity: { create: mockActivityCreate },
@@ -31,7 +32,24 @@ describe('PrismaVcsRepository', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    mockTxManager.isInTransaction.mockReturnValue(false);
     repo = new PrismaVcsRepository(mockTxManager as never, mockPrisma as never);
+  });
+
+  it('refuses a connection lock outside a transaction', async () => {
+    await expect(repo.findVcsConnectionByProjectId('p1', { lock: true })).rejects.toThrow('Connection locking requires an active transaction');
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+  });
+
+  it('reads a missing connection under FOR UPDATE in the caller transaction', async () => {
+    mockTxManager.isInTransaction.mockReturnValue(true);
+    mockQueryRaw.mockResolvedValue([]);
+    expect(await repo.findVcsConnectionByProjectId('p1', { lock: true })).toBeNull();
+    const [sql, projectId] = mockQueryRaw.mock.calls[0];
+    expect(sql.join('?')).toContain('SELECT * FROM "VcsConnection" WHERE "projectId" = ? FOR UPDATE');
+    expect(projectId).toBe('p1');
+    expect(mockRun).not.toHaveBeenCalled();
   });
 
   it('createTicketFromIssue allocates next number in txManager.run', async () => {
@@ -209,6 +227,14 @@ describe('PrismaVcsRepository', () => {
       expect(mockUpdate).not.toHaveBeenCalled();
     });
 
+    it.each(['open', 'draft', 'merged'])('F1: compares the expected state under lock before writing %s', async (next) => {
+      mockQueryRaw.mockResolvedValue([{ prState: 'closed' }]);
+      await expect(repo.updateTicketLinkWithPrState('link-1', next, { expectedState: 'open' }))
+        .resolves.toEqual({ result: 'state-changed', previousState: 'closed' });
+      expect(lockedSql()).toContain('FOR UPDATE');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
     it('reports a vanished link as not-found with no previous state and no write', async () => {
       mockQueryRaw.mockResolvedValue([]);
 
@@ -218,8 +244,16 @@ describe('PrismaVcsRepository', () => {
     });
   });
 
+  it('F2: an ineligible current ticket creates no transition records', async () => {
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+    await expect(repo.applyMergedPrTransition({ ticketId: 't1', externalRef: null, prUrl: 'http://gh/pr/1', mergedBy: null, mergeSha: null })).resolves.toBe(false);
+    expect(mockUpdateMany).toHaveBeenCalledWith({ where: { id: 't1', status: 'IN_PROGRESS', deletedAt: null }, data: { status: 'VERIFY_FIX' } });
+    expect(mockCommentCreate).not.toHaveBeenCalled();
+    expect(mockActivityCreate).not.toHaveBeenCalled();
+  });
+
   it('applyMergedPrTransition writes ticket, comment and activity in txManager.run', async () => {
-    await repo.applyMergedPrTransition({
+    const transitioned = await repo.applyMergedPrTransition({
       ticketId: 't1',
       externalRef: null,
       prUrl: 'http://gh/pr/1',
@@ -228,10 +262,11 @@ describe('PrismaVcsRepository', () => {
     });
 
     expect(mockRun).toHaveBeenCalledTimes(1);
-    expect(mockUpdate).toHaveBeenCalledWith({
-      where: { id: 't1' },
+    expect(mockUpdateMany).toHaveBeenCalledWith({
+      where: { id: 't1', status: 'IN_PROGRESS', deletedAt: null },
       data: { status: 'VERIFY_FIX' },
     });
+    expect(transitioned).toBe(true);
     expect(mockCommentCreate).toHaveBeenCalled();
     expect(mockActivityCreate).toHaveBeenCalled();
   });

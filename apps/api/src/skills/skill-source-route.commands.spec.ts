@@ -13,6 +13,13 @@ describe('SkillSourceRouteCommands', () => {
     new SkillSourceRouteCommands(registry, service as unknown as SkillsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
   }
+  it.each([
+    ['skill.source.create', 'rest:admin-skill-sources.create'],
+    ['skill.source.update', 'rest:admin-skill-sources.update'],
+  ])('AC-13: registers prepare for %s / %s', (key, variant) => {
+    const { registry } = build();
+    expect(registry.get(key, variant)).toMatchObject({ key, variant, prepare: expect.any(Function) });
+  });
   it('AC-9: registers the exact deletion variant', () => {
     const { registry } = build();
     expect(registry.get('skill.source.delete', SKILL_SOURCE_ROUTE_VARIANTS.delete)).toMatchObject({ key: 'skill.source.delete', variant: 'rest:admin-skill-sources.delete' });

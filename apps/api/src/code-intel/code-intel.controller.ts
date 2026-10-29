@@ -26,7 +26,11 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { ProjectSlugFrom } from '../projects/project-slug-from.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext } from '../projects/project-context';
-import { AuditRecorder } from '../audit/audit-recorder.service';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { CODE_INTEL_ROUTE_VARIANTS } from './code-intel-route.commands';
+import type { SymbolIndexResult } from './ast-index.service';
 
 @ApiTags('code-intel')
 @ApiBearerAuth()
@@ -36,7 +40,7 @@ export class CodeIntelController {
 
   constructor(
     private readonly astIndexService: AstIndexService,
-    private readonly audit: AuditRecorder,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   @Post('index')
@@ -47,25 +51,17 @@ export class CodeIntelController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @ProjectSlugFrom('body', 'projectSlug')
   @Requires('codeintel.index.write')
+  @ApprovalGated()
   async indexCommit(
     @Body() dto: IndexCommitDto,
     @CurrentProject() ctx: ProjectContext,
   ) {
-    const result = await this.astIndexService.indexCommit(
-      dto.repoId,
-      dto.commitHash,
-      dto.files,
-      ctx.project.id,
-      (indexed) => this.audit.record({
-        key: 'codeintel.index.write',
-        resourceType: 'code-repo',
-        resourceId: dto.repoId,
-        projectId: ctx.project.id,
-        summary: `indexed ${indexed.symbolsIndexed} symbols in ${indexed.filesIndexed} files`,
-      }),
-    );
-
-    return JsonResponse.Ok(result);
+    const outcome = await this.routeGate.run<SymbolIndexResult>({
+      key: 'codeintel.index.write', variant: CODE_INTEL_ROUTE_VARIANTS.index, projectId: ctx.project.id,
+      input: { projectId: ctx.project.id, index: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get('symbols')

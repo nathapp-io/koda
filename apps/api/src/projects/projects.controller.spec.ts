@@ -139,6 +139,7 @@ describe('ProjectsController', () => {
       findByProject: vi.fn(),
       listProjectRoster: vi.fn(),
       isOnProjectRosterBySlug: vi.fn(),
+      findRosteredAgentIdentity: vi.fn().mockResolvedValue({ projectId: 'proj-1', agentId: 'agent-1' }),
       update: vi.fn(),
     } as unknown as Mocked<AgentsService>;
 
@@ -508,6 +509,26 @@ describe('ProjectsController', () => {
     const canAllow = () => permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
     const canDeny = () => permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
+    it('AC-8: gates a non-self project-agent update after proving the global key', async () => {
+      canAllow();
+      agentsService.isOnProjectRosterBySlug.mockResolvedValue(true);
+      await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal, projectCtx);
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'agent.update', variant: 'rest:project-agents.update', projectId: null,
+        input: { slug: 'alpha', agentSlug: 'bot', projectId: 'proj-1', agentId: 'agent-1', patch: { status: 'PAUSED' } }, keyCheck: false,
+      });
+    });
+
+    it('AC-9: self update bypasses permission check and approval gate', async () => {
+      agentsService.isOnProjectRosterBySlug.mockResolvedValue(true);
+      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+      const self = makeAgentPrincipal('agent-a', 'agent-a');
+      await controller.updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, self, projectCtx);
+      expect(agentsService.update).toHaveBeenCalledExactlyOnceWith('agent-a', { status: 'OFFLINE' });
+      expect(permissions.can).not.toHaveBeenCalled();
+      expect(routeGate.run).not.toHaveBeenCalled();
+    });
+
     it('US-002 AC10: updates a rostered agent status when the caller holds the key', async () => {
       canAllow();
       agentsService.isOnProjectRosterBySlug.mockResolvedValue(true);
@@ -517,8 +538,9 @@ describe('ProjectsController', () => {
 
       expect(permissions.can).toHaveBeenCalledWith(adminPrincipal, 'agent.update');
       expect(agentsService.isOnProjectRosterBySlug).toHaveBeenCalledWith('alpha', 'bot');
-      expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
-      expect((result as any).data.status).toBe('PAUSED');
+      expect(routeGate.run).toHaveBeenCalledWith(expect.objectContaining({ key: 'agent.update', variant: 'rest:project-agents.update' }));
+      expect(agentsService.update).not.toHaveBeenCalled();
+      expect((result as any).data).toEqual(mockProject);
     });
 
     it('US-001 AC-6: asks can exactly once, with exactly the two arguments (principal, agent.update)', async () => {
@@ -542,7 +564,8 @@ describe('ProjectsController', () => {
 
       expect(permissions.can).toHaveBeenCalledWith(memberPrincipal, 'agent.update');
       expect(projectsService.findBySlug).not.toHaveBeenCalled();
-      expect((result as any).data.status).toBe('PAUSED');
+      expect(routeGate.run).toHaveBeenCalledOnce();
+      expect((result as any).data).toEqual(mockProject);
     });
 
     it('US-007: refuses a caller whose can answer is denied and is not the agent, with 403 permissions', async () => {

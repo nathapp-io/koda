@@ -1,11 +1,10 @@
 import { KbDocumentDeletion } from '../rag/kb-document-deletion.service';
-import { disableEnvProxy } from '../../test/helpers/no-env-proxy';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard applied to the project-scoped routes.
  *
- * Boots a real Fastify HTTP server (mocked providers, no database) so the guard
+ * Boots a Fastify app (mocked providers, no database) and injects HTTP requests so the guard
  * runs inside Nest's real guard chain, in the same order the production app uses
  * (global guards run before controller/route guards). The principal is injected by
  * a global test guard that stands in for CombinedAuthGuard, so `@Principal()` and
@@ -15,7 +14,6 @@ import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Page } from '@nathapp/nestjs-common';
-import request from 'supertest';
 import { TicketsController } from '../tickets/tickets.controller';
 import { TicketsService } from '../tickets/tickets.service';
 import { TicketTransitionsService } from '../tickets/state-machine/ticket-transitions.service';
@@ -235,9 +233,6 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   });
 
   beforeEach(() => {
-    // Re-apply the hermetic loopback setup in this HTTP suite in case another test
-    // in the same worker restored or changed proxy variables after test-setup ran.
-    disableEnvProxy();
     vi.clearAllMocks();
 
     currentPrincipal = developerUser;
@@ -277,17 +272,17 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     // US-001: access is the key, so a caller with no source in the project is refused here.
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha/tickets');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha/tickets' });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ticketsService.findAll).not.toHaveBeenCalled();
     expect(can).toHaveBeenCalledWith(developerUser, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
   });
 
   it('AC7 boundary: GET /api/projects/:slug/tickets returns 200 for a member DEVELOPER user', async () => {
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha/tickets');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha/tickets' });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     // The route is guarded: a member is admitted only after the guard resolved the slug.
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
@@ -295,20 +290,16 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   it('AC8: POST /api/projects/:slug/tickets/:ref/assign returns 403 for a caller without project.read', async () => {
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'cuser2' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/tickets/KODA-1/assign', payload: { userId: 'cuser2' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ticketsService.assign).not.toHaveBeenCalled();
   });
 
   it('AC8 boundary: POST /api/projects/:slug/tickets/:ref/assign returns 200 for a member DEVELOPER user', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'cuser2' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/tickets/KODA-1/assign', payload: { userId: 'cuser2' } });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
@@ -331,11 +322,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     // US-001: the agent reaches the project through `project.read`, not a roster row.
     membershipRepo.isAgentOnRoster.mockResolvedValue(false);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'cuser2' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/tickets/KODA-1/assign', payload: { userId: 'cuser2' } });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
     expect(membershipRepo.isAgentOnRoster).not.toHaveBeenCalled();
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
@@ -361,11 +350,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
     membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'cuser2' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/tickets/KODA-1/assign', payload: { userId: 'cuser2' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
     expect(ticketsService.assign).not.toHaveBeenCalled();
@@ -378,16 +365,16 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   it('AC10: GET /api/projects/:slug returns 403 for a caller without project.read', async () => {
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha' });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(projectsService.findBySlug).not.toHaveBeenCalled();
   });
 
   it('AC11: GET /api/projects/:slug returns 200 for a member DEVELOPER user', async () => {
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha' });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     // The route is guarded: a member is admitted only after the guard resolved the slug.
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
@@ -397,9 +384,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     globalReaders.add(currentPrincipal.id);
     membershipRepo.findMembershipRole.mockResolvedValue(null);
 
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha' });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
@@ -415,32 +402,26 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     // US-007: a Viewer holds only `*.read`, so `kb.document.add` is refused by the key check.
     refusedKeys = new Set(['kb.document.add']);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/documents')
-      .send({ source: 'doc', sourceId: 'doc-1', content: 'hello world' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/documents', payload: { source: 'doc', sourceId: 'doc-1', content: 'hello world' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ragService.indexDocument).not.toHaveBeenCalled();
   });
 
   it('AC13: POST /api/projects/:slug/kb/documents returns a 2xx status for a member whose project role is DEVELOPER', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/documents')
-      .send({ source: 'doc', sourceId: 'doc-1', content: 'hello world' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/documents', payload: { source: 'doc', sourceId: 'doc-1', content: 'hello world' } });
 
-    expect(res.status).toBeGreaterThanOrEqual(200);
-    expect(res.status).toBeLessThan(300);
+    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    expect(res.statusCode).toBeLessThan(300);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
   it('AC12 boundary: POST /api/projects/:slug/kb/documents returns 403 for a caller without project.read', async () => {
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/documents')
-      .send({ source: 'doc', sourceId: 'doc-1', content: 'hello world' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/documents', payload: { source: 'doc', sourceId: 'doc-1', content: 'hello world' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ragService.indexDocument).not.toHaveBeenCalled();
   });
 
@@ -448,11 +429,11 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
     refusedKeys = new Set(['kb.document.delete']);
 
-    const res = await request(app.getHttpServer()).delete(
-      '/api/projects/alpha/kb/documents/doc-1',
-    );
+    const res = await app.inject({ method: 'DELETE', url: '/api/projects/alpha/kb/documents/doc-1' });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
+    expect(can).toHaveBeenCalledWith(developerUser, 'kb.document.delete', { projectId: 'proj-1' });
+    expect(app.get(ApprovalRouteGate).run).not.toHaveBeenCalled();
     expect(ragService.deleteBySource).not.toHaveBeenCalled();
   });
 
@@ -466,11 +447,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       deletedAt: null,
     });
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/import/graphify')
-      .send({ nodes: [{ id: 'n1', label: 'Foo' }], links: [] });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/import/graphify', payload: { nodes: [{ id: 'n1', label: 'Foo' }], links: [] } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ragService.importGraphify).not.toHaveBeenCalled();
   });
 
@@ -478,18 +457,16 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
     refusedKeys = new Set(['kb.optimize']);
 
-    const res = await request(app.getHttpServer()).post('/api/projects/alpha/kb/optimize');
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/optimize' });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(ragService.optimizeTable).not.toHaveBeenCalled();
   });
 
   it('AC14: POST /api/projects/:slug/kb/search returns 200 for a member whose project role is DEVELOPER', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/search')
-      .send({ query: 'auth bug' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/search', payload: { query: 'auth bug' } });
 
-    expect(res.status).toBe(200);
+    expect(res.statusCode).toBe(200);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
@@ -498,22 +475,18 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
     refusedKeys = new Set(['kb.search']);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/search')
-      .send({ query: 'auth bug' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/search', payload: { query: 'auth bug' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(hybridRetriever.search).not.toHaveBeenCalled();
   });
 
   it('AC14 boundary: POST /api/projects/:slug/kb/search returns 403 for a caller without project.read', async () => {
     refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/search')
-      .send({ query: 'auth bug' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/search', payload: { query: 'auth bug' } });
 
-    expect(res.status).toBe(403);
+    expect(res.statusCode).toBe(403);
     expect(hybridRetriever.search).not.toHaveBeenCalled();
   });
 
@@ -524,9 +497,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   it('AC17: a guarded route returns 404 when params.slug names an unknown project', async () => {
     membershipRepo.findBySlug.mockResolvedValue(null);
 
-    const res = await request(app.getHttpServer()).get('/api/projects/no-such-project/tickets');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/no-such-project/tickets' });
 
-    expect(res.status).toBe(404);
+    expect(res.statusCode).toBe(404);
     expect(ticketsService.findAll).not.toHaveBeenCalled();
   });
 
@@ -537,9 +510,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       deletedAt: new Date(),
     });
 
-    const res = await request(app.getHttpServer()).get('/api/projects/alpha');
+    const res = await app.inject({ method: 'GET', url: '/api/projects/alpha' });
 
-    expect(res.status).toBe(404);
+    expect(res.statusCode).toBe(404);
     expect(projectsService.findBySlug).not.toHaveBeenCalled();
   });
 
@@ -550,11 +523,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       deletedAt: new Date(),
     });
 
-    const res = await request(app.getHttpServer())
-      .post('/api/projects/alpha/kb/search')
-      .send({ query: 'auth bug' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/alpha/kb/search', payload: { query: 'auth bug' } });
 
-    expect(res.status).toBe(404);
+    expect(res.statusCode).toBe(404);
     expect(hybridRetriever.search).not.toHaveBeenCalled();
   });
 });

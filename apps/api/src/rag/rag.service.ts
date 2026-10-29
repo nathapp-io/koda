@@ -1,3 +1,4 @@
+import type { LanceRecord } from './lance-table-manager';
 import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaRagRepository } from './prisma-rag.repository';
@@ -22,6 +23,8 @@ export interface IndexDocumentInput {
 
 /** Operations valid only inside the project's shared LanceDB write mutex. */
 export interface KbDocumentWriteSession {
+  capturePair(source: string, sourceId: string): Promise<LanceRecord[]>;
+  restorePair(source: string, sourceId: string, rows: LanceRecord[]): Promise<void>;
   deleteBySource(source: string, sourceId: string): Promise<void>;
   findSourceRowIds(source: string, sourceId: string): Promise<string[]>;
   deleteRows(ids: readonly string[]): Promise<void>;
@@ -37,20 +40,25 @@ export class RagService {
     @Optional() private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {}
 
-  withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true }): Promise<T> {
+  withDocumentWriteLock<T>(projectId: string, work: (session: KbDocumentWriteSession) => Promise<T>, options?: { recovery: true; additionRecovery?: true }): Promise<T> {
     return this.vectorStore.withDocumentWriteLock(projectId, work, options);
+  }
+
+  blockDocumentWrites(projectId: string, blocked: boolean): void {
+    this.vectorStore.blockDocumentWrites(projectId, blocked);
   }
 
   clearProjectCaches(projectId: string): void {
     this.vectorStore.clearProjectCaches(projectId);
   }
 
-  /**
-   * Indexes a document in the knowledge base for a project.
-   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
-   */
-  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<string | null> {
-    return this.vectorStore.indexDocument(projectId, doc);
+  /** Compute the index vector before entering a deferred execution transaction. */
+  embedForIndex(content: string): Promise<number[] | null> {
+    return this.vectorStore.embedForIndex(content);
+  }
+
+  async indexDocument(projectId: string, doc: IndexDocumentInput, vector?: number[]): Promise<string | null> {
+    return this.vectorStore.indexDocument(projectId, doc, vector);
   }
 
   /**

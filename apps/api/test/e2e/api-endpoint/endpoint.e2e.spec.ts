@@ -1,3 +1,4 @@
+import { GitHubProvider } from '../../../src/vcs/providers/github.provider';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * API E2E Tests — Full lifecycle via supertest + real Postgres DB
@@ -2381,8 +2382,9 @@ describeIntegration('API Integration Tests', () => {
         })
         .expect(201);
 
-      const data = body<{ indexed: boolean }>(res);
-      expect(data.indexed).toBe(true);
+      // Human callers retain the immediate 201 result through the approval gate.
+      const data = body<{ indexed: boolean; sourceId: string }>(res);
+      expect(data).toMatchObject({ indexed: true, sourceId: 'doc-manual-001' });
       documentSourceId = 'doc-manual-001';
     });
 
@@ -3437,7 +3439,10 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ items: unknown[] }>(res)).toHaveProperty('items');
     });
 
-    it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
+    it('POST /api/admin/skills/sources — 201 for a human under wait with no approval row', async () => {
+      const db = fixtureDb(app);
+      const policy = await seedWaitPolicy(db, 'skill.source.create', null);
+      const before = await db.approvalRequest.count();
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
       const resolve = vi.spyOn(resolver, 'resolve');
       resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
@@ -3450,7 +3455,9 @@ describeIntegration('API Integration Tests', () => {
           .expect(201);
 
         expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's1' });
+        expect(await db.approvalRequest.count()).toBe(before);
       } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
         if (resolver) resolve.mockRestore();
       }
     });
@@ -3469,7 +3476,10 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('US-004 Skill source update & delete', () => {
-    it('POST /api/admin/skills/sources/:id/update — 200 with the booted app resolver spied', async () => {
+    it('POST /api/admin/skills/sources/:id/update — 200 for a human under wait with no approval row', async () => {
+      const db = fixtureDb(app);
+      const policy = await seedWaitPolicy(db, 'skill.source.update', null);
+      const before = await db.approvalRequest.count();
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
       const resolve = vi.spyOn(resolver, 'resolve');
       try {
@@ -3489,7 +3499,9 @@ describeIntegration('API Integration Tests', () => {
           .expect(200);
 
         expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's2' });
+        expect(await db.approvalRequest.count()).toBe(before);
       } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
         if (resolver) resolve.mockRestore();
       }
     });
@@ -3602,6 +3614,67 @@ describeIntegration('API Integration Tests', () => {
         .expect(200);
 
       expect(body<{ id: string; enabled: boolean }>(res)).toMatchObject({ id: skillId, enabled: true });
+    });
+
+    it('AC-9: agent project-skill enable under a wait policy answers exactly 202', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const skillId = await seedSkill(uniqueName());
+      await grantKeys(db, { type: 'AGENT', id: agentId }, ['skill.project.enable', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db, 'skill.project.enable', project.id);
+      try {
+        await request(httpServer).put(`/api/projects/${projectSlug}/skills/${skillId}`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
+    it('PUT /api/projects/:slug/skills/:skillId — human bypasses a wait policy without an approval row', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const skillId = await seedSkill(uniqueName());
+      const policy = await seedWaitPolicy(db, 'skill.project.enable', project.id);
+      const before = await db.approvalRequest.count();
+      try {
+        const res = await request(httpServer).put(`/api/projects/${projectSlug}/skills/${skillId}`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
+        expect(body<{ enabled: boolean }>(res).enabled).toBe(true);
+        expect(await db.approvalRequest.count()).toBe(before);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
+    it('AC-10: agent memory create under a wait policy answers exactly 202', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(db, { type: 'AGENT', id: agentId }, ['memory.create', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db, 'memory.create', project.id);
+      try {
+        await request(httpServer).post('/api/memory').set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ projectId: project.id, kind: 'FACT', subject: 'approval-test', predicate: 'is', object: 'gated' })
+          .expect(202);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
+    it('POST /api/code-intel/index — 201 preserves the indexing result', async () => {
+      const res = await request(httpServer).post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectSlug, repoId: 'e2e-gated-index', commitHash: 'c1', files: [{ path: 'a.ts', content: 'export function indexed() {}' }] })
+        .expect(201);
+      expect(body<{ symbolsIndexed: number; filesIndexed: number }>(res)).toMatchObject({ symbolsIndexed: 1, filesIndexed: 1 });
+    });
+
+    it('POST /api/code-intel/index — 400 rejects an invalid file', async () => {
+      await request(httpServer).post('/api/code-intel/index')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectSlug, repoId: 'e2e-invalid-index', commitHash: 'c1', files: [{ path: '', content: 42 }] })
+        .expect(400);
     });
 
     it('PUT /api/projects/:slug/skills/:skillId — 404 for an unknown skill', async () => {
@@ -5607,4 +5680,93 @@ describeIntegration('budget approval lifecycle', () => {
       expect(await db.budgetPolicy.findUnique({ where: { id } })).toBeNull();
     });
   }
+});
+
+/** Admin writes keep their response shapes and domain/transport refusals after gating. */
+describeIntegration('admin write approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['user.update', 'outbox.retry'], null);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+
+  it('user update waits, executes on approval, and still refuses self-disable', async () => {
+    await seedWaitPolicy(db, 'user.update', null);
+    const pending = data<{ id: string }>(await request(server()).patch(`/api/admin/users/${world.ids.dev}`)
+      .set(auth(agent.apiKey)).send({ disabled: true }).expect(202));
+    const decided = data<{ status: string }>(await request(server()).post(`/api/approvals/${pending.id}/decisions`)
+      .set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+    expect(decided.status).toBe('executed');
+    expect((await db.user.findUniqueOrThrow({ where: { id: world.ids.dev } })).disabled).toBe(true);
+    const refused = await request(server()).patch(`/api/admin/users/${world.ids.root}`)
+      .set(auth(world.tokens.root)).send({ disabled: true }).expect(403);
+    refusal(refused, 'users.self.40003');
+  });
+  it('outbox retry executes with empty 200 for root but rejects agent keys', async () => {
+    await seedWaitPolicy(db, 'outbox.retry', null);
+    const event = await db.outboxEvent.create({ data: { projectId: world.projectId, type: 'ticket_event', eventId: 'retry-smoke', status: 'dead' } });
+    await request(server()).post(`/api/admin/outbox/${event.id}/retry`).set(auth(agent.apiKey)).expect(401);
+    const retried = await request(server()).post(`/api/admin/outbox/${event.id}/retry`).set(auth(world.tokens.root)).expect(200);
+    expect(retried.text).toBe('');
+    expect((await db.outboxEvent.findUniqueOrThrow({ where: { id: event.id } })).status).toBe('pending');
+  });
+});
+
+
+describeIntegration('VCS manual issue sync lifecycle', () => {
+  let app: NathApplication;
+  let world: FleetHttpWorld;
+  let slug: string;
+  let sequence = 0;
+  const server = () => app.getHttpServer();
+  const root = () => ({ Authorization: `Bearer ${world.tokens.root}` });
+  const post = (suffix = '') => request(server()).post(`/api/projects/${slug}/vcs/sync${suffix}`).set(root());
+  const issue = (number: number) => ({ number, title: `Issue ${number}`, body: null, authorLogin: 'alice', url: `https://github.com/acme/manual/issues/${number}`, labels: [], createdAt: new Date() });
+  beforeAll(async () => {
+    vi.stubEnv('VCS_ENCRYPTION_KEY', 'ab'.repeat(32));
+    try {
+      await resetDb();
+      app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+      world = await seedFleetHttpWorld(server(), fixtureDb(app));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 60000);
+  beforeEach(async () => {
+    resetThrottle(app);
+    slug = `manual-sync-e2e-${++sequence}`;
+    await request(server()).post('/api/projects').set(root()).send({ slug, key: `SYNC${String.fromCharCode(64 + sequence)}`, name: 'Manual sync' }).expect(201);
+    await request(server()).post(`/api/projects/${slug}/vcs`).set(root()).send({ provider: 'github', repoOwner: 'acme', repoName: 'manual', token: 'fixture-token', syncMode: 'off' }).expect(201);
+  });
+  afterEach(() => vi.restoreAllMocks());
+  afterAll(async () => { await app?.close(); });
+  it('single import returns project-key refs and a duplicate remains 409', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssue').mockResolvedValue(issue(7));
+    expect(data(await post('/7').expect(200))).toMatchObject({ issuesSynced: 1, tickets: [{ ref: `SYNC${String.fromCharCode(64 + sequence)}-1`, title: 'Issue 7' }] });
+    await post('/7').expect(409);
+  });
+  it('PR sync returns only updated and a removed connection remains 404', async () => {
+    const syncPr = () => request(server()).post(`/api/projects/${slug}/vcs/sync-pr`).set(root());
+    expect(data(await syncPr().expect(200))).toEqual({ updated: 0 });
+    await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
+    await syncPr().expect(404);
+  });
+  it('full import returns a summary and a removed connection remains 404', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(8)], cursor: null, capped: false });
+    expect(data(await post().expect(200))).toMatchObject({ issuesSynced: 1, issuesSkipped: 0, tickets: [{ title: 'Issue 8' }] });
+    await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
+    await post().expect(404);
+  });
 });

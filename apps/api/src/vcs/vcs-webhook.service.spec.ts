@@ -608,6 +608,17 @@ describe('VcsWebhookService — prState change detection (review B1)', () => {
     }));
   });
 
+  it('acknowledges a shared state-changed outcome without an audit entry', async () => {
+    const { service, record, module } = await handle({ result: 'state-changed', previousState: 'closed' });
+    try {
+      expect(await service.handleWebhook(createMockConnection(), 'pull_request', pullRequest('reopened')))
+        .toEqual({ success: true, ignored: true, reason: 'PR state changed concurrently' });
+      expect(record).not.toHaveBeenCalled();
+    } finally {
+      await module.close();
+    }
+  });
+
   it('records nothing when the write replaced the state it targeted', async () => {
     const { service, record, module } = await handle({ result: 'updated', previousState: 'closed' });
 

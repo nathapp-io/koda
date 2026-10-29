@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
-import type { Ticket, VcsSyncLog } from '../generated/prisma/client';
+import type { Ticket, VcsSyncLog, VcsConnection } from '../generated/prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { ConnectionRepo, linkMatchesConnection } from './connection-pr-match';
@@ -91,7 +91,15 @@ export class PrismaVcsRepository implements IVcsRepository {
   // VcsConnection
   // ---------------------------------------------------------------------------
 
-  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionDomain | null> {
+  async findVcsConnectionByProjectId(projectId: string, options?: { lock: boolean }): Promise<VcsConnectionDomain | null> {
+    if (options?.lock) {
+      // The caller owns the transaction, keeping this lock through drift validation and all writes.
+      if (!this.txManager.isInTransaction()) throw new Error('Connection locking requires an active transaction');
+      const rows = await this.db.$queryRaw<VcsConnection[]>`
+        SELECT * FROM "VcsConnection" WHERE "projectId" = ${projectId} FOR UPDATE
+      `;
+      return rows[0] ? this.toConnectionDomain(rows[0]) : null;
+    }
     const m = await this.db.vcsConnection.findUnique({ where: { projectId } });
     return m ? this.toConnectionDomain(m) : null;
   }
@@ -293,7 +301,7 @@ export class PrismaVcsRepository implements IVcsRepository {
    * not lost. `count === 0` used to be ambiguous (already merged vs deleted); the locked read answers
    * it, so a vanished link is never reported as already merged.
    */
-  async updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteOutcome> {
+  async updateTicketLinkWithPrState(id: string, prState: string, options?: { expectedState: string | null }): Promise<PrStateWriteOutcome> {
     return this.txManager.run(async () => {
       const rows = await this.db.$queryRaw<Array<{ prState: string | null }>>`
         SELECT "prState" FROM "TicketLink" WHERE "id" = ${id} FOR UPDATE`;
@@ -301,6 +309,7 @@ export class PrismaVcsRepository implements IVcsRepository {
 
       const previousState = rows[0].prState;
       if (previousState === 'merged') return { result: 'already-merged' as const, previousState };
+      if (options && previousState !== options.expectedState) return { result: 'state-changed' as const, previousState };
 
       const write = () => this.db.ticketLink.update({ where: { id }, data: { prState, prUpdatedAt: new Date() } });
       if (previousState === prState) await bookkeeping('vcs.pr-same-state', write);
@@ -315,12 +324,15 @@ export class PrismaVcsRepository implements IVcsRepository {
    * - Create a FIX_REPORT comment
    * - Log a VCS_PR_MERGED activity
    */
-  async applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void> {
-    await this.txManager.run(async () => {
-      await this.db.ticket.update({
-        where: { id: input.ticketId },
+  async applyMergedPrTransition(input: MergedPrTransitionInput): Promise<boolean> {
+    return this.txManager.run(async () => {
+      // The conditional update takes the ticket row lock and rechecks eligibility against the
+      // current version, not the ticket snapshot from before provider fetching.
+      const changed = await this.db.ticket.updateMany({
+        where: { id: input.ticketId, status: TicketStatus.IN_PROGRESS, deletedAt: null },
         data: { status: TicketStatus.VERIFY_FIX },
       });
+      if (changed.count === 0) return false;
 
       const mergeAuthor = input.mergedBy ?? 'unknown';
       const mergeSha = input.mergeSha ?? 'unknown';
@@ -348,6 +360,7 @@ export class PrismaVcsRepository implements IVcsRepository {
           newValue: prInfo,
         },
       });
+      return true;
     });
   }
 

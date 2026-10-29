@@ -21,6 +21,7 @@ import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 export class UpdateCapabilitiesDto {
   @ApiProperty({ example: ['typescript', 'nestjs'] })
@@ -40,6 +41,7 @@ export class AgentsService {
     // service asks the one permission decision point. Required, and before the two optional seams.
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -214,6 +216,45 @@ export class AgentsService {
     return this.agentRepo.isOnProjectRoster(agent.id, project.id);
   }
 
+  async findRosteredAgentIdentity(projectSlug: string, agentSlug: string): Promise<{ projectId: string; agentId: string }> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!project || project.deletedAt || !agent || !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+      throw new NotFoundAppException({}, 'projectAgents');
+    }
+    return { projectId: project.id, agentId: agent.id };
+  }
+
+  async updateRosteredAgent(
+    projectSlug: string,
+    agentSlug: string,
+    updateData: UpdateAgentDto,
+    expectedProjectId: string,
+    expectedAgentId: string,
+  ): Promise<AgentResponseDto> {
+    return this.txManager.run(async () => {
+      const project = await this.agentRepo.findProjectBySlug(projectSlug);
+      if (!project || project.deletedAt || project.id !== expectedProjectId) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+      await this.agentRepo.lockProjectAgents(project.id);
+      const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+      if (!agent || agent.id !== expectedAgentId || !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+      const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
+      if (updateData.name !== undefined) data.name = updateData.name;
+      if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
+      if (updateData.status !== undefined) data.status = updateData.status;
+      const updated = await this.audit.audited(
+        () => this.agentRepo.updateById(expectedAgentId, data),
+        (result) => ({ key: 'agent.update', resourceType: 'agent', resourceId: result.id, projectId: null, summary: fieldsSummary(data) }),
+      );
+      await this.invalidateAfterCommit(updated.id);
+      return AgentResponseDto.from(updated);
+    });
+  }
+
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
     const existing = await this.agentRepo.findBySlugScalar(slug);
     if (!existing) throw new NotFoundAppException({}, 'agents');
@@ -227,7 +268,25 @@ export class AgentsService {
       () => this.agentRepo.update(slug, data),
       (agent) => ({ key: 'agent.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: fieldsSummary(data) }),
     );
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
+    await this.invalidateAfterCommit(updated.id);
+    return AgentResponseDto.from(updated);
+  }
+
+  /** Approval requests bind to an immutable id, never a potentially reused slug. */
+  async updateById(agentId: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
+    const existing = await this.agentRepo.findByIdScalar(agentId);
+    if (!existing) throw new NotFoundAppException({}, 'agents');
+
+    const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
+    if (updateData.name !== undefined) data.name = updateData.name;
+    if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
+    if (updateData.status !== undefined) data.status = updateData.status;
+
+    const updated = await this.audit.audited(
+      () => this.agentRepo.updateById(agentId, data),
+      (agent) => ({ key: 'agent.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: fieldsSummary(data) }),
+    );
+    await this.invalidateAfterCommit(updated.id);
     return AgentResponseDto.from(updated);
   }
 
@@ -241,7 +300,7 @@ export class AgentsService {
 
     // Return updated agent with capabilities
     const updated = await this.agentRepo.findById(agentId);
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    await this.invalidateAfterCommit(agentId);
     return AgentResponseDto.from(updated);
   }
 
@@ -273,8 +332,13 @@ export class AgentsService {
       },
       (deleted) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: deleted.id, projectId: null, summary: `deleted ${deleted.slug}` }),
     ));
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${id}`);
+    await this.invalidateAfterCommit(id);
     return AgentResponseDto.from(agent);
+  }
+
+  private async invalidateAfterCommit(agentId: string): Promise<void> {
+    const task = async () => this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    if (!this.afterCommit.defer(task)) await task();
   }
 
   private static readonly PRIORITY_RANK: Record<string, number> = {

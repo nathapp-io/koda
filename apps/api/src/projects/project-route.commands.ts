@@ -8,11 +8,14 @@ import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { AgentsService } from '../agents/agents.service';
+import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 
 export const PROJECT_ROUTE_VARIANTS = {
   create: 'rest:projects.create',
   update: 'rest:projects.update',
   delete: 'rest:projects.delete',
+  updateAgent: 'rest:project-agents.update',
 } as const;
 
 @Injectable()
@@ -21,6 +24,7 @@ export class ProjectRouteCommands implements OnModuleInit {
     private readonly commands: ApprovalCommandRegistry,
     private readonly service: ProjectsService,
     private readonly loader: ActorPrincipalLoader,
+    private readonly agents: AgentsService,
   ) {}
 
   onModuleInit(): void {
@@ -41,6 +45,17 @@ export class ProjectRouteCommands implements OnModuleInit {
         return { slug, patch };
       },
       run: async (_principal, input) => this.service.update(input.slug, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ slug: string; agentSlug: string; projectId: string; agentId: string; patch: UpdateAgentDto }, Awaited<ReturnType<AgentsService['update']>>>({
+      key: 'agent.update', variant: PROJECT_ROUTE_VARIANTS.updateAgent,
+      parse: (input) => {
+        const { slug, agentSlug } = parseRouteInput(input, ['slug', 'agentSlug']);
+        const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        const { projectId, agentId } = parseRouteInput(source, ['projectId', 'agentId']);
+        return { slug, agentSlug, projectId, agentId, patch: parseBody(UpdateAgentDto, source.patch ?? {}) };
+      },
+      run: async (_principal, input) => this.agents.updateRosteredAgent(input.slug, input.agentSlug, input.patch, input.projectId, input.agentId),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ projectId: string }, null>({

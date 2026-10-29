@@ -12,9 +12,10 @@ describe('ProjectRouteCommands', () => {
       create: vi.fn().mockResolvedValue(result),
       update: vi.fn().mockResolvedValue(result),
       softDeleteById: vi.fn().mockResolvedValue(result),
+      updateRosteredAgent: vi.fn().mockResolvedValue(result),
     };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
-    new ProjectRouteCommands(registry, service as unknown as ProjectsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new ProjectRouteCommands(registry, service as unknown as ProjectsService, loader as unknown as ActorPrincipalLoader, service as never).onModuleInit();
     return { registry, service, loader, result };
   }
   it('refuses secret-bearing input before it can be frozen or serialized', () => {
@@ -25,6 +26,18 @@ describe('ProjectRouteCommands', () => {
       expect(() => command.parse({ slug: 'alpha', patch: { ciWebhookToken } })).toThrow(ValidationAppException);
     }
     expect(command.parse({ slug: 'alpha', patch: { name: 'Safe' } })).toEqual({ slug: 'alpha', patch: { name: 'Safe' } });
+  });
+  it('AC-7: registers the rostered agent update command', () => {
+    const { registry } = build();
+    expect(registry.get('agent.update', PROJECT_ROUTE_VARIANTS.updateAgent)).toMatchObject({ key: 'agent.update' });
+  });
+  it('AC-10: command rechecks roster and calls updateRosteredAgent', async () => {
+    const { registry, service } = build();
+    const command = registry.get('agent.update', PROJECT_ROUTE_VARIANTS.updateAgent);
+    if (!command) throw new Error('Missing command');
+    const input = command.parse({ slug: 'alpha', agentSlug: 'bot', projectId: 'p1', agentId: 'a1', patch: { status: 'PAUSED' } });
+    await command.execute(input);
+    expect(service.updateRosteredAgent).toHaveBeenCalledExactlyOnceWith('alpha', 'bot', { status: 'PAUSED' }, 'p1', 'a1');
   });
   it('AC-8: registers create, update and delete variants', () => {
     const { registry } = build();

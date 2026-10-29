@@ -31,25 +31,37 @@ export class AdminSkillsController {
   @Post()
   @HttpCode(201)
   @Requires('skill.source.create')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Register and resolve a public GitHub skill source (global admin)' })
   @ApiResponse({ status: 201, type: SkillSourceDto })
   @ApiResponse({ status: 400, description: 'Invalid source URL or request' })
   @ApiResponse({ status: 403, description: 'Global admin required' })
   @ApiResponse({ status: 409, description: 'Source or skill name already registered' })
-  async create(@Body() dto: CreateSkillSourceDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(SkillSourceDto.fromDomain(await this.skills.createSource(dto, principal)));
+  async create(@Body() dto: CreateSkillSourceDto, @Principal() _principal: KodaPrincipal) {
+    const outcome = await this.routeGate.run<SkillSourceDto>({
+      key: 'skill.source.create', variant: SKILL_SOURCE_ROUTE_VARIANTS.create,
+      projectId: null, input: { source: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/update')
   @HttpCode(200)
   @Requires('skill.source.update')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Re-resolve a registered skill source (global admin)' })
   @ApiResponse({ status: 200, type: SkillSourceDto })
   @ApiResponse({ status: 403, description: 'Global admin required' })
   @ApiResponse({ status: 404, description: 'Skill source not found' })
   @ApiResponse({ status: 409, description: 'Skill name already registered by another source' })
   async update(@Param('id') id: string) {
-    return JsonResponse.Ok(SkillSourceDto.fromDomain(await this.skills.updateSource(id)));
+    const outcome = await this.routeGate.run<SkillSourceDto>({
+      key: 'skill.source.update', variant: SKILL_SOURCE_ROUTE_VARIANTS.update,
+      projectId: null, input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':id')

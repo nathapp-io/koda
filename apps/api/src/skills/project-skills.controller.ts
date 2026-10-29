@@ -1,3 +1,7 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { PROJECT_SKILL_ROUTE_VARIANTS } from './project-skill-route.commands';
 import { Controller, Delete, Get, HttpCode, Param, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -17,7 +21,7 @@ import { SkillsService } from './skills.service';
 @ApiParam({ name: 'slug', description: 'Project slug' })
 @UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class ProjectSkillsController {
-  constructor(private readonly skills: SkillsService) {}
+  constructor(private readonly skills: SkillsService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @Requires('skill.project.read')
@@ -33,6 +37,7 @@ export class ProjectSkillsController {
 
   @Put(':skillId')
   @Requires('skill.project.enable')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Enable a catalog skill for this project' })
   @ApiResponse({ status: 200, type: ProjectSkillDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -41,15 +46,20 @@ export class ProjectSkillsController {
   async enable(
     @Param('skillId') skillId: string,
     @CurrentProject() ctx: ProjectContext,
-    @Principal() principal: KodaPrincipal,
+    @Principal() _principal: KodaPrincipal,
   ) {
-    const skill = await this.skills.enableProjectSkill(ctx.project.id, skillId, principal.id);
-    return JsonResponse.Ok(ProjectSkillDto.fromDomain(skill));
+    const outcome = await this.routeGate.run<ProjectSkillDto>({
+      key: 'skill.project.enable', variant: PROJECT_SKILL_ROUTE_VARIANTS.enable, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, skillId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':skillId')
   @HttpCode(204)
   @Requires('skill.project.disable')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Disable a catalog skill for this project' })
   @ApiResponse({ status: 204, description: 'Skill disabled' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -59,6 +69,10 @@ export class ProjectSkillsController {
     @Param('skillId') skillId: string,
     @CurrentProject() ctx: ProjectContext,
   ): Promise<void> {
-    await this.skills.disableProjectSkill(ctx.project.id, skillId);
+    const outcome = await this.routeGate.run({
+      key: 'skill.project.disable', variant: PROJECT_SKILL_ROUTE_VARIANTS.disable, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, skillId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
   }
 }

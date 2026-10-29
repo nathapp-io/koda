@@ -235,6 +235,7 @@ export class ProjectsController {
   // US-001: the key is the global `agent.update` — the project-scoped `project.agent.update` is
   // folded into it, so a Project Admin no longer edits an agent's global record from here.
   @Requires('agent.update', { enforcedBy: 'service' })
+  @ApprovalGated()
   @ApiOperation({ summary: 'Update an agent status within a project context (the global agent.update key, or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -262,17 +263,26 @@ export class ProjectsController {
       throw new NotFoundAppException({}, 'projectAgents');
     }
 
-    // US-007: the old `isAdmin || isSelf` pair becomes one key-or-self refusal. US-001: the key is
-    // the global `agent.update`, so only a global Owner or Admin may change another agent; an agent
-    // may always update itself (graceful OFFLINE shutdown). `ctx` stays in the signature — the route
-    // is project-scoped — but the global key is asked without a project context.
-    const isAdmin = (await this.permissions.can(principal, 'agent.update')).allowed;
-    const isSelf = isAgentPrincipal(principal) && principal.slug === agentSlug;
-    if (!isAdmin && !isSelf) {
+    // Self shutdown is unconditional after roster validation and must never wait on approval.
+    if (isAgentPrincipal(principal) && principal.slug === agentSlug) {
+      return JsonResponse.Ok(await this.agentsService.update(agentSlug, updateDto));
+    }
+
+    // The action key is global; check it before entering the gate.
+    if (!(await this.permissions.can(principal, 'agent.update')).allowed) {
       throw new ForbiddenAppException({}, 'permissions');
     }
 
-    const data = await this.agentsService.update(agentSlug, updateDto);
-    return JsonResponse.Ok(data);
+    const patch = parseBody(UpdateAgentDto, updateDto ?? {});
+    const identity = await this.agentsService.findRosteredAgentIdentity(slug, agentSlug);
+    const outcome = await this.routeGate.run({
+      key: 'agent.update',
+      variant: PROJECT_ROUTE_VARIANTS.updateAgent,
+      projectId: null,
+      input: { slug, agentSlug, projectId: identity.projectId, agentId: identity.agentId, patch },
+      keyCheck: false,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

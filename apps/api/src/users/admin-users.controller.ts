@@ -6,6 +6,10 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { USER_ROUTE_VARIANTS } from './user-route.commands';
 import { UsersAdminService } from './users-admin.service';
 import { ListUsersQuery } from './dto/list-users.query';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -19,7 +23,7 @@ import { UserAdminDto } from './dto/user-admin.dto';
 @ApiBearerAuth()
 @Controller('admin/users')
 export class AdminUsersController {
-  constructor(private readonly users: UsersAdminService) {}
+  constructor(private readonly users: UsersAdminService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @UseGuards(RequiresGuard)
@@ -46,6 +50,7 @@ export class AdminUsersController {
   }
 
   @Patch(':id')
+  @ApprovalGated()
   @UseGuards(RequiresGuard)
   @Requires('user.update')
   @ApiOperation({ summary: 'Change a user\'s global role or disable/enable them (global admin)' })
@@ -53,7 +58,11 @@ export class AdminUsersController {
   @ApiResponse({ status: 403, description: 'Forbidden - user.update is missing, or the caller cannot demote or disable themselves' })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'Would leave no active global admin' })
-  async update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.users.update(principal.id, id, dto));
+  async update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Principal() _principal: KodaPrincipal) {
+    const outcome = await this.routeGate.run<UserAdminDto>({
+      key: 'user.update', variant: USER_ROUTE_VARIANTS.update, projectId: null, input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

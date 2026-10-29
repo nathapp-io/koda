@@ -1,1026 +1,229 @@
-import type { Mock, Mocked } from 'vitest';
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
+import { MemoryWriteService } from './memory-write.service';
+import { MemoryRouteCommands } from './memory-route.commands';
+import { ApprovalCommandRegistry } from '../approvals/approval-command.registry';
+import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
+import { ApprovalRouteGate, type RouteGateCall } from '../approvals/route/approval-route-gate';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
-import { MemoryReplaceRefusedError, MemoryWriteGuard } from './memory-write.guard';
-import { MemoryKind, ActorRole } from '../common/enums';
-import { MemoryItem } from './memory-item-repository';
+import { MemoryWriteGuard } from './memory-write.guard';
+import { MemoryKind } from '../common/enums';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { MemoryWritten } from './memory-audit';
-import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
+import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
-// Fixed timestamps: two independent makeMemoryItem() calls (e.g. the mock's
-// resolved value and the expected value in a toEqual) must be deep-equal even
-// when the wall clock advances between them, which previously caused a 1 ms
-// CI flake in this suite.
-const MEMORY_ITEM_TIMESTAMP = new Date('2026-01-01T00:00:00.000Z');
-
-const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
-  id: 'mem-1',
-  projectId: 'project-123',
-  kind: MemoryKind.FACT,
-  subject: 'ticket:1',
-  predicate: 'status',
-  object: 'active',
-  status: 'active',
-  confidence: 0.9,
-  createdAt: new Date(MEMORY_ITEM_TIMESTAMP),
-  updatedAt: new Date(MEMORY_ITEM_TIMESTAMP),
-  ...overrides,
+const makePrincipal = (id = 'user-1'): UserPrincipal => ({
+  actorType: 'user', id, name: undefined, blacklisted: false, revoked: false,
+  authorities: [], role: 'ADMIN' as UserPrincipal['role'], email: `${id}@example.test`,
 });
 
-const makeUserPrincipal = (role: string): UserPrincipal => ({
-  actorType: 'user',
-  id: 'user-1',
-  name: undefined,
-  blacklisted: false,
-  revoked: false,
-  authorities: [],
-  role: role as UserPrincipal['role'],
-  email: 'test@example.com',
-});
-
-const makeAgentPrincipal = (): AgentPrincipal => ({
-  actorType: 'agent',
-  id: 'agent-1',
-  name: undefined,
-  blacklisted: false,
-  revoked: false,
-  authorities: [],
-  slug: 'my-agent',
-  status: 'ACTIVE',
-  agentRoles: ['DEVELOPER'],
-  capabilities: [],
-});
-
-const ALLOWED = { allowed: true, reason: 'granted' } as const;
-const DENIED = { allowed: false, reason: 'not-granted' } as const;
-
-describe('makeMemoryItem', () => {
-  // Guards the CI flake at memory.controller.spec.ts "allows a MEMBER-role …":
-  // two independent calls (the mock's resolved value and the expected value)
-  // must be deep-equal, so the helper cannot read the wall clock.
-  it('produces deep-equal items across calls even as time advances', () => {
-    vi.useFakeTimers();
-    try {
-      const first = makeMemoryItem();
-      vi.advanceTimersByTime(1);
-      const second = makeMemoryItem();
-      expect(second).toEqual(first);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-describe('MemoryController', () => {
-  let controller: MemoryController;
-  let extractionService: Mocked<Partial<ExtractionService>>;
-  let repository: Mocked<Partial<PrismaMemoryItemRepository>>;
-  let projectAccess: Mocked<Partial<ProjectAccessService>>;
-  let can: Mock;
-  /** Permissions P2 US-002: the recorder every write route's `onWritten` hook records through. */
-  let audit: { record: Mock };
-
-  /**
-   * Permissions P1 US-008 fixture: every project-scoped key is allowed, and the one global check the
-   * controller makes (`memory.update` with no project, the attribution grant) is refused unless a case
-   * asks for it — a project-level grant must not be mistaken for a global one.
-   */
-  let globalAttributionGranted: boolean;
-
-  const granted = (): { allowed: boolean; reason: string } => ({ ...ALLOWED });
-
-  beforeEach(async () => {
-    globalAttributionGranted = false;
-
-    extractionService = {
-      extractFromEvent: vi.fn().mockReturnValue([]),
-      recordDecision: vi.fn(),
-    };
-
-    repository = {
-      upsert: vi.fn(),
-      findActive: vi.fn().mockResolvedValue(null),
-      ticketInProject: vi.fn().mockResolvedValue(true),
-    };
-
-    projectAccess = {
-      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
-    };
-
-    can = vi.fn(async (_principal: unknown, key: string, ctx?: { projectId?: string }) => {
-      if (ctx?.projectId !== undefined) return granted();
-      return key === 'memory.update' && !globalAttributionGranted ? { ...DENIED } : granted();
-    });
-
-    const permissions = { can } as unknown as PermissionService;
-
-    // Permissions P2 US-002: a recorder whose `record` the write routes call through their `onWritten` hook.
-    audit = { record: vi.fn(async () => undefined) };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MemoryController,
-        { provide: ExtractionService, useValue: extractionService },
-        { provide: PrismaMemoryItemRepository, useValue: repository },
-        { provide: ProjectAccessService, useValue: projectAccess },
-        { provide: PermissionService, useValue: permissions },
-        { provide: AuditRecorder, useValue: audit },
-        // The real guard over the two mocks, so the cases exercise its decision rather than a stub.
-        { provide: MemoryWriteGuard, useValue: new MemoryWriteGuard(permissions, repository as PrismaMemoryItemRepository) },
-      ],
-    }).compile();
-
-    controller = module.get<MemoryController>(MemoryController);
-
-    vi.clearAllMocks();
-    (projectAccess.assertProjectMembership as Mock).mockResolvedValue(undefined);
-    (repository.findActive as Mock).mockResolvedValue(null);
-    (repository.ticketInProject as Mock).mockResolvedValue(true);
-  });
-
-  /** Refuse one project key for the rest of the case. */
-  const refuseKey = (refused: string): void => {
-    can.mockImplementation(async (_principal: unknown, key: string, ctx?: { projectId?: string }) => {
-      if (ctx?.projectId !== undefined) return key === refused ? { ...DENIED } : granted();
-      return key === 'memory.update' && !globalAttributionGranted ? { ...DENIED } : granted();
-    });
+function setupController() {
+  let activePrincipal: KodaPrincipal = makePrincipal();
+  const item = {
+    id: 'memory-1', projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p', object: 'value',
+    status: 'active', confidence: 0.8, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const extraction = {
+    extractFromEvent: vi.fn().mockReturnValue([]),
+    recordDecision: vi.fn().mockResolvedValue({ canonicalId: 'canonical-1', memoryId: 'memory-1' }),
+  };
+  const repository = {
+    upsert: vi.fn().mockResolvedValue(item),
+    findActive: vi.fn().mockResolvedValue(null),
+    ticketInProject: vi.fn().mockResolvedValue(true),
+  };
+  const projectAccess = { assertProjectMembership: vi.fn().mockResolvedValue(undefined) };
+  const permissions = {
+    can: vi.fn(async (_actor: unknown, key: string, context?: { projectId?: string; resource?: unknown }) => {
+      if (context?.resource) return { allowed: false, reason: 'not-granted' };
+      if (key === 'memory.update' && context?.projectId === undefined) return { allowed: false, reason: 'not-granted' };
+      return { allowed: true, reason: 'granted' };
+    }),
+  };
+  const writeGuard = new MemoryWriteGuard(permissions as unknown as PermissionService, repository as unknown as PrismaMemoryItemRepository);
+  const audit = { record: vi.fn().mockResolvedValue(undefined) };
+  const writes = new MemoryWriteService(
+    extraction as unknown as ExtractionService,
+    repository as unknown as PrismaMemoryItemRepository,
+    projectAccess as unknown as ProjectAccessService,
+    permissions as unknown as PermissionService,
+    writeGuard,
+    audit as unknown as AuditRecorder,
+  );
+  const registry = new ApprovalCommandRegistry();
+  const loader = { forContext: vi.fn(async () => activePrincipal) };
+  new MemoryRouteCommands(registry, writes, loader as unknown as ActorPrincipalLoader).onModuleInit();
+  const gate = {
+    run: vi.fn(async <T>(call: RouteGateCall) => {
+      const command = registry.get(call.key, call.variant);
+      if (!command) throw new Error(`missing command ${call.key}/${call.variant}`);
+      const parsed = command.parse(call.input);
+      return { status: 'executed' as const, result: await command.execute(parsed) as T };
+    }),
+  };
+  const controller = new MemoryController(writes, gate as unknown as ApprovalRouteGate);
+  const invoke = async <T>(principal: KodaPrincipal, action: () => Promise<T>): Promise<T> => {
+    activePrincipal = principal;
+    return action();
   };
 
-  describe('extractFromEvent', () => {
-    it('returns empty items when projectId is missing', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      const result = await controller.extractFromEvent({ action: 'x', data: {} } as any, principal);
-      expect(result).toEqual({ items: [] });
-      expect(can).not.toHaveBeenCalled();
+  return { controller, extraction, repository, projectAccess, permissions, audit, gate, invoke, item };
+}
+
+describe('MemoryController gated writes', () => {
+  it('AC-10 calls routeGate.run for create with the dto project and body', async () => {
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' };
+    const run = vi.fn().mockResolvedValue({ status: 'executed', result: { id: 'memory-1' } });
+    const controller = new MemoryController({} as MemoryWriteService, { run } as unknown as ApprovalRouteGate);
+
+    await controller.createMemory(input, makePrincipal());
+
+    expect(run).toHaveBeenCalledExactlyOnceWith({ key: 'memory.create', variant: 'rest:memory.create', projectId: 'p1', input: { memory: input } });
+  });
+
+  it('create executes the real write command, returns its result, and attributes ownership to the principal', async () => {
+    const { controller, repository, invoke, item } = setupController();
+    const principal = makePrincipal('writer-1');
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p', ownerId: 'forged' };
+
+    const result = await invoke(principal, () => controller.createMemory(input, principal));
+
+    expect(result).toEqual(JsonResponse.Ok(item));
+    expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'writer-1', ownerType: 'USER' }), expect.anything());
+  });
+
+  it('create honors privileged attribution and reports the exact gate call', async () => {
+    const { controller, repository, permissions, gate, invoke, item } = setupController();
+    permissions.can.mockImplementation(async () => ({ allowed: true, reason: 'granted' }));
+    const principal = makePrincipal('global-writer');
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p', ownerId: 'chosen-owner' };
+
+    const result = await invoke(principal, () => controller.createMemory(input, principal));
+
+    expect(result).toEqual(JsonResponse.Ok(item));
+    expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'chosen-owner', ownerType: null }), expect.anything());
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'memory.create', variant: 'rest:memory.create', projectId: 'p1', input: { memory: input } });
+  });
+
+  it('create records agent attribution as AGENT', async () => {
+    const { controller, repository, invoke, item } = setupController();
+    const principal: KodaPrincipal = { actorType: 'agent', id: 'agent-7', slug: 'agent-seven', status: 'ACTIVE', capabilities: [], blacklisted: false, revoked: false, authorities: [], name: undefined };
+    const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' };
+
+    const result = await invoke(principal, () => controller.createMemory(input, principal));
+
+    expect(result).toEqual(JsonResponse.Ok(item));
+    expect(repository.upsert).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'agent-7', ownerType: 'AGENT' }), expect.anything());
+  });
+
+  it('create runs replacement authorization and the audit hook through the real service', async () => {
+    const { controller, repository, permissions, audit, invoke, item } = setupController();
+    repository.upsert.mockImplementation(async (_input: unknown, options?: { beforeSupersede?: (existing: typeof item) => Promise<void>; onWritten?: (written: { item: typeof item; superseded: null }) => Promise<void> }) => {
+      await options?.beforeSupersede?.({ ...item, ownerId: 'other', ownerType: 'USER' });
+      await options?.onWritten?.({ item, superseded: null });
+      return item;
     });
+    permissions.can.mockImplementation(async (_actor, key, context) =>
+      context?.resource ? { allowed: true, reason: 'granted' } : key === 'memory.update' ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' });
+    const principal = makePrincipal();
 
-    it('throws ForbiddenAppException for a MEMBER user without project membership', async () => {
-      const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
+    await invoke(principal, () => controller.createMemory({ projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' }, principal));
 
-      await expect(
-        controller.extractFromEvent({ projectId: 'project-123', action: 'x', data: {} }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
-    });
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'memory.update', expect.objectContaining({ projectId: 'p1', resource: expect.anything() }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.create', resourceId: item.id }));
+  });
 
-    it('throws ForbiddenAppException for a VIEWER user without project membership', async () => {
-      const principal = makeUserPrincipal(ActorRole.VIEWER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
+  it('create propagates real service validation failures without writing', async () => {
+    const { controller, repository, invoke } = setupController();
+    const principal = makePrincipal();
+    await expect(invoke(principal, () => controller.createMemory({ projectId: 'p1', kind: MemoryKind.DECISION, subject: 's', predicate: 'p' }, principal)))
+      .rejects.toBeInstanceOf(ValidationAppException);
+    expect(repository.upsert).not.toHaveBeenCalled();
+  });
 
-      await expect(
-        controller.extractFromEvent({ projectId: 'project-123', action: 'x', data: {} }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
-    });
+  it('recordDecision executes the matching service method with caller attribution and passes its result through', async () => {
+    const { controller, extraction, gate, invoke } = setupController();
+    const principal = makePrincipal('decision-writer');
+    const decision = { projectId: 'p1', actorId: 'spoofed', topic: 'architecture', decision: 'keep it simple' };
 
-    it('throws the permissions 403 when the caller does not hold memory.extract', async () => {
-      const principal = makeUserPrincipal(ActorRole.VIEWER);
-      refuseKey('memory.extract');
+    const result = await invoke(principal, () => controller.recordDecision(decision, principal));
 
-      await expect(
-        controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(can).toHaveBeenCalledWith(principal, 'memory.extract', { projectId: 'project-123' });
-      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('answers 404 tickets when the event names a ticket of another project, and stores nothing', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (repository.ticketInProject as Mock).mockResolvedValue(false);
-
-      await expect(
-        controller.extractFromEvent(
-          { projectId: 'project-123', ticketId: 'ticket-of-other-project', action: 'status_changed', data: {} },
-          principal,
-        ),
-      ).rejects.toThrow(NotFoundAppException);
-
-      expect(repository.ticketInProject).toHaveBeenCalledWith('project-123', 'ticket-of-other-project');
-      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('does not read a ticket when the event names none', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-
-      await controller.extractFromEvent({ projectId: 'project-123', action: 'x', data: {} }, principal);
-
-      expect(repository.ticketInProject).not.toHaveBeenCalled();
-    });
-
-    it('allows a MEMBER-role global user who holds a project membership (any role)', async () => {
-      const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          confidence: 0.9,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', action: 'status_changed', data: {} },
-        principal,
-      );
-      expect(result.items).toHaveLength(1);
-    });
-
-    it('extracts and upserts items for ADMIN user', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      const extracted = [
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          object: 'active',
-          confidence: 0.9,
-        },
-      ];
-      (extractionService.extractFromEvent as Mock).mockReturnValue(extracted);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const event = {
-        type: 'ticket_event',
-        id: 'evt-1',
-        projectId: 'project-123',
-        actorId: 'actor-1',
-        action: 'status_changed',
-        data: { newStatus: 'active' },
-      };
-
-      const result = await controller.extractFromEvent(event, principal);
-
-      expect(extractionService.extractFromEvent).toHaveBeenCalledWith(event);
-      expect(repository.upsert).toHaveBeenCalledTimes(1);
-      expect(result.items).toHaveLength(1);
-    });
-
-    it('extracts and upserts items for DEVELOPER user', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          confidence: 0.9,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', action: 'status_changed', data: {} },
-        principal,
-      );
-      expect(result.items).toHaveLength(1);
-    });
-
-    it('allows agent principals to extract', async () => {
-      const principal = makeAgentPrincipal();
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          confidence: 0.9,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', action: 'status_changed', data: {} },
-        principal,
-      );
-      expect(result.items).toHaveLength(1);
-    });
-
-    it('returns empty items array when extraction yields no items', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([]);
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', action: 'status_changed', data: {} },
-        principal,
-      );
-      expect(result).toEqual({ items: [] });
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('H12 follow-up: extract with decision_event payload does not create a DECISION item via the HTTP route', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.DECISION,
-          subject: 'agent:victim',
-          predicate: 'decision',
-          object: 'use microservices',
-          sourceType: 'decision_event',
-          sourceId: 'evt-1',
-          confidence: 1.0,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'decision_event', action: 'decided', data: {}, agentId: 'victim' },
-        principal,
-      );
-
-      // Filtered silently — nothing persisted, nothing echoed back.
-      expect(result.items).toEqual([]);
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('H12 follow-up: extract with agent_event decision_made payload does not create a DECISION item', async () => {
-      const principal = makeAgentPrincipal();
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.DECISION,
-          subject: 'agent:victim',
-          predicate: 'decision',
-          object: 'use microservices',
-          sourceType: 'agent_event',
-          sourceId: 'evt-2',
-          confidence: 0.95,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'agent_event', action: 'decision_made', data: { decision: 'x' }, agentId: 'victim' },
-        principal,
-      );
-
-      expect(result.items).toEqual([]);
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('H12 follow-up: non-DECISION items are still extracted while DECISION items are filtered (positive control)', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      const factItem = {
-        projectId: 'project-123',
-        kind: MemoryKind.FACT,
-        subject: 'ticket:1',
-        predicate: 'status',
-        object: 'active',
-        sourceType: 'ticket_event',
-        sourceId: 'evt-3',
-        confidence: 0.9,
-      };
-      const decisionItem = {
-        projectId: 'project-123',
-        kind: MemoryKind.DECISION,
-        subject: 'agent:victim',
-        predicate: 'decision',
-        object: 'forged',
-        confidence: 1.0,
-      };
-      (extractionService.extractFromEvent as Mock).mockReturnValue([decisionItem, factItem]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'ticket_event', action: 'status_changed', data: {} },
-        principal,
-      );
-
-      expect(result.items).toEqual([factItem]);
-      expect(repository.upsert).toHaveBeenCalledTimes(1);
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: MemoryKind.FACT, ownerId: 'user-1', ownerType: 'USER' }),
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-    });
-
-    it('H12: extract uses principal.id as ownerId, not event.actorId', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          object: 'active',
-          confidence: 0.9,
-        },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      const event = {
-        type: 'ticket_event',
-        id: 'evt-1',
-        projectId: 'project-123',
-        actorId: 'victim',
-        action: 'status_changed',
-        data: { newStatus: 'active' },
-      };
-
-      await controller.extractFromEvent(event as any, principal);
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'user-1' }),
-        expect.anything(),
-      );
-      expect(repository.upsert).not.toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'victim' }),
-        expect.anything(),
-      );
-    });
-
-    it('US-008: an agent records its own items with ownerType AGENT', async () => {
-      const principal = makeAgentPrincipal();
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', confidence: 0.9 },
-      ]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal);
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'agent-1', ownerType: 'AGENT' }),
-        expect.anything(),
-      );
-    });
-
-    it('US-008: refuses the whole request (403 permissions) when an extracted item may not supersede its active item', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([
-        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', confidence: 0.9 },
-      ]);
-      (repository.findActive as Mock).mockResolvedValue(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-2' }));
-      can.mockImplementation(async (_principal: unknown, key: string, ctx?: { projectId?: string; resource?: unknown }) => {
-        if (ctx?.projectId !== undefined) {
-          return key === 'memory.update' && ctx.resource !== undefined ? { ...DENIED } : granted();
-        }
-        return { ...DENIED };
-      });
-
-      await expect(
-        controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(repository.findActive).toHaveBeenCalledWith('project-123', MemoryKind.FACT, 'ticket:1', 'status');
-      expect(repository.upsert).not.toHaveBeenCalled();
+    expect(result).toEqual(JsonResponse.Ok({ canonicalId: 'canonical-1', memoryId: 'memory-1' }));
+    expect(extraction.recordDecision).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'decision-writer', topic: 'architecture' }), expect.anything(), expect.anything());
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.decision.record', variant: 'rest:memory.decisions.record', projectId: 'p1', input: { decision },
     });
   });
 
-  describe('recordDecision', () => {
-    it('delegates to extractionService.recordDecision and returns the result', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      const writeResult = { canonicalId: 'src-1', memoryId: 'mem-1' };
-      (extractionService.recordDecision as Mock).mockResolvedValue(writeResult);
-
-      const input = {
-        projectId: 'project-123',
-        actorId: 'actor-1',
-        topic: 'architecture',
-        decision: 'use microservices',
-        rationale: 'scalability',
-        sourceId: 'src-1',
-      };
-
-      const result = await controller.recordDecision(input, principal);
-
-      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
-      expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        {
-          projectId: 'project-123',
-          actorId: 'user-1',
-          topic: 'architecture',
-          decision: 'use microservices',
-          rationale: 'scalability',
-          sourceId: 'src-1',
-          ownerType: 'USER',
-        },
-        repository,
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-      expect(result).toEqual(writeResult);
+  it('recordDecision honors privileged actor attribution and records replacement audit hooks', async () => {
+    const { controller, extraction, permissions, audit, gate, invoke } = setupController();
+    permissions.can.mockImplementation(async () => ({ allowed: true, reason: 'granted' }));
+    extraction.recordDecision.mockImplementation(async (input: unknown, _repository: unknown, options?: { beforeSupersede?: (existing: { id: string }) => Promise<void>; onWritten?: (written: { item: { id: string; kind: string }; superseded: null }) => Promise<void> }) => {
+      await options?.beforeSupersede?.({ id: 'prior-decision' });
+      await options?.onWritten?.({ item: { id: 'new-decision', kind: MemoryKind.DECISION }, superseded: null });
+      return { canonicalId: 'new-decision', memoryId: 'new-decision' };
     });
+    const principal = makePrincipal('privileged-writer');
+    const decision = { projectId: 'p1', actorId: 'chosen-actor', topic: 'architecture', decision: 'approved' };
 
-    it('throws ForbiddenAppException for MEMBER user without project membership', async () => {
-      const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
+    const result = await invoke(principal, () => controller.recordDecision(decision, principal));
 
-      await expect(
-        controller.recordDecision(
-          { projectId: 'project-123', topic: 't', decision: 'd' },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(extractionService.recordDecision).not.toHaveBeenCalled();
-      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
+    expect(result).toEqual(JsonResponse.Ok({ canonicalId: 'new-decision', memoryId: 'new-decision' }));
+    expect(extraction.recordDecision).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'chosen-actor', ownerType: null }), expect.anything(), expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.decision.record', resourceId: 'new-decision' }));
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'memory.update', expect.objectContaining({ projectId: 'p1', resource: expect.anything() }));
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'memory.decision.record', variant: 'rest:memory.decisions.record', projectId: 'p1', input: { decision } });
+  });
+
+  it('recordDecision propagates a real service failure', async () => {
+    const { controller, extraction, invoke } = setupController();
+    const principal = makePrincipal();
+    const failure = new Error('decision write failed');
+    extraction.recordDecision.mockRejectedValue(failure);
+    await expect(invoke(principal, () => controller.recordDecision({ projectId: 'p1', topic: 't', decision: 'd' }, principal)))
+      .rejects.toBe(failure);
+  });
+
+  it('extract filters decision items, persists facts and records its audit hook through the real service', async () => {
+    const { controller, extraction, repository, audit, gate, invoke, item } = setupController();
+    const fact = { projectId: 'p1', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'open', confidence: 0.9 };
+    const decision = { projectId: 'p1', kind: MemoryKind.DECISION, subject: 'agent:victim', predicate: 'decision', object: 'forged', confidence: 1 };
+    extraction.extractFromEvent.mockReturnValue([decision, fact]);
+    repository.upsert.mockImplementation(async (_input: unknown, options?: { onWritten?: (written: { item: typeof item; superseded: null }) => Promise<void> }) => {
+      await options?.onWritten?.({ item, superseded: null });
+      return item;
     });
+    const principal = makePrincipal();
 
-    it('throws the permissions 403 when the caller does not hold memory.decision.record', async () => {
-      const principal = makeUserPrincipal(ActorRole.VIEWER);
-      refuseKey('memory.decision.record');
+    const result = await invoke(principal, () => controller.extractFromEvent({ projectId: 'p1', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} }, principal));
 
-      await expect(
-        controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(can).toHaveBeenCalledWith(principal, 'memory.decision.record', { projectId: 'project-123' });
-      expect(extractionService.recordDecision).not.toHaveBeenCalled();
-    });
-
-    it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-      await expect(
-        controller.recordDecision(
-          { projectId: 'project-other', topic: 't', decision: 'd' },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(extractionService.recordDecision).not.toHaveBeenCalled();
-    });
-
-    it('ignores a non-admin-supplied actorId and records the decision as the caller', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
-
-      await controller.recordDecision(
-        { projectId: 'project-123', actorId: 'someone-else', topic: 't', decision: 'd' },
-        principal,
-      );
-
-      expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        expect.objectContaining({ actorId: 'user-1', ownerType: 'USER' }),
-        repository,
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-    });
-
-    it('honors an actorId for a caller holding the global memory.update grant, stored with no owner type', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      globalAttributionGranted = true;
-      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
-
-      await controller.recordDecision(
-        { projectId: 'project-123', actorId: 'attributed-actor', topic: 't', decision: 'd' },
-        principal,
-      );
-
-      expect(can).toHaveBeenCalledWith(principal, 'memory.update');
-      expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        expect.objectContaining({ actorId: 'attributed-actor', ownerType: null }),
-        repository,
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-    });
-
-    it('US-008: answers the permissions 403 when the store refuses the supersede', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.recordDecision as Mock).mockRejectedValue(new MemoryReplaceRefusedError('mem-9'));
-
-      await expect(
-        controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
+    expect(result).toEqual(JsonResponse.Ok({ items: [fact] }));
+    expect(repository.upsert).toHaveBeenCalledTimes(1);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.extract', resourceId: item.id }));
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.extract', variant: 'rest:memory.extract', projectId: 'p1', input: { event: { projectId: 'p1', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} } },
     });
   });
 
-  describe('createMemory', () => {
-    it('creates a memory item for ADMIN user', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      const created = makeMemoryItem();
-      (repository.upsert as Mock).mockResolvedValue(created);
-
-      const input = {
-        projectId: 'project-123',
-        kind: MemoryKind.FACT,
-        subject: 'ticket:1',
-        predicate: 'status',
-        object: 'active',
-      };
-
-      const result = await controller.createMemory(input, principal);
-
-      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          object: 'active',
-          sourceType: 'manual',
-          confidence: 0.8,
-          ownerId: 'user-1',
-          ownerType: 'USER',
-        }),
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-      expect(result).toEqual(created);
-    });
-
-    it('throws the permissions 403 when the caller does not hold memory.create', async () => {
-      const principal = makeUserPrincipal(ActorRole.VIEWER);
-      refuseKey('memory.create');
-
-      await expect(
-        controller.createMemory(
-          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(can).toHaveBeenCalledWith(principal, 'memory.create', { projectId: 'project-123' });
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('throws ForbiddenAppException for MEMBER user without project membership', async () => {
-      const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(
-        controller.createMemory(
-          {
-            projectId: 'project-123',
-            kind: MemoryKind.FACT,
-            subject: 'ticket:1',
-            predicate: 'status',
-          },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(repository.upsert).not.toHaveBeenCalled();
-      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
-    });
-
-    it('throws ForbiddenAppException for VIEWER user without project membership', async () => {
-      const principal = makeUserPrincipal(ActorRole.VIEWER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(
-        controller.createMemory(
-          {
-            projectId: 'project-123',
-            kind: MemoryKind.FACT,
-            subject: 'ticket:1',
-            predicate: 'status',
-          },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('allows a MEMBER-role global user who holds a project DEVELOPER membership (resolves lockout)', async () => {
-      const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      // With a ProjectMember row (mock membership check passes), a user whose
-      // GLOBAL role is only MEMBER may write memory to the project.
-      const result = await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-        },
-        principal,
-      );
-
-      expect(result).toEqual(makeMemoryItem());
-      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
-    });
-
-    it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-      await expect(
-        controller.createMemory(
-          {
-            projectId: 'project-other',
-            kind: MemoryKind.FACT,
-            subject: 'ticket:1',
-            predicate: 'status',
-          },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('uses provided ownerId for a caller holding the global memory.update grant, with no owner type', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      globalAttributionGranted = true;
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          ownerId: 'custom-owner',
-        },
-        principal,
-      );
-
-      expect(can).toHaveBeenCalledWith(principal, 'memory.update');
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'custom-owner', ownerType: null }),
-        expect.anything(),
-      );
-    });
-
-    it('H12: generic POST forces ownerId to principal for non-admin users', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          ownerId: 'victim',
-        },
-        principal,
-      );
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: principal.id, ownerType: 'USER' }),
-        expect.anything(),
-      );
-      expect(repository.upsert).not.toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'victim' }),
-        expect.anything(),
-      );
-    });
-
-    it('H12: generic POST forces ownerId to principal for agents too', async () => {
-      const principal = makeAgentPrincipal();
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          ownerId: 'victim',
-        },
-        principal,
-      );
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'agent-1', ownerType: 'AGENT' }),
-        expect.anything(),
-      );
-    });
-
-    it('H12: generic POST rejects kind=DECISION with a validation error pointing at /decisions', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-
-      await expect(
-        controller.createMemory(
-          {
-            projectId: 'project-123',
-            kind: MemoryKind.DECISION,
-            subject: 'agent:victim',
-            predicate: 'p',
-            object: 'o',
-          },
-          principal,
-        ),
-      ).rejects.toThrow(ValidationAppException);
-      expect(repository.upsert).not.toHaveBeenCalled();
-    });
-
-    it('uses provided confidence over default 0.8', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-          confidence: 0.5,
-        },
-        principal,
-      );
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ confidence: 0.5 }),
-        expect.anything(),
-      );
-    });
-
-    it('allows agent principals to create memory', async () => {
-      const principal = makeAgentPrincipal();
-      const created = makeMemoryItem();
-      (repository.upsert as Mock).mockResolvedValue(created);
-
-      const result = await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-        },
-        principal,
-      );
-
-      expect(result).toEqual(created);
-    });
-
-    it('US-008: answers the permissions 403 when the store refuses the supersede', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (repository.upsert as Mock).mockRejectedValue(new MemoryReplaceRefusedError('mem-9'));
-
-      await expect(
-        controller.createMemory(
-          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
-          principal,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
-
-    it('US-008: hands the upsert the guard\'s replace check for its own transaction', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.createMemory(
-        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
-        principal,
-      );
-
-      const options = (repository.upsert as Mock).mock.calls[0][1] as { beforeSupersede: (item: MemoryItem) => Promise<void> };
-      // The check reads the same key the guard reads: another principal's item is refused.
-      can.mockImplementation(async (_principal: unknown, key: string, ctx?: { resource?: { createdBy?: { id: string } | null } }) => {
-        if (key !== 'memory.update') return granted();
-        const creator = ctx?.resource?.createdBy;
-        return creator && creator.id !== 'user-1' ? { ...DENIED } : granted();
-      });
-
-      await expect(options.beforeSupersede(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-2' })))
-        .rejects.toBeInstanceOf(MemoryReplaceRefusedError);
-      await expect(options.beforeSupersede(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-1' })))
-        .resolves.toBeUndefined();
-    });
+  it('extract propagates ticket validation failures from the real service', async () => {
+    const { controller, repository, invoke } = setupController();
+    repository.ticketInProject.mockResolvedValue(false);
+    const principal = makePrincipal();
+    await expect(invoke(principal, () => controller.extractFromEvent({ projectId: 'p1', ticketId: 'foreign', action: 'status_changed', data: {} }, principal)))
+      .rejects.toBeInstanceOf(NotFoundAppException);
+    expect(repository.upsert).not.toHaveBeenCalled();
   });
 
-  // -------------------------------------------------------------------------
-  // Permissions P2 US-002 — every write route hands the upsert an audit hook
-  // -------------------------------------------------------------------------
-
-  describe('audit entries (US-002)', () => {
-    interface UpsertOptions { onWritten?: (written: MemoryWritten) => Promise<void> }
-
-    /** The `upsert` mock: it answers the created item, and runs the caller's `onWritten` like the repository. */
-    const upsertRunningHook = (): void => {
-      (repository.upsert as Mock).mockImplementation(
-        async (_input: unknown, options?: UpsertOptions): Promise<MemoryItem> => {
-          const item = makeMemoryItem({ id: 'mem-created' });
-          await options?.onWritten?.({ item, superseded: null });
-          return item;
-        },
-      );
-    };
-
-    const extractedFact = {
-      projectId: 'project-123',
-      kind: MemoryKind.FACT,
-      subject: 'ticket:1',
-      predicate: 'status',
-      object: 'active',
-      sourceType: 'ticket_event',
-      sourceId: 'evt-1',
-      confidence: 0.9,
-    };
-
-    const extractedDecision = {
-      projectId: 'project-123',
-      kind: MemoryKind.DECISION,
-      subject: 'agent:victim',
-      predicate: 'decision',
-      object: 'use microservices',
-      sourceType: 'decision_event',
-      sourceId: 'evt-9',
-      confidence: 1.0,
-    };
-
-    it('AC-14: answers no items when extraction yields only DECISION items', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedDecision]);
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'decision_event', action: 'decided', data: {}, agentId: 'victim' },
-        principal,
-      );
-
-      expect(result.items).toEqual([]);
-    });
-
-    it('AC-15: a DECISION-only extraction neither upserts nor records, while a FACT extraction records one entry', async () => {
-      const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedFact]);
-      upsertRunningHook();
-
-      await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} },
-        principal,
-      );
-
-      // The positive control: the extract route records under its own key, on the item it wrote.
-      expect(audit.record).toHaveBeenCalledWith({
-        key: 'memory.extract',
-        resourceType: 'memory-item',
-        resourceId: 'mem-created',
-        projectId: 'project-123',
-        summary: 'created FACT',
-      });
-
-      (repository.upsert as Mock).mockClear();
-      audit.record.mockClear();
-      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedDecision]);
-
-      const result = await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'decision_event', id: 'evt-9', action: 'decided', data: {}, agentId: 'victim' },
-        principal,
-      );
-
-      expect(result.items).toEqual([]);
-      expect(repository.upsert).not.toHaveBeenCalled();
-      expect(audit.record).not.toHaveBeenCalled();
-    });
-
-    it('createMemory records under memory.create', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      upsertRunningHook();
-
-      await controller.createMemory(
-        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
-        principal,
-      );
-
-      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.create', resourceId: 'mem-created' }));
-    });
-
-    it('extractFromEvent hands the upsert the beforeSupersede and onWritten hooks', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedFact]);
-      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
-
-      await controller.extractFromEvent(
-        { projectId: 'project-123', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} },
-        principal,
-      );
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-    });
-
-    it('recordDecision hands its options to the service, whose key is memory.decision.record', async () => {
-      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'src-1', memoryId: 'mem-1' });
-
-      await controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal);
-
-      expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        expect.anything(),
-        repository,
-        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
-      );
-
-      const options = (extractionService.recordDecision as Mock).mock.calls[0][2] as UpsertOptions & {
-        onWritten: (written: MemoryWritten) => Promise<void>;
-      };
-      await options.onWritten({ item: makeMemoryItem({ id: 'mem-2', kind: MemoryKind.DECISION }), superseded: null });
-
-      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
-        key: 'memory.decision.record', resourceId: 'mem-2', summary: 'created DECISION',
-      }));
-    });
+  it('extract refuses a forbidden replacement before writing any extracted items', async () => {
+    const { controller, extraction, repository, permissions, invoke } = setupController();
+    extraction.extractFromEvent.mockReturnValue([{ projectId: 'p1', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' }]);
+    repository.findActive.mockResolvedValue({ ...setupController().item, ownerId: 'other', ownerType: 'USER' });
+    permissions.can.mockImplementation(async (_actor, _key, context) => context?.resource ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' });
+    const principal = makePrincipal();
+    await expect(invoke(principal, () => controller.extractFromEvent({ projectId: 'p1', action: 'status_changed', data: {} }, principal)))
+      .rejects.toBeInstanceOf(ForbiddenAppException);
+    expect(repository.upsert).not.toHaveBeenCalled();
   });
 });

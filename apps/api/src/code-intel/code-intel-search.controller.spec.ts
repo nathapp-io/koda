@@ -8,7 +8,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { ProjectContext } from '../projects/project-context';
-import { AuditRecorder } from '../audit/audit-recorder.service';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 
 // ---------------------------------------------------------------------------
 // Local type stubs matching the search interface
@@ -108,7 +108,7 @@ describe('CodeIntelController.searchSymbols()', () => {
             assertProjectMembership: vi.fn().mockResolvedValue(undefined),
           } as unknown as ProjectAccessService,
         },
-        { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
       ],
     })
       .overrideGuard(ProjectMembershipGuard).useValue(guardStub)
@@ -404,7 +404,7 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
             assertProjectMembership: vi.fn().mockResolvedValue(undefined),
           } as unknown as ProjectAccessService,
         },
-        { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
       ],
     })
       .overrideGuard(ProjectMembershipGuard)

@@ -6,9 +6,11 @@ import {
   OWNABLE_KEYS,
   PERMISSION_CATALOG,
   PUBLIC_KEYS,
+  READ_ACTION_KEYS,
   type PermissionCatalogEntry,
 } from './catalog';
 import { expandEntries } from './entry-matcher';
+import { approvableKeys } from '../approvals/approvable-keys';
 
 /**
  * The catalog is derived from `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.
@@ -164,7 +166,7 @@ function expectedScope(key: string, access: CatalogAccess, ownable: boolean): Ca
 function expectedRisk(key: string): CatalogRisk {
   if (key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   const last = key.slice(key.lastIndexOf('.') + 1);
-  if (last === 'read') return 'low';
+  if (last === 'read' || READ_ACTION_KEYS.has(key)) return 'low';
   if (last === 'delete' || last === 'remove') return 'high';
   if (HIGH_RISK_PREFIXES.some((prefix) => key.startsWith(prefix))) return 'high';
   return 'medium';
@@ -349,7 +351,8 @@ describe('PERMISSION_CATALOG', () => {
   });
 
   it('derives access, scope, ownable, risk, principals and approval for every catalog key', () => {
-    const isReadKey = (key: string) => key.slice(key.lastIndexOf('.') + 1) === 'read';
+    const isReadKey = (key: string) =>
+      key.slice(key.lastIndexOf('.') + 1) === 'read' || READ_ACTION_KEYS.has(key);
     const derive = (key: string): Partial<PermissionCatalogEntry> => {
       const access = expectedAccess(key);
       const ownable = access === 'role' && OWNABLE_KEY_LIST.includes(key);
@@ -395,6 +398,35 @@ describe('PERMISSION_CATALOG', () => {
  * the mode an `AGENT` subject gets when no policy matches (design §4).
  */
 describe('catalog approval metadata', () => {
+  it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
+    'US-001 AC-3: treats POST read key %s as non-approvable and low risk',
+    (key) => {
+      expect(findCatalogEntry(key)).toMatchObject({
+        risk: 'low',
+        approval: { approvable: false, floor: 'none', default: 'none' },
+      });
+    },
+  );
+
+  it('US-001 AC-4: keeps KB document addition approvable', () => {
+    expect(findCatalogEntry('kb.document.add')?.approval.approvable).toBe(true);
+  });
+
+  it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
+    'US-001 AC-5: excludes non-approvable key %s from the DTO list',
+    (key) => {
+      const entries = approvableKeys();
+      expect(entries.map((entry) => entry.key)).not.toContain(key);
+      expect(entries[0]).toMatchObject({
+        key: expect.any(String),
+        scope: expect.any(String),
+        risk: expect.any(String),
+        floor: expect.any(String),
+        default: expect.any(String),
+      });
+    },
+  );
+
   it('US-001 AC-1: shell escalation is a high-risk project ask', () => {
     expect(findCatalogEntry('fleet.job.shell.escalate')).toMatchObject({
       scope: 'project', access: 'role', risk: 'high',

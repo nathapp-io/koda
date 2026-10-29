@@ -1,3 +1,6 @@
+import { AgentRouteCommands, AGENT_ROUTE_VARIANTS } from '../agents/agent-route.commands';
+import { AgentsService } from '../agents/agents.service';
+import { KbRouteCommands, KB_ROUTE_VARIANTS } from '../rag/kb-route.commands';
 import { ProjectRouteCommands, PROJECT_ROUTE_VARIANTS } from '../projects/project-route.commands';
 import type { ProjectsService } from '../projects/projects.service';
 import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
@@ -68,6 +71,33 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it('fails a global agent update after deletion/recreation and leaves the replacement untouched', async () => {
+    const frozen = { slug: 'bot', agentId: 'original', patch: { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 } };
+    const s = setup({ permissionKey: 'agent.update', projectId: null, variant: AGENT_ROUTE_VARIANTS.update,
+      input: frozen, inputHash: approvalInputHash(frozen) });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['agent.update']));
+    // The original has been deleted since opening the request. Its slug now belongs to this row.
+    const replacement = { id: 'replacement', slug: 'bot', name: 'Replacement', status: 'ACTIVE',
+      maxConcurrentTickets: 5, capabilities: [], createdAt: now, updatedAt: now };
+    const before = { ...replacement };
+    const repository = {
+      findByIdScalar: vi.fn(async () => null),
+      findBySlugScalar: vi.fn(async () => replacement),
+      update: vi.fn(async (_slug: string, patch: object) => Object.assign(replacement, patch)),
+      updateById: vi.fn(),
+    };
+    const audit = { audited: async (write: () => Promise<unknown>) => write() };
+    const agents = new AgentsService(repository as never, {} as never, s.tx as never, {} as never,
+      s.permissions as never, audit as never, s.afterCommit);
+    new AgentRouteCommands(s.registry, agents,
+      { forContext: async () => ({ actorType: 'agent', id: 'a1' }) } as never).onModuleInit();
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed' });
+    expect(repository.findByIdScalar).toHaveBeenCalledWith('original');
+    expect(repository.update).not.toHaveBeenCalled();
+    expect(repository.updateById).not.toHaveBeenCalled();
+    expect(replacement).toEqual(before);
+  });
   it.each([{ projectId: 'p1' }, { projectId: 'p1', slug: 'old-slug' }])(
     'executes ID-based project deletion without fencing an unused slug (%j)', async (frozen) => {
       const s = setup({ permissionKey: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,
@@ -76,7 +106,7 @@ describe('ApprovalExecutionService', () => {
       const softDeleteById = vi.fn().mockResolvedValue({ id: 'p1' });
       const loader = { forContext: vi.fn().mockResolvedValue({ actorType: 'agent', id: 'a1' }) };
       new ProjectRouteCommands(s.registry, { softDeleteById } as unknown as ProjectsService,
-        loader as unknown as ActorPrincipalLoader).onModuleInit();
+        loader as unknown as ActorPrincipalLoader, {} as never).onModuleInit();
       const fence = vi.fn().mockRejectedValue(new Error('project was renamed'));
       Object.assign(s.repo, { lockProjectSlug: fence });
 
@@ -143,6 +173,47 @@ describe('ApprovalExecutionService', () => {
     };
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
     expect(mutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('F2: queued execution does not repeat graphify prepare after the first execution settles', async () => {
+    const frozen = { slug: 'alpha', projectId: 'p1', graph: { nodes: [{ id: 'n1', label: 'Frozen' }], links: [] } };
+    const s = setup({ permissionKey: 'kb.graphify.import', variant: KB_ROUTE_VARIANTS.graphifyImport,
+      input: frozen, inputHash: approvalInputHash(frozen) });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['kb.graphify.import']));
+    s.repo.transition.mockImplementation(async (_id, _from, patch) => {
+      s.state.current = { ...s.state.current, ...patch };
+      return s.state.current;
+    });
+    Object.assign(s.repo, { lockProjectSlug: vi.fn() });
+    let entered!: () => void;
+    let release!: () => void;
+    const importing = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const importGraphify = vi.fn(async () => {
+      entered(); await resume;
+      return { imported: 1, cleared: 0 };
+    });
+    const audited = vi.fn(async (work: () => Promise<unknown>) => work());
+    new KbRouteCommands(s.registry, {} as never, { forContext: async () => ({ actorType: 'agent', id: 'a1' }) } as never,
+      {} as never, { importGraphify } as never, { audited } as never).onModuleInit();
+    const command = s.registry.get('kb.graphify.import', KB_ROUTE_VARIANTS.graphifyImport);
+    if (!command) throw new Error('graphify command missing');
+    const parse = vi.spyOn(command, 'parse');
+    const first = s.service.execute('r1', now);
+    await importing;
+    // Attach rejection handling immediately: the duplicate should fail, not import again.
+    const second = s.service.execute('r1', now).then(value => ({ value }), error => ({ error }));
+    try {
+      // Both calls passed the initial approved-status check; the second now waits for the slot.
+      await vi.waitFor(() => expect(parse).toHaveBeenCalledTimes(2));
+      expect(importGraphify).toHaveBeenCalledTimes(1);
+    } finally { release(); }
+    expect(await first).toMatchObject({ status: 'executed', result: { imported: 1, cleared: 0 } });
+    expect(await second).toMatchObject({ error: expect.any(ApprovalRequestNotPendingError) });
+    expect(importGraphify).toHaveBeenCalledTimes(1);
+    expect(audited).toHaveBeenCalledTimes(1);
+    expect(s.repo.transition).toHaveBeenCalledTimes(1);
+    parse.mockRestore();
   });
 
   it.each(['settlement', 'commit', 'success'])('real VCS deletion preserves polling on %s failure', async (mode) => {

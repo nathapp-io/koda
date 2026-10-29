@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PermissionService } from '../permissions/permission.service';
@@ -56,15 +57,18 @@ function createMockOutboxAdminService() {
 
 describe('AdminController', () => {
   let controller: AdminController;
+  let gate: { run: ReturnType<typeof vi.fn> };
   let moduleRef: TestingModule;
   let mockOutboxAdminService: ReturnType<typeof createMockOutboxAdminService>;
 
   beforeEach(async () => {
     mockOutboxAdminService = createMockOutboxAdminService();
+    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) };
 
     moduleRef = await Test.createTestingModule({
       controllers: [AdminController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: gate },
         { provide: OutboxAdminService, useValue: mockOutboxAdminService },
         // Permissions P1 (US-010): the controller runs `RequiresGuard`, whose one dependency is the
         // decision point the global PermissionsModule exports.
@@ -116,14 +120,14 @@ describe('AdminController', () => {
   });
 
   describe('POST /admin/outbox/:eventId/retry', () => {
-    it('delegates the event id to the service', async () => {
+    it('delegates the event id to the gate', async () => {
       await controller.retryOutboxEvent(adminUser, 'dl-001');
 
-      expect(mockOutboxAdminService.retry).toHaveBeenCalledWith('dl-001');
+      expect(gate.run).toHaveBeenCalledWith({ key: 'outbox.retry', variant: 'rest:admin-outbox.retry', projectId: null, input: { eventId: 'dl-001' } });
     });
 
-    it('propagates a 404 from the service (unknown event)', async () => {
-      mockOutboxAdminService.retry.mockRejectedValue(
+    it('propagates a 404 from the gated command (unknown event)', async () => {
+      gate.run.mockRejectedValue(
         new HttpException('Outbox event not found', HttpStatus.NOT_FOUND),
       );
 
@@ -132,8 +136,8 @@ describe('AdminController', () => {
       });
     });
 
-    it('propagates a 409 from the service (processing or published)', async () => {
-      mockOutboxAdminService.retry.mockRejectedValue(
+    it('propagates a 409 from the gated command (processing or published)', async () => {
+      gate.run.mockRejectedValue(
         new HttpException('Outbox event is processing; only dead or pending events can be retried', HttpStatus.CONFLICT),
       );
 

@@ -145,7 +145,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
             createTicketFromIssue: vi.fn(),
             findActiveTicketLinksWithPrs: vi.fn(),
             updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
-            applyMergedPrTransition: vi.fn(),
+            applyMergedPrTransition: vi.fn().mockResolvedValue(true),
           },
         },
       ],
@@ -179,7 +179,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       const mergedPrStatus = createMergedPrStatus(101, 'abc123', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(true);
       vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'updated', previousState: null });
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
@@ -195,7 +195,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       );
 
       // Should update prState to merged
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged', { expectedState: 'open' });
       expect(result.updated).toBe(1);
     });
 
@@ -210,7 +210,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
       // Should update prState but NOT attempt ticket transition
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged', { expectedState: 'open' });
 
       // Should NOT call applyMergedPrTransition
       expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
@@ -249,7 +249,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       const mergedPrStatus = createMergedPrStatus(101, 'abc123def', 'merger-user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(true);
       vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'updated', previousState: null });
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
@@ -289,7 +289,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       const mergedPrStatus = createMergedPrStatus(101, 'sha123', 'merger');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(true);
       vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'updated', previousState: null });
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
@@ -326,7 +326,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
       // Should update TicketLink prState to merged
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'merged', { expectedState: 'open' });
 
       // Should NOT call applyMergedPrTransition
       expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
@@ -377,7 +377,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       ).resolves.not.toThrow();
 
       // prState should still be updated despite transition failure
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged', { expectedState: 'open' });
     });
 
     it('should handle ticket not found during transition gracefully', async () => {
@@ -412,7 +412,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
       // prState should still be updated
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged', { expectedState: 'open' });
       expect(result.updated).toBe(1);
     });
 
@@ -492,7 +492,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       };
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(true);
       vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'updated', previousState: null });
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');

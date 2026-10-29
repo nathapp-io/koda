@@ -13,11 +13,15 @@ import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+import { AfterCommitService } from '../permissions/after-commit.service';
+import { AgentAuthProvider } from '../auth/agent-auth.provider';
 
 describe('AgentsService', () => {
   let service: AgentsService;
   let agentRepo: Mocked<PrismaAgentRepository>;
   let kodaDomainWriter: { writeAgentAction: Mock };
+  let afterCommit: AfterCommitService;
+  const authProvider = { invalidateByTag: vi.fn().mockResolvedValue(undefined) };
 
   const mockAgent = {
     id: 'agent-123',
@@ -45,6 +49,30 @@ describe('AgentsService', () => {
     updatedAt: mockAgent.updatedAt,
   };
 
+  it('updates by immutable id and defers its auth eviction until commit', async () => {
+    const patch = { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 };
+    agentRepo.findByIdScalar.mockResolvedValue(mockAgent);
+    agentRepo.updateById.mockResolvedValue({ ...mockAgent, ...patch, capabilities: [] });
+    await afterCommit.scope(async () => {
+      expect(await service.updateById(mockAgent.id, patch)).toMatchObject({ id: mockAgent.id, ...patch });
+      expect(agentRepo.updateById).toHaveBeenCalledWith(mockAgent.id, patch);
+      expect(agentRepo.update).not.toHaveBeenCalled();
+      expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+    });
+    expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith(`AGENT:${mockAgent.id}`);
+  });
+
+  it('a frozen update fails after deletion/recreation without mutating the replacement', async () => {
+    const replacement = { ...mockAgent, id: 'replacement' };
+    agentRepo.findByIdScalar.mockResolvedValue(null);
+    agentRepo.findBySlugScalar.mockResolvedValue(replacement);
+    await expect(service.updateById(mockAgent.id, { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 }))
+      .rejects.toThrow(NotFoundAppException);
+    expect(agentRepo.updateById).not.toHaveBeenCalled();
+    expect(agentRepo.update).not.toHaveBeenCalled();
+    expect(replacement).toMatchObject({ name: 'Test Agent', status: 'ACTIVE', maxConcurrentTickets: 3 });
+  });
+
   const mockAgentsDto = [mockAgentDto];
 
   const mockAgentWithRelations = {
@@ -66,12 +94,15 @@ describe('AgentsService', () => {
     updateApiKeyHash: vi.fn(),
     update: vi.fn(),
     deleteBySlug: vi.fn(),
+    deleteById: vi.fn(),
     createCapabilities: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
     findVerifiedUnassignedTickets: vi.fn(),
     findByProjectSlug: vi.fn(),
     isOnProjectRoster: vi.fn(),
+    lockProjectAgents: vi.fn(),
+    updateById: vi.fn(),
     findRosterProjects: vi.fn(),
     findProjectRoster: vi.fn(),
   };
@@ -116,6 +147,8 @@ describe('AgentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
+        AfterCommitService,
+        { provide: AgentAuthProvider, useValue: authProvider },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -127,6 +160,7 @@ describe('AgentsService', () => {
     }).compile();
 
     service = module.get<AgentsService>(AgentsService);
+    afterCommit = module.get(AfterCommitService);
     agentRepo = module.get(PrismaAgentRepository);
     kodaDomainWriter = module.get(KodaDomainWriter);
 
@@ -242,6 +276,7 @@ describe('AgentsService', () => {
         const moduleWithoutSecret: TestingModule = await Test.createTestingModule({
           providers: [
             AgentsService,
+            AfterCommitService,
             { provide: AuditRecorder, useValue: mockAuditRecorder },
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
@@ -523,6 +558,32 @@ describe('AgentsService', () => {
     });
   });
 
+  describe('updateRosteredAgent', () => {
+    it('locks the project roster before rechecking membership and updating the frozen agent id', async () => {
+      const order: string[] = [];
+      mockAgentRepo.findProjectBySlug.mockImplementation(async () => { order.push('project'); return { id: 'project-1', deletedAt: null }; });
+      mockAgentRepo.lockProjectAgents.mockImplementation(async () => { order.push('lock'); });
+      mockAgentRepo.findBySlugScalar.mockImplementation(async () => { order.push('agent'); return mockAgent; });
+      mockAgentRepo.isOnProjectRoster.mockImplementation(async () => { order.push('roster'); return true; });
+      mockAgentRepo.updateById.mockImplementation(async (id: string) => { order.push('update'); expect(id).toBe(mockAgent.id); return mockAgent; });
+      await service.updateRosteredAgent('alpha', mockAgent.slug, { status: 'PAUSED' }, 'project-1', mockAgent.id);
+      expect(order).toEqual(['project', 'lock', 'agent', 'roster', 'update']);
+      expect(mockTxManager.run).toHaveBeenCalledOnce();
+    });
+
+    it('AC-11: refuses a target removed from the project roster without updating it', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+      const error = await service.updateRosteredAgent('alpha', 'test-agent', { status: 'PAUSED' }, 'project-1', mockAgent.id)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ prefix: 'projectAgents' });
+      expect(mockAgentRepo.update).not.toHaveBeenCalled();
+      expect(mockAgentRepo.updateById).not.toHaveBeenCalled();
+    });
+  });
+
   describe('update', () => {
     it('should update agent with basic fields', async () => {
       const updateData = {
@@ -555,6 +616,40 @@ describe('AgentsService', () => {
       mockAgentRepo.findBySlugScalar.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
+    });
+  });
+
+  describe('auth cache invalidation timing', () => {
+    it('AC-10: update defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.update.mockResolvedValue(mockAgent);
+      await afterCommit.scope(async () => {
+        await service.update(mockAgent.slug, { name: 'Changed' });
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-11: update invalidates immediately without a scope', async () => {
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.update.mockResolvedValue(mockAgent);
+      await service.update(mockAgent.slug, { name: 'Changed' });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-12: removeById defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.deleteById.mockResolvedValue(mockAgent);
+      await afterCommit.scope(async () => {
+        await service.removeById(mockAgent.id);
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-13: capabilities update defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      await afterCommit.scope(async () => {
+        await service.updateCapabilities(mockAgent.id, { capabilities: ['ts'] });
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
     });
   });
 

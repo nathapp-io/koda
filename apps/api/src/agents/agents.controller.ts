@@ -151,6 +151,7 @@ export class AgentsController {
 
   @Patch(':slug')
   @UseGuards(RequiresGuard)
+  @ApprovalGated()
   @Requires('agent.update')
   @ApiOperation({ summary: 'Update agent (agent.update)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
@@ -158,12 +159,15 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'agent.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Principal() principal: KodaPrincipal) {
-    const data = await this.updateAgent(slug, updateDto, principal);
-    return JsonResponse.Ok(data);
+    const target = await this.agentsService.findBySlug(slug);
+    const outcome = await this.routeGate.run<AgentResponseDto>({ key: 'agent.update', variant: AGENT_ROUTE_VARIANTS.update, projectId: null, input: { slug, agentId: target.id, patch: updateDto } });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Patch(':slug/update-capabilities')
   @UseGuards(RequiresGuard)
+  @ApprovalGated()
   @Requires('agent.capabilities.update')
   @ApiOperation({ summary: 'Update agent capabilities (agent.capabilities.update)' })
   @ApiResponse({ status: 200, description: 'Capabilities updated successfully' })
@@ -171,8 +175,10 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'agent.capabilities.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Principal() principal: KodaPrincipal) {
-    const data = await this.updateAgentCapabilities(slug, updateCapabilitiesDto, principal);
-    return JsonResponse.Ok(data);
+    const target = await this.agentsService.findBySlug(slug);
+    const outcome = await this.routeGate.run<AgentResponseDto>({ key: 'agent.capabilities.update', variant: AGENT_ROUTE_VARIANTS.updateCapabilities, projectId: null, input: { slug, agentId: target.id, capabilities: updateCapabilitiesDto } });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':slug')

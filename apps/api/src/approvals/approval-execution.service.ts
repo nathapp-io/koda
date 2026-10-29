@@ -148,6 +148,11 @@ export class ApprovalExecutionService {
     // opens its own transaction. Holding this request's slot across both keeps a waiting execute from
     // taking the still-approved row in that gap and running the command a second time.
     return this.serialised(request.id, async () => {
+      // A queued caller may have read 'approved' before the preceding execution settled.
+      // Refuse it before prepare: store work there cannot be rolled back by the later row lock.
+      const current = await this.requests.findById(request.id);
+      if (!current) throw new ApprovalRequestNotFoundError(request.id);
+      if (current.status !== 'approved') throw new ApprovalRequestNotPendingError(current.status);
       const { settled, raw } = await this.executeOnce(request, command, parsed, decision, now);
       // Step 5: only a committed execution has a follow-up, and its failure changes nothing.
       if (settled.status === 'executed' && raw !== undefined) {
@@ -182,7 +187,7 @@ export class ApprovalExecutionService {
       // work: a role or binding command's permission-cache invalidation is deferred here and runs
       // once the commit ended. Flushed before it, a concurrent read would recompute the pre-commit
       // keys and cache them under the new generation, keeping revoked access for one TTL.
-      const settled = await this.afterCommit.scope(() => withCommittedEffects(() => this.txManager.run(async () => {
+      const transaction = () => this.afterCommit.scope(() => withCommittedEffects(() => this.txManager.run(async () => {
         try {
           const locked = await this.requests.lockById(request.id);
           if (!locked) throw new ApprovalRequestNotFoundError(request.id);
@@ -225,6 +230,7 @@ export class ApprovalExecutionService {
         }
       })));
 
+      const settled = await (command.withExecution ? command.withExecution(parsed, transaction) : transaction());
       return { settled, raw };
     } catch (error) {
       if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;

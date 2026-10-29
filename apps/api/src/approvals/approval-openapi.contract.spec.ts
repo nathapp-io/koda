@@ -45,8 +45,13 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/fleet/repos/{repoId}/drift-checks'],
   ['delete', '/api/projects/{slug}'],
   ['delete', '/api/projects/{slug}/kb/documents/{sourceId}'],
+  ['post', '/api/projects/{slug}/kb/documents'],
+  ['post', '/api/projects/{slug}/kb/import/graphify'],
+  ['post', '/api/projects/{slug}/kb/optimize'],
   ['delete', '/api/agents/{slug}'],
   ['delete', '/api/admin/skills/sources/{id}'],
+  ['post', '/api/admin/skills/sources'],
+  ['post', '/api/admin/skills/sources/{id}/update'],
   ['delete', '/api/projects/{slug}/webhooks/{id}'],
   ['delete', '/api/webhooks/{id}'],
   ['delete', '/api/projects/{slug}/vcs'],
@@ -72,6 +77,21 @@ const gatedOperations = [
   ['delete', '/api/projects/{slug}/invites/{id}'],
   ['put', '/api/projects/{slug}/tickets/{ref}/watch'],
   ['delete', '/api/projects/{slug}/tickets/{ref}/watch'],
+  ['patch', '/api/agents/{slug}'],
+  ['patch', '/api/agents/{slug}/update-capabilities'],
+  ['patch', '/api/projects/{slug}/agents/{agentSlug}'],
+  ['patch', '/api/admin/users/{id}'],
+  // JWT-only over REST, but still a gated command with a documented pending response.
+  ['post', '/api/admin/outbox/{eventId}/retry'],
+  ['put', '/api/projects/{slug}/skills/{skillId}'],
+  ['delete', '/api/projects/{slug}/skills/{skillId}'],
+  ['post', '/api/code-intel/index'],
+  ['post', '/api/memory'],
+  ['post', '/api/memory/decisions'],
+  ['post', '/api/memory/extract'],
+  ['post', '/api/projects/{slug}/vcs/sync-pr'],
+  ['post', '/api/projects/{slug}/vcs/sync'],
+  ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
@@ -121,7 +141,19 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/invites']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-6: 202 responses exist on exactly the 62 gated operations and existing reindex operation', () => {
+  it('AC-5: POST /api/memory has a 202 response', () => {
+    expect(openapi.paths['/api/memory']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('AC-6: secret agent creation has no 202 response', () => {
+    expect(openapi.paths['/api/agents']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-7: POST knowledge-base search has no 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-8: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });

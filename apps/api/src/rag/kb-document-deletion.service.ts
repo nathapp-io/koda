@@ -17,6 +17,11 @@ export class KbDocumentDeletion {
     private readonly journal: KbDeletionJournal,
   ) {}
 
+  /** Keep the same LanceDB -> Postgres lock order as addition, including deferred execution. */
+  withExecution<T>(projectId: string, transaction: () => Promise<T>): Promise<T> {
+    return this.rag.withDocumentWriteLock(projectId, () => transaction());
+  }
+
   async preflight(principal: KodaPrincipal, projectId: string, sourceId: string, source?: KbDeleteSource) {
     const sources = source ? [source] : [...KB_DELETE_SOURCES];
     // These reads also preserve the store's filter-safe-id validation before any write.

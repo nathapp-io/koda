@@ -1,3 +1,5 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
@@ -71,7 +73,10 @@ describe('CodeIntelController', () => {
   let module: TestingModule;
   let astIndexService: Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
+  let gate: { run: ReturnType<typeof vi.fn> };
+
   beforeEach(async () => {
+    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: makeIndexResult() }) };
     astIndexService = {
       indexCommit: vi.fn(),
       getSymbol: vi.fn(),
@@ -83,7 +88,7 @@ describe('CodeIntelController', () => {
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
-        { provide: (await import('../audit/audit-recorder.service')).AuditRecorder, useValue: { record: vi.fn() } },
+        { provide: ApprovalRouteGate, useValue: gate },
       ],
     })
       .overrideGuard(ProjectMembershipGuard).useValue({ canActivate: () => true })
@@ -103,14 +108,20 @@ describe('CodeIntelController', () => {
   // -------------------------------------------------------------------------
 
   describe('indexCommit()', () => {
-    it('delegates indexing with the guard-resolved project id and wraps the result', async () => {
+    it('surfaces pending without indexing', async () => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'approval-1' } });
+      await expect(controller.indexCommit(makeDto(), makeCtx())).rejects.toBeInstanceOf(ApprovalPending);
+      expect(astIndexService.indexCommit).not.toHaveBeenCalled();
+    });
+    it('gates indexing with the guard-resolved project id and wraps the result', async () => {
       astIndexService.indexCommit.mockResolvedValue(makeIndexResult());
       const dto = makeDto();
 
       const result = await controller.indexCommit(dto, makeCtx());
 
       expect(result.data).toMatchObject({ commitHash: 'abc123', symbolsIndexed: 1 });
-      expect(astIndexService.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', dto.files, 'proj-1', expect.any(Function));
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'codeintel.index.write', variant: 'rest:code-intel.index', projectId: 'proj-1', input: { projectId: 'proj-1', index: dto } });
+      expect(astIndexService.indexCommit).not.toHaveBeenCalled();
     });
   });
 

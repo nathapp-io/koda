@@ -1,6 +1,5 @@
-import type { Mock, Mocked } from 'vitest';
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
 import { PermissionService } from '../permissions/permission.service';
@@ -14,7 +13,6 @@ import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import type { ProjectContext } from '../projects/project-context';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
-import { SyncResultDto } from './dto/sync-result.dto';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
@@ -28,7 +26,6 @@ vi.mock('../common/utils/encryption.util', () => ({
   encryptToken: vi.fn().mockReturnValue('enc-token'),
 }));
 
-import { createVcsProvider } from './factory';
 
 function makeProjectDto(overrides?: object) {
   return {
@@ -256,106 +253,56 @@ describe('VcsController', () => {
     });
   });
 
-  describe('syncIssue', () => {
-    it('should fetch the issue and create a ticket, returning the sync result', async () => {
-      const mockProvider = {
-        fetchIssue: vi.fn().mockResolvedValue({
-          number: 5,
-          title: 'Issue title',
-          body: 'Body',
-          authorLogin: 'alice',
-          url: 'https://github.com/owner/repo/issues/5',
-          labels: [],
-          createdAt: new Date(),
-        }),
-        fetchIssues: vi.fn(),
-        testConnection: vi.fn(),
-        getPullRequestStatus: vi.fn(),
-        listPrCommits: vi.fn(),
-      };
-      (createVcsProvider as Mock).mockReturnValue(mockProvider);
-
-      mockSyncService.syncIssue.mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' });
-
-      const result = await controller.syncIssue('test-project', '5');
-
-      expect(mockProvider.fetchIssue).toHaveBeenCalledWith(5);
-      expect(mockSyncService.syncIssue).toHaveBeenCalled();
-      expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 1 });
-      expect((result.data as SyncResultDto).tickets).toHaveLength(1);
-      expect((result.data as SyncResultDto).tickets[0].ref).toContain('TEST-5');
-    });
-
-
-    it('should throw 409 CONFLICT when the issue is already synced', async () => {
-      const mockProvider = {
-        fetchIssue: vi.fn().mockResolvedValue({
-          number: 5,
-          title: 'Existing issue',
-          body: null,
-          authorLogin: 'alice',
-          url: 'https://github.com/owner/repo/issues/5',
-          labels: [],
-          createdAt: new Date(),
-        }),
-        fetchIssues: vi.fn(),
-        testConnection: vi.fn(),
-        getPullRequestStatus: vi.fn(),
-        listPrCommits: vi.fn(),
-      };
-      (createVcsProvider as Mock).mockReturnValue(mockProvider);
-
-      mockSyncService.syncIssue.mockResolvedValue({ action: 'skipped', reason: 'already exists' });
-
-      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(
-        new HttpException('Issue already synced', HttpStatus.CONFLICT),
-      );
-    });
-
-    it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockVcsConfig.encryptionKey = null;
-
-      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(ValidationAppException);
-    });
-  });
-
-  describe('syncAll', () => {
-    it('should run a full sync and return the summary', async () => {
-      mockSyncService.fullSync.mockResolvedValue({
-        issuesSynced: 3,
-        issuesSkipped: 1,
-        createdTickets: [{ id: 't-1', number: 7, title: 'Issue 7' }],
-        errors: [],
+  describe('manual issue sync gates', () => {
+    it.each(['syncIssue', 'syncAll'] as const)('gates %s with the resolved project and returns the result', async (method) => {
+      const summary = { syncType: 'manual', issuesSynced: 1, issuesSkipped: 0, tickets: [{ ref: 'TEST-5', title: 'Issue' }] };
+      gate.run.mockResolvedValue({ status: 'executed', result: summary });
+      const result = method === 'syncIssue'
+        ? await controller.syncIssue('test-project', '5', projectContext())
+        : await controller.syncAll('test-project', projectContext());
+      expect(result.data).toEqual(summary);
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+        key: method === 'syncIssue' ? 'vcs.sync.issue' : 'vcs.sync.all',
+        variant: method === 'syncIssue' ? 'rest:vcs.sync-issue' : 'rest:vcs.sync-all',
+        projectId: 'proj-1', input: { slug: 'test-project', projectId: 'proj-1', ...(method === 'syncIssue' ? { issueNumber: '5' } : {}) },
       });
-
-      const result = await controller.syncAll('test-project');
-      expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 3, issuesSkipped: 1 });
-      expect((result.data as SyncResultDto).tickets[0].ref).toBe('TEST-7');
-      expect((result.data as SyncResultDto).tickets[0].title).toBe('Issue 7');
+      expect(mockProjectsService.findBySlug).not.toHaveBeenCalled();
+      expect(mockSyncService.fullSync).not.toHaveBeenCalled();
+      expect(mockSyncService.syncIssue).not.toHaveBeenCalled();
     });
-
-
-    it('should throw ValidationAppException when encryption key is not configured', async () => {
+    it('AC-12: missing encryption key refuses full sync before gating', async () => {
       mockVcsConfig.encryptionKey = null;
-
-      await expect(controller.syncAll('test-project')).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncAll('alpha', projectContext())).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncAll('alpha', projectContext())).rejects.toMatchObject({ prefix: 'vcs' });
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+    it('refuses single sync without a key before gating', async () => {
+      mockVcsConfig.encryptionKey = null;
+      await expect(controller.syncIssue('alpha', '7', projectContext())).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+    it.each(['syncIssue', 'syncAll'] as const)('throws pending for %s', async (method) => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+      await expect(method === 'syncIssue' ? controller.syncIssue('alpha', '7', projectContext()) : controller.syncAll('alpha', projectContext())).rejects.toThrow(ApprovalPending);
     });
   });
 
   describe('syncPr', () => {
     it('should run PR sync and return updated count', async () => {
-      mockPrSyncService.syncPrStatus.mockResolvedValue({ updated: 5, skipped: 1 });
+      gate.run.mockResolvedValue({ status: 'executed', result: { updated: 5, skipped: 1, extractions: ['private'] } });
 
-      const result = await controller.syncPr('test-project');
-      expect(result.data).toMatchObject({ updated: 5 });
-      expect(mockPrSyncService.syncPrStatus).toHaveBeenCalled();
+      const result = await controller.syncPr('test-project', projectContext());
+      expect(result.data).toEqual({ updated: 5 });
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'vcs.sync.pr', variant: 'rest:vcs.sync-pr', projectId: 'proj-1', input: { slug: 'test-project', projectId: 'proj-1' } });
+      expect(mockPrSyncService.syncPrStatus).not.toHaveBeenCalled();
     });
 
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncPr('test-project')).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncPr('test-project', projectContext())).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
     });
   });
 });

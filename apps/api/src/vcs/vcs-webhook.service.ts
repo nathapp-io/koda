@@ -103,7 +103,9 @@ export class VcsWebhookService implements OnModuleDestroy {
   };
 
   /** M12: map a non-`updated` write result to the ignored response it deserves. */
-  private static ignoredWrite(result: 'already-merged' | 'not-found'): WebhookHandleResult {
+  private static ignoredWrite(result: Exclude<PrStateWriteResult, 'updated'>): WebhookHandleResult {
+    // Webhook writes do not supply expectedState, but keep the shared outcome exhaustive.
+    if (result === 'state-changed') return { success: true, ignored: true, reason: 'PR state changed concurrently' };
     return result === 'not-found' ? VcsWebhookService.LINK_MISSING : VcsWebhookService.ALREADY_MERGED;
   }
   private readonly cleanupInterval: ReturnType<typeof setInterval>;

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from '../catalog';
-import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
+import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES } from '../pending-gate-routes';
 import type { RequiresMetadata } from '../requires.decorator';
 import {
+  expectedPendingGateRoutes,
   findContractViolations as findContractViolationsWithAllowlist,
   type ContractViolation,
   type PermissionDeclarations,
@@ -13,7 +14,7 @@ describe('permission contract checker', () => {
     declarations: PermissionDeclarations,
     catalog = PERMISSION_CATALOG,
     pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,
-    pendingGateRoutes: ReadonlyMap<string, PendingGateFeature> = new Map(),
+    pendingGateRoutes: ReadonlyMap<string, string> = new Map(),
   ) => findContractViolationsWithAllowlist(declarations, catalog, pending, pendingGateRoutes);
 
   const expectedPending = new Set([
@@ -117,7 +118,7 @@ describe('permission contract checker', () => {
     }
   });
 
-  it('AC-6: explicitly lists exactly the secret-bearing routes', () => {
+  it('US-001 AC-1: explicitly lists exactly the 11 secret-bearing routes', () => {
     expect(SECRET_GATE_ROUTES).toEqual(new Set([
       'POST /fleet/enrollments',
       'POST /projects/:slug/vcs',
@@ -127,19 +128,39 @@ describe('permission contract checker', () => {
       'PATCH /projects/:slug/webhooks/:id',
       'POST /projects/:slug/invites',
       'POST /projects/:slug/invites/:id/resend',
+      'POST /agents',
+      'POST /agents/:slug/rotate-key',
+      'POST /admin/users',
     ]));
   });
 
-  it('AC-7: assigns every explicit secret route to gate-secret', () => {
+  it('US-001 AC-1/2: assigns every explicit secret route to gate-secret', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
+    expect(PENDING_GATE_ROUTES.get('POST /agents/:slug/rotate-key')).toBe('gate-secret');
   });
 
-  it('US-011 AC-3: holds exactly 25 core, 36 fleet and 8 secret rollout routes', () => {
-    const counts = [...PENDING_GATE_ROUTES.values()].reduce<Record<string, number>>((result, feature) => {
-      result[feature] = (result[feature] ?? 0) + 1;
-      return result;
-    }, {});
-    expect(counts).toEqual({ 'gate-core-domains': 25, 'gate-fleet': 36, 'gate-secret': 8 });
+  it.each([
+    'POST /context/:slug/query',
+    'POST /projects/:slug/kb/search',
+    'POST /projects/:slug/kb/evaluate/retrieval',
+  ])('US-001 AC-6: removes non-approvable read route %s from pending gates', (route) => {
+    expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
+  });
+
+  it('AC-3: keeps exactly 36 fleet and 11 secret rollout assignments', () => {
+    expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-fleet')).toHaveLength(36);
+    expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-secret')).toHaveLength(11);
+    expect(PENDING_GATE_ROUTES.size).toBe(47);
+  });
+
+  it('AC-4: classifies an unexpected core-domain write and reports it ungated', () => {
+    const unexpectedRoute = route(['ticket.create'], 'guard', true, 'POST', false, 'POST /x');
+    const catalog = [entry('ticket.create', true)];
+    const expected = expectedPendingGateRoutes([unexpectedRoute], catalog);
+    expect(expected).toEqual([['POST /x', 'gate-core-domains']]);
+    expect(findContractViolations(
+      declarations({ routes: [unexpectedRoute] }), catalog, new Set(), PENDING_GATE_ROUTES,
+    )).toContainEqual({ kind: 'ungated-approvable-write', route: 'POST /x' });
   });
 
   it('AC-1 (US-010): has no gate-high pending assignments', () => {
@@ -157,8 +178,8 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
-  it('AC-11: assigns memory creation to gate-core-domains', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /memory')).toBe('gate-core-domains');
+  it('US-001: classifies admin user creation as a secret-gated route', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /admin/users')).toBe('gate-secret');
   });
 
   it('US-001 AC-2: assigns invite resend to gate-secret', () => {
