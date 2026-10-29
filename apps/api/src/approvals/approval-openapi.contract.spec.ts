@@ -108,6 +108,24 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/vcs/sync-pr'],
   ['post', '/api/projects/{slug}/vcs/sync'],
   ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
+  ['post', '/api/projects/{slug}/threads'],
+  ['patch', '/api/projects/{slug}/threads/{id}'],
+  ['post', '/api/projects/{slug}/threads/{id}/plan'],
+  ['post', '/api/projects/{slug}/threads/{id}/run'],
+  ['post', '/api/projects/{slug}/threads/{id}/stop'],
+  ['post', '/api/projects/{slug}/threads/{id}/end-session'],
+  ['post', '/api/projects/{slug}/threads/{id}/answer'],
+  ['post', '/api/projects/{slug}/threads/{id}/archive'],
+  ['post', '/api/projects/{slug}/threads/{id}/publish'],
+  ['post', '/api/projects/{slug}/threads/{id}/discard'],
+  ['post', '/api/projects/{slug}/threads/{id}/messages'],
+  ['post', '/api/threads'],
+  ['patch', '/api/threads/{id}'],
+  ['post', '/api/threads/{id}/messages'],
+  ['post', '/api/threads/{id}/archive'],
+  ['post', '/api/threads/{id}/stop'],
+  ['post', '/api/threads/{id}/end-session'],
+  ['post', '/api/threads/{id}/answer'],
 ] as const;
 
 function operationsWith202(): string[] {
@@ -118,7 +136,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI pending response contract', () => {
+describe('OpenAPI contract for 115 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -171,10 +189,14 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/fleet/jobs']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-6: 202 responses exist on at least the original 97 gated operations', () => {
+  it('US-009 AC-4: project message and workspace create operations have a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/threads/{id}/messages']?.post?.responses).toHaveProperty('202');
+    expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('US-009 AC-5: 202 responses exist on exactly the 115 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(97);
-    expect(operationsWith202()).toEqual(expect.arrayContaining(expected));
-    expect(operationsWith202().length).toBeGreaterThanOrEqual(97);
+    expect(expected).toHaveLength(115);
+    expect(operationsWith202()).toEqual(expected);
   });
 });

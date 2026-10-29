@@ -163,16 +163,10 @@ describe('permission contract checker', () => {
     ]) expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
-  it('keeps exactly 11 secret rollout assignments while thread gates roll out', () => {
-    const secretRoutes = [...PENDING_GATE_ROUTES].filter(([, feature]) => feature === 'gate-secret');
-    expect(secretRoutes).toHaveLength(11);
-  });
-
-  it('AC-4: every fleet rollout route is a thread route', () => {
-    for (const [route, feature] of PENDING_GATE_ROUTES) {
-      if (feature !== 'gate-fleet') continue;
-      expect(route).toMatch(/^(?:GET|POST|PUT|PATCH|DELETE) \/(?:threads|projects\/:slug\/threads)(?:\/|$)/);
-    }
+  it('US-009 AC-3: pending gate assignments contain exactly the 11 secret routes', () => {
+    expect(PENDING_GATE_ROUTES.size).toBe(11);
+    expect([...PENDING_GATE_ROUTES.values()]).toEqual(Array(11).fill('gate-secret'));
+    expect(new Set(PENDING_GATE_ROUTES.keys())).toEqual(SECRET_GATE_ROUTES);
   });
 
   it('AC-4: classifies an unexpected core-domain write and reports it ungated', () => {

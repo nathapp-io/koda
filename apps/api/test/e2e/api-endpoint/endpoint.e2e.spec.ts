@@ -3805,6 +3805,39 @@ describeIntegration('API Integration Tests', () => {
       } finally { await db().chatThread.delete({ where: { id: thread.id } }); }
     });
 
+    it('US-009 AC-7: project thread create returns exactly 202 for a gated agent request', async () => {
+      await grantKeys(db(), { type: 'AGENT', id: agentId }, ['project.read', 'thread.create'], world.projectId);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db(), 'thread.create', world.projectId);
+      try {
+        await request(httpServer).post(`/api/projects/${projectSlug}/threads`)
+          .set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ kind: 'PROJECT', title: 'Pending thread', backend: { kind: 'native' } })
+          .expect(202);
+      } finally {
+        await db().approvalPolicy.delete({ where: { id: policy.id } });
+        await app.get(MembershipService).invalidatePermissions();
+      }
+    });
+
+    it('US-009 AC-8: workspace thread create returns exactly 202 for a globally gated agent request', async () => {
+      const grant = await grantKeys(db(), { type: 'AGENT', id: agentId }, ['thread.workspace.create'], null);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db(), 'thread.workspace.create', null);
+      try {
+        await request(httpServer).post('/api/threads')
+          .set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ title: 'Pending workspace thread', backend: { kind: 'native' } })
+          .expect(202);
+      } finally {
+        await db().approvalPolicy.delete({ where: { id: policy.id } });
+        const binding = await db().roleBinding.findUniqueOrThrow({ where: { id: grant.id }, select: { roleId: true } });
+        await db().roleBinding.delete({ where: { id: grant.id } });
+        await db().role.delete({ where: { id: binding.roleId } });
+        await app.get(MembershipService).invalidatePermissions();
+      }
+    });
+
     it('workspace POST /threads refuses repo fields and a principal without thread.workspace.create', async () => {
       const res = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
         .send({ title: 'Workspace', backend: { kind: 'native' }, repoId: world.repoId }).expect(400);
