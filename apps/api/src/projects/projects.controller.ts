@@ -274,11 +274,12 @@ export class ProjectsController {
     }
 
     const patch = parseBody(UpdateAgentDto, updateDto ?? {});
+    const identity = await this.agentsService.findRosteredAgentIdentity(slug, agentSlug);
     const outcome = await this.routeGate.run({
       key: 'agent.update',
       variant: PROJECT_ROUTE_VARIANTS.updateAgent,
       projectId: null,
-      input: { slug, agentSlug, patch },
+      input: { slug, agentSlug, projectId: identity.projectId, agentId: identity.agentId, patch },
       keyCheck: false,
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);

@@ -77,6 +77,8 @@ describe('AgentsService', () => {
     findVerifiedUnassignedTickets: vi.fn(),
     findByProjectSlug: vi.fn(),
     isOnProjectRoster: vi.fn(),
+    lockProjectAgents: vi.fn(),
+    updateById: vi.fn(),
     findRosterProjects: vi.fn(),
     findProjectRoster: vi.fn(),
   };
@@ -533,12 +535,26 @@ describe('AgentsService', () => {
   });
 
   describe('updateRosteredAgent', () => {
+    it('locks the project roster before rechecking membership and updating the frozen agent id', async () => {
+      const order: string[] = [];
+      mockAgentRepo.findProjectBySlug.mockImplementation(async () => { order.push('project'); return { id: 'project-1', deletedAt: null }; });
+      mockAgentRepo.lockProjectAgents.mockImplementation(async () => { order.push('lock'); });
+      mockAgentRepo.findBySlugScalar.mockImplementation(async () => { order.push('agent'); return mockAgent; });
+      mockAgentRepo.isOnProjectRoster.mockImplementation(async () => { order.push('roster'); return true; });
+      mockAgentRepo.updateById.mockImplementation(async (id: string) => { order.push('update'); expect(id).toBe(mockAgent.id); return mockAgent; });
+      await service.updateRosteredAgent('alpha', mockAgent.slug, { status: 'PAUSED' }, 'project-1', mockAgent.id);
+      expect(order).toEqual(['project', 'lock', 'agent', 'roster', 'update']);
+      expect(mockTxManager.run).toHaveBeenCalledOnce();
+    });
+
     it('AC-11: refuses a target removed from the project roster without updating it', async () => {
       mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
       mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
       mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
-      await expect(service.updateRosteredAgent('alpha', 'test-agent', { status: 'PAUSED' }))
-        .rejects.toMatchObject({ prefix: 'projectAgents' });
+      const error = await service.updateRosteredAgent('alpha', 'test-agent', { status: 'PAUSED' }, 'project-1', mockAgent.id)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ prefix: 'projectAgents' });
       expect(mockAgentRepo.update).not.toHaveBeenCalled();
     });
   });

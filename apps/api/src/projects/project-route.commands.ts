@@ -47,14 +47,15 @@ export class ProjectRouteCommands implements OnModuleInit {
       run: async (_principal, input) => this.service.update(input.slug, input.patch),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; agentSlug: string; patch: UpdateAgentDto }, Awaited<ReturnType<AgentsService['update']>>>({
+    this.commands.register(routeCommand<{ slug: string; agentSlug: string; projectId: string; agentId: string; patch: UpdateAgentDto }, Awaited<ReturnType<AgentsService['update']>>>({
       key: 'agent.update', variant: PROJECT_ROUTE_VARIANTS.updateAgent,
       parse: (input) => {
         const { slug, agentSlug } = parseRouteInput(input, ['slug', 'agentSlug']);
         const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-        return { slug, agentSlug, patch: parseBody(UpdateAgentDto, source.patch ?? {}) };
+        const { projectId, agentId } = parseRouteInput(source, ['projectId', 'agentId']);
+        return { slug, agentSlug, projectId, agentId, patch: parseBody(UpdateAgentDto, source.patch ?? {}) };
       },
-      run: async (_principal, input) => this.agents.updateRosteredAgent(input.slug, input.agentSlug, input.patch),
+      run: async (_principal, input) => this.agents.updateRosteredAgent(input.slug, input.agentSlug, input.patch, input.projectId, input.agentId),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ projectId: string }, null>({

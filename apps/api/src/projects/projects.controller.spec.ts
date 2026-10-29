@@ -139,6 +139,7 @@ describe('ProjectsController', () => {
       findByProject: vi.fn(),
       listProjectRoster: vi.fn(),
       isOnProjectRosterBySlug: vi.fn(),
+      findRosteredAgentIdentity: vi.fn().mockResolvedValue({ projectId: 'proj-1', agentId: 'agent-1' }),
       update: vi.fn(),
     } as unknown as Mocked<AgentsService>;
 
@@ -514,7 +515,7 @@ describe('ProjectsController', () => {
       await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal, projectCtx);
       expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
         key: 'agent.update', variant: 'rest:project-agents.update', projectId: null,
-        input: { slug: 'alpha', agentSlug: 'bot', patch: { status: 'PAUSED' } }, keyCheck: false,
+        input: { slug: 'alpha', agentSlug: 'bot', projectId: 'proj-1', agentId: 'agent-1', patch: { status: 'PAUSED' } }, keyCheck: false,
       });
     });
 

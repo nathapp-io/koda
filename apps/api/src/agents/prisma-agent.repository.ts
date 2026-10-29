@@ -69,6 +69,10 @@ export class PrismaAgentRepository {
     });
   }
 
+  async updateById(id: string, data: Partial<{ name: string; status: string; maxConcurrentTickets: number }>) {
+    return this.db.agent.update({ where: { id }, data, include: { capabilities: true } });
+  }
+
   async update(slug: string, data: Partial<{ name: string; status: string; maxConcurrentTickets: number }>) {
     return this.db.agent.update({
       where: { slug },

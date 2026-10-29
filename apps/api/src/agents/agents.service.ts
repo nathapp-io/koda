@@ -216,11 +216,43 @@ export class AgentsService {
     return this.agentRepo.isOnProjectRoster(agent.id, project.id);
   }
 
-  async updateRosteredAgent(projectSlug: string, agentSlug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
-    if (!(await this.isOnProjectRosterBySlug(projectSlug, agentSlug))) {
+  async findRosteredAgentIdentity(projectSlug: string, agentSlug: string): Promise<{ projectId: string; agentId: string }> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!project || project.deletedAt || !agent || !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
       throw new NotFoundAppException({}, 'projectAgents');
     }
-    return this.update(agentSlug, updateData);
+    return { projectId: project.id, agentId: agent.id };
+  }
+
+  async updateRosteredAgent(
+    projectSlug: string,
+    agentSlug: string,
+    updateData: UpdateAgentDto,
+    expectedProjectId: string,
+    expectedAgentId: string,
+  ): Promise<AgentResponseDto> {
+    return this.txManager.run(async () => {
+      const project = await this.agentRepo.findProjectBySlug(projectSlug);
+      if (!project || project.deletedAt || project.id !== expectedProjectId) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+      await this.agentRepo.lockProjectAgents(project.id);
+      const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+      if (!agent || agent.id !== expectedAgentId || !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+      const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
+      if (updateData.name !== undefined) data.name = updateData.name;
+      if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
+      if (updateData.status !== undefined) data.status = updateData.status;
+      const updated = await this.audit.audited(
+        () => this.agentRepo.updateById(expectedAgentId, data),
+        (result) => ({ key: 'agent.update', resourceType: 'agent', resourceId: result.id, projectId: null, summary: fieldsSummary(data) }),
+      );
+      await this.invalidateAfterCommit(updated.id);
+      return AgentResponseDto.from(updated);
+    });
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {

@@ -35,9 +35,9 @@ describe('ProjectRouteCommands', () => {
     const { registry, service } = build();
     const command = registry.get('agent.update', PROJECT_ROUTE_VARIANTS.updateAgent);
     if (!command) throw new Error('Missing command');
-    const input = command.parse({ slug: 'alpha', agentSlug: 'bot', patch: { status: 'PAUSED' } });
+    const input = command.parse({ slug: 'alpha', agentSlug: 'bot', projectId: 'p1', agentId: 'a1', patch: { status: 'PAUSED' } });
     await command.execute(input);
-    expect(service.updateRosteredAgent).toHaveBeenCalledExactlyOnceWith('alpha', 'bot', { status: 'PAUSED' });
+    expect(service.updateRosteredAgent).toHaveBeenCalledExactlyOnceWith('alpha', 'bot', { status: 'PAUSED' }, 'p1', 'a1');
   });
   it('AC-8: registers create, update and delete variants', () => {
     const { registry } = build();
