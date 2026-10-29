@@ -2,6 +2,7 @@ import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
+import { MemoryWriteService } from './memory-write.service';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
@@ -126,6 +127,11 @@ describe('MemoryController', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryController,
+        { provide: MemoryWriteService, useFactory: () => new MemoryWriteService(
+          extractionService as ExtractionService, repository as PrismaMemoryItemRepository,
+          projectAccess as ProjectAccessService, permissions,
+          new MemoryWriteGuard(permissions, repository as PrismaMemoryItemRepository), audit as unknown as AuditRecorder,
+        ) },
         { provide: ExtractionService, useValue: extractionService },
         { provide: PrismaMemoryItemRepository, useValue: repository },
         { provide: ProjectAccessService, useValue: projectAccess },

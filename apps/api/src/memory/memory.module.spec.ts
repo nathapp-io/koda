@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MemoryModule } from './memory.module';
 import { MemoryReadController } from './memory-read.controller';
 import { MemoryGovernanceService } from './memory-governance.service';
+import { MemoryWriteService } from './memory-write.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
@@ -29,6 +30,10 @@ describe('MemoryModule (DI wiring)', () => {
       moduleRef = await Test.createTestingModule({
         imports: [GlobalStubsModule, MemoryModule],
       }).compile();
+    });
+
+    it('AC-8 resolves MemoryWriteService', () => {
+      expect(moduleRef.get(MemoryWriteService)).toBeInstanceOf(MemoryWriteService);
     });
 
     it('registers MemoryReadController', () => {
