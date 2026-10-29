@@ -142,7 +142,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
             createTicketFromIssue: vi.fn(),
             findActiveTicketLinksWithPrs: vi.fn(),
             updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
-            applyMergedPrTransition: vi.fn(),
+            applyMergedPrTransition: vi.fn().mockResolvedValue(true),
           },
         },
       ],
@@ -264,7 +264,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged', { expectedState: 'open' });
       expect(result.updated).toBe(1);
     });
 
@@ -310,7 +310,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged', { expectedState: 'open' });
     });
 
     it('should map VcsPrStatus.merged=true to prState="merged"', async () => {
@@ -335,6 +335,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(
         'link-1',
         'merged',
+        { expectedState: 'open' },
       );
     });
   });
@@ -416,7 +417,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed', { expectedState: 'open' });
     });
 
     it('should count 404 PRs as updated (state changed to closed), not skipped', async () => {
@@ -551,7 +552,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
       expect(result.updated).toBe(1);
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed', { expectedState: 'open' });
     });
 
     it('should map fetched state correctly regardless of VCS provider', async () => {
@@ -576,7 +577,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key', 'vcs.sync.pr');
 
       // When merged=false and state='closed', prState should be 'closed'
-      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed');
+      expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'closed', { expectedState: 'open' });
     });
   });
 });

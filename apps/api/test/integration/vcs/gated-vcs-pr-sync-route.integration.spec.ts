@@ -112,6 +112,30 @@ describeIntegration('gated VCS PR sync', () => {
     expect((await approve((await pending()).id)).status).toBe('failed');
     expect((await readLink()).prState).toBe('open');
   });
+  it.each(['open', 'draft', 'merged'] as const)('F1: preserves a concurrent close before applying fetched %s', async (next) => {
+    // Ensure the fetched state differs from the preparation snapshot in every case.
+    await db.ticketLink.update({ where: { id: link.id }, data: { prState: next === 'open' ? 'draft' : 'open' } });
+    vi.mocked(GitHubProvider.prototype.getPullRequestStatus).mockImplementation(async () => {
+      await db.ticketLink.update({ where: { id: link.id }, data: { prState: 'closed' } });
+      return { ...status(), state: 'open', draft: next === 'draft', merged: next === 'merged' };
+    });
+    expect(await approve((await pending()).id)).toMatchObject({ status: 'executed', result: { updated: 0 } });
+    expect((await readLink()).prState).toBe('closed');
+    expect(VcsLinkExtractorService.prototype.extractLinksFromPr).not.toHaveBeenCalled();
+  });
+  it('F2: preserves a ticket status changed after preparation without false transition records', async () => {
+    const ticketId = (await readLink()).ticketId;
+    vi.mocked(GitHubProvider.prototype.getPullRequestStatus).mockImplementation(async () => {
+      await db.ticket.update({ where: { id: ticketId }, data: { status: 'CLOSED' } });
+      return { ...status(), merged: true };
+    });
+    expect(await approve((await pending()).id)).toMatchObject({ status: 'executed', result: { updated: 1 } });
+    expect((await readLink()).prState).toBe('merged');
+    expect((await db.ticket.findUniqueOrThrow({ where: { id: ticketId } })).status).toBe('CLOSED');
+    expect(await db.comment.count({ where: { ticketId, type: 'FIX_REPORT' } })).toBe(0);
+    expect(await db.ticketActivity.count({ where: { ticketId, action: 'VCS_PR_MERGED' } })).toBe(0);
+    expect(await db.auditEntry.count({ where: { resourceId: ticketId, key: 'system.vcs.pr-merge-transition' } })).toBe(0);
+  });
   it('AC-14: missing PR close write failure propagates', async () => {
     vi.mocked(GitHubProvider.prototype.getPullRequestStatus).mockRejectedValue(new NotFoundAppException({}, 'vcs'));
     const write = vi.spyOn(PrismaVcsRepository.prototype, 'updateTicketLinkWithPrState').mockRejectedValue(new Error('close failed'));

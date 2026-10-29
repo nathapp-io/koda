@@ -129,16 +129,17 @@ export class VcsPrSyncService {
       try {
         if (item.kind === 'error') throw item.error;
         if (item.kind === 'missing') {
-          if (await this.writePrState(link.id, 'closed', project.id, auditKey) === 'updated') updated++;
+          if (await this.writePrState(link.id, 'closed', project.id, auditKey, link.prState) === 'updated') updated++;
           continue;
         }
         const prStatus = item.status;
         const next = mapPrState(prStatus);
         if (next === link.prState || link.prState === 'merged' || link.prState === 'closed') continue;
         const outcome = next === 'merged'
-          ? await this.applyMergedPr(link, prStatus, { rethrow: !options.isolate })
-          : await this.writePrState(link.id, next, project.id, auditKey);
-        if (outcome === 'updated') updated++;
+          ? await this.applyMergedPr(link, prStatus, { rethrow: !options.isolate, expectedState: link.prState })
+          : await this.writePrState(link.id, next, project.id, auditKey, link.prState);
+        if (outcome !== 'updated') continue;
+        updated++;
         if (link.ticket && prStatus.branchName) {
           extractions.push({
             project, connection, encryptionKey,
@@ -176,9 +177,10 @@ export class VcsPrSyncService {
     nextState: string,
     projectId: string,
     auditKey: VcsPrStateAuditKey,
+    expectedState: string | null,
   ): Promise<PrStateWriteResult> {
     const outcome = await this.audit.audited(
-      () => this.vcsRepo.updateTicketLinkWithPrState(linkId, nextState),
+      () => this.vcsRepo.updateTicketLinkWithPrState(linkId, nextState, { expectedState }),
       (written) => written.result === 'updated' && written.previousState !== nextState
         ? { key: auditKey, resourceType: 'ticket-link', resourceId: linkId, projectId, summary: prStateSummary(written.previousState, nextState) }
         : [],
@@ -198,10 +200,12 @@ export class VcsPrSyncService {
    * auto-transition writes `status: IN_PROGRESS -> VERIFY_FIX` on the ticket. `runAsSystem` keeps the
    * enclosing correlation id, so both entries still join the request or tick that saw the merge.
    */
-  async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus, options: { rethrow: boolean } = { rethrow: false }): Promise<PrStateWriteResult> {
+  async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus, options: { rethrow: boolean; expectedState?: string | null } = { rethrow: false }): Promise<PrStateWriteResult> {
     return runAsSystemWriter(this, async () => {
       const outcome = await this.audit.audited(
-        () => this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged'),
+        () => options.expectedState === undefined
+          ? this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged')
+          : this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged', { expectedState: options.expectedState }),
         (written) => written.result === 'updated' && written.previousState !== 'merged'
           ? {
             key: MERGE_AUDIT_KEY,
@@ -235,7 +239,8 @@ export class VcsPrSyncService {
     prStatus: VcsPrStatus,
     options: { rethrow: boolean } = { rethrow: false },
   ): Promise<void> {
-    // If ticket is not IN_PROGRESS, skip auto-transition
+    // The snapshot is only a fast rejection; the repository's conditional update rechecks the
+    // live ticket under its write lock before creating any transition records.
     if (!link.ticket || link.ticket.status !== TicketStatus.IN_PROGRESS) {
       return;
     }
@@ -256,13 +261,13 @@ export class VcsPrSyncService {
           mergedBy: prStatus.mergedBy ?? null,
           mergeSha: prStatus.mergeSha ?? null,
         }),
-        () => ({
+        (transitioned) => transitioned ? ({
           key: MERGE_AUDIT_KEY,
           resourceType: 'ticket',
           resourceId: link.ticketId,
           projectId: link.ticket?.projectId ?? null,
           summary: MERGE_TRANSITION_SUMMARY,
-        }),
+        }) : [],
       );
     } catch (error) {
       if (options.rethrow) throw error;

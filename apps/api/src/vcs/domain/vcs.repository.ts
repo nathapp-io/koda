@@ -86,8 +86,9 @@ export interface OutboxDedupQuery {
  * M12: outcome of the single TicketLink.prState write. `already-merged` is the
  * terminal-state skip; `not-found` means the link vanished between the caller's
  * lookup and the write (so the caller must not report it as already merged).
+ * `state-changed` means a prepared sync's expected state no longer matches the locked row.
  */
-export type PrStateWriteResult = 'updated' | 'already-merged' | 'not-found';
+export type PrStateWriteResult = 'updated' | 'already-merged' | 'not-found' | 'state-changed';
 
 /**
  * Review B1: the outcome of that write. `previousState` is the state the write actually replaced,
@@ -125,10 +126,12 @@ export interface IVcsRepository {
    * Review B1: the stored state is read under the row lock in the same transaction as the write, so
    * the outcome's `previousState` is authoritative for both change detection and the audit summary.
    */
-  updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteOutcome>;
+  // Sync passes expectedState from preparation; a mismatch under the row lock returns state-changed.
+  // Webhooks omit it so an explicit reopen retains its existing semantics.
+  updateTicketLinkWithPrState(id: string, prState: string, options?: { expectedState: string | null }): Promise<PrStateWriteOutcome>;
 
-  // Merged PR auto-transition
-  applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;
+  // Merged PR auto-transition: true only when a live, currently IN_PROGRESS ticket was transitioned.
+  applyMergedPrTransition(input: MergedPrTransitionInput): Promise<boolean>;
 
   // Ticket lookup (for webhook synchronize handler)
   findTicketWithProject(ticketId: string): Promise<{ id: string; number: number; externalVcsId: string | null; project: { id: string; key: string } } | null>;
