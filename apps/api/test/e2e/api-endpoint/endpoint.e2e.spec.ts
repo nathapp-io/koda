@@ -3806,7 +3806,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-009 AC-7: project thread create returns exactly 202 for a gated agent request', async () => {
-      await grantKeys(db(), { type: 'AGENT', id: agentId }, ['project.read', 'thread.create'], world.projectId);
+      const grant = await grantKeys(db(), { type: 'AGENT', id: agentId }, ['project.read', 'thread.create'], world.projectId);
       await app.get(MembershipService).invalidatePermissions();
       const policy = await seedWaitPolicy(db(), 'thread.create', world.projectId);
       try {
@@ -3816,8 +3816,12 @@ describeIntegration('API Integration Tests', () => {
           .expect(202);
       } finally {
         await db().approvalPolicy.delete({ where: { id: policy.id } });
+        const binding = await db().roleBinding.findUniqueOrThrow({ where: { id: grant.id }, select: { roleId: true } });
+        await db().roleBinding.delete({ where: { id: grant.id } });
+        await db().role.delete({ where: { id: binding.roleId } });
         await app.get(MembershipService).invalidatePermissions();
       }
+      expect(await db().roleBinding.findUnique({ where: { id: grant.id } })).toBeNull();
     });
 
     it('US-009 AC-8: workspace thread create returns exactly 202 for a globally gated agent request', async () => {
