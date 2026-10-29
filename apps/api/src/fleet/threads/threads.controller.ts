@@ -112,9 +112,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Plan a published thread spec (thread.plan and fleet.job.dispatch: the creator, or the any-row key)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 403, description: 'thread.plan or fleet.job.dispatch is missing, or the caller did not create the thread' })
+  @ApprovalGated()
   async plan(@Param('id') id: string, @Body() dto: PlanThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.plan', ctx);
-    return JsonResponse.Ok(await this.threads.plan(ctx.project.id, id, principal.id, dto, canOperate));
+    const outcome = await this.routeGate.run<Awaited<ReturnType<ThreadsService['plan']>>>({
+      key: 'thread.plan', variant: THREAD_ROUTE_VARIANTS.plan, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, plan: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/run')
@@ -124,9 +129,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Run a thread after its latest plan completed (thread.run and fleet.job.dispatch: the creator, or the any-row key)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 403, description: 'thread.run or fleet.job.dispatch is missing, or the caller did not create the thread' })
+  @ApprovalGated()
   async run(@Param('id') id: string, @Body() dto: RunThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.run', ctx);
-    return JsonResponse.Ok(await this.threads.run(ctx.project.id, id, principal.id, dto, canOperate));
+    const outcome = await this.routeGate.run<Awaited<ReturnType<ThreadsService['run']>>>({
+      key: 'thread.run', variant: THREAD_ROUTE_VARIANTS.run, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, run: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/stop')

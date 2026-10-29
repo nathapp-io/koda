@@ -11,7 +11,7 @@ describe('ThreadRouteCommands', () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
-    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }) };
+    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }) };
     const permissions = { can: vi.fn().mockResolvedValue({ allowed: false }) };
     new ThreadRouteCommands(registry, threads as unknown as ThreadsService, permissions as unknown as PermissionService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, threads, permissions, principal, loader };
@@ -22,6 +22,24 @@ describe('ThreadRouteCommands', () => {
     for (const [key, variant] of [['thread.create', THREAD_ROUTE_VARIANTS.create], ['thread.cap.update', THREAD_ROUTE_VARIANTS.update], ['thread.archive', THREAD_ROUTE_VARIANTS.archive]]) {
       expect(registry.get(key, variant)).toMatchObject({ key, variant });
     }
+  });
+
+  it('AC-7: registers plan and run REST variants', () => {
+    const { registry } = build();
+    expect(registry.get('thread.plan', THREAD_ROUTE_VARIANTS.plan)).toMatchObject({ key: 'thread.plan', variant: 'rest:threads.plan' });
+    expect(registry.get('thread.run', THREAD_ROUTE_VARIANTS.run)).toMatchObject({ key: 'thread.run', variant: 'rest:threads.run' });
+  });
+
+  it('AC-8: recomputes thread.run authority and passes the validated request to the service', async () => {
+    const { registry, threads, permissions, principal } = build();
+    permissions.can.mockResolvedValue({ allowed: true });
+    const command = registry.get('thread.run', THREAD_ROUTE_VARIANTS.run);
+    if (!command) throw new Error('Missing run command');
+    const input = { slug: 'web', projectId: 'p1', id: 't1', run: { maxCostUsd: 3 } };
+    const result = await command.execute(command.parse(input));
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.run', { projectId: 'p1' });
+    expect(threads.run).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', { maxCostUsd: 3 }, true);
+    expect(command.toResult?.(result)).toEqual({ job: { id: 'j2' } });
   });
 
   it('AC-10: recomputes requester authority for cap update at execution', async () => {
