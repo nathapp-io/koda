@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-fleet-ops",
   "branchName": "feat/permissions-p3-approval-gate-fleet-ops",
   "createdAt": "2026-10-29T00:00:00Z",
-  "updatedAt": "2026-10-29T11:05:13.395Z",
+  "updatedAt": "2026-10-29T11:20:22.904Z",
   "userStories": [
     {
       "id": "US-001",
@@ -526,14 +526,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New admin/command orchestration spans policy gating, mutable kill-switch state, transactional audit and asynchronous wake timing; strict access-control TDD applies."
+        "reasoning": "New admin/command orchestration spans policy gating, mutable kill-switch state, transactional audit and asynchronous wake timing; strict access-control TDD applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
@@ -575,7 +578,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "045dffb4c3cde2e6eb92b3f66b5273086ce56def"
     },
     {
       "id": "US-008",
