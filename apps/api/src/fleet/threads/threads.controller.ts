@@ -8,7 +8,6 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { PermissionService } from '../../permissions/permission.service';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
@@ -27,7 +26,7 @@ import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
  * no CASL check left: an agent may create and drive a thread, and the key decides.
  *
  * The thread write keys are ownable, so `RequiresGuard` passes a caller holding only `X.own`
- * (`not-owner`) on purpose — the row is not loaded yet. The handler then asks for the same key
+ * (`not-owner`) on purpose — the row is not loaded yet. The route command then asks for the same key
  * *without* a resource: `canOperate` is true only for an any-row holder, and a `.own` holder keeps the
  * creator compare in the service and repository. `plan` and `run` also need `fleet.job.dispatch`,
  * because both dispatch a job.
@@ -37,7 +36,7 @@ import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/threads')
 export class ThreadsController {
-  constructor(private readonly threads: ThreadsService, private readonly permissions: PermissionService, private readonly routeGate: ApprovalRouteGate) {}
+  constructor(private readonly threads: ThreadsService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Post()
   @HttpCode(201)
@@ -252,14 +251,19 @@ export class ThreadsController {
   @ApiResponse({ status: 200, type: SendMessageResultDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.message.send nor created the thread' })
   @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session' })
+  @ApprovalGated()
   async sendMessage(    @Param('id') id: string,
     @Body() dto: SendMessageDto,
     @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
     @Res({ passthrough: true }) response: { status: (code: number) => unknown },
   ) {
-    const canOperate = await this.canOperate(principal, 'thread.message.send', ctx);
-    const result = await this.threads.sendMessage(ctx.project.id, id, principal.id, dto, canOperate);
+    const outcome = await this.routeGate.run<Awaited<ReturnType<ThreadsService['sendMessage']>>>({
+      key: 'thread.message.send', variant: THREAD_ROUTE_VARIANTS.message, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, message: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    const result = outcome.result;
     if (result.deduplicated) response.status(200);
     return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
   }
@@ -282,12 +286,4 @@ export class ThreadsController {
     return JsonResponse.Ok(await this.threads.messages(ctx.project.id, id, after ?? 0, limit ?? 100));
   }
 
-  /**
-   * The any-row half of "creator or any-row key holder": a caller holding the plain key operates on every
-   * thread of the project; one holding only `X.own` is answered `not-owner` here (no resource is passed),
-   * so the service and repository keep the `createdById === caller` compare.
-   */
-  private async canOperate(principal: KodaPrincipal, key: string, ctx: ProjectContext): Promise<boolean> {
-    return (await this.permissions.can(principal, key, { projectId: ctx.project.id })).allowed;
-  }
 }

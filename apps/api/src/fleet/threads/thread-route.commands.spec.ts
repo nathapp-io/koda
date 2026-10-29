@@ -12,10 +12,45 @@ describe('ThreadRouteCommands', () => {
     const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
     const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined), publish: vi.fn().mockResolvedValue({ jobId: 'jp1' }), discard: vi.fn().mockResolvedValue({ jobId: 'jd1' }) };
+    const sendResult = { message: { id: 'm1' }, jobId: 'j1', deduplicated: false };
+    const mutate = vi.fn().mockResolvedValue(sendResult);
+    const messageThreads = { ...threads, sendMessage: vi.fn().mockResolvedValue(sendResult), prepareSendMessage: vi.fn().mockResolvedValue(mutate) };
     const permissions = { can: vi.fn().mockResolvedValue({ allowed: false }) };
-    new ThreadRouteCommands(registry, threads as unknown as ThreadsService, permissions as unknown as PermissionService, loader as unknown as ActorPrincipalLoader).onModuleInit();
-    return { registry, threads, permissions, principal, loader };
+    new ThreadRouteCommands(registry, messageThreads as unknown as ThreadsService, permissions as unknown as PermissionService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    return { registry, threads: messageThreads, permissions, principal, loader, mutate };
   }
+
+  it('message AC-9: registers the send REST variant with preparation', () => {
+    const { registry } = build();
+    expect(registry.get('thread.message.send', 'rest:threads.message')).toMatchObject({ key: 'thread.message.send', prepare: expect.any(Function) });
+  });
+
+  it('message execution rebuilds authority on both paths and defers only the mutation', async () => {
+    const { registry, threads, permissions, principal, mutate } = build();
+    const command = registry.get('thread.message.send', THREAD_ROUTE_VARIANTS.message);
+    if (!command?.prepare) throw new Error('Missing message preparation');
+    const message = { text: 'hi', clientMessageId: 'c1' };
+    const input = command.parse({ slug: 'web', projectId: 'p1', id: 't1', message });
+    permissions.can.mockResolvedValue({ allowed: true });
+    const callback = await command.prepare(input);
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'thread.message.send', { projectId: 'p1' });
+    expect(threads.prepareSendMessage).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', message, true);
+    expect(mutate).not.toHaveBeenCalled();
+    await callback();
+    expect(mutate).toHaveBeenCalledOnce();
+    expect(threads.sendMessage).not.toHaveBeenCalled();
+    permissions.can.mockResolvedValue({ allowed: false });
+    await command.execute(input);
+    expect(threads.sendMessage).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', message, false);
+    expect(command.parse({ slug: 'web', projectId: 'p1', id: 't1' })).toMatchObject({ message: {} });
+    expect(() => command.parse({ slug: '', projectId: 'p1', id: 't1', message })).toThrow(ValidationAppException);
+  });
+
+  it('message AC-10: stores only message and jobId', () => {
+    const { registry } = build();
+    const command = registry.get('thread.message.send', 'rest:threads.message');
+    expect(command?.toResult?.({ message: { id: 'm1' }, jobId: 'j1', deduplicated: false })).toEqual({ message: { id: 'm1' }, jobId: 'j1' });
+  });
 
   it('AC-9: registers the three REST variants', () => {
     const { registry } = build();

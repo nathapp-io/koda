@@ -26,7 +26,6 @@ POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/threads/:id/messages=gate-fleet
 POST /projects/:slug/vcs=gate-secret
 POST /projects/:slug/vcs/webhook-secret/rotate=gate-secret
 POST /projects/:slug/webhooks=gate-secret

@@ -152,6 +152,11 @@ export class ThreadsService {
   }
 
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto, canOperate = false): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+    return (await this.prepareSendMessage(projectId, threadId, userId, input, canOperate))();
+  }
+
+  /** Resolve external context before the deferred execution transaction; the repository rechecks under its lock. */
+  async prepareSendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto, canOperate = false): Promise<() => Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>> {
     if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
         typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
       throw new ValidationAppException({ reason: 'message' }, 'threads.input');
@@ -160,7 +165,7 @@ export class ThreadsService {
     // run inside it. A missing thread skips the resolution entirely: the repository answers its own not-found.
     const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     const repoContext = thread ? await this.projectBrief.resolveRepoContext(await this.repoIdForThread(projectId, thread)) : undefined;
-    return this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate });
+    return () => this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext, canOperate });
   }
 
   /**

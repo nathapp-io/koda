@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { ConfigType } from '@nestjs/config';
@@ -24,6 +25,30 @@ const record: ChatThreadRecord = {
   session: null, lastActivityAt: new Date('2026-10-01T00:00:00.000Z'), createdAt: new Date('2026-10-01T00:00:00.000Z'),
   activeJob: null, writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
 };
+
+describe('ThreadsService.prepareSendMessage', () => {
+  function build() {
+    const threads = { get: vi.fn().mockResolvedValue(record), sendMessage: vi.fn().mockResolvedValue({ message: { id: 'm1' }, jobId: 'j1', deduplicated: false }) };
+    const brief = briefStub('ctx');
+    const service = new ThreadsService(threads as unknown as ChatThreadRepository, {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>, {} as FleetJobsService, brief, new AfterCommitService());
+    return { service, threads, brief };
+  }
+  it('message AC-7: rejects invalid text before reading repository context', async () => {
+    const { service, brief } = build();
+    await expect(service.prepareSendMessage('p1', 't1', 'u1', { text: '', clientMessageId: 'c1' }, true)).rejects.toBeInstanceOf(ValidationAppException);
+    await expect(service.prepareSendMessage('p1', 't1', 'u1', { text: '', clientMessageId: 'c1' }, true)).rejects.toMatchObject({ response: { prefix: 'threads.input' } });
+    expect(brief.resolveRepoContext).not.toHaveBeenCalled();
+  });
+  it('message AC-8: resolves context once before returning the repository mutation', async () => {
+    const { service, threads, brief } = build();
+    const mutate = await service.prepareSendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' }, true);
+    expect(brief.resolveRepoContext).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(threads.sendMessage).not.toHaveBeenCalled();
+    await mutate();
+    expect(threads.sendMessage).toHaveBeenCalledExactlyOnceWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: 'ctx', canOperate: true });
+    expect(brief.resolveRepoContext).toHaveBeenCalledOnce();
+  });
+});
 
 describe('ThreadsService.list', () => {
   it('US-001 AC10: answers { items, threadsEnabled } with threadsEnabled read from the config at each call', async () => {

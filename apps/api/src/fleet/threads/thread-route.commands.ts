@@ -6,7 +6,7 @@ import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { PermissionService } from '../../permissions/permission.service';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, CreateThreadDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, CreateThreadDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 
 export const THREAD_ROUTE_VARIANTS = {
@@ -20,6 +20,7 @@ export const THREAD_ROUTE_VARIANTS = {
   answer: 'rest:threads.answer',
   publish: 'rest:threads.publish',
   discard: 'rest:threads.discard',
+  message: 'rest:threads.message',
 } as const;
 
 @Injectable()
@@ -32,6 +33,24 @@ export class ThreadRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string; message: SendMessageDto }, Awaited<ReturnType<ThreadsService['sendMessage']>>>({
+      key: 'thread.message.send', variant: THREAD_ROUTE_VARIANTS.message,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['slug', 'projectId', 'id']);
+        const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        return { ...route, message: parseBody(SendMessageDto, value.message ?? {}) };
+      },
+      prepare: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.message.send', { projectId: input.projectId })).allowed;
+        return this.threads.prepareSendMessage(input.projectId, input.id, principal.id, input.message, canOperate);
+      },
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.message.send', { projectId: input.projectId })).allowed;
+        return this.threads.sendMessage(input.projectId, input.id, principal.id, input.message, canOperate);
+      },
+      toResult: ({ message, jobId }) => ({ message, jobId }),
+    }, this.loader));
+
     this.commands.register(routeCommand<{ slug: string; projectId: string; thread: CreateThreadDto }, Awaited<ReturnType<ThreadsService['create']>>>({
       key: 'thread.create', variant: THREAD_ROUTE_VARIANTS.create,
       parse: (input) => {
