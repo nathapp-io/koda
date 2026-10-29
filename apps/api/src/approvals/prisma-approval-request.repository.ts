@@ -27,20 +27,24 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return (client as Record<string, unknown>).approvalRequest as PrismaModelDelegate<ApprovalRequest, string>;
   }
   protected toDomain(model: ApprovalRequest): ApprovalRequestRecord {
-    const { actorType, actorId, onBehalfOfType, onBehalfOfId, variant, updatedAt: _updatedAt, ...fields } = model;
+    const { actorType, actorId, onBehalfOfType, onBehalfOfId, variant, redeem, updatedAt: _updatedAt, ...fields } = model;
     return {
       ...fields,
       // Absent when the column is null (the key's primary command), so a record read back from the
       // database and one built in memory by the gate have the same shape.
       ...(variant !== null ? { variant } : {}),
+      // Absent unless the column is true: a record never carries `redeem: false`, and every reader of
+      // the flag tests for the property rather than its value.
+      ...(redeem ? { redeem: true as const } : {}),
       actor: { type: actorType as ApprovalRequestRecord['actor']['type'], id: actorId },
       onBehalfOf: onBehalfOfType !== null && onBehalfOfId !== null
         ? { type: onBehalfOfType as 'USER' | 'AGENT', id: onBehalfOfId } : null,
     } as ApprovalRequestRecord;
   }
   protected toPersistenceCreate(record: ApprovalRequestRecord) {
-    // An absent variant persists as NULL: the primary command's row.
-    return { ...this.toPersistenceUpdate(record), variant: record.variant ?? null };
+    // An absent variant persists as NULL: the primary command's row. An absent redeem is the column's
+    // false default, written explicitly so a create never depends on it.
+    return { ...this.toPersistenceUpdate(record), variant: record.variant ?? null, redeem: record.redeem === true };
   }
   protected toPersistenceUpdate(patch: Partial<ApprovalRequestRecord>) {
     const { actor, onBehalfOf, input, result, ...fields } = patch;

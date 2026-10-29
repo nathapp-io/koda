@@ -76,6 +76,23 @@ describe('routeCommand', () => {
     expect(command.toResult).toBeUndefined();
   });
 
+  it('AC-8: passes the spec redeem through and omits it when the spec has none', () => {
+    const redact = vi.fn((input: { key: string }) => ({ key: input.key }));
+    const withRedeem = routeCommand(
+      { key: 'agent.create', variant: 'rest:test.redeem', parse: (raw) => raw as { key: string }, run: async () => 'done', redeem: { redact } },
+      { forContext: async () => principal },
+    );
+    const withoutRedeem = routeCommand(
+      { key: 'agent.create', variant: 'rest:test.redeem', parse: (raw) => raw as { key: string }, run: async () => 'done' },
+      { forContext: async () => principal },
+    );
+
+    expect(withRedeem.redeem?.redact).toBe(redact);
+    expect(withRedeem.redeem?.redact?.({ key: 'qa' })).toEqual({ key: 'qa' });
+    expect(redact).toHaveBeenCalledExactlyOnceWith({ key: 'qa' });
+    expect(withoutRedeem.redeem).toBeUndefined();
+  });
+
   it('carries the self-authorising flag only when the spec asks for it', () => {
     const base = { key: 'approval.decide', variant: 'rest:x', parse: (raw: unknown) => raw, run: async () => 'done' };
 

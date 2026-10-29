@@ -6,7 +6,7 @@ import { DEFAULT_APPROVAL_TIMEOUT_SEC, type ApprovalPolicyRecord, type ApprovalR
 import type { PendingApprovalMatch } from './prisma-approval-request.repository';
 import { UnregisteredApprovalCommandError } from './domain/approval.errors';
 import type { ResolvedApproval } from './approval-policy.resolver';
-import { configurableTestCommand } from './test-helpers/test-approval-command';
+import { configurableTestCommand, type TestRedeemState } from './test-helpers/test-approval-command';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
 import { currentContext, runWithActionContext, type ActionActor, type ActionApproval } from '../action-context/action-context';
 
@@ -260,5 +260,132 @@ describe('ApprovalGate', () => {
     }, now);
     expect(testCommand.state.calls).toEqual([]);
     expect(variant.state.calls).toEqual([]);
+  });
+
+  /**
+   * `gate-secret` US-001: a redeem command's request stores the redacted input and the redeem flag,
+   * so no secret reaches the row and the approval only releases the request.
+   */
+  describe('redeem commands', () => {
+    const variant = 'rest:test.redeem';
+    const agentMode: ResolvedApproval = { mode: 'agent', floor: 'none', policy: null, source: 'default' };
+    const noneMode: ResolvedApproval = { mode: 'none', floor: 'none', policy: null, source: 'not-approvable' };
+    /** The `agent.create` command this case redeems; a fresh registry per case takes one per pair. */
+    const redeeming = (patch: Partial<TestRedeemState> = {}) => {
+      const helper = configurableTestCommand('agent.create', { variant });
+      helper.state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false, ...patch };
+      registry.register(helper.command);
+
+      return helper;
+    };
+    const gateAgentCreate = (value: Record<string, string>) =>
+      agent(() => gate.gate('agent.create', value, { projectId: null, variant }, now));
+
+    it('AC-1: stores the redacted input, its hash and the redeem flag', async () => {
+      const command = redeeming();
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a', secret: 's' });
+
+      expect(command.state.redeem?.calls).toEqual([{ name: 'a', secret: 's' }]);
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        permissionKey: 'agent.create',
+        variant,
+        input: { name: 'a' },
+        inputHash: approvalInputHash({ name: 'a' }),
+        redeem: true,
+      }));
+    });
+
+    it('AC-2: two calls whose secrets differ deduplicate on the redacted hash', async () => {
+      redeeming();
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a', secret: 's1' });
+      await gateAgentCreate({ name: 'a', secret: 's2' });
+
+      expect(requests.findPendingDuplicate.mock.calls.map(([match]) => match.inputHash))
+        .toEqual([approvalInputHash({ name: 'a' }), approvalInputHash({ name: 'a' })]);
+    });
+
+    it('AC-3: a command without redeem stores the whole input and no redeem flag', async () => {
+      registry.register(configurableTestCommand('agent.create', { variant }).command);
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a', secret: 's' });
+
+      const created = requests.create.mock.calls[0]?.[0];
+      expect(created?.input).toEqual({ name: 'a', secret: 's' });
+      expect(created?.inputHash).toBe(approvalInputHash({ name: 'a', secret: 's' }));
+      expect('redeem' in (created ?? {})).toBe(false);
+    });
+
+    it('AC-4: redeem declared without a redact stores the whole input and still marks the request', async () => {
+      redeeming({ withoutRedact: true });
+      resolve.mockResolvedValue(agentMode);
+
+      await gateAgentCreate({ name: 'a', secret: 's' });
+
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        input: { name: 'a', secret: 's' },
+        inputHash: approvalInputHash({ name: 'a', secret: 's' }),
+        redeem: true,
+      }));
+    });
+
+    it('AC-5: under mode none a redeem command executes with the full input and opens no request', async () => {
+      const command = redeeming();
+      resolve.mockResolvedValue(noneMode);
+
+      await expect(gateAgentCreate({ name: 'a', secret: 's' }))
+        .resolves.toEqual({ status: 'executed', result: 'done', approval: { requiredMode: 'none', satisfiedBy: 'none' } });
+      expect(command.state.calls).toEqual([{ name: 'a', secret: 's' }]);
+      expect(command.state.redeem?.calls).toEqual([]);
+      expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
+      expect(requests.create).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: a redact that answers undefined refuses and never stores the input', async () => {
+      const command = redeeming({ answer: { value: undefined } });
+      resolve.mockResolvedValue(agentMode);
+
+      await expect(gateAgentCreate({ name: 'a', secret: 's' }))
+        .rejects.toThrow('approval redeem redact returned no input: agent.create');
+      expect(requests.create).not.toHaveBeenCalled();
+      expect(command.state.calls).toEqual([]);
+    });
+
+    it('AC-10: a repeat that differs only in a redacted field answers the first request', async () => {
+      redeeming();
+      resolve.mockResolvedValue(agentMode);
+      // The store answers the pending request when the frozen hash matches, as the repository does.
+      const opened: ApprovalRequestRecord[] = [];
+      requests.create.mockImplementation(async (record) => {
+        opened.push(record);
+
+        return record;
+      });
+      requests.findPendingDuplicate.mockImplementation(async (match) =>
+        opened.find((record) => record.inputHash === match.inputHash && record.status === 'pending' && record.expiresAt > now) ?? null);
+
+      const first = await gateAgentCreate({ name: 'a', secret: 's1' });
+      const second = await gateAgentCreate({ name: 'a', secret: 's2' });
+
+      expect(first).toMatchObject({ status: 'pending', request: { status: 'pending', redeem: true, input: { name: 'a' } } });
+      expect(second).toEqual(first);
+      expect(requests.create).toHaveBeenCalledTimes(1);
+      expect(requests.findPendingDuplicate).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-11: a redact that answers null refuses before storing or executing', async () => {
+      const command = redeeming({ answer: { value: null } });
+      resolve.mockResolvedValue(agentMode);
+
+      await expect(gateAgentCreate({ name: 'a', secret: 's' }))
+        .rejects.toEqual(new Error('approval redeem redact returned no input: agent.create'));
+      expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
+      expect(requests.create).not.toHaveBeenCalled();
+      expect(command.state.calls).toEqual([]);
+    });
   });
 });

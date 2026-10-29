@@ -21,6 +21,7 @@ describeDb('AssistantActionRequest committed migration (PG)', () => {
     // The generated client selects every scalar the model declares, so this chain needs the columns
     // later migrations add to ApprovalRequest too.
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
+    await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
   }, 120_000);
   afterAll(async () => { await scratch?.drop(); });
 

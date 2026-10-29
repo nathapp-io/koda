@@ -32,6 +32,7 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     // The generated client selects every scalar the model declares, so this chain needs the columns
     // later migrations add to ApprovalRequest too.
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
+    await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
     db = scratch.db;
     // The repository reads `prisma.client`, the transaction-aware proxy: route it through the real
     // transaction manager so `FOR UPDATE` runs inside a real PG transaction.

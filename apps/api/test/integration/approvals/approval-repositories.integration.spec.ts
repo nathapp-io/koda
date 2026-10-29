@@ -39,14 +39,15 @@ describeDb('approval engine migration', () => {
     // carry them too or a create on this table sends a column the schema does not have.
     await applyMigration(scratch.db, '20261106090000_approval_fleet_core');
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
+    await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
   }, 60_000);
   afterAll(async () => { await scratch?.drop(); });
   it('AC-1: creates every model column and the unique selector index', async () => {
     const expected = {
       ApprovalPolicy: 'id selector projectId permissionPattern principalType roleId principalId mode timeoutSec onTimeout requiredApprovals approverMustHoldAction requireDistinctApprover updatedByType updatedById createdAt updatedAt',
       // `variant` is appended by 20261108090000_approval_request_variant: ALTER TABLE ADD COLUMN
-      // lands last, whatever position the Prisma model declares.
-      ApprovalRequest: 'id permissionKey projectId actorType actorId onBehalfOfType onBehalfOfId origin correlationId input inputHash requiredMode policyId onTimeout approverMustHoldAction requireDistinctApprover status satisfiedBy approverType approverId expiresAt decidedAt settledAt result createdAt updatedAt variant',
+      // lands last, whatever position the Prisma model declares. `redeem` follows it by the same rule.
+      ApprovalRequest: 'id permissionKey projectId actorType actorId onBehalfOfType onBehalfOfId origin correlationId input inputHash requiredMode policyId onTimeout approverMustHoldAction requireDistinctApprover status satisfiedBy approverType approverId expiresAt decidedAt settledAt result createdAt updatedAt variant redeem',
       ApprovalDecision: 'id requestId deciderType deciderId decision comment decidedAt params',
     };
     for (const [table, names] of Object.entries(expected)) {
@@ -209,6 +210,31 @@ describeDb('approval repositories through AppModule', () => {
     expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: variant.id } })).variant).toBe('rest:labels.delete');
     expect((await requests.findById(variant.id))?.variant).toBe('rest:labels.delete');
     expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: row.id } })).variant).toBeNull();
+  });
+  it('AC-6: persists the redeem flag and reads it back on the record', async () => {
+    const row = await create();
+    const domain = await requests.findById(row.id);
+    if (!domain) throw new Error('missing request');
+
+    const redeem = await write(() => requests.create({ ...domain, id: randomUUID(), redeem: true }));
+
+    expect(redeem.redeem).toBe(true);
+    expect((await requests.findById(redeem.id))?.redeem).toBe(true);
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: redeem.id } })).redeem).toBe(true);
+  });
+  it('AC-7: writes no redeem flag for an execute-after-approval request', async () => {
+    const row = await create();
+    const domain = await requests.findById(row.id);
+    if (!domain) throw new Error('missing request');
+
+    // A row written before the column existed reads back without the property, as an in-memory
+    // fixture does; creating that record again writes the column's false default.
+    expect('redeem' in domain).toBe(false);
+    const copy = await write(() => requests.create({ ...domain, id: randomUUID() }));
+    const readBack = await requests.findById(copy.id);
+
+    expect(readBack !== null && 'redeem' in readBack).toBe(false);
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: copy.id } })).redeem).toBe(false);
   });
   it('joins ambient transactions and rolls back transitions and decisions together', async () => {
     const row = await create();

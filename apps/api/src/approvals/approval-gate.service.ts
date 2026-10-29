@@ -6,6 +6,7 @@ import { currentContext, runWithActionContext, type ActionApproval, type ActionC
 import { findCatalogEntry } from '../permissions/catalog';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalCommandRegistry } from './approval-command.registry';
+import type { ApprovalCommand } from './approval-command.registry';
 import { approvalInputHash, freezeApprovalInput } from './approval-input';
 import { ApprovalPolicyResolver, type ApprovalSubject, type ResolvedApproval } from './approval-policy.resolver';
 import {
@@ -25,6 +26,27 @@ const NO_POLICY_ON_TIMEOUT: ApprovalRequestRecord['onTimeout'] = 'reject';
 
 /** The gate's request seam: the duplicate lookup and the insert of one pending request. */
 type RequestStore = Pick<PrismaApprovalRequestRepository, 'create' | 'findPendingDuplicate'>;
+
+/**
+ * The input a request stores and hashes for `command`, before it is frozen (US-001 of `gate-secret`).
+ *
+ * A command with no `redeem`, or a redeem command with no `redact`, stores its parsed input whole. A
+ * declared `redact` answers the stored form — the input minus its secrets — and a `redact` that
+ * answers nothing is a broken redaction: it throws rather than letting the secret through, so neither
+ * the row nor the hash ever carries it. The gate and `ApprovalExecutionService.redeem` both use this,
+ * so the hash a redemption compares against is the hash the gate wrote.
+ */
+export function redeemStored(command: Pick<ApprovalCommand, 'key' | 'redeem'>, parsed: unknown): unknown {
+  const redact = command.redeem?.redact;
+  if (redact === undefined) return parsed;
+
+  const stored = redact(parsed);
+  if (stored === null || stored === undefined) {
+    throw new Error(`approval redeem redact returned no input: ${command.key}`);
+  }
+
+  return stored;
+}
 
 @Injectable()
 export class ApprovalGate {
@@ -78,7 +100,7 @@ export class ApprovalGate {
       approval = { requiredMode: resolved.mode, satisfiedBy: 'human', approverType: 'USER', approverId: actor.id };
     } else {
       const request = await this.openRequest(
-        { key, projectId: opts.projectId, variant: opts.variant, parsed, resolved, context, actorType: requestActorType },
+        { command, key, projectId: opts.projectId, variant: opts.variant, parsed, resolved, context, actorType: requestActorType },
         now ?? new Date(),
       );
       return { status: 'pending', request };
@@ -98,6 +120,8 @@ export class ApprovalGate {
    */
   private async openRequest(
     opened: {
+      /** The command the request runs; its `redeem` decides what is stored and the record's flag. */
+      command: ApprovalCommand;
       key: string;
       projectId: string | null;
       /** The command's variant (US-001): absent for the key's primary command. */
@@ -109,9 +133,10 @@ export class ApprovalGate {
     },
     now: Date,
   ): Promise<ApprovalRequestRecord> {
-    const { key, projectId, variant, resolved, context, actorType } = opened;
-    // Freeze once: the snapshot the row stores is exactly the value the hash describes.
-    const input = freezeApprovalInput(opened.parsed);
+    const { command, key, projectId, variant, resolved, context, actorType } = opened;
+    // Freeze once: the snapshot the row stores is exactly the value the hash describes. A redeem
+    // command stores and hashes its redacted input, so neither the row nor the hash carries a secret.
+    const input = freezeApprovalInput(redeemStored(command, opened.parsed));
     const inputHash = approvalInputHash(input);
     const duplicate: PendingApprovalMatch = {
       actorType,
@@ -132,7 +157,7 @@ export class ApprovalGate {
     // audit entry, and the write does not count against the entry point's audit coverage.
     return bookkeeping('approval.request-open', () => this.txManager.run(async () => {
       const created = await this.requests.create(
-        newRequest({ key, projectId, variant, resolved, context, actorType, input, inputHash }, now),
+        newRequest({ command, key, projectId, variant, resolved, context, actorType, input, inputHash }, now),
       );
       await this.events.record(created);
       return created;
@@ -147,6 +172,7 @@ export class ApprovalGate {
  */
 function newRequest(
   opened: {
+    command: ApprovalCommand;
     key: string;
     projectId: string | null;
     variant: string | undefined;
@@ -158,7 +184,7 @@ function newRequest(
   },
   now: Date,
 ): ApprovalRequestRecord {
-  const { key, projectId, variant, resolved, context, actorType, input, inputHash } = opened;
+  const { command, key, projectId, variant, resolved, context, actorType, input, inputHash } = opened;
   const { policy } = resolved;
   const timeoutSec = policy?.timeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
 
@@ -167,6 +193,8 @@ function newRequest(
     permissionKey: key,
     // Absent, never `undefined`: the record doubles as the null-variant check its readers rely on.
     ...(variant === undefined ? {} : { variant }),
+    // Absent unless the command redeems: the record doubles as the false check its readers rely on.
+    ...(command.redeem === undefined ? {} : { redeem: true as const }),
     projectId,
     actor: { type: actorType, id: context.actor.id },
     onBehalfOf: context.onBehalfOf ?? null,

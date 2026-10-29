@@ -24,7 +24,7 @@
  * `execute` writes through the `PrismaService` (not a raw client) so that the row joins the ambient
  * transaction: an execution that fails rolls the label back with it.
  */
-import type { ApprovalCommand, ApprovalCommandRegistry } from '../approval-command.registry';
+import type { ApprovalCommand, ApprovalRedeem, ApprovalCommandRegistry } from '../approval-command.registry';
 
 /** The input shape `parse` accepts and returns a copy of: a flat object of string values. */
 export type TestCommandInput = Record<string, string>;
@@ -86,6 +86,24 @@ export interface TestRejectState {
 }
 
 /**
+ * The `redeem` switch: while set, the command declares the redeem mode (US-001 of `gate-secret`), so
+ * the gate stores and hashes the redacted input and marks the request redeemable.
+ */
+export interface TestRedeemState {
+  /** Every input `redact` ran with, in order. */
+  calls: TestCommandInput[];
+  /** The keys `redact` removes from its copy of the input. */
+  drop: readonly string[];
+  /**
+   * Set to make `redact` answer this value instead of the redacted copy: `null` and `undefined`
+   * exercise a broken redaction, which must refuse rather than store the secret.
+   */
+  answer: { value: unknown } | null;
+  /** The command declares `redeem` with no `redact`: the input is stored whole and still redeemable. */
+  withoutRedact: boolean;
+}
+
+/**
  * The switches a case flips. `reset()` turns every one of them off (and empties `calls`), so a case
  * never inherits the previous case's behaviour.
  */
@@ -113,6 +131,8 @@ export interface TestCommandState {
   onReject: TestRejectState | null;
   /** Used as the command's `afterCommit` while set; the command carries none otherwise. */
   afterCommit: TestAfterCommitState | null;
+  /** Used as the command's `redeem` while set; the command carries none otherwise. */
+  redeem: TestRedeemState | null;
 }
 
 export interface ConfigurableTestCommand {
@@ -185,6 +205,25 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
         if (switchState.throws !== null) throw switchState.throws;
       };
     },
+    // A getter, like the other switches: the gate reads `redeem.redact` when it opens a request, and a
+    // case turns the mode on only for the cases that need it.
+    get redeem(): ApprovalRedeem<TestCommandInput> | undefined {
+      const switchState = state.redeem;
+      if (switchState === null) return undefined;
+      if (switchState.withoutRedact) return {};
+
+      return {
+        redact: (input) => {
+          switchState.calls.push({ ...input });
+          if (switchState.answer !== null) return switchState.answer.value;
+
+          const copy: TestCommandInput = { ...input };
+          for (const key of switchState.drop) delete copy[key];
+
+          return copy;
+        },
+      };
+    },
   };
 
   return {
@@ -246,6 +285,7 @@ function freshState(): TestCommandState {
     parseDecision: null,
     onReject: null,
     afterCommit: null,
+    redeem: null,
   };
 }
 

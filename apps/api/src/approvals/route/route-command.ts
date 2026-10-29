@@ -1,5 +1,5 @@
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
-import type { ApprovalCommand } from '../approval-command.registry';
+import type { ApprovalCommand, ApprovalRedeem } from '../approval-command.registry';
 
 /** The one thing a route command needs from `ActorPrincipalLoader`. */
 export interface RoutePrincipalLoader {
@@ -19,6 +19,11 @@ export interface RouteCommandSpec<TInput, TResult> {
   parse(input: unknown): TInput;
   /** The action, as the principal the loader rebuilt from the action context. */
   run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>;
+  /**
+   * Present for the `gate-secret` routes: an approval only releases the request, so the gate stores
+   * this command's redacted input and approving the request runs nothing. See `ApprovalRedeem`.
+   */
+  redeem?: ApprovalRedeem<TInput>;
   /** External reads outside the approval transaction; the returned callback rechecks targets. */
   prepare?(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<() => Promise<TResult>>;
   /** Runs only after deferred execution commits, with its ephemeral raw result. */
@@ -70,6 +75,9 @@ export function routeCommand<TInput, TResult>(
   }
   const { toResult } = spec;
   if (toResult !== undefined) command.toResult = (result) => toResult(result);
+  // The redeem contract is the spec's own object: `redeemStored` reads `redact` off it directly.
+  const { redeem } = spec;
+  if (redeem !== undefined) command.redeem = redeem;
   if (spec.skipKeyRecheck === true) command.skipKeyRecheck = true;
 
   return command;
