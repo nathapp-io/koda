@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-core",
   "branchName": "feat/permissions-p3-approval-gate-secret-core",
   "createdAt": "2026-11-09T09:00:00.000Z",
-  "updatedAt": "2026-10-29T17:04:29.541Z",
+  "updatedAt": "2026-10-29T17:08:22.393Z",
   "userStories": [
     {
       "id": "US-001",
@@ -200,14 +200,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing source files gain a due-query predicate and a settlement branch using established locks, counters, events and audit; no new scheduler or locking mechanism is introduced, but authorization expiry requires strict isolated TDD."
+        "reasoning": "Two existing source files gain a due-query predicate and a settlement branch using established locks, counters, events and audit; no new scheduler or locking mechanism is introduced, but authorization expiry requires strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
@@ -238,7 +241,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "91be5f2d53dda0dc9600c8164b529abea91d69dd"
     },
     {
       "id": "US-004",
