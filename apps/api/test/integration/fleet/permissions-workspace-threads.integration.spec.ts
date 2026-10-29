@@ -49,8 +49,8 @@ const THREAD_NOT_FOUND = (readI18n('threads')['notFound'] as Record<string, stri
 
 interface ThreadBody { id: string; status: string; maxCostUsd: string; createdByType: string; homeProject: { slug: string } }
 
-/** The three keys the custom GLOBAL role grants: create, read-own and send-own, and nothing else. */
-const WORKSPACE_AGENT_KEYS = ['thread.workspace.create', 'thread.workspace.read.own', 'thread.workspace.message.send.own'];
+/** Workspace creation/archive and the two owner-scoped read/send keys granted by the custom GLOBAL role. */
+const WORKSPACE_AGENT_KEYS = ['thread.workspace.create', 'thread.workspace.archive', 'thread.workspace.read.own', 'thread.workspace.message.send.own'];
 
 describeIntegration('workspace thread keys and hosting (US-003)', () => {
   let app: NathApplication;
@@ -274,9 +274,11 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
     expect(await prisma.chatThread.count({ where: { createdById: ids.plainAgent } })).toBe(0);
   }, TIMEOUT);
 
-  it('AC-4: an agent granted the workspace keys by a GLOBAL role creates a workspace thread in p1 as an AGENT', async () => {
+  it('AC-4/US-006 AC-6: an agent with global keys creates immediately without a policy request', async () => {
+    const requestsBefore = await prisma.approvalRequest.count();
     const res = await as('ws-host-agent', 'post', '/api/threads', createBody(P1_SLUG)).expect(201);
 
+    expect(await prisma.approvalRequest.count()).toBe(requestsBefore);
     const thread = data<ThreadBody>(res);
     expect(thread).toEqual(expect.objectContaining({ createdByType: 'AGENT', homeProject: { slug: P1_SLUG, name: 'P1' } }));
     expect(await reload(thread.id)).toEqual(expect.objectContaining({
@@ -349,6 +351,16 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
 
     expectNotFound(await as('root', 'get', `/api/threads/${thread.id}`));
     expectNotFound(await as('root', 'get', `/api/threads/${thread.id}/messages`));
+  }, TIMEOUT);
+
+  it('US-006 AC-11: a globally authorized agent gets 404 inside archive and creates no approval request for another owner\'s thread', async () => {
+    const thread = await threadRow(ids.devBind);
+    const requestsBefore = await prisma.approvalRequest.count();
+
+    expectNotFound(await as('ws-host-agent', 'post', `/api/threads/${thread.id}/archive`));
+
+    expect(await prisma.approvalRequest.count()).toBe(requestsBefore);
+    expect((await reload(thread.id)).status).toBe('ACTIVE');
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

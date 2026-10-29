@@ -2,6 +2,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { RequiresMetadata, REQUIRES_METADATA } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { WorkspaceThreadsController } from './workspace-threads.controller';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 
 /**
  * Permissions P1 US-003: the route half of the workspace thread migration, pinned per handler.
@@ -60,6 +61,18 @@ describe('WorkspaceThreadsController route keys (US-003)', () => {
   it('authorizes through keys only: PermissionService is the service\'s dependency, not the controller\'s', () => {
     const deps = Reflect.getMetadata('design:paramtypes', WorkspaceThreadsController) as unknown[];
 
-    expect(deps.map((dep) => (dep as { name: string }).name)).toEqual(['WorkspaceThreadsService']);
+    expect(deps.map((dep) => (dep as { name: string }).name)).toEqual(['WorkspaceThreadsService', 'ApprovalRouteGate']);
+  });
+
+  it('AC-9: routes create through the global approval gate with the body unchanged', async () => {
+    const body = { title: 'thread', backend: { kind: 'native', model: 'm1' } };
+    const run = vi.fn(async () => ({ status: 'executed' as const, result: { id: 't1' } }));
+    const controller = new WorkspaceThreadsController({} as never, { run } as unknown as ApprovalRouteGate);
+
+    await controller.create(body as never, { actorType: 'user', id: 'u', role: 'MEMBER' } as never);
+
+    expect(run).toHaveBeenCalledWith({
+      key: 'thread.workspace.create', variant: 'rest:workspace-threads.create', projectId: null, input: { thread: body },
+    });
   });
 });

@@ -8,6 +8,11 @@ import { RequiresGuard } from '../../permissions/requires.guard';
 import { AnswerQuestionDto, ChatMessageListDto, SendMessageDto, SendMessageResultDto, UpdateThreadDto } from './dto/thread.dto';
 import { CreateWorkspaceThreadDto, WorkspaceThreadDetailDto, WorkspaceThreadDto, WorkspaceThreadListDto } from './dto/workspace-thread.dto';
 import { WorkspaceThreadsService } from './workspace-threads.service';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { WORKSPACE_THREAD_ROUTE_VARIANTS } from './workspace-thread-route.commands';
+import type { ChatThreadRecord, ChatThreadDetail } from './domain/chat-thread.domain';
 
 /** A query integer (same rules as the project route): only digits, so `Number('1e3')` or `Number('')` never pass. */
 function intParam(raw: string | undefined, min: number, max: number): number | null {
@@ -31,7 +36,7 @@ function intParam(raw: string | undefined, min: number, max: number): number | n
 @ApiBearerAuth()
 @Controller('threads')
 export class WorkspaceThreadsController {
-  constructor(private readonly threads: WorkspaceThreadsService) {}
+  constructor(private readonly threads: WorkspaceThreadsService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Post()
   @HttpCode(201)
@@ -40,8 +45,14 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Create a personal workspace chat thread (thread.workspace.create, hosted by the home project’s thread.create)' })
   @ApiResponse({ status: 201, type: WorkspaceThreadDto })
   @ApiResponse({ status: 403, description: 'thread.workspace.create is missing, or thread.create is refused in the home project' })
+  @ApprovalGated()
   async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    return JsonResponse.Ok(await this.threads.create(principal, dto));
+    const outcome = await this.routeGate.run<ChatThreadRecord>({
+      key: 'thread.workspace.create', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.create, projectId: null,
+      input: { thread: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get()
@@ -107,9 +118,14 @@ export class WorkspaceThreadsController {
   @ApiOperation({ summary: 'Archive a personal workspace chat thread (thread.workspace.archive)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadDetailDto })
   @ApiResponse({ status: 403, description: 'thread.workspace.archive is missing' })
+  @ApprovalGated()
   async archive(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
-    await this.threads.archive(principal, id);
-    return JsonResponse.Ok(await this.threads.get(principal.id, id));
+    const outcome = await this.routeGate.run<ChatThreadDetail>({
+      key: 'thread.workspace.archive', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.archive, projectId: null,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Patch(':id')

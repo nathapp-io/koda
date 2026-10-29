@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { isUserPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
@@ -14,6 +14,7 @@ import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, 
 import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 
 /**
  * The personal (workspace) thread surface, authorized by permission keys (permissions P1 US-003).
@@ -36,7 +37,10 @@ export class WorkspaceThreadsService {
     private readonly access: ProjectAccessService,
     private readonly permissions: PermissionService,
     private readonly fleetJobs: FleetJobsService,
+    private readonly afterCommit: AfterCommitService,
   ) {}
+
+  private readonly logger = new Logger(WorkspaceThreadsService.name);
 
   async create(principal: UserPrincipal | AgentPrincipal, input: CreateWorkspaceThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
@@ -165,11 +169,15 @@ export class WorkspaceThreadsService {
     const thread = await this.requireOwnedThread(principal.id, id);
     const jobId = await this.threads.archive({ kind: 'workspace', userId: principal.id }, id, principal.id, false);
     if (!jobId) return;
-    try { await this.fleetJobs.cancel(principal.id, thread.projectId, jobId, true); }
-    catch (error) {
-      if (!(error instanceof ConflictAppException)) throw error;
-      // The terminal transition may win after archive commits.
-    }
+    const cancel = async () => {
+      try { await this.fleetJobs.cancel(principal.id, thread.projectId, jobId, true); }
+      catch (error) {
+        if (!(error instanceof ConflictAppException)) throw error;
+        // The terminal transition may win after archive commits.
+      }
+    };
+    const deferred = () => cancel().catch((error: unknown) => this.logger.warn(`archive cancel of job ${jobId} failed: ${String(error)}`));
+    if (!this.afterCommit.defer(deferred)) await cancel();
   }
 
   /**

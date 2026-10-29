@@ -7,16 +7,20 @@ import { WorkspaceThreadsController } from './workspace-threads.controller';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { PermissionService } from '../../permissions/permission.service';
 import { validateCreateWorkspaceThread } from './thread-input';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 
 // Principal injection reads request.user, as CombinedAuthGuard does in production.
 describe('workspace POST body whitelist', () => {
   let app: NestFastifyApplication;
   let module: TestingModule;
+  let service: { create: ReturnType<typeof vi.fn> };
   beforeEach(async () => {
+    service = { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) };
     module = await Test.createTestingModule({
       controllers: [WorkspaceThreadsController],
       providers: [
-        { provide: WorkspaceThreadsService, useValue: { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) } },
+        { provide: WorkspaceThreadsService, useValue: service },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn(async (call: { input: { thread: unknown } }) => ({ status: 'executed', result: await service.create({ actorType: 'user', id: 'u', role: 'MEMBER' }, call.input.thread) })) } },
         // US-003: the routes carry `RequiresGuard`, which reads the global PermissionService.
         { provide: PermissionService, useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } },
       ],

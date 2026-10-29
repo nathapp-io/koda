@@ -16,6 +16,7 @@ import { ProjectBriefService } from './project-brief.service';
 import { ThreadsService } from './threads.service';
 import { ProjectsModule } from '../../projects/projects.module';
 import { WorkspaceThreadsService } from './workspace-threads.service';
+import { WorkspaceThreadRouteCommands } from './workspace-thread-route.commands';
 import { WorkspaceThreadsController } from './workspace-threads.controller';
 import { WorkspaceThreadEventsController, WorkspaceThreadEventsGuard } from './workspace-thread-events.controller';
 
@@ -23,7 +24,7 @@ import { WorkspaceThreadEventsController, WorkspaceThreadEventsGuard } from './w
   // GitBrokerModule exports GitHubAppClient, which ProjectBriefService reads the repository context with (1c-D3).
   imports: [ApprovalEngineModule, AuthRepositoryModule, ProjectsModule, ProjectAccessModule, SkillsModule, FleetReposModule, ThreadStoreModule, FleetJobsModule, GitBrokerModule, AuthModule, LiveModule],
   controllers: [WorkspaceThreadsController, WorkspaceThreadEventsController, ThreadsController, ThreadEventsController],
-  providers: [ThreadRouteCommands, WorkspaceThreadsService, WorkspaceThreadEventsGuard, ThreadsService, ThreadEventsGuard, ProjectBriefService],
+  providers: [ThreadRouteCommands, WorkspaceThreadRouteCommands, WorkspaceThreadsService, WorkspaceThreadEventsGuard, ThreadsService, ThreadEventsGuard, ProjectBriefService],
   exports: [ThreadsService],
 })
 export class ThreadsModule {}

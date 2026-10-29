@@ -11,6 +11,8 @@ import type { ProjectAccessService } from '../../projects/project-access.service
 import type { IFleetConfig } from '../../config/fleet.config';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
+import { AfterCommitService } from '../../permissions/after-commit.service';
+import { Logger } from '@nestjs/common';
 
 const allow = (): PermissionDecision => ({ allowed: true, reason: 'granted' });
 const deny = (reason: PermissionDecision['reason'] = 'not-granted'): PermissionDecision => ({ allowed: false, reason });
@@ -58,6 +60,7 @@ describe('workspace home project creation', () => {
       { findMembershipRole: vi.fn(async (id: string) => roles[id] ?? null), resolveMembership } as unknown as ProjectAccessService,
       { can } as unknown as PermissionService,
       {} as never,
+      new AfterCommitService(),
     );
   });
 
@@ -147,7 +150,7 @@ describe('workspace read, cap and command scope', () => {
     service = new WorkspaceThreadsService(
       repository as unknown as ChatThreadRepository,
       {} as IFleetRepoRepository, {} as SkillsService, config as IFleetConfig, {} as ProjectsService,
-      {} as ProjectAccessService, { can } as unknown as PermissionService, {} as never,
+      {} as ProjectAccessService, { can } as unknown as PermissionService, {} as never, new AfterCommitService(),
     );
   });
 
@@ -272,5 +275,48 @@ describe('workspace read, cap and command scope', () => {
       await expect(run(service, principal)).rejects.toMatchObject({ prefix: 'threads.notFound', httpStatus: 404 });
     }
     expect(can).not.toHaveBeenCalled();
+  });
+
+  describe('archive cancel commit boundary', () => {
+    let afterCommit: AfterCommitService;
+    let cancel: ReturnType<typeof vi.fn>;
+    let archiveService: WorkspaceThreadsService;
+    let archiveRepository: Record<string, ReturnType<typeof vi.fn>>;
+
+    beforeEach(() => {
+      afterCommit = new AfterCommitService();
+      cancel = vi.fn(async () => undefined);
+      archiveRepository = { get: vi.fn(async () => record), archive: vi.fn(async () => 'j1') };
+      archiveService = new WorkspaceThreadsService(
+        archiveRepository as unknown as ChatThreadRepository, {} as IFleetRepoRepository, {} as SkillsService,
+        { threadsEnabled: true } as IFleetConfig, {} as ProjectsService, {} as ProjectAccessService,
+        {} as PermissionService, { cancel } as never, afterCommit,
+      );
+    });
+
+    it('AC-8: defers cancellation until after the commit scope callback returns', async () => {
+      const order: string[] = [];
+      cancel.mockImplementation(async () => { order.push('cancel'); });
+      await afterCommit.scope(async () => {
+        await archiveService.archive(principal, 't1');
+        order.push('scope');
+        expect(order).toEqual(['scope']);
+      });
+      expect(order).toEqual(['scope', 'cancel']);
+      expect(cancel).toHaveBeenCalledWith('u', 'p1', 'j1', true);
+    });
+
+    it('AC-10: logs a deferred cancellation failure without rejecting the committed archive', async () => {
+      const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      cancel.mockRejectedValue(new Error('offline'));
+      await expect(afterCommit.scope(() => archiveService.archive(principal, 't1'))).resolves.toBeUndefined();
+      expect(warning).toHaveBeenCalledTimes(1);
+      warning.mockRestore();
+    });
+
+    it('REG-1: cancels immediately outside an after-commit scope', async () => {
+      await archiveService.archive(principal, 't1');
+      expect(cancel).toHaveBeenCalledWith('u', 'p1', 'j1', true);
+    });
   });
 });
