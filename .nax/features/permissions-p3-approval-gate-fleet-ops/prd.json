@@ -1,0 +1,709 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-gate-fleet-ops",
+  "branchName": "feat/permissions-p3-approval-gate-fleet-ops",
+  "createdAt": "2026-10-29T00:00:00Z",
+  "updatedAt": "2026-10-29T09:59:21.895Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Test-hook keys stop being approvable",
+      "description": "**Goal** — Make the two production-unreachable fleet test-hook keys non-approvable and open the incremental rollout contract.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — **The test-hook keys are non-approvable by name.** `catalog.ts` gains `TEST_HOOK_KEYS = new Set(['testhook.schedule.fire', 'testhook.nax-files.seed'])` (exported). `buildEntry` answers `approvable: false` (floor and default `none`) for a member. Its risk stays `medium`, because the rule is about reachability, not risk. No role changes. A policy naming one of these keys is refused by policy validation from then on, as for any non-approvable key.\n\n**Each gating story removes its own `PENDING_GATE_ROUTES` rows.** US-001 relaxes the exact gated-route count to a lower bound (at least 81), and the allowlist count case to the `gate-secret` count. US-009 restores both exactly.\n\nUS-001: the rows of `POST /fleet/test-hooks/schedules/:id/fire` and `PUT /fleet/test-hooks/repos/:repoId/nax-files` are deleted (their keys are no longer approvable, so the contract would report them stale).\n\nUpdate `catalog.spec.ts` — the \"derives … for every catalog key\" case's local approvable rule also excludes TEST_HOOK_KEYS members (import TEST_HOOK_KEYS), so its derivation matches the catalog. In `src/permissions/test-helpers/permission-contract.spec.ts`, the \"AC-3: keeps exactly 36 fleet and 11 secret rollout assignments\" case asserts only the gate-secret count (11), until US-009. In `test/integration/permissions/permission-contract.integration.spec.ts`, the \"collects exactly 81 gated routes\" case becomes \"at least 81\" (its title follows); US-009 restores an exact count. Consumers `approvableKeys()` and `validateApprovalPolicy` should derive their new behavior through catalog approvability.\n\n**Scope** — In: catalog derivation, the two hook allowlist removals and temporary contract assertion relaxation. Out: gating the 16 production routes (US-002–US-008), exact final counts/OpenAPI (US-009), changing hook reachability or role grants. Changing any catalog default: these keys stay `none`. Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`: the test-hook rule is code (`TEST_HOOK_KEYS`), not an inventory column.\n\n**Interface** — `TEST_HOOK_KEYS = new Set(['testhook.schedule.fire', 'testhook.nax-files.seed'])` (exported); `buildEntry` answers `approvable: false` (floor and default `none`) for a member.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: findCatalogEntry(key)?.approval equals { approvable: false, floor: 'none', default: 'none' } for each of testhook.schedule.fire and testhook.nax-files.seed (one it.each row each).",
+        "AC-2 [unit]: findCatalogEntry('testhook.schedule.fire')?.risk returns 'medium', unchanged.",
+        "AC-3 [unit]: approvableKeys() contains neither testhook.schedule.fire nor testhook.nax-files.seed.",
+        "AC-4 [unit]: findCatalogEntry('fleet.ingest.backfill')?.approval.approvable remains true.",
+        "AC-5 [unit]: PENDING_GATE_ROUTES.has(route) returns false for each of POST /fleet/test-hooks/schedules/:id/fire and PUT /fleet/test-hooks/repos/:repoId/nax-files (one it.each row each).",
+        "AC-6 [unit]: validateApprovalPolicy returns 'pattern' for a policy whose permissionPattern is testhook.schedule.fire."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "approval-gate",
+        "security",
+        "catalog"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small catalog and rollout-contract change, but it changes access-control policy validation and requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/pending-gate-routes.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/approvals/approvable-keys.ts",
+        "apps/api/src/approvals/approval-policy.validation.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "TEST_HOOK_KEYS (exported); buildEntry answers approvable false (floor and default none) for its members"
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the \"derives … for every catalog key\" case's local approvable rule also excludes TEST_HOOK_KEYS members (import TEST_HOOK_KEYS), so its derivation matches the catalog"
+        },
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "the two test-hook rows are deleted"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the \"AC-3: keeps exactly 36 fleet and 11 secret rollout assignments\" case asserts only the gate-secret count (11), until US-009"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the \"collects exactly 81 gated routes\" case becomes \"at least 81\" (its title follows); US-009 restores an exact count"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Gated job dispatch and requeue, and the ticket auto-start after commit",
+      "description": "**Goal** — Route job dispatch/requeue through REST commands and move RUN ticket auto-start beyond the owning approval commit.\n\n**Motivation** — The fleet writes still bypass the engine on REST: a policy `fleet.job.dispatch → agent` makes the assistant's `koda_dispatch_job` wait, while the same agent calling `POST /projects/:slug/fleet/jobs` dispatches at once.\n\n**Approach** — **The dispatch's ticket auto-start runs after commit.** `FleetJobTicketEffects.onRunDispatched` starts each linked ticket and logs a failure instead of throwing (\"C9 D452, after commit\"). Inside the execution transaction, a swallowed failure poisons the transaction, and a start inside it is no longer after commit. The method now hands its start loop to `AfterCommitService.defer(task)`, and runs it at once when `defer` answers false (no scope: the immediate path). The approval execution opens the scope, so a deferred dispatch starts its tickets after its commit. This also covers the assistant's `koda_dispatch_job`, whose approved run already dispatches inside the execution transaction.\n\n**A deferred job create that loses the active-job race fails the request.** `FleetJobsService.dispatch`, `.requeue` and `ConfigJobsService.create` catch `DuplicateActiveJobError`, then look up the winner \"outside the failed transaction\". Inside the execution transaction, that lookup runs in the aborted transaction, and the request settles `failed`. That is the right outcome; the 409 body's `activeJobId` is not reproduced (Out of Scope). 5b's drift check already behaves this way.\n\n**The frozen input is ids, slugs and the validated body.** Project-scoped inputs carry `slug`, so the execution locks the slug to the request's project (`lockProjectSlug`). Ingest inputs are global and carry only the job id.\n\nRegister exactly these project-scoped commands in new `fleet/jobs/fleet-job-route.commands.ts`:\n- `POST /projects/:slug/fleet/jobs` | `fleet.job.dispatch` | `rest:fleet-jobs.dispatch` | `{ slug, projectId, dispatch: parseBody(DispatchFleetJobDto, …) }` | `jobs.dispatch(principal.id, projectId, dispatch, { ticketActor: { principal, projectSlug: slug } })`.\n- `POST /projects/:slug/fleet/jobs/:id/requeue` | `fleet.job.requeue` | `rest:fleet-jobs.requeue` | `{ slug, projectId, id }` | `jobs.requeue(principal.id, projectId, id)`.\n\nId and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Every body-returning command declares `toResult: (result) => result`. `FleetJobsModule` imports `ApprovalEngineModule`, `AuthRepositoryModule`; provides `FleetJobRouteCommands`. `FleetJobsController` gains `ApprovalRouteGate` last, and only dispatch/requeue change in this story. Each gated handler gains `@ApprovalGated()`, keeps its `@Requires`, `@HttpCode` and `@ApiResponse`s. On pending throw `new ApprovalPending(outcome.request)`; on executed answer `JsonResponse.Ok(outcome.result)` with today's 201/200. **Only the HTTP handlers change.** Gated handlers keep their parameters, in order. This preserves the existing HTTP handler signatures and parameter order; it does not exclude the explicitly scoped commands, module wiring or ticket-effects changes above.\n\nRemove only the dispatch and requeue rows from `PENDING_GATE_ROUTES`. `FleetJobTicketEffects` constructor gains `AfterCommitService` last. Every construction in `fleet-job-ticket.effects.spec.ts` (lines 20, 57 and 185) passes `new AfterCommitService()` as the 6th argument; existing start assertions still hold (no scope is open there); add deferred-start cases. `bundle-ingest.workflow.spec.ts`'s construction also passes `new AfterCommitService()` as the 6th argument; no assertion changes.\n\nTest fixtures: agent holds fleet.job.dispatch and fleet.job.requeue in P. Seed each wait policy explicitly; these keys default to none. Dispatch body is `{ repoId: world.repoId, command: 'RUN', feature: <unique>, maxCostUsd: 5 }`; use independent CREATED tickets and jobs for each criterion.\n\n**Scope** — In: dispatch/requeue gate, commands/module, shared ticket-start timing and affected constructions. Out: cancel and unlink (US-003), config job prepare (US-005), final contracts/OpenAPI (US-009). Assistant or MCP writes on these keys: they keep their primary command. Reproducing the `activeJobId` of the 409 `fleet.jobs` / `fleet.configJobActive` body on a deferred job create that loses the active-job race: the request settles `failed` (Design). The activity rows of the ingest and job writes still record `actorType: 'USER'` for an agent actor, as today. A transaction timeout other than Prisma's default for the execution transaction: a deferred dispatch's placement and a deferred backfill run inside it as they are. Bounding the size of a frozen input: `DispatchFleetJobDto`, `SubmitConfigEditDto.edits` and the patterns list are stored whole in `ApprovalRequest.input` when a request waits. US-002 only: retrying a ticket auto-start that failed after commit; it is logged, as today.\n\n**Interface** — `FleetJobRouteCommands`, `FLEET_JOB_ROUTE_VARIANTS` — new: `dispatch`, `requeue`; `FleetJobsService.dispatch(actorId, projectId, dto, opts)`, `.requeue(actorId, projectId, jobId)`; `FleetJobTicketEffects.onRunDispatched`; `AfterCommitService.defer(task)` answers false outside a scope.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/projects/web/fleet/jobs with a dispatch body by the agent under a wait policy answers 202 with data matching { permissionKey: 'fleet.job.dispatch', projectId: <P's id> }.",
+        "AC-2 [integration]: After the agent opens its own AC-1-equivalent request, before approval, no FleetJob row with that feature exists.",
+        "AC-3 [integration]: Approving the agent's own AC-1-equivalent request leaves exactly one QUEUED FleetJob with that feature whose requestedById is the agent's id, and the request's result.job.id is that job's id.",
+        "AC-4 [integration]: Approving the agent's pending RUN dispatch with ticketRefs: [<a CREATED ticket of P>] leaves that ticket IN_PROGRESS.",
+        "AC-5 [integration]: Approving the agent's pending dispatch after root dispatched the same repository and feature while it waited settles the request failed, and exactly one FleetJob with that feature exists.",
+        "AC-6 [integration]: POST /api/projects/web/fleet/jobs with the root token under a wait policy answers 201 and writes no ApprovalRequest row.",
+        "AC-7 [integration]: POST /api/projects/web/fleet/jobs/<job>/requeue for a CANCELLED job by the agent under a wait policy answers 202 with data.permissionKey 'fleet.job.requeue'.",
+        "AC-8 [integration]: Approving the agent's own AC-7-equivalent request leaves the job QUEUED.",
+        "AC-9 [integration]: The ApprovalRequest row opened by the test's AC-1-equivalent call has variant 'rest:fleet-jobs.dispatch' and input.dispatch.feature equal to the sent feature.",
+        "AC-10 [unit]: After onModuleInit, registry.get('fleet.job.dispatch', 'rest:fleet-jobs.dispatch') returns a command with key 'fleet.job.dispatch', and registry.get('fleet.job.requeue', 'rest:fleet-jobs.requeue') returns a command with key 'fleet.job.requeue'.",
+        "AC-11 [unit]: The rest:fleet-jobs.dispatch command's run for a principal with id a1 calls jobs.dispatch('a1', 'p1', <the dto>, { ticketActor: { principal: <that principal>, projectSlug: 'web' } }) for input { slug: 'web', projectId: 'p1', dispatch: <the dto> }.",
+        "AC-12 [unit]: The rest:fleet-jobs.requeue command's run for a principal with id a1 calls jobs.requeue('a1', 'p1', 'j1') for input { slug: 'web', projectId: 'p1', id: 'j1' }.",
+        "AC-13 [unit]: Inside AfterCommitService.scope, FleetJobTicketEffects.onRunDispatched(actor, [<a CREATED ticket>]) calls transitions.startForDispatch only after the scope's callback has returned.",
+        "AC-14 [unit]: Outside any scope, onRunDispatched(actor, [<a CREATED ticket>]) calls transitions.startForDispatch before it answers.",
+        "AC-15 [integration]: POST /api/projects/web/fleet/jobs by the agent with no policy seeded answers 201 and writes no ApprovalRequest row."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "transactions",
+        "jobs"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module command registration and deferred domain writes must preserve actor authority and commit timing; security override requires strict TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/test/integration/fleet/gated-project-fleet-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/fleet-job-route.commands.ts",
+        "apps/api/src/fleet/jobs/fleet-job-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-job-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/fleet/jobs and POST /projects/:slug/fleet/jobs/:id/requeue"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides FleetJobRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate (last); dispatch and requeue gated"
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+          "reason": "constructor gains AfterCommitService (last); onRunDispatched defers its start loop when a scope is open"
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts",
+          "reason": "every construction (lines 20, 57 and 185) passes `new AfterCommitService()` as the 6th argument; existing start assertions still hold (no scope is open there); the deferred-start cases"
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts",
+          "reason": "its FleetJobTicketEffects construction (about line 119) passes `new AfterCommitService()` as the 6th argument; no assertion changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Gated job cancel and ticket-job unlink",
+      "description": "**Goal** — Gate cancel and unlink while preserving requester cancellation without a cancel key and rechecking authority when execution occurs.\n\n**Motivation** — The fleet writes still bypass the engine on REST: a policy `fleet.job.dispatch → agent` makes the assistant's `koda_dispatch_job` wait, while the same agent calling `POST /projects/:slug/fleet/jobs` dispatches at once.\n\n**Approach** — **Cancel keeps \"a requester may cancel its own job\".** `fleet.job.cancel` is not ownable: the route declares it `enforcedBy: 'service'`, and `FleetJobsService.cancel` lets the requester through without it. The handler first asks `FleetJobsService.requesterOf(projectId, id)` (new), for every caller. That method throws `NotFoundAppException({}, 'fleet.jobs')` for a job missing from the project, as today's 404. The handler then asks `permissions.can(principal, 'fleet.job.cancel', { projectId })`. When that is denied and the requester is not the caller, it throws `ForbiddenAppException({}, 'permissions')`, as today's 403. It then gates with `keyCheck: false`, because a requester holds no key to check. The command computes `canOperate` again at execution, as 5b's schedule delete computes `canAdminister`, and `FleetJobsService.cancel` re-checks requester-or-key. The engine's execution pre-check (`ApprovalExecutionService.precheck`) re-checks the actor's key for every command, not only prepared ones, so a requester without the key would settle `permission-revoked`. The cancel command therefore sets `skipKeyRecheck: true`: its run is its own authority, as 5a's decide is.\n\nExtend `FleetJobRouteCommands` and its spec (both created by US-002) with cancel registration and run cases. Add `TicketFleetJobRouteCommands` and its spec. Project-scoped route contracts:\n- `POST /projects/:slug/fleet/jobs/:id/cancel` | `fleet.job.cancel` | project, `keyCheck: false` | `rest:fleet-jobs.cancel` | `{ slug, projectId, id }` | `jobs.cancel(principal.id, projectId, id, <can fleet.job.cancel at execution>)`; `skipKeyRecheck: true`.\n- `DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId` | `fleet.ticket-job.unlink` | project | `rest:ticket-fleet-jobs.unlink` | `{ slug, projectId, ref, jobId }` | `fleetTickets.unlink(projectId, ref, jobId, principal.id)`, answering `null`.\n\nId and string members are read with `parseRouteInput`. The cancel command declares `toResult: (result) => result`; the no-body unlink command declares none. `FleetTicketsModule` imports `ApprovalEngineModule`, `AuthRepositoryModule`; provides `TicketFleetJobRouteCommands`. `TicketFleetJobsController` gains `ApprovalRouteGate` last; unlink is gated. Keep existing handler parameters in order, guards, @Requires, @HttpCode and response decorators; add @ApprovalGated. Pending throws ApprovalPending; executed cancel returns JsonResponse.Ok(outcome.result), executed unlink has no body/204. Remove exactly the cancel and unlink rows from PENDING_GATE_ROUTES. Existing dispatch/requeue behavior belongs to US-002 and stays intact.\n\nThe keyed agent holds fleet.job.cancel and fleet.ticket-job.unlink in P. The requester agent holds fleet.job.dispatch in P and no fleet.job.cancel. Each cancel test inserts its own QUEUED job. A linked job is dispatched by root with `{ repoId: world.repoId, command: 'RUN', feature: <unique>, maxCostUsd: 5, ticketRefs: [<a ticket of P>] }`. Each test repeats its own pending call before approval; do not share another test's request.\n\n**Scope** — In: requesterOf, pre-gate checks, cancel command extension, unlink command/module/controller and their two allowlist removals. Out: changing dispatch/requeue or ticket-start timing (US-002), schedule authority (US-004), final exact contract/export (US-009).\n\n**Interface** — `FleetJobsService.requesterOf(projectId, jobId)` — new: the job's `requestedById`; 404 `fleet.jobs` when missing from the project. `FleetJobsService.cancel(actorId, projectId, jobId, canOperate)`. `TicketFleetJobRouteCommands`, `TICKET_FLEET_JOB_ROUTE_VARIANTS` — new: `unlink`. `FleetTicketsService.unlink(projectId, ref, jobId, actorId)`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/projects/web/fleet/jobs/<job>/cancel by the keyed agent under a wait policy answers 202 with data matching { permissionKey: 'fleet.job.cancel', projectId: <P's id> }.",
+        "AC-2 [integration]: Approving the keyed agent's own AC-1-equivalent request leaves the job CANCELLED, and the request's result.state is CANCELLED.",
+        "AC-3 [integration]: POST /api/projects/web/fleet/jobs/<job>/cancel by the requester agent on a job it requested, under a wait policy, answers 202 with data.permissionKey 'fleet.job.cancel'.",
+        "AC-4 [integration]: Approving the requester agent's own AC-3-equivalent request leaves the job CANCELLED.",
+        "AC-5 [integration]: POST /api/projects/web/fleet/jobs/<job>/cancel by the requester agent on a job dev requested answers 403 with key permissions and writes no ApprovalRequest row.",
+        "AC-6 [integration]: POST /api/projects/web/fleet/jobs/<unknown id>/cancel by the keyed agent under a wait policy answers 404 with key fleet.jobs and writes no ApprovalRequest row.",
+        "AC-7 [integration]: Approving the keyed agent's pending cancel after root cancelled the same job while it waited settles the request failed.",
+        "AC-8 [integration]: DELETE /api/projects/web/tickets/<ref>/fleet-jobs/<job> on a linked job by the keyed agent under a wait policy answers 202 with data.permissionKey 'fleet.ticket-job.unlink'.",
+        "AC-9 [integration]: Approving the keyed agent's own AC-8-equivalent request removes the ticket's link to that job.",
+        "AC-10 [integration]: The same DELETE with the root token under a wait policy answers 204 with an empty body and writes no ApprovalRequest row.",
+        "AC-11 [unit]: FleetJobsService.requesterOf('p1', 'j1') answers the job's requestedById, and throws NotFoundAppException with key fleet.jobs for a job of another project.",
+        "AC-12 [unit]: When the registered rest:fleet-jobs.cancel command executes input { slug: 'web', projectId: 'p1', id: 'j1' } with ActorPrincipalLoader.forContext() returning principal a1 and permissions.can(principal, 'fleet.job.cancel', { projectId: 'p1' }) resolving { allowed: false }, its run calls jobs.cancel('a1', 'p1', 'j1', false).",
+        "AC-13 [unit]: After onModuleInit, registry.get('fleet.job.cancel', 'rest:fleet-jobs.cancel') returns a command with key 'fleet.job.cancel' and skipKeyRecheck true, and registry.get('fleet.ticket-job.unlink', 'rest:ticket-fleet-jobs.unlink') returns a command with key 'fleet.ticket-job.unlink'.",
+        "AC-14 [unit]: The rest:ticket-fleet-jobs.unlink command's run for a principal with id a1 calls fleetTickets.unlink('p1', 'WEB-1', 'j1', 'a1') and answers null.",
+        "AC-15 [integration]: Approving the keyed agent's pending unlink after root unlinked the same job while it waited settles the request failed."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "ownership",
+        "jobs",
+        "tickets"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Requester authority intentionally bypasses engine key checks and must be proved before gating and recomputed under service locking; strict access-control TDD applies."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-job-route.commands.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/tickets/fleet-tickets.service.ts",
+        "apps/api/src/fleet/schedules/schedule-route.commands.ts",
+        "apps/api/test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/tickets/ticket-fleet-job-route.commands.ts",
+        "apps/api/src/fleet/tickets/ticket-fleet-job-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-cancel-unlink-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/fleet/jobs/:id/cancel and DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "requesterOf"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+          "reason": "the requesterOf cases"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
+          "reason": "cancel checks the key or the requester, then gates with keyCheck false"
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-tickets.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides TicketFleetJobRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/ticket-fleet-jobs.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate (last); unlink gated"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Gated schedule create, update, enable and disable",
+      "description": "**Goal** — Gate the four remaining schedule writes and determine any-row authority from the requester at execution.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — **Any-row schedule authority is the requester's at execution.** `update`, `enable` and `disable` pass `canAdminister` today, computed in the handler. Their commands compute `permissions.can(principal, 'fleet.schedule.update', { projectId })` when they run, as `ScheduleRouteCommands` does for delete.\n\nExtend existing SCHEDULE_ROUTE_VARIANTS and ScheduleRouteCommands with these project-scoped contracts:\n- `POST /projects/:slug/fleet/schedules` | `fleet.schedule.create` | `rest:project-fleet-schedules.create` | `{ slug, projectId, schedule: parseBody(CreateScheduleDto, …) }` | `schedules.create(principal.id, projectId, schedule)`.\n- `PATCH /projects/:slug/fleet/schedules/:id` | `fleet.schedule.update` | `rest:project-fleet-schedules.update` | `{ slug, projectId, id, patch: parseBody(UpdateScheduleDto, …) }` | `schedules.update(principal.id, projectId, id, patch, <can fleet.schedule.update at execution>)`.\n- `POST /projects/:slug/fleet/schedules/:id/enable` | `fleet.schedule.update` | `rest:project-fleet-schedules.enable` | `{ slug, projectId, id }` | `schedules.enable(principal.id, projectId, id, <can at execution>)`.\n- `POST /projects/:slug/fleet/schedules/:id/disable` | `fleet.schedule.update` | `rest:project-fleet-schedules.disable` | `{ slug, projectId, id }` | `schedules.disable(principal.id, projectId, id, <can at execution>)`.\n\nId and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Every body-returning command declares `toResult: (result) => result`. Keep slug in each new project input for lockProjectSlug. SchedulesModule already has the engine and commands since 5b; the controller already has the gate. In ProjectFleetSchedulesController, create/update/enable/disable gain @ApprovalGated and call the route gate. Preserve @Requires, guard order, @HttpCode, @ApiResponse and handler parameters in order. Pending throws ApprovalPending; executed answers JsonResponse.Ok(outcome.result) with today's status. The private canAdminister helper is removed (the commands compute it), and the constructor drops PermissionService (its only use). Drop the four corresponding PENDING_GATE_ROUTES rows and extend existing commands spec registrations/runs. Keep the already-gated delete untouched.\n\nFixtures: keyed agent holds fleet.schedule.create and fleet.schedule.update in P; own-only agent holds fleet.schedule.update.own. Each update test creates its own schedule as dev with `{ name, repoId: world.repoId, feature, cron: '0 9 * * *', timezone: 'UTC', maxCostUsd: 5 }`. Seed wait policies explicitly. The .own-only request may wait on another owner's row but the service must reject execution without changing that row.\n\n**Scope** — In: four schedule commands/handlers, execution-time any-row checks and allowlist removals. Out: schedule delete changes, cancel requester semantics (US-003), config operations (US-005), final contract/OpenAPI (US-009).\n\n**Interface** — `SCHEDULE_ROUTE_VARIANTS` gains `create`, `update`, `enable`, `disable`. `SchedulesService.create(actorId, projectId, dto)`, `.update(actorId, projectId, id, dto, canAdminister)`, `.enable(…, canAdminister)`, `.disable(…, canAdminister)`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/projects/web/fleet/schedules by the keyed agent under a wait policy answers 202 with data matching { permissionKey: 'fleet.schedule.create', projectId: <P's id> }.",
+        "AC-2 [integration]: Approving the keyed agent's own AC-1-equivalent request leaves exactly one schedule with that name whose createdById is the agent's id.",
+        "AC-3 [integration]: PATCH /api/projects/web/fleet/schedules/<schedule> with { maxCostUsd: 7 } by the keyed agent under a wait policy answers 202 with data.permissionKey 'fleet.schedule.update'.",
+        "AC-4 [integration]: Approving the keyed agent's own AC-3-equivalent request leaves the schedule's maxCostUsd 7.",
+        "AC-5 [integration]: Approving the keyed agent's pending POST /api/projects/web/fleet/schedules/<schedule>/disable leaves the schedule disabled.",
+        "AC-6 [integration]: Approving the keyed agent's pending POST /api/projects/web/fleet/schedules/<schedule>/enable on a disabled schedule leaves it enabled.",
+        "AC-7 [integration]: Approving the own-only agent's pending PATCH /api/projects/web/fleet/schedules/<dev's schedule> settles the request failed, and the schedule keeps its maxCostUsd.",
+        "AC-8 [integration]: POST /api/projects/web/fleet/schedules with the dev token under a wait policy answers 201 and writes no ApprovalRequest row.",
+        "AC-9 [integration]: PATCH /api/projects/web/fleet/schedules/<schedule> by an agent holding only project.read in P answers 403 with key permissions and writes no ApprovalRequest row.",
+        "AC-10 [unit]: After onModuleInit, registry.get('fleet.schedule.create', 'rest:project-fleet-schedules.create') returns a command with key 'fleet.schedule.create', and registry.get('fleet.schedule.update', variant) returns a command with key 'fleet.schedule.update' for each of 'rest:project-fleet-schedules.update', 'rest:project-fleet-schedules.enable' and 'rest:project-fleet-schedules.disable'.",
+        "AC-11 [unit]: When the registered rest:project-fleet-schedules.update command executes parsed input { slug: 'web', projectId: 'p1', id: 's1', patch: { maxCostUsd: 7 } } with ActorPrincipalLoader.forContext() returning principal a1 and permissions.can(principal, 'fleet.schedule.update', { projectId: 'p1' }) resolving { allowed: true }, its run calls schedules.update('a1', 'p1', 's1', { maxCostUsd: 7 }, true).",
+        "AC-12 [unit]: When the registered rest:project-fleet-schedules.enable command executes input { slug: 'web', projectId: 'p1', id: 's1' } with ActorPrincipalLoader.forContext() returning principal a1 and permissions.can(principal, 'fleet.schedule.update', { projectId: 'p1' }) resolving { allowed: false }, its run calls schedules.enable('a1', 'p1', 's1', false)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "schedules",
+        "ownership"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends existing route-command/DI patterns without new abstractions, but execution-time own-versus-any-row authorization requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-route.commands.ts",
+        "apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts",
+        "apps/api/src/fleet/schedules/schedules.service.ts",
+        "apps/api/src/fleet/schedules/schedule-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-project-fleet-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-fleet-schedule-write-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/fleet/schedules, PATCH /projects/:slug/fleet/schedules/:id and POST …/:id/enable and …/:id/disable"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-route.commands.ts",
+          "reason": "create, update, enable and disable commands"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts",
+          "reason": "create, update, enable and disable gated; the private canAdminister helper is removed (the commands compute it), and the constructor drops PermissionService (its only use)"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Gated config edit and regenerate",
+      "description": "**Goal** — Gate config-edit/regenerate requests and separate regenerate's forge preparation from its execution transaction.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — **The regenerate splits like the drift check.** `ConfigJobsService.prepareRegenerate(actorId, projectId, repoId, body)` (new) reads the repository first (404 `fleet.repos`, as today), then validates the body, then lists its nax files on the forge. The callback it answers re-reads the repository: one changed since the prepare answers `ConflictAppException({}, 'fleet.repos')`, as `prepareDrift` does. The callback then creates the config job. `submitRegenerate` becomes `(await this.prepareRegenerate(…))()`.\n\n**A deferred job create that loses the active-job race fails the request.** `FleetJobsService.dispatch`, `.requeue` and `ConfigJobsService.create` catch `DuplicateActiveJobError`, then look up the winner \"outside the failed transaction\". Inside the execution transaction, that lookup runs in the aborted transaction, and the request settles `failed`. That is the right outcome; the 409 body's `activeJobId` is not reproduced (Out of Scope). 5b's drift check already behaves this way.\n\nExtend REPO_CONFIG_ROUTE_VARIANTS and RepoConfigRouteCommands with project-scoped contracts:\n- `POST /projects/:slug/fleet/repos/:repoId/config-edits` | `fleet.job.config.edit` | `rest:project-repo-config.config-edit` | `{ slug, projectId, repoId, edit: parseBody(SubmitConfigEditDto, …) }` | `configJobs.submitEdit(principal.id, projectId, repoId, edit)`.\n- `POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate` | `fleet.job.config.edit` | `rest:project-repo-config.regenerate` | `{ slug, projectId, repoId, regenerate: parseBody(RegenerateConfigDto, …) }` | `configJobs.submitRegenerate(…)`; `prepare`: `configJobs.prepareRegenerate(principal.id, projectId, repoId, regenerate)`.\n\nId and string members are read with `parseRouteInput`; a body member with `parseBody` of the route's DTO (a missing body member is parsed as `{}`). Both body-returning commands declare `toResult: (result) => result`. Preparation is only for deferred execution: opening a waiting request does not read the forge; immediate run still calls submitRegenerate. RepoConfigModule and ProjectRepoConfigController already have engine/auth/commands/gate wiring from 5b. Add @ApprovalGated to submitEdit/submitRegenerate and route through the gate; keep handler parameters in order, guards, @Requires, @HttpCode and existing responses. Pending throws ApprovalPending; executed returns today's JsonResponse.Ok dispatch result and 201. Remove exactly these two PENDING_GATE_ROUTES rows. Extend config-jobs.service.spec.ts for prepareRegenerate while keeping existing submitRegenerate assertions; extend command registrations/runs and add the AC-11 controller gate-call case while retaining route metadata assertions.\n\nFixtures: the agent holds fleet.job.config.edit in P. Spy FLEET_REPO_FILES_READER.list in beforeEach to answer `{ baseSha: 'c'.repeat(40), defaultBranch: 'trunk', files: [] }`, restoring it in afterEach; each test counts only its own calls. Each pending edit/regenerate test owns its rows and policy.\n\n**Scope** — In: prepareRegenerate, two commands/handlers and allowlist removals. Out: job dispatch/requeue/cancel (US-002/US-003), changing drift behavior, exact final contract/export (US-009). Reproducing the `activeJobId` of the 409 `fleet.jobs` / `fleet.configJobActive` body on a deferred job create that loses the active-job race: the request settles `failed` (Design). Bounding the size of a frozen input: `DispatchFleetJobDto`, `SubmitConfigEditDto.edits` and the patterns list are stored whole in `ApprovalRequest.input` when a request waits.\n\n**Interface** — `ConfigJobsService.prepareRegenerate(actorId, projectId, repoId, body)` (new); `submitRegenerate` becomes `(await this.prepareRegenerate(…))()`. `REPO_CONFIG_ROUTE_VARIANTS` gains `configEdit`, `regenerate`. The existing `prepareDrift` callback shape is the implementation model.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/projects/web/fleet/repos/<repo>/config-edits with { edits: [<one valid edit>], prTitle: 'Edit', baseSha: 'c'.repeat(40) } by the agent under a wait policy answers 202 with data matching { permissionKey: 'fleet.job.config.edit', projectId: <P's id> }.",
+        "AC-2 [integration]: Approving the agent's own AC-1-equivalent request leaves exactly one CONFIG_EDIT job on the repository whose requestedById is the agent's id.",
+        "AC-3 [integration]: POST /api/projects/web/fleet/repos/<repo>/config-edits/regenerate with { prTitle: 'Regen' } by the agent under a wait policy answers 202 with data.permissionKey 'fleet.job.config.edit'.",
+        "AC-4 [integration]: After the test's own AC-3-equivalent request, before approval, the reader's list was not called.",
+        "AC-5 [integration]: Approving the agent's own AC-3-equivalent request leaves exactly one CONFIG_EDIT job whose config edit has mode regenerate and base sha 'c'.repeat(40).",
+        "AC-6 [integration]: Approving the agent's pending regenerate while list rejects settles the request failed with result.error 'execution-failed', and no config job exists.",
+        "AC-7 [integration]: POST /api/projects/web/fleet/repos/<repo>/config-edits with the root token under a wait policy answers 201 and writes no ApprovalRequest row.",
+        "AC-8 [unit]: The callback of ConfigJobsService.prepareRegenerate('a1', 'p1', 'r1', { prTitle: 'Regen' }) throws ConflictAppException with key fleet.repos when the repository changed after the prepare, and creates no job.",
+        "AC-9 [unit]: prepareRegenerate throws NotFoundAppException with key fleet.repos for a repository of another project, and never calls list.",
+        "AC-10 [unit]: After onModuleInit, registry.get('fleet.job.config.edit', 'rest:project-repo-config.config-edit') returns a command with key 'fleet.job.config.edit' and prepare undefined, and registry.get('fleet.job.config.edit', 'rest:project-repo-config.regenerate') returns a command with key 'fleet.job.config.edit' and a prepare function.",
+        "AC-11 [unit]: ProjectRepoConfigController.submitEdit('r1', body, <ctx of P>, principal) calls routeGate.run with { key: 'fleet.job.config.edit', variant: 'rest:project-repo-config.config-edit', projectId: <P's id>, input: { slug: 'web', projectId: <P's id>, repoId: 'r1', edit: body } }."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "repo-config",
+        "transactions",
+        "forge"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends existing RepoConfigRouteCommands and copies prepareDrift's established prepare/revalidate algorithm; medium scope is sufficient, while permission-gated writes still require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repo-config/config-jobs.service.ts",
+        "apps/api/src/fleet/repo-config/repo-config-route.commands.ts",
+        "apps/api/src/fleet/repo-config/project-repo-config.controller.ts",
+        "apps/api/src/fleet/repo-config/config-jobs.service.spec.ts",
+        "apps/api/test/integration/fleet/gated-project-fleet-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/gated-fleet-config-edit-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/fleet/repos/:repoId/config-edits and POST …/config-edits/regenerate"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/config-jobs.service.ts",
+          "reason": "prepareRegenerate; submitRegenerate runs it"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/config-jobs.service.spec.ts",
+          "reason": "the prepareRegenerate cases; existing submitRegenerate assertions still hold"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/repo-config-route.commands.ts",
+          "reason": "configEdit and regenerate commands"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/repo-config-route.commands.spec.ts",
+          "reason": "the new registrations and runs"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/project-repo-config.controller.ts",
+          "reason": "submitEdit and submitRegenerate gated"
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/project-repo-config.controller.spec.ts",
+          "reason": "gains the US-005 AC-11 case (the gate call); its route-metadata cases stay unchanged"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Ingest writes move to IngestRequeueService and are gated",
+      "description": "**Goal** — Move ingest write orchestration into a reusable service, gate all three global REST writes and defer their background wake until commit.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — **The ingest writes move to a service.** `FleetIngestController.queue()` holds the write, the activity row, the audit entry and the kick. US-006 moves them, unchanged, into `IngestRequeueService` (`fleet/ingest/ingest-requeue.service.ts`) with `backfill(actorId)`, `rerunJob(actorId, jobId)` and `rerunOutdated(actorId)`. `rerunJob` also takes over the job lookup (404 `fleet.jobs`). The commands call the same methods. The controller keeps only the list route's collaborator (`BUNDLE_INGEST_REPOSITORY`) and gains `ApprovalRouteGate`.\n\n**The ingest kick and the knowledge enqueue use `committedEffect`.** `BundleIngestService.kick()` and `KnowledgeIndexQueue.enqueue(repoId, 'admin')` start background work that reads the rows the route just wrote. Both are in-memory wake signals, like `RunnerNotifier.notify`. Each is wrapped in `committedEffect(() => …)` and called after the write's own `txManager.run` returns. The approval execution wraps its transaction in `withCommittedEffects`, so a deferred write queues the wake until the commit. On the immediate path there is no owning scope, so the wake runs at once, after the write committed, as today.\n\nA deferred-only wake has this shape (the ingest kick; the knowledge enqueue is the same):\n```ts\nconst queued = await this.txManager.run(async () => { /* the write, the activity row, the audit entry, as today */ });\ncommittedEffect(() => this.ingest.kick());\nreturn { queued };\n```\n\nCreate IngestRouteCommands/INGEST_ROUTE_VARIANTS with these global scope (`projectId: null`) contracts:\n- `POST /fleet/ingest/backfill` | `fleet.ingest.backfill` | `rest:fleet-ingest.backfill` | `{}` | `ingestRequeue.backfill(principal.id)`.\n- `POST /fleet/ingest/jobs/:jobId/rerun` | `fleet.ingest.rerun` | `rest:fleet-ingest.rerun-job` | `{ jobId }` | `ingestRequeue.rerunJob(principal.id, jobId)`.\n- `POST /fleet/ingest/rerun-outdated` | `fleet.ingest.rerun` | `rest:fleet-ingest.rerun-outdated` | `{}` | `ingestRequeue.rerunOutdated(principal.id)`.\n\nId and string members are read with `parseRouteInput`. Every body-returning command declares `toResult: (result) => result`. Preserve the existing repository calls with INGEST_PARSER_VERSION, activity bookkeeping, actorType USER, conditional audit only when queued > 0, result `{ queued }` and list route. Rerun target existence is a command/service check, not a new pre-gate handler check: missing targets may open requests that later fail. IngestModule imports ApprovalEngineModule/AuthRepositoryModule and provides IngestRequeueService/IngestRouteCommands. FleetIngestController constructor becomes `(BUNDLE_INGEST_REPOSITORY, ApprovalRouteGate)`. Three writes gain @ApprovalGated and gate calls, preserving parameters in order, @Requires and existing responses/statuses. Pending throws ApprovalPending; executed returns JsonResponse.Ok(outcome.result), 201 as today. Remove these three PENDING_GATE_ROUTES rows.\n\nTest fixture agent holds global fleet.ingest.backfill and fleet.ingest.rerun; seed global wait policies with null. Each test seeds its own job with a bundle artifact, as fleet-ingest-api.integration.spec.ts does. Spy BundleIngestService.prototype.kick with mockImplementation(() => undefined) so no drain runs, and restore all spies in afterEach. Unit service tests pin audit omission for zero, missing-job refusal and callback ordering; integration tests cross approval execution into the wake scope.\n\n**Scope** — In: ingest service extraction, three global commands/handlers, module/allowlist and commit-safe kick. Out: dispatch ticket auto-start (US-002), knowledge admin extraction/enqueue (US-007), final contract/export/representative endpoint cases (US-009). The activity rows of the ingest and job writes still record `actorType: 'USER'` for an agent actor, as today. A transaction timeout other than Prisma's default for the execution transaction: a deferred dispatch's placement and a deferred backfill run inside it as they are.\n\n**Interface** — `IngestRequeueService` with `backfill(actorId)`, `rerunJob(actorId, jobId)` and `rerunOutdated(actorId)`; `IngestRouteCommands`, `INGEST_ROUTE_VARIANTS` — new: `backfill`, `rerunJob`, `rerunOutdated`. `IBundleIngestRepository.backfill(parserVersion)`, `.rerunJob(jobId)`, `.rerunOutdated(parserVersion)`; `BundleIngestService.kick()`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/fleet/ingest/backfill by the agent under a global wait policy answers 202 with data matching { permissionKey: 'fleet.ingest.backfill', projectId: null }.",
+        "AC-2 [integration]: After the test's own AC-1-equivalent request, before approval, the seeded artifact has no ingest row, and kick was not called.",
+        "AC-3 [integration]: Approving the agent's own AC-1-equivalent request leaves one ingest row for the seeded artifact and request result { queued: 1 }.",
+        "AC-4 [integration]: Approving the agent's own AC-1-equivalent request calls kick exactly once.",
+        "AC-5 [integration]: POST /api/fleet/ingest/jobs/<job>/rerun by the agent under a global wait policy answers 202 with data.permissionKey 'fleet.ingest.rerun'.",
+        "AC-6 [integration]: Approving the agent's pending rerun of a job whose FleetJob row the test deleted while it waited settles the request failed.",
+        "AC-7 [integration]: Approving the agent's pending POST /api/fleet/ingest/rerun-outdated with one seeded done ingest row whose parserVersion is below INGEST_PARSER_VERSION leaves the request executed with result { queued: 1 }.",
+        "AC-8 [integration]: POST /api/fleet/ingest/backfill with the root token under a global wait policy answers 201 and writes no ApprovalRequest row, and the agent's backfill with no policy seeded answers 201 and writes none either.",
+        "AC-9 [integration]: POST /api/fleet/ingest/backfill by an agent holding only project.read globally answers 403 with key permissions, and writes no ApprovalRequest row.",
+        "AC-10 [unit]: IngestRequeueService.rerunJob('u1', 'missing') throws NotFoundAppException with key fleet.jobs and writes nothing.",
+        "AC-11 [unit]: IngestRequeueService.backfill('u1') with the repository answering 0 records no audit entry and answers { queued: 0 }.",
+        "AC-12 [unit]: Inside withCommittedEffects, IngestRequeueService.backfill('u1') calls kick only after the scope's callback has returned.",
+        "AC-13 [unit]: After onModuleInit, registry.get('fleet.ingest.backfill', 'rest:fleet-ingest.backfill') returns a command with key 'fleet.ingest.backfill', and registry.get('fleet.ingest.rerun', variant) returns a command with key 'fleet.ingest.rerun' for each of 'rest:fleet-ingest.rerun-job' and 'rest:fleet-ingest.rerun-outdated'.",
+        "AC-14 [unit]: The rest:fleet-ingest.rerun-job command's run for a principal with id a1 calls ingestRequeue.rerunJob('a1', 'j1') for input { jobId: 'j1' }."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "ingest",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces a service/command boundary for global privileged writes and defers background wake effects through an outer transaction; security override applies."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/fleet-ingest.controller.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/common/committed-effects.ts",
+        "apps/api/src/fleet/ingest/ingest.module.ts",
+        "apps/api/test/integration/fleet/fleet-ingest-api.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/ingest/ingest-requeue.service.ts",
+        "apps/api/src/fleet/ingest/ingest-requeue.service.spec.ts",
+        "apps/api/src/fleet/ingest/ingest-route.commands.ts",
+        "apps/api/src/fleet/ingest/ingest-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-ingest-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /fleet/ingest/backfill, POST /fleet/ingest/jobs/:jobId/rerun and POST /fleet/ingest/rerun-outdated"
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/ingest.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides IngestRequeueService and IngestRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/fleet-ingest.controller.ts",
+          "reason": "constructor becomes (BUNDLE_INGEST_REPOSITORY, ApprovalRouteGate); the three write handlers gated; the private queue helper moves to IngestRequeueService"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Knowledge writes move to KnowledgeIndexAdmin and are gated",
+      "description": "**Goal** — Gate corpus-pattern save and repository reindex via a new admin service, preserving kill-switch refusals and commit-safe indexing wakes.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — **The knowledge writes move to a service.** `ProjectKnowledgeController.patterns` and `.reindex` hold the save, the pass queueing, the audit entry and the enqueue. US-007 moves them into `KnowledgeIndexAdmin` (`fleet/knowledge/knowledge-index-admin.service.ts`) with `savePatterns(projectId, patterns)` and `reindex(projectId, repoId)`. The controller loses `KnowledgeIndexQueue` and `AuditRecorder` and gains `ApprovalRouteGate`. It keeps the kill switch of the reindex (409 before the gate). `KnowledgeIndexAdmin.reindex` checks the kill switch again when it runs and throws `ConflictAppException({}, 'knowledge.disabled')`, so a reindex approved after indexing was switched off settles `failed` instead of recording a pass that `enqueue` silently drops.\n\n**The reindex answers 202 on both paths.** Its executed answer is `202 { queued: true }`, as today. A waiting request answers 202 with the pending summary, as every gated route does. A client tells them apart by the body. OpenAPI holds one response per status, so the handler drops its own `@ApiResponse({ status: 202, type: KnowledgeReindexResultDto })` and documents the executed body in its `@ApiOperation` summary; the documented 202 is `@ApprovalGated()`'s.\n\n**The ingest kick and the knowledge enqueue use `committedEffect`.** `BundleIngestService.kick()` and `KnowledgeIndexQueue.enqueue(repoId, 'admin')` start background work that reads the rows the route just wrote. Both are in-memory wake signals, like `RunnerNotifier.notify`. Each is wrapped in `committedEffect(() => …)` and called after the write's own `txManager.run` returns. The approval execution wraps its transaction in `withCommittedEffects`, so a deferred write queues the wake until the commit. On the immediate path there is no owning scope, so the wake runs at once, after the write committed, as today.\n\nRegister these project-scoped commands in KnowledgeRouteCommands/KNOWLEDGE_ROUTE_VARIANTS:\n- `PUT /projects/:slug/knowledge/patterns` | `fleet.knowledge.patterns.update` | `rest:project-knowledge.patterns` | `{ slug, projectId, patterns }`: the body's `patterns`, parsed by the command's `parse` | `knowledgeAdmin.savePatterns(projectId, patterns)`.\n- `POST /projects/:slug/knowledge/repos/:repoId/reindex` | `fleet.knowledge.repo.reindex` | `rest:project-knowledge.reindex` | `{ slug, projectId, repoId }` | `knowledgeAdmin.reindex(projectId, repoId)`.\n\nId and string members are read with `parseRouteInput`. Every body-returning command declares `toResult: (result) => result`. The patterns command's `parse` reads `patterns` from its input: `null` stays `null`; anything else goes through `parseKnowledgePatterns`, and a refusal throws `ValidationAppException({ reason }, 'knowledge.input')`, as the handler's `acceptPatterns` does today. The handler passes `{ slug, projectId, patterns: body?.patterns }` as the input.\n\nRequest checks stay before the gate: reindex's knowledge kill switch (409 knowledge.disabled) and patterns body parse (400 knowledge.input), which runs in command parse before opening a request. Every other check runs in the command at once or after approval; a failing check settles failed. savePatterns retains audited persistence via KnowledgeIndexService, returns the effective patterns/custom flag plus queued count, queues every project repository once when enabled and none when disabled. Reindex resolves through KnowledgeIndexService, returns 404 knowledge.repoNotFound for a missing target, records the existing audited reindex operation before any enqueue and returns { queued: true }.\n\nKnowledgeModule imports ApprovalEngineModule/AuthRepositoryModule and provides KnowledgeIndexAdmin/KnowledgeRouteCommands; knowledge.module.spec.ts also resolves both. Controller constructor becomes `(search, index, config, ApprovalRouteGate)`. Remove acceptPatterns/queuePasses from it; keep read/search behavior. Preserve handler parameters in order, guards, @Requires and success @HttpCode; add @ApprovalGated, map pending to ApprovalPending and executed to JsonResponse.Ok. Remove the two corresponding PENDING_GATE_ROUTES rows. In project-knowledge.controller.spec.ts replace queue/audit constructor doubles with a gate double; move patterns/reindex save/queue assertions to the new admin/commands specs. Both HTTP Test.createTestingModule blocks must provide ApprovalRouteGate `{ run: vi.fn() }` rather than queue/audit, and HTTP write cases assert gate calls; keep the pre-gate kill-switch test.\n\nFixtures: agent holds fleet.knowledge.patterns.update and fleet.knowledge.repo.reindex in P. Set fleetConfig().knowledgeIndexEnabled = true for reindex tests, restoring it in afterEach. Spy the app KnowledgeIndexQueue instance's enqueue with mockImplementation(() => undefined), restoring all spies per test, so no index pass runs.\n\n**Scope** — In: knowledge admin/commands/module, two handlers, patterns parsing, kill-switch recheck, commit-safe enqueue and allowlist removals. Out: ingest changes (US-006), final OpenAPI/contract closure (US-009). Bounding the size of a frozen input: `DispatchFleetJobDto`, `SubmitConfigEditDto.edits` and the patterns list are stored whole in `ApprovalRequest.input` when a request waits. US-007 only: telling the reindex's executed 202 from its pending 202 by status code; the body tells them apart (Design).\n\n**Interface** — `KnowledgeIndexAdmin` with `savePatterns(projectId, patterns)` and `reindex(projectId, repoId)`; `KnowledgeRouteCommands`, `KNOWLEDGE_ROUTE_VARIANTS` — new: `patterns`, `reindex`. `KnowledgeIndexService.savePatterns(projectId, patterns)`, `.listProjectRepos(projectId)`, `.resolveProjectRepo(projectId, { repoId })`; `KnowledgeIndexQueue.enqueue(repoId, 'admin')`; `parseKnowledgePatterns(input)`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: POST /api/projects/web/knowledge/repos/<repo>/reindex by the agent under a wait policy answers 202 with data matching { permissionKey: 'fleet.knowledge.repo.reindex', projectId: <P's id> }.",
+        "AC-2 [unit]: Inside withCommittedEffects, KnowledgeIndexAdmin.savePatterns('p1', null) with indexing enabled and one project repository calls enqueue only after the scope's callback has returned.",
+        "AC-3 [integration]: Approving the agent's own AC-1-equivalent request leaves exactly one fleet.knowledge.repo.reindex audit entry for the repository.",
+        "AC-4 [integration]: Approving the agent's own AC-1-equivalent request calls enqueue(<repo id>, 'admin') exactly once.",
+        "AC-5 [integration]: POST /api/projects/web/knowledge/repos/<repo>/reindex with indexing disabled by the agent under a wait policy answers 409 with key knowledge.disabled and writes no ApprovalRequest row.",
+        "AC-6 [integration]: PUT /api/projects/web/knowledge/patterns with { patterns: ['docs/**/*.md'] } by the agent under a wait policy answers 202 with data.permissionKey 'fleet.knowledge.patterns.update'.",
+        "AC-7 [integration]: Approving the agent's own AC-6-equivalent request leaves P's saved patterns exactly ['docs/**/*.md'], and the request's result.patterns equals them.",
+        "AC-8 [integration]: PUT /api/projects/web/knowledge/patterns with a body the parser refuses by the agent under a wait policy answers 400 with key knowledge.input and writes no ApprovalRequest row.",
+        "AC-9 [integration]: POST /api/projects/web/knowledge/repos/<repo>/reindex with the dev token under a wait policy answers 202 with data { queued: true } and writes no ApprovalRequest row.",
+        "AC-10 [unit]: KnowledgeIndexAdmin.reindex('p1', 'missing') throws NotFoundAppException with key knowledge.repoNotFound and enqueues nothing, and reindex('p1', 'r1') with indexing disabled throws ConflictAppException with key knowledge.disabled and records no audit entry.",
+        "AC-11 [unit]: KnowledgeIndexAdmin.reindex('p1', 'r1') enqueues nothing when its audit entry rejects.",
+        "AC-12 [unit]: KnowledgeIndexAdmin.savePatterns('p1', ['docs/**/*.md']) with indexing disabled saves the list, enqueues nothing and answers queued 0.",
+        "AC-13 [unit]: KnowledgeIndexAdmin.savePatterns('p1', null) with indexing enabled and two project repositories enqueues each repository once with 'admin' and answers queued 2.",
+        "AC-14 [unit]: After onModuleInit, registry.get('fleet.knowledge.patterns.update', 'rest:project-knowledge.patterns') returns a command with key 'fleet.knowledge.patterns.update', and registry.get('fleet.knowledge.repo.reindex', 'rest:project-knowledge.reindex') returns a command with key 'fleet.knowledge.repo.reindex'.",
+        "AC-15 [unit]: The rest:project-knowledge.patterns command's parse throws ValidationAppException with key knowledge.input for input { slug: 'web', projectId: 'p1', patterns: [''] }, and keeps patterns null for input { slug: 'web', projectId: 'p1', patterns: null }."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "knowledge",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New admin/command orchestration spans policy gating, mutable kill-switch state, transactional audit and asynchronous wake timing; strict access-control TDD applies."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.service.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.ts",
+        "apps/api/src/common/committed-effects.ts",
+        "apps/api/test/integration/permissions/enforce-fleet-config-knowledge.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-index-admin.service.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index-admin.service.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge-route.commands.ts",
+        "apps/api/src/fleet/knowledge/knowledge-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-knowledge-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops PUT /projects/:slug/knowledge/patterns and POST /projects/:slug/knowledge/repos/:repoId/reindex"
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge.module.ts",
+          "reason": "imports ApprovalEngineModule and AuthRepositoryModule; provides KnowledgeIndexAdmin and KnowledgeRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
+          "reason": "constructor becomes (search, index, config, ApprovalRouteGate); patterns and reindex gated; acceptPatterns and queuePasses move out; the reindex drops its own 202 `@ApiResponse`"
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/project-knowledge.controller.spec.ts",
+          "reason": "the controller construction (about line 91) passes a gate double instead of the queue and audit doubles; the patterns and reindex save/queue cases (about lines 328-460) move to knowledge-index-admin.service.spec.ts and knowledge-route.commands.spec.ts; the handler cases assert the gate call; the kill-switch reindex case stays (409 before the gate); the two HTTP `Test.createTestingModule` blocks (about lines 500 and 802, describes from about line 470 to the end) provide an `ApprovalRouteGate` double (`{ run: vi.fn() }`) instead of the queue and audit providers, and their HTTP reindex and patterns cases (about lines 682-785) assert the gate call instead of the save/queue, those behaviours now living in gated-fleet-knowledge-routes.integration.spec.ts and the new unit specs"
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge.module.spec.ts",
+          "reason": "also resolves KnowledgeIndexAdmin and KnowledgeRouteCommands"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Gated project fleet decide",
+      "description": "**Goal** — Gate project fleet ask decisions by type while recording the inner decision in the outer transaction and executing approved inner commands only after commit.\n\n**Motivation** — 5a to 5c-2 gated 81 routes.\n\n**Approach** — The project fleet decide route mirrors 5a's `POST /approvals/:id/decisions` (variant `rest:approvals.decide`). It gates under the type key (`fleet.approval.decide.bash` for a `fleet.job.shell.escalate` ask, `fleet.approval.decide.budget` for a `fleet.budget.override` ask). Its command records the decision. The approved command runs from `afterCommit`, and `skipKeyRecheck` is set.\n\n**The fleet decide gains step methods beside `decide`.** `ApprovalsService.decide` today does: steps 1 to 3, the body translation, `ApprovalDecisionService.decide` (record, then execute), and the reload. It stays exactly as it is, so the global `/fleet/approvals/:id/decide` route and its spec keep their behaviour. Four new methods share its private helpers (`findVisible`, `engineDecision`, `refusalOf`, `decideFailure`):\n- `checkDecide(caller, route, id, dto, now)` runs steps 1 to 3 and the translation, and answers `{ key, input }`. `key` is `fleet.approval.decide.bash` when the request's `permissionKey` is `fleet.job.shell.escalate`, else `fleet.approval.decide.budget`. `input` is `{ requestId, decision, comment, params? }`.\n- `recordDecide(principal, input)` calls `ApprovalDecisionService.recordDecision(requestId, decision, comment, now, params)`. It reloads the request (`queries.findById`) and builds the decider from `principal`, so it can map errors through `decideFailure(error, request, decider)` as `decide` does.\n- `executeDecided(principal, requestId)` calls `ApprovalExecutionService.execute(requestId)` with the same mapping.\n- `view(id)` reloads the ask and keeps the `job_ended` 409.\n\n`ApprovalsService` gains `ApprovalExecutionService` (last constructor parameter). The project handler runs `checkDecide`, then gates with `keyCheck: false`: eligibility was checked, and the type keys are metadata the guard does not enforce. On `executed` with `decision === 'approve'`, it runs `executeDecided`, then answers `view(id)`. The commands' `afterCommit` runs `ApprovalExecutionService.execute(requestId)` for an approve, as 5a's does.\n\nRequest checks the handler makes today stay before the gate, so they answer as today and open no request: the fleet decide's steps 1 to 3 (visible ask, pending, eligibility) and its body translation (400 `fleet.approvalInput`, 409 `fleet.budgetNotPaused`, …). Every other check runs inside the command, at once or after approval; a failing check settles the request `failed`. This is 5a's rule.\n\nRoute contract: `POST /projects/:slug/fleet/approvals/:id/decide` | `fleet.approval.decide.bash` or `.budget` (by the ask) | project, `keyCheck: false` | `rest:project-fleet-approvals.decide` | `{ requestId, decision, comment, params? }` (from `checkDecide`) | `approvals.recordDecide(principal, input)`; `afterCommit`: execute the inner request on approve; `skipKeyRecheck: true`; `toResult: ApprovalRequestSummaryDto.from`. `fleet.approval.decide.bash` and `fleet.approval.decide.budget` each register one command with the same variant and the same spec; they differ only in `key`. Parse ids and translated decision/comment/optional params using the shipped decision command's validation shape. The fleet-decide input is exactly the translated input above, not an additional slug/body envelope.\n\nApprovalsModule provides FleetApprovalRouteCommands; it imports the engine already and needs AuthRepositoryModule for ActorPrincipalLoader. ProjectFleetApprovalsController gains ApprovalRouteGate last and @ApprovalGated on decide. Keep handler parameters in order, @Requires service-enforced type metadata, guard order, @HttpCode(200) and existing responses. Pending throws ApprovalPending; executed approve invokes executeDecided before returning JsonResponse.Ok(await approvals.view(id)); reject just returns view. Remove the project-decide PENDING_GATE_ROUTES row. Add ApprovalExecutionService as sixth argument to approvals.service.spec.ts's construction; every existing decide assertion still holds (decide still calls decisions.decide); new methods' cases add recordDecision to the decisions double. Controller cases assert checkDecide, gate call and executed mapping.\n\nEach integration test seeds its own pending bash ask through seedFleetAsk with job/runner/lease rows as in fleet-approvals-decide.integration.spec.ts's bashAsk helper. Asks carry approverMustHoldAction true, so the deciding agent holds approval.decide and fleet.job.shell.escalate in P, not necessarily the metadata type key. The agent's pending deny is POST with `{ decision: 'deny' }` under a wait policy for fleet.approval.decide.bash; translation freezes decision reject and comment null. Approving the outer request uses root's global /api/approvals/:id/decisions route. Map inner not-pending/expired errors to fleet.approvalNotPending so a changed inner ask fails the outer request instead of escaping as the outer engine row's concurrency exception.\n\n**Scope** — In: four service methods beside unchanged decide, two type-key registrations for one REST variant, two-phase project handler, module and allowlist. Out: other fleet gates (US-002–US-007), final contracts/export (US-009). The global `POST /fleet/approvals/:id/decide`: it declares only the read key `fleet.approval.read`, which is not approvable, so it stays ungated; it keeps deciding through `ApprovalsService.decide`. A caller holding global `fleet.approval.read` and eligible to decide can still decide there at once, outside a `fleet.approval.decide.*` policy (designer's call; closing it is a later change). US-008 only: the inner request's execution failure after an approved outer decide is logged by `afterCommit`, as 5a's decide does; the outer request stays `executed`.\n\n**Interface** — `ApprovalsService.checkDecide(caller, route, id, dto, now)` → `{ key, input }`; `recordDecide(principal, input)`; `executeDecided(principal, requestId)`; `view(id)`. `ApprovalDecisionService.recordDecision(requestId, decision, comment, now, params)`; `ApprovalExecutionService.execute(requestId)`; `FleetApprovalRouteCommands`, `FLEET_APPROVAL_ROUTE_VARIANTS` — new: `decide` (two keys).",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: The agent's deny on POST /api/projects/web/fleet/approvals/<ask>/decide under a fleet.approval.decide.bash wait policy answers 202 with data matching { permissionKey: 'fleet.approval.decide.bash', projectId: <P's id> }.",
+        "AC-2 [integration]: After the test's own AC-1-equivalent request, before approval, the ask's ApprovalRequest row is still pending.",
+        "AC-3 [integration]: Approving the agent's own AC-1-equivalent request leaves the ask's ApprovalRequest row rejected.",
+        "AC-4 [integration]: Approving the agent's pending deny after root decided the same ask while it waited settles the outer request failed, and the ask keeps root's decision.",
+        "AC-5 [integration]: POST /api/projects/web/fleet/approvals/<ask>/decide with { decision: 'deny' } by an agent holding only project.read in P, under the same policy, answers 403 with key permissions and writes no new ApprovalRequest row.",
+        "AC-6 [integration]: POST /api/projects/web/fleet/approvals/<a decided ask>/decide by the agent under the same policy answers 409 with key fleet.approvalNotPending and writes no new ApprovalRequest row.",
+        "AC-7 [integration]: POST /api/projects/web/fleet/approvals/<ask>/decide with { decision: 'deny' } with the root token under the same policy answers 200, leaves the ask's ApprovalRequest row rejected and writes no new ApprovalRequest row.",
+        "AC-8 [unit]: ApprovalsService.checkDecide(caller, route, id, { decision: 'deny' }, now) for a pending bash ask the caller may decide answers { key: 'fleet.approval.decide.bash', input: { requestId: id, decision: 'reject', comment: null } }.",
+        "AC-9 [unit]: checkDecide for a pending budget ask with { decision: 'keep_paused' } answers key 'fleet.approval.decide.budget'.",
+        "AC-10 [unit]: ApprovalsService.recordDecide(principal, input) maps an ApprovalRequestNotPendingError and an ApprovalRequestExpiredError from recordDecision each to ConflictAppException with key fleet.approvalNotPending.",
+        "AC-11 [unit]: After onModuleInit, registry.get(key, 'rest:project-fleet-approvals.decide') returns a command with the matching key and skipKeyRecheck true for each of 'fleet.approval.decide.bash' and 'fleet.approval.decide.budget'.",
+        "AC-12 [unit]: The command's afterCommit for input { requestId: 'r1', decision: 'approve', comment: null } calls execution.execute('r1'); for decision reject it calls nothing.",
+        "AC-13 [unit]: With checkDecide answering { key: 'fleet.approval.decide.bash', input: { requestId: 'a1', decision: 'approve', comment: null } }, ProjectFleetApprovalsController.decide('a1', { decision: 'allow' }, <ctx of P>, principal) with the gate answering executed awaits approvals.executeDecided(principal, 'a1'), then answers JsonResponse.Ok(await approvals.view('a1')).",
+        "AC-14 [unit]: With that same checkDecide result, the handler calls routeGate.run with { key: 'fleet.approval.decide.bash', variant: 'rest:project-fleet-approvals.decide', projectId: <P's id>, input: { requestId: 'a1', decision: 'approve', comment: null }, keyCheck: false }.",
+        "FM-1 [integration]: Approving the agent's pending fleet decide after the inner ask expired settles the outer request failed from 409 fleet.approvalNotPending inside the command."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approval-gate",
+        "security",
+        "approvals",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Nested approval decisions span eligibility, two command keys, separate transaction phases and concurrency-error mapping; strict security TDD is mandatory."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/approvals/approval-route.commands.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/test/integration/fleet/fleet-approvals-decide.integration.spec.ts",
+        "apps/api/test/helpers/fleet-ask-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/fleet-approval-route.commands.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-route.commands.spec.ts",
+        "apps/api/test/integration/fleet/gated-fleet-approval-decide-route.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/pending-gate-routes.ts",
+          "reason": "drops POST /projects/:slug/fleet/approvals/:id/decide"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "constructor gains ApprovalExecutionService (last); checkDecide, recordDecide, executeDecided and view beside the unchanged decide"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "its construction (about line 78) passes an ApprovalExecutionService double as the 6th argument; every existing decide assertion still holds (decide still calls `decisions.decide`); the new methods' cases add `recordDecision` to the decisions double"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "imports AuthRepositoryModule; provides FleetApprovalRouteCommands"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts",
+          "reason": "constructor gains ApprovalRouteGate (last); decide gated"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/project-fleet-approvals.controller.spec.ts",
+          "reason": "the construction (about line 19) passes a gate double; the decide cases assert checkDecide, the gate call and the executed mapping"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Contract, OpenAPI and endpoint coverage",
+      "description": "**Goal** — Close the rollout contract at exactly 97 gated routes and publish the pending-response API contract with two representative endpoint behaviors.\n\n**Motivation** — `PENDING_GATE_ROUTES` lists 36 routes under `gate-fleet`.\n\n**Approach** — US-009: the allowlist holds the 18 thread rows under `gate-fleet` and the 11 `gate-secret` rows, and nothing else. **Each gating story removes its own `PENDING_GATE_ROUTES` rows.** US-001 relaxes the exact gated-route count to a lower bound (at least 81), and the allowlist count case to the `gate-secret` count. US-009 restores both exactly.\n\nThe contract counts 97 gated routes after this feature (81 + 16). The allowlist holds only the 18 thread rows under `gate-fleet` and the 11 `gate-secret` rows. In `test/integration/permissions/permission-contract.integration.spec.ts`, the gated-route count is exactly 97. In `src/permissions/test-helpers/permission-contract.spec.ts`, the counts case asserts 18 gate-fleet and 11 gate-secret entries and size 29, and every fleet remainder is under /threads or /projects/:slug/threads. Preserve the no-violation walk and rejection of an approvable write that is neither gated nor allowlisted.\n\nIn `src/approvals/approval-openapi.contract.spec.ts`, gatedOperations gains the 16 operations (the reindex among them); the reindexOperation constant and its spread are deleted, so the AC-8 case expects exactly gatedOperations. `openapi.json` — regenerated: the 16 gated operations list 202. In `test/e2e/api-endpoint/endpoint.e2e.spec.ts`, add two 202 cases (US-009 AC-7, AC-8).\n\n**The reindex answers 202 on both paths.** Its executed answer is `202 { queued: true }`, as today. A waiting request answers 202 with the pending summary, as every gated route does. A client tells them apart by the body. OpenAPI holds one response per status, so the handler drops its own `@ApiResponse({ status: 202, type: KnowledgeReindexResultDto })` and documents the executed body in its `@ApiOperation` summary; the documented 202 is `@ApprovalGated()`'s. The handler work is US-007; this story verifies that published responses reflect it without an extra reindex exception.\n\nRegenerate only `openapi.json` with `bun run api:export-spec` at the repository root after all gating stories land. The operation set includes jobs dispatch/requeue/cancel, ticket unlink, four schedule writes, config edit/regenerate, three ingest writes, patterns/reindex and project fleet decide, each counted once by HTTP method/path. Endpoint tests grant the agent the exact scoped key and invalidate PermissionCache; seedWaitPolicy uses null for global ingest and the project id for patterns. Delete each policy in finally so this intentionally sequential e2e suite does not leak policy behavior. This binding story stays separate despite being contract/test-focused; create no new source/test files. Verification includes the OpenAPI unit contract, booted runtime permission walk, endpoint cases, `bun run --cwd apps/api type-check` and `bun run --cwd apps/api lint`; these quality gates are not acceptance criteria.\n\n**Scope** — In: final exact rollout assertions, generated root OpenAPI and two representative existing endpoint-suite cases. Out: implementing the 16 handler gates and their domain logic (US-002–US-008), changing hook catalog semantics (US-001). Regenerating `apps/cli/src/generated` for the new 202 responses: only `openapi.json` is regenerated, as in 5c-2. `endpoint.e2e.spec.ts` coverage for every gated route: US-009 adds two representative 202 cases.\n\n**Interface** — `PENDING_GATE_ROUTES` — 18 `gate-fleet` (the thread routes), 11 `gate-secret`. `findContractViolations` reports no violation over the booted app. OpenAPI paths use `/api/projects/{slug}/…` and one response per status; operations with 202 are exactly the 97 gated ones.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Over the booted app, the collected routes contain exactly 97 gated routes.",
+        "AC-2 [integration]: Over the booted app, findContractViolations reports no violation.",
+        "AC-3 [unit]: PENDING_GATE_ROUTES holds exactly 18 gate-fleet and 11 gate-secret entries and nothing else.",
+        "AC-4 [unit]: Every gate-fleet entry of PENDING_GATE_ROUTES is a route under /threads or /projects/:slug/threads.",
+        "AC-5 [unit]: openapi.json's post /api/projects/{slug}/fleet/jobs operation has a 202 response.",
+        "AC-6 [unit]: The operations of openapi.json with a 202 response are exactly the 97 gated ones.",
+        "AC-7 [integration]: In endpoint.e2e.spec.ts, POST /api/fleet/ingest/backfill with the key of an agent granted global fleet.ingest.backfill, under a global wait policy deleted in a finally, answers exactly 202.",
+        "AC-8 [integration]: In endpoint.e2e.spec.ts, PUT /api/projects/:slug/knowledge/patterns with the key of an agent granted fleet.knowledge.patterns.update in the project, under a wait policy deleted in a finally, answers exactly 202."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "approval-gate",
+        "security",
+        "openapi",
+        "contract"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Binding final contract story updates existing contracts/generated API output; access-control rollout closure and exact pending behavior require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/scripts/export-spec.cjs",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+        "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gated-route count is exactly 97"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "the counts case asserts 18 gate-fleet and 11 gate-secret entries and size 29"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "gatedOperations gains the 16 operations (the reindex among them); the reindexOperation constant and its spread are deleted, so the AC-8 case expects exactly gatedOperations"
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the 16 gated operations list 202"
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "two 202 cases (US-009 AC-7, AC-8)"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository discovery and authority: this is an enhancement to an existing approval engine, not greenfield. The codebase-memory MCP tools were unavailable in this session, so discovery used repository Read/Grep/Glob rather than graph navigation. The supplied framework detection is inaccurate for implementation: the API uses NestJS 12 and Fastify, not an Express application architecture; apps/api/package.json:65 lists @nestjs/platform-fastify and .nax/mono/apps/api/context.md:41 describes AppFactory. Web is outside scope and its detected Next.js label must not drive this feature. Read .nax/mono/apps/api/context.md and the nathapp-nestjs-patterns skill before writing NestJS code; that skill was not exposed by this session's tools and no matching repository filename was found. Follow Nathapp envelopes, exceptions, DI and transaction patterns. This task only drafts requirements: no production code was changed and no test commands were executed.\n\nGoal and completion: close the REST policy bypass for exactly 16 fleet operations while preserving immediate execution under shipped medium-risk/default-none settings and for direct human actors. Two unreachable-in-production test-hook keys become non-approvable instead of gaining gates. The final runtime contract is 97 gated routes (81 + 16); the pending allowlist is 29 entries, exactly 18 thread gate-fleet entries and 11 gate-secret entries. The project fleet decide endpoint counts as one route even though it registers the same command variant for two type keys. Reindex already has a non-gate 202 response; after rollout it belongs to the gated operation set, not a separate OpenAPI exception. No database migration or new schema is required. The binding story ids, dependency edges and apps/api workdirs are preserved, including US-009's contract/endpoint-only scope and its mandated root openapi.json output.\n\nExisting shared seams, to reuse rather than redesign: apps/api/src/approvals/route/approval-route-gate.ts:8 defines RouteGateCall and :42 implements run, selecting global scope only for projectId null, refusing non-principal actors and checking canHoldKey before entering ApprovalGate. apps/api/src/approvals/approval-gate.service.ts:38 resolves a command by key/variant, parses input before resolving policy, executes mode none directly, and lets USER subjects satisfy any mode without an ApprovalRequest. Agent calls wait only when a policy names their key. apps/api/src/approvals/route/route-command.ts:13 defines parse/run/prepare/afterCommit/toResult/skipKeyRecheck; :43 adapts them using ActorPrincipalLoader.forContext on both immediate and deferred paths. apps/api/src/auth/principal/actor-principal.loader.ts:26 reloads enabled users or active agents and :60 derives the actor from action context, never the approving human. Its provider is exported by apps/api/src/auth/auth-repository.module.ts:13. apps/api/src/approvals/approval-engine.module.ts:28 exports one registry, gate, decisions, execution and queries for application-wide reuse. Do not accidentally provide a second registry or AfterCommitService instance in a fleet module.\n\nFrozen-input and response rules for every implementation story: register REST variants through routeCommand in onModuleInit; keep primary assistant/MCP commands unchanged. Project-scoped inputs carry slug and projectId plus ids and validated DTO bodies, except the explicitly specified fleet-decide input, which is the translated { requestId, decision, comment, params? }. Global ingest inputs carry only jobId or {}. apps/api/src/approvals/route/parse-route-input.ts:4 validates named non-empty strings. apps/api/src/approvals/route/parse-body.ts:27 validates and whitelists DTO bodies into plain JSON; missing body members must be passed as {}. Patterns parsing belongs to the command parse, preserving null and throwing ValidationAppException({ reason }, 'knowledge.input') otherwise. Every body-returning command projects its raw result with toResult: (result) => result, except decide, which uses ApprovalRequestSummaryDto.from; the unlink command returns null and has no toResult. Keep HTTP handler parameters in their existing order, @Requires, guards, successful @HttpCode and existing responses; add @ApprovalGated and map pending to ApprovalPending, executed to the current JsonResponse.Ok or empty 204. The only response decorator removed is reindex's own 202 response, to avoid overwriting @ApprovalGated's pending response.\n\nTransactional guarantees and high-risk seams: apps/api/src/approvals/approval-execution.service.ts:77 prechecks the actor's key for EVERY command, unless skipKeyRecheck; this is not limited to commands with prepare. At :179 prepare runs outside the transaction; at :190 afterCommit.scope(() => withCommittedEffects(() => txManager.run(...))) encloses mutation, audit and settlement. Prepared commands get a second key check under the request lock; :212 locks the immutable request project to an input slug. Callback failures roll back and settle failed with { error: 'execution-failed', name }; :253 runs afterCommit as warning-only after durable execution. Do not modify these shipped engine APIs. apps/api/src/permissions/after-commit.service.ts:31 scope flushes asynchronous tasks only after the outer callback succeeds and :43 defer returns false without an owning scope. apps/api/src/common/committed-effects.ts:11 flushes synchronous wake effects after the owner completes; :20 executes immediately outside a scope. Use AfterCommitService for ticket domain writes and committedEffect only for non-persistent ingest/index wake signals. Do not defer domain writes with committedEffect. The injected shared AfterCommitService is globally exported by apps/api/src/permissions/permissions.module.ts:41. Its same-instance requirement is essential.\n\nUS-001 baseline and impact: apps/api/src/permissions/catalog.ts:430 buildEntry currently makes all role/non-low/non-read keys approvable at :434; floors/defaults are derived at :445. Add exported TEST_HOOK_KEYS and exclude just its two members from approvability, retaining medium risk, role access and role grants. apps/api/src/approvals/approvable-keys.ts:4 filters directly on the catalog, and apps/api/src/approvals/approval-policy.validation.ts:40 rejects patterns matching no approvable entries; these consumers should change behavior through the catalog, not ad hoc special cases. Update catalog.spec.ts's independent derivation to exclude TEST_HOOK_KEYS. apps/api/src/permissions/pending-gate-routes.ts:20 contains 36 fleet and 11 secret assignments, including the two hook rows. apps/api/src/permissions/test-helpers/permission-contract.spec.ts:150 pins those old counts; apps/api/test/integration/permissions/permission-contract.integration.spec.ts:67 pins exactly 81 routes. Temporarily relax only the fleet/total allowlist assertions and use at least 81 gated routes while downstream stories land. Each gating story removes its own rows; US-009 restores exact closure. Existing production hook reachability stays untouched.\n\nUS-002 baseline and impact: apps/api/src/fleet/jobs/fleet-jobs.controller.ts:43 and :72 directly dispatch/requeue today; add ApprovalRouteGate last, retain PermissionService for US-003. Create FleetJobRouteCommands and its variants and wire ApprovalEngineModule/AuthRepositoryModule into FleetJobsModule (current imports at apps/api/src/fleet/jobs/fleet-jobs.module.ts:24). apps/api/src/fleet/jobs/fleet-jobs.service.ts:67 already owns dispatch validation, budget checks, atomic job/ticket/activity/audit creation, placement and job result projection. At :130 dispatch awaits ticketEffects.onRunDispatched after its own txManager.run, which is not a real commit when approval execution owns the transaction. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:42 currently starts CREATED/VERIFIED tickets in a best-effort loop and swallows errors per ticket. Move that loop into a task, defer it through the shared AfterCommitService, and await it immediately when defer returns false. Preserve logging and PLAN behavior. Update all three direct constructions in fleet-job-ticket.effects.spec.ts:20, :57, :185 and the workflow construction in apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts:119 with a sixth argument. This also repairs approved assistant dispatch timing without changing assistant commands. DuplicateActiveJobError catches at fleet-jobs.service.ts:120 and :292 look up a winner after an inner transaction; under an engine-owned aborted transaction that lookup can fail. Settling the approved request failed with no duplicate job is intentional; do not attempt to reproduce activeJobId.\n\nUS-003 baseline and impact: apps/api/src/fleet/jobs/fleet-jobs.controller.ts:52 declares cancel service-enforced and currently computes canOperate before calling cancel. apps/api/src/fleet/jobs/fleet-jobs.service.ts:152 locks the job, checks project, requester-or-key, then terminal state. Add requesterOf(projectId, jobId) with the same project-hidden 404. At request time, always look up requester first, then check the key and deny a non-requester without it before opening an approval. Gate with keyCheck false; command sets skipKeyRecheck true because a legitimate requester need not hold fleet.job.cancel. At execution recompute canOperate and call the unchanged service authority check. Extend the US-002 commands class/spec rather than creating another. apps/api/src/fleet/tickets/ticket-fleet-jobs.controller.ts:44 directly unlinks and answers void/204. apps/api/src/fleet/tickets/fleet-tickets.service.ts:81 owns atomic unlink, event and audit, throwing fleet.ticketJobs if the link disappeared. Add TicketFleetJobRouteCommands and gate the controller without changing that service. Wire FleetTicketsModule imports/providers at apps/api/src/fleet/tickets/fleet-tickets.module.ts:21.\n\nUS-004 baseline and impact: ScheduleRouteCommands currently registers only delete (apps/api/src/fleet/schedules/schedule-route.commands.ts:23) and already recomputes any-row authority inside its command. Extend this pattern to create/update/enable/disable. apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts:35 already injects the route gate; its existing delete at :98 remains unchanged. The other writes still call services and its private canAdminister helper at :141 is request-time only; remove the helper and PermissionService constructor parameter while preserving handler signatures. apps/api/src/fleet/schedules/schedules.service.ts:97 creates schedules, :117 updates under lock, :162 enables with an owner-dispatch recheck and :184 disables. These services remain the domain authority; a .own grant passes the route/gate key check but cannot mutate another owner's row after approval. SchedulesModule already imports the engine/auth repository and provides commands (apps/api/src/fleet/schedules/schedules.module.ts:17).\n\nUS-005 baseline and impact: apps/api/src/fleet/repo-config/project-repo-config.controller.ts:26 already injects the gate for drift, while submitEdit and submitRegenerate at :67 and :78 remain direct calls. apps/api/src/fleet/repo-config/repo-config-route.commands.ts:21 registers only drift with prepare. ConfigJobsService.submitRegenerate at apps/api/src/fleet/repo-config/config-jobs.service.ts:68 currently performs repository lookup, title/body validation, forge list and create in one method; prepareDrift at :80 already demonstrates read outside transaction and isDeepStrictEqual repository recheck. Implement prepareRegenerate analogously, preserving lookup-before-body-validation-before-list order, and make submitRegenerate call its returned callback. For deferred execution use prepare; for immediate execution run invokes submitRegenerate. No forge read when opening a pending request. RepoConfigModule already has engine/auth/commands wiring at apps/api/src/fleet/repo-config/repo-config.module.ts:35. Its controller spec currently checks route metadata (apps/api/src/fleet/repo-config/project-repo-config.controller.spec.ts:20), so add a gate-call test without losing those anchors.\n\nUS-006 baseline and impact: apps/api/src/fleet/ingest/fleet-ingest.controller.ts:23 injects repo/jobs/ingest/activity/transaction/audit, :50/:62/:77 implement writes and :85 queue encloses mutation, bookkeeping activity and conditional audit. Move those unchanged semantics into IngestRequeueService, including rerunJob's lookup/404, leaving list's repo dependency in the controller and adding the gate. Preserve audit omission when count is zero and the existing activity actorType USER. At present queue calls ingest.kick immediately at :101; wrap only that wake in committedEffect after txManager.run returns. Add global commands and register both service and commands in IngestModule, which currently imports FleetJobsModule/FleetActivityModule/BudgetsModule/FleetTicketsModule (apps/api/src/fleet/ingest/ingest.module.ts:21). No service exports or background-drain redesign are required.\n\nUS-007 baseline and impact: apps/api/src/fleet/knowledge/project-knowledge.controller.ts:124 contains patterns save and :131 parsing, :142 queuePasses, :159 reindex with request-time kill switch, scoped lookup, audited no-op and immediate enqueue. Move orchestration into KnowledgeIndexAdmin; parse remains in the new command, not the admin service/controller. KnowledgeIndexService already provides the public repository facade and audited pattern persistence (apps/api/src/fleet/knowledge/knowledge-index.service.ts:27, :33, :62); do not inject the private repository into the controller/admin. Queue.enqueue at apps/api/src/fleet/knowledge/knowledge-index.queue.ts:53 starts fire-and-forget work and its :75 kill switch silently drops disabled indexing, so KnowledgeIndexAdmin.reindex must recheck the kill switch before resolving/writing, throw knowledge.disabled and create no audit if disabled while waiting. Wrap all admin enqueue calls in committedEffect after durable save/audit. The controller keeps search/index/config and the early 409 check, gains the gate, loses queue/audit. Preserve search/repos read behavior and both paths' 202 status; distinguish executed { queued: true } from pending by body. KnowledgeModule's current imports/providers/exports are apps/api/src/fleet/knowledge/knowledge.module.ts:22; add engine/auth/admin/commands without exposing the private queue or introducing reverse imports from ingest/sync. Existing knowledge controller specs construct it directly and through two HTTP testing modules; update both provider blocks to gate doubles, migrate save/queue assertions into new service/commands specs, and add both new provider resolutions to knowledge.module.spec.ts.\n\nUS-008 baseline and impact: apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:58 uses service-enforced type-key metadata and :66 directly calls ApprovalsService.decide. apps/api/src/fleet/approvals/approvals.service.ts:76 runs visibility/pending/eligibility, engineDecision translation, decisions.decide and reload; :126 contains translation rules and :154 visibility; refusalOf and decideFailure are currently module-level functions at :167/:179, not private class methods. Reuse these existing helpers without unnecessary changes to the original decide path. Add checkDecide/recordDecide/executeDecided/view alongside unchanged decide, and inject ApprovalExecutionService last. checkDecide must choose the metadata key by inner permissionKey, not by caller body. recordDecide calls recordDecision only and maps inner not-pending/expired errors into fleet conflicts; otherwise the engine might mistake an inner concurrency refusal for the outer request's own locked-row conflict. The request's actor context, not approver identity, must authorize the inner decision. Copy the shipped two-phase decide structure from apps/api/src/approvals/approval-route.commands.ts:47: keyCheck false at gate, skipKeyRecheck true in both registrations, summary projection, and afterCommit executing the approved inner command only for approve. Immediate handlers executeDecided on approve, then view; engine afterCommit is not invoked for immediate commands, preventing double execution. Keep global POST /fleet/approvals/:id/decide using original decide, including its documented policy bypass. ApprovalsModule already imports ApprovalEngineModule (apps/api/src/fleet/approvals/approvals.module.ts:26); add AuthRepositoryModule and the commands provider. Add a sixth execution double to approvals.service.spec.ts:78; preserve existing decide assertions and add recordDecision to the decision double.\n\nUS-009 baseline and impact: the booted permission contract (apps/api/test/integration/permissions/permission-contract.integration.spec.ts:67) must close at exactly 97 and no violations, including rejecting synthetic unlisted approvable writes. Allowlist counts at apps/api/src/permissions/test-helpers/permission-contract.spec.ts:154 close at 18/11/29 with all remaining fleet paths belonging to threads. apps/api/src/approvals/approval-openapi.contract.spec.ts:12 holds the current 81 gatedOperations and :96 separately permits reindex; replace that exception with the complete 97-operation gated set and assert exact equality of all 202 operations, not just presence of a few endpoints. apps/api/scripts/export-spec.cjs:8 boots AppModule, :9 uses prefix api, :22 writes root openapi.json. Run bun run api:export-spec at repository root once all handler metadata lands; do not hand edit the generated spec or regenerate CLI clients. endpoint.e2e.spec.ts already imports grantKeys/seedWaitPolicy at :24 and demonstrates cleanup in finally for pending policy tests at :788 and :1038; add only the two representative exact-202 cases. Its existing reindex human checks at :5010/:5018 must remain executed { queued: true }. Root guidance normally asks to regenerate the CLI after contract changes; this feature explicitly excludes it and confines contract generation to openapi.json.\n\nDependencies and verification approach: US-001 enables wait-policy fixtures and unblocks independent US-002/004/005/006/007/008. US-003 follows US-002 because they share the jobs controller/commands/spec. US-009 follows US-003 through US-008 and restores exact contracts after all rows move. Concurrent stories touch pending-gate-routes.ts; retain each other's removals. Constructor changes affect DI consumers as well as direct unit constructions; existing FleetModule, FleetJobsModule, FleetTicketsModule, SchedulesModule, IngestModule, KnowledgeModule and ApprovalsModule unit specs provide no-DB registration checks. Security/access-control changes in every story require three-session-tdd, even catalog and contract stories. Commands/service unit specs pin service forwarding, parsing, registrations, recomputed authority and scope timing; controller doubles return { status: 'executed', result } or pending and assert gate call/mapping instead of bypassing commands. Existing regression suites include gated-project-fleet-routes.integration.spec.ts, fleet-job-cancel-requeue.integration.spec.ts, fleet-ingest-api.integration.spec.ts, enforce-fleet-config-knowledge.integration.spec.ts, fleet-approvals-decide.integration.spec.ts, fleet-job-ticket.effects.spec.ts, config-jobs.service.spec.ts, approvals.service.spec.ts and the OpenAPI/permission contract specs.\n\nIntegration isolation is mandatory: follow .nax/rules/api-test-isolation.md:1. Each AC is its own test with independent rows; repeated references to another AC describe repeating its setup/call in that test, never sharing state. Use seedFleetHttpWorld/seedFleetHttpAgent, grantKeys then PermissionCache.invalidate, seedWaitPolicy(db, key, projectId or null), bootHttpApp/data/resetThrottle/fixtureDb and seedFleetAsk. The helper implementations are apps/api/src/approvals/test-helpers/approval-fixtures.ts:7/:36 and apps/api/test/helpers/fleet-ask-fixtures.ts:57. Medium defaults mean older gated fleet fixtures relying on high-risk defaults cannot substitute for explicitly seeded wait policies here. Each new integration file deletes its ApprovalDecision, ApprovalRequest and ApprovalPolicy rows and fleet rows in beforeEach in FK-safe order, uses unique names/features/refs, restores prototype/instance spies in afterEach with vi.restoreAllMocks, restores knowledge config, closes Nest apps and Prisma clients. Spy forge list to return baseSha c repeated 40, defaultBranch trunk, files []; spy BundleIngestService.prototype.kick and the app KnowledgeIndexQueue.enqueue to prevent drains while asserting timing/counts. Start compose Postgres with bun run test:db:up in apps/api and run bun run test:scoped on each integration file outside NAX_SANDBOXED=1; skips are not verification. DB tests require KODA_DB_TESTS=1 through the wrapper and use shared canRunDbTests gates; every DB run resets the schema, so no parallel runs on one test database. Use a private container for another checkout. Unit/DI specs remain DB-free. Run unit specs shuffled, then scoped DB tests and representative endpoint suite; at final closure export OpenAPI and run bun run --cwd apps/api type-check and bun run --cwd apps/api lint. Do not edit generated nax acceptance material.\n\nCompatibility and migration risks: new 202 responses occur only for policy-governed agent calls; default-none agent responses, direct human execution, result envelopes, audit mode none, read endpoints and existing service invariants stay intact. No roles, catalog defaults, inventory TSV, runner protocol, frontend, CLI or database schema changes are intended. Test-hook policies newly fail validation, but no data-cleanup migration is specified for previously stored policies. Approval inputs remain full frozen bodies without new size bounds. Default Prisma execution-transaction timeout remains a known risk for placement/backfill workloads, explicitly deferred. Best-effort wakes are not durable and ticket-start retries remain excluded. Freeze actor-independent ids/body only; recompute row authority at execution, never freeze approver privileges or canAdminister/canOperate. Late domain failures settle failed, while inner execution failures after an outer decide commit leave the outer request executed and are only logged. Suggested hardening, if any, must not silently expand the binding acceptance set; additional FM criteria below come directly from the spec's Failure Handling table where its numbered ACs did not explicitly cover the row.\n\nSecond-turn adversarial audit: re-read the full feature spec and the current registry, route adapter, decision adapter, regenerate preparation model, schedule command tests and knowledge handlers. All 110 numbered spec ACs remain in their original stories: US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-008 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-009 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8. Matching scope summaries, no-request/no-new-request clauses, exact result/count assertions, unchanged risk/approvability, foreign-project refusals, empty 204, original principal forwarding, ordering, no/with-prepare distinctions, skipKeyRecheck flags and policy cleanup in finally are retained. The spec's compound regression bullets stay intact rather than being split or shortened.\n\nConcrete interface corrections from that audit: ApprovalCommandRegistry.get(key, variant) at apps/api/src/approvals/approval-command.registry.ts:111 returns an ApprovalCommand, not a key lookup by variant alone. Registration ACs now inspect the returned command's key and applicable flags/functions. The registry exposes execute(input, decision?), not RouteCommandSpec.run(principal, input); exercise the specified run behavior through command.execute(command.parse(input)) with ActorPrincipalLoader.forContext mocked to return the specified original requester. This adapter is at apps/api/src/approvals/route/route-command.ts:47. PermissionService.can calls include that principal as their first parameter; cancellation and schedule ACs now make the scope and allowed result explicit. ApprovalRequestSummaryDto.from is the stored outer-decision result projection; the immediate fleet handler returns a Nathapp JsonResponse.Ok envelope containing the reloaded fleet view, not the summary or a raw DTO. The updated controller AC spells out that envelope while retaining executeDecided-before-view ordering. No new production helper or command API is proposed by these testability clarifications.\n\nAudit closure: each story already has a negative acceptance path (US-001 AC-6; US-002 AC-5; US-003 AC-5/6/7/15; US-004 AC-7/9; US-005 AC-6/8/9; US-006 AC-6/9/10; US-007 AC-5/8/10/11/15; US-008 AC-4/5/6/10 and FM-1; US-009 FM-1). Backward-compatibility anchors include US-001 AC-2/4; US-002 AC-6/14/15; US-003 AC-3/4/10; US-004 AC-8; US-005 AC-7 and retained submitRegenerate unit assertions; US-006 AC-8/11; US-007 AC-9/12/13; US-008 AC-7 and retained unchanged decide unit assertions; US-009 AC-6's full old-plus-new operation set. All spec Context Files are included, with at most five per story; only US-003 references an upstream-created file, FleetJobRouteCommands from US-002. All expectedFiles remain exactly this story's specified new files. The nine binding dependency arrays and apps/api workdirs remain unchanged. All 16 feature-level exclusions remain verbatim in outOfScope, including the explicitly feature-listed US-002/007/008-only deferrals; there are no additional story-local out-of-scope blocks in the spec to hoist. No new negative criterion is needed because every story already has one. Lower US-005 to medium complexity: prepareDrift and the existing route-command/module wiring already supply the algorithm and integration seams. Keep strict three-session-tdd for every story under the access-control security override; lower complexity does not remove that requirement.",
+  "outOfScope": [
+    "The 18 thread routes (`permissions-p3-approval-gate-threads`) and the 11 `gate-secret` routes.",
+    "The global `POST /fleet/approvals/:id/decide`: it declares only the read key `fleet.approval.read`, which is not approvable, so it stays ungated; it keeps deciding through `ApprovalsService.decide`. A caller holding global `fleet.approval.read` and eligible to decide can still decide there at once, outside a `fleet.approval.decide.*` policy (designer's call; closing it is a later change).",
+    "Regenerating `apps/cli/src/generated` for the new 202 responses: only `openapi.json` is regenerated, as in 5c-2.",
+    "Changing any catalog default: these keys stay `none`.",
+    "Running a service's domain checks before a request opens, beyond the handler checks listed in Design.",
+    "Assistant or MCP writes on these keys: they keep their primary command.",
+    "Any change to `apps/web` or `apps/cli`.",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`: the test-hook rule is code (`TEST_HOOK_KEYS`), not an inventory column.",
+    "Reproducing the `activeJobId` of the 409 `fleet.jobs` / `fleet.configJobActive` body on a deferred job create that loses the active-job race: the request settles `failed` (Design).",
+    "The activity rows of the ingest and job writes still record `actorType: 'USER'` for an agent actor, as today.",
+    "A transaction timeout other than Prisma's default for the execution transaction: a deferred dispatch's placement and a deferred backfill run inside it as they are.",
+    "Bounding the size of a frozen input: `DispatchFleetJobDto`, `SubmitConfigEditDto.edits` and the patterns list are stored whole in `ApprovalRequest.input` when a request waits.",
+    "US-002 only: retrying a ticket auto-start that failed after commit; it is logged, as today.",
+    "US-007 only: telling the reindex's executed 202 from its pending 202 by status code; the body tells them apart (Design).",
+    "US-008 only: the inner request's execution failure after an approved outer decide is logged by `afterCommit`, as 5a's decide does; the outer request stays `executed`.",
+    "`endpoint.e2e.spec.ts` coverage for every gated route: US-009 adds two representative 202 cases."
+  ],
+  "routingProfile": "native-codex"
+}
