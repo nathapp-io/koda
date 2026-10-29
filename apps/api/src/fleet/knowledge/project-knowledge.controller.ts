@@ -11,10 +11,12 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
-import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { KNOWLEDGE_ROUTE_VARIANTS } from './knowledge-route.commands';
 import { KnowledgeIndexService } from './knowledge-index.service';
-import { KnowledgeIndexQueue } from './knowledge-index.queue';
-import { DEFAULT_KNOWLEDGE_PATTERNS, parseKnowledgePatterns } from './knowledge-patterns';
+import { DEFAULT_KNOWLEDGE_PATTERNS } from './knowledge-patterns';
 import { KnowledgeReindexResultDto, KnowledgeRepoStatesDto, toKnowledgeRepoState } from './knowledge-repo-state.dto';
 import { KnowledgeSearchQuery, KnowledgeSearchResult, KnowledgeSearchService, parseKnowledgeSearchInput } from './knowledge-search.service';
 
@@ -87,8 +89,7 @@ export class ProjectKnowledgeController {
     private readonly searchService: KnowledgeSearchService,
     private readonly index: KnowledgeIndexService,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
-    private readonly queue: KnowledgeIndexQueue,
-    private readonly audit: AuditRecorder,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   @Get('repos')
@@ -117,55 +118,40 @@ export class ProjectKnowledgeController {
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.knowledge.patterns.update')
+  @ApprovalGated()
   @ApiOperation({ summary: "Replace the project's Markdown corpus patterns (fleet.knowledge.patterns.update)" })
   @ApiResponse({ status: 200, type: KnowledgePatternsResultDto })
   @ApiResponse({ status: 400, description: 'Invalid patterns body (knowledge.input)' })
   @ApiResponse({ status: 403, description: 'fleet.knowledge.patterns.update is missing' })
   async patterns(@Body() body: KnowledgePatternsBodyDto, @CurrentProject() project: ProjectContext) {
-    const saved = await this.index.savePatterns(project.project.id, this.acceptPatterns(body?.patterns));
-    // The routes answer while indexing is disabled: the list is saved, only the passes are skipped.
-    return JsonResponse.Ok<KnowledgePatternsResultDto>({ ...saved, queued: await this.queuePasses(project.project.id) });
-  }
-
-  /** `null` is the explicit "restore the defaults" body; anything else must parse or the request is refused. */
-  private acceptPatterns(input: unknown): string[] | null {
-    if (input === null) return null;
-    // This app compiles with `strictNullChecks: false`, where a boolean-literal discriminant does not narrow
-    // (`ok` widens to boolean); this permissive local shape is what both branches of the parser guarantee, and
-    // the parser's own spec pins them.
-    const parsed: { ok: boolean; value?: string[]; reason?: string } = parseKnowledgePatterns(input);
-    if (!parsed.ok) throw new ValidationAppException({ reason: parsed.reason }, 'knowledge.input');
-    return parsed.value ?? [];
-  }
-
-  /** US-002: every repository re-selects under the new list; a disabled index queues nothing. */
-  private async queuePasses(projectId: string): Promise<number> {
-    if (!this.config.knowledgeIndexEnabled) return 0;
-    const repos = await this.index.listProjectRepos(projectId);
-    for (const repo of repos) this.queue.enqueue(repo.id, 'admin');
-    return repos.length;
+    const outcome = await this.routeGate.run<KnowledgePatternsResultDto>({
+      key: 'fleet.knowledge.patterns.update', variant: KNOWLEDGE_ROUTE_VARIANTS.patterns,
+      projectId: project.project.id,
+      input: { slug: project.project.slug, projectId: project.project.id, patterns: body?.patterns },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('repos/:repoId/reindex')
   @HttpCode(202)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.knowledge.repo.reindex')
+  @ApprovalGated()
   @ApiParam({ name: 'repoId', required: true, schema: { type: 'string' } })
-  @ApiOperation({ summary: "Queue an index pass for one of the project's repositories (fleet.knowledge.repo.reindex)" })
-  @ApiResponse({ status: 202, type: KnowledgeReindexResultDto })
+  @ApiOperation({ summary: "Queue an index pass (fleet.knowledge.repo.reindex); executed: 202 { queued: true }, pending: 202 approval summary" })
   @ApiResponse({ status: 403, description: 'fleet.knowledge.repo.reindex is missing' })
   @ApiResponse({ status: 404, description: 'knowledge.repoNotFound' })
   @ApiResponse({ status: 409, description: 'knowledge.disabled' })
   async reindex(@Param('repoId') repoId: string, @CurrentProject() project: ProjectContext) {
     if (!this.config.knowledgeIndexEnabled) throw new ConflictAppException({}, 'knowledge.disabled');
-    const repo = await this.index.resolveProjectRepo(project.project.id, { repoId });
-    if (!repo) throw new NotFoundAppException({}, 'knowledge.repoNotFound');
-    await this.audit.audited(async () => undefined, () => ({
-      key: 'fleet.knowledge.repo.reindex', resourceType: 'fleet-repo', resourceId: repo.id,
-      projectId: project.project.id, summary: 'reindex queued',
-    }));
-    this.queue.enqueue(repo.id, 'admin');
-    return JsonResponse.Ok<KnowledgeReindexResultDto>({ queued: true });
+    const outcome = await this.routeGate.run<KnowledgeReindexResultDto>({
+      key: 'fleet.knowledge.repo.reindex', variant: KNOWLEDGE_ROUTE_VARIANTS.reindex,
+      projectId: project.project.id,
+      input: { slug: project.project.slug, projectId: project.project.id, repoId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('search')

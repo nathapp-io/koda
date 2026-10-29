@@ -7,6 +7,7 @@ import {
   PERMISSION_CATALOG,
   PUBLIC_KEYS,
   READ_ACTION_KEYS,
+  TEST_HOOK_KEYS,
   type PermissionCatalogEntry,
 } from './catalog';
 import { expandEntries } from './entry-matcher';
@@ -358,7 +359,7 @@ describe('PERMISSION_CATALOG', () => {
       const ownable = access === 'role' && OWNABLE_KEY_LIST.includes(key);
       const risk = expectedRisk(key);
       // Reads are never approvable (design §4); nothing unapprovable carries a floor or default.
-      const approvable = access === 'role' && risk !== 'low' && !isReadKey(key);
+      const approvable = access === 'role' && risk !== 'low' && !isReadKey(key) && !TEST_HOOK_KEYS.has(key);
       return {
         access,
         scope: expectedScope(key, access, ownable),
@@ -398,6 +399,27 @@ describe('PERMISSION_CATALOG', () => {
  * the mode an `AGENT` subject gets when no policy matches (design §4).
  */
 describe('catalog approval metadata', () => {
+  it.each(['testhook.schedule.fire', 'testhook.nax-files.seed'])(
+    'US-001 AC-1: makes test-hook key %s non-approvable with no floor or default',
+    (key) => {
+      expect(findCatalogEntry(key)?.approval).toEqual({ approvable: false, floor: 'none', default: 'none' });
+    },
+  );
+
+  it('US-001 AC-2: preserves medium risk for test-hook keys', () => {
+    expect(findCatalogEntry('testhook.schedule.fire')?.risk).toBe('medium');
+  });
+
+  it('US-001 AC-3: excludes both test-hook keys from approvable keys', () => {
+    const keys = approvableKeys().map(({ key }) => key);
+    expect(keys).not.toContain('testhook.schedule.fire');
+    expect(keys).not.toContain('testhook.nax-files.seed');
+  });
+
+  it('US-001 AC-4: keeps fleet ingest backfill approvable', () => {
+    expect(findCatalogEntry('fleet.ingest.backfill')?.approval.approvable).toBe(true);
+  });
+
   it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
     'US-001 AC-3: treats POST read key %s as non-approvable and low risk',
     (key) => {

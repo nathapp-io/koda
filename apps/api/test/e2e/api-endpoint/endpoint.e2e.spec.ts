@@ -32,7 +32,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
-import { FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
+import { FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
@@ -5768,5 +5769,134 @@ describeIntegration('VCS manual issue sync lifecycle', () => {
     expect(data(await post().expect(200))).toMatchObject({ issuesSynced: 1, issuesSkipped: 0, tickets: [{ title: 'Issue 8' }] });
     await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
     await post().expect(404);
+  });
+});
+
+/** Cancel/unlink keep their public statuses while policy-controlled agent writes wait. */
+describeIntegration('fleet cancel and unlink approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'fleet.job.cancel', 'fleet.ticket-job.unlink'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+    await seedWaitPolicy(db, 'fleet.job.cancel', world.projectId);
+    await seedWaitPolicy(db, 'fleet.ticket-job.unlink', world.projectId);
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+  it('cancels and unlinks after approval; missing targets retain their 404s', async () => {
+    const base = '/api/projects/web/fleet/jobs';
+    const missing = await request(server()).post(`${base}/missing/cancel`).set(auth(agent.apiKey)).expect(404);
+    refusal(missing, 'fleet.jobs.404');
+    expect(await db.approvalRequest.count()).toBe(0);
+    const ticket = data<{ ref: string }>(await request(server()).post('/api/projects/web/tickets').set(auth(world.tokens.root)).send({ type: 'TASK', title: 'cancel unlink smoke' }).expect(201));
+    const { job } = data<{ job: { id: string } }>(await request(server()).post(base).set(auth(world.tokens.root)).send({ repoId: world.repoId, command: 'RUN', feature: 'cancel-unlink-smoke', maxCostUsd: 5, ticketRefs: [ticket.ref] }).expect(201));
+    const opened = data<{ id: string }>(await request(server()).post(`${base}/${job.id}/cancel`).set(auth(agent.apiKey)).expect(202));
+    const decided = data<{ status: string; result: { state: string } }>(await request(server()).post(`/api/approvals/${opened.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+    expect(decided).toMatchObject({ status: 'executed', result: { state: 'CANCELLED' } });
+    const link = `/api/projects/web/tickets/${ticket.ref}/fleet-jobs/${job.id}`;
+    const pendingUnlink = data<{ id: string }>(await request(server()).delete(link).set(auth(agent.apiKey)).expect(202));
+    expect(data<{ status: string }>(await request(server()).post(`/api/approvals/${pendingUnlink.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200)).status).toBe('executed');
+    const unlinked = await request(server()).delete(link).set(auth(world.tokens.root)).expect(404);
+    refusal(unlinked, 'fleet.ticketJobs.404');
+  });
+});
+
+
+/** Project fleet decide gates the translated decision, not the ask's execution. */
+describeIntegration('project fleet decide approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'approval.decide', 'fleet.job.shell.escalate'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+    await seedWaitPolicy(db, 'fleet.approval.decide.bash', world.projectId);
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  it('defers deny until approval and preserves missing and decided ask errors', async () => {
+    const decide = (id: string) => request(server()).post(`/api/projects/web/fleet/approvals/${id}/decide`).set(auth(agent.apiKey)).send({ decision: 'deny' });
+    refusal(await decide('missing').expect(404), 'fleet.approvals.404');
+    expect(await db.approvalRequest.count()).toBe(0);
+    const runner = await insertRunner(db, { createdById: world.ids.root, enabled: false });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: 'decide-smoke',
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING',
+      bashMode: 'escalate', runnerId: runner.id, leaseEpoch: 1, firstStartedAt: new Date(),
+    } });
+    const { requestId } = await seedFleetAsk(db, {
+      kind: 'bash', projectId: world.projectId, onBehalfOf: { type: 'USER', id: world.ids.dev },
+      input: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask', payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask' },
+    });
+    const outer = data<{ id: string; permissionKey: string }>(await decide(requestId).expect(202));
+    expect(outer.permissionKey).toBe('fleet.approval.decide.bash');
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'pending' });
+    expect(data<{ status: string }>(await request(server()).post(`/api/approvals/${outer.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200)).status).toBe('executed');
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'rejected' });
+    refusal(await decide(requestId).expect(409), 'fleet.approvalNotPending.409');
+    expect(await db.approvalRequest.count()).toBe(2);
+  });
+});
+
+/** Representative global and project-scoped approval-gated fleet operations. */
+describeIntegration('fleet ingest and knowledge approval endpoints', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'fleet.ingest.backfill'], null);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.knowledge.patterns.update'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+
+  it('AC-7: global ingest backfill returns exactly 202 under a global wait policy', async () => {
+    const policy = await seedWaitPolicy(db, 'fleet.ingest.backfill', null);
+    try {
+      await app.get(MembershipService).invalidatePermissions();
+      await request(server()).post('/api/fleet/ingest/backfill').set(auth(agent.apiKey)).expect(202);
+    } finally {
+      await db.approvalPolicy.delete({ where: { id: policy.id } });
+      await app.get(MembershipService).invalidatePermissions();
+    }
+  });
+
+  it('AC-8: project knowledge patterns returns exactly 202 under a project wait policy', async () => {
+    const policy = await seedWaitPolicy(db, 'fleet.knowledge.patterns.update', world.projectId);
+    try {
+      await app.get(MembershipService).invalidatePermissions();
+      await request(server()).put('/api/projects/web/knowledge/patterns').set(auth(agent.apiKey))
+        .send({ patterns: ['docs/**/*.md'] }).expect(202);
+    } finally {
+      await db.approvalPolicy.delete({ where: { id: policy.id } });
+      await app.get(MembershipService).invalidatePermissions();
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
@@ -47,6 +48,16 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       configEdits as never,
       mockAuditRecorder,
     );
+  });
+
+  it('US-003 AC-11: requesterOf scopes the lookup to the project', async () => {
+    repo.findById.mockResolvedValue({ ...jobA, id: 'j1', projectId: 'p1', requestedById: 'a1' });
+    expect(await service.requesterOf('p1', 'j1')).toBe('a1');
+    expect(repo.findById).toHaveBeenCalledWith('j1');
+    await expect(service.requesterOf('other', 'j1')).rejects.toThrow(NotFoundAppException);
+    await expect(service.requesterOf('other', 'j1')).rejects.toMatchObject({ response: { prefix: 'fleet.jobs' } });
+    repo.findById.mockResolvedValue(null);
+    await expect(service.requesterOf('p1', 'missing')).rejects.toMatchObject({ response: { prefix: 'fleet.jobs' } });
   });
 
   it('list counts pending approvals for the whole page in one query (D272)', async () => {

@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
+import { KnowledgeIndexAdmin } from './knowledge-index-admin.service';
+import { KnowledgeRouteCommands } from './knowledge-route.commands';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
 import { KnowledgeIndexQueue } from './knowledge-index.queue';
 import { KnowledgeIndexService } from './knowledge-index.service';
@@ -44,6 +46,11 @@ describe('KnowledgeModule', () => {
     expect(module.get(KnowledgeIndexQueue)).toBeInstanceOf(KnowledgeIndexQueue);
     expect(module.get(KnowledgePoller)).toBeInstanceOf(KnowledgePoller);
     expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgePoller);
+  });
+
+  it('resolves the knowledge admin and route commands', () => {
+    expect(module.get(KnowledgeIndexAdmin)).toBeInstanceOf(KnowledgeIndexAdmin);
+    expect(module.get(KnowledgeRouteCommands)).toBeInstanceOf(KnowledgeRouteCommands);
   });
 
   it('exports the two services only', () => {

@@ -60,23 +60,35 @@ export class ProjectRepoConfigController {
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.job.config.edit')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (fleet.job.config.edit)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 403, description: 'fleet.job.config.edit is missing' })
   @ApiResponse({ status: 409, description: 'A config job is already active for this repo (fleet.configJobActive)' })
   async submitEdit(@Param('repoId') repoId: string, @Body() body: SubmitConfigEditDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.configJobs.submitEdit(principal.id, ctx.project.id, repoId, body));
+    const outcome = await this.routeGate.run<DispatchResultDto>({
+      key: 'fleet.job.config.edit', variant: REPO_CONFIG_ROUTE_VARIANTS.configEdit, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, repoId, edit: body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('config-edits/regenerate')
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.job.config.edit')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Queue a regenerate PR (CONFIG_EDIT with no file edits) (fleet.job.config.edit)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 403, description: 'fleet.job.config.edit is missing' })
   async submitRegenerate(@Param('repoId') repoId: string, @Body() body: RegenerateConfigDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.configJobs.submitRegenerate(principal.id, ctx.project.id, repoId, body));
+    const outcome = await this.routeGate.run<DispatchResultDto>({
+      key: 'fleet.job.config.edit', variant: REPO_CONFIG_ROUTE_VARIANTS.regenerate, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, repoId, regenerate: body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post('drift-checks')

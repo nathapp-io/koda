@@ -30,6 +30,10 @@ const gatedOperations = [
   ['patch', '/api/projects/{slug}/fleet/budgets/{id}'],
   ['delete', '/api/projects/{slug}/fleet/budgets/{id}'],
   ['post', '/api/projects/{slug}/fleet/budgets/{id}/resume'],
+  ['post', '/api/projects/{slug}/fleet/jobs'],
+  ['post', '/api/projects/{slug}/fleet/jobs/{id}/cancel'],
+  ['post', '/api/projects/{slug}/fleet/jobs/{id}/requeue'],
+  ['delete', '/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}'],
   ['post', '/api/fleet/repos'],
   ['delete', '/api/fleet/repos/{id}'],
   ['post', '/api/fleet/repos/{id}/check'],
@@ -37,6 +41,18 @@ const gatedOperations = [
   ['delete', '/api/fleet/runners/{id}'],
   ['delete', '/api/fleet/analytics'],
   ['delete', '/api/projects/{slug}/fleet/schedules/{id}'],
+  ['post', '/api/projects/{slug}/fleet/schedules'],
+  ['patch', '/api/projects/{slug}/fleet/schedules/{id}'],
+  ['post', '/api/projects/{slug}/fleet/schedules/{id}/enable'],
+  ['post', '/api/projects/{slug}/fleet/schedules/{id}/disable'],
+  ['post', '/api/projects/{slug}/fleet/repos/{repoId}/config-edits'],
+  ['post', '/api/projects/{slug}/fleet/repos/{repoId}/config-edits/regenerate'],
+  ['post', '/api/fleet/ingest/backfill'],
+  ['post', '/api/fleet/ingest/jobs/{jobId}/rerun'],
+  ['post', '/api/fleet/ingest/rerun-outdated'],
+  ['post', '/api/projects/{slug}/fleet/approvals/{id}/decide'],
+  ['put', '/api/projects/{slug}/knowledge/patterns'],
+  ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'],
   ['delete', '/api/comments/{id}'],
   ['delete', '/api/projects/{slug}/labels/{id}'],
   ['delete', '/api/projects/{slug}/tickets/{ref}'],
@@ -93,8 +109,6 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/vcs/sync'],
   ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
 ] as const;
-
-const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
 
 function operationsWith202(): string[] {
   return Object.entries(openapi.paths).flatMap(([path, methods]) =>
@@ -153,8 +167,13 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-8: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
-    const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
+  it('AC-5: POST /api/projects/{slug}/fleet/jobs has a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/fleet/jobs']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('AC-6: 202 responses exist on exactly the 97 gated operations', () => {
+    const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
+    expect(expected).toHaveLength(97);
     expect(operationsWith202()).toEqual(expected);
   });
 });

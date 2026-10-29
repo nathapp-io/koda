@@ -26,15 +26,15 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
-import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
 import type { KnowledgeIndexState, KnowledgeProjectState, KnowledgeRepoRef } from './knowledge-index.domain';
 import { KnowledgeIndexService } from './knowledge-index.service';
-import { KnowledgeIndexQueue } from './knowledge-index.queue';
 import { DEFAULT_KNOWLEDGE_PATTERNS } from './knowledge-patterns';
 import type { KnowledgeRepoStatesDto } from './knowledge-repo-state.dto';
 import type { KnowledgeHit, KnowledgeSearchQuery, KnowledgeSearchResult } from './knowledge-search.service';
 import { KnowledgeSearchService } from './knowledge-search.service';
-import { KnowledgePatternsBodyDto, KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
+import { KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
 
 const PROJECT_ID = 'proj-1';
 const PROJECT: ProjectContext = { project: { id: PROJECT_ID, slug: 'koda' } };
@@ -55,7 +55,7 @@ interface Harness {
     getPatterns: ReturnType<typeof vi.fn>;
     savePatterns: ReturnType<typeof vi.fn>;
   };
-  queue: { enqueue: ReturnType<typeof vi.fn> };
+  gate: { run: ReturnType<typeof vi.fn> };
   config: { knowledgeIndexEnabled: boolean };
 }
 
@@ -85,17 +85,15 @@ function harness(overrides: {
       return patternsAnswer(stored);
     }),
   };
-  const queue = { enqueue: vi.fn() };
-  const audit = { record: vi.fn(async () => undefined), audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
+  const gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { queued: true } }) };
   const config = { knowledgeIndexEnabled: overrides.enabled ?? true };
   const controller = new ProjectKnowledgeController(
     search as unknown as KnowledgeSearchService,
     index as unknown as KnowledgeIndexService,
     config as unknown as ConfigType<typeof fleetConfig>,
-    queue as unknown as KnowledgeIndexQueue,
-    audit as unknown as AuditRecorder,
+    gate as unknown as ApprovalRouteGate,
   );
-  return { controller, search, index, queue, config, audit };
+  return { controller, search, index, gate, config };
 }
 
 /** The error a call throws, so a test can assert on the exception the route would map to a status. */
@@ -325,48 +323,24 @@ describe('ProjectKnowledgeController repos (US-005, 1c-c-D12)', () => {
 });
 
 describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
-  it('US-004 AC-13: records before enqueue and does not enqueue when audited rejects', async () => {
-    const { controller, queue, audit } = harness();
-    audit.audited.mockRejectedValue(new Error('audit failed'));
-
-    await expect(controller.reindex('repo-1', PROJECT)).rejects.toThrow('audit failed');
-
-    expect(audit.audited).toHaveBeenCalledTimes(1);
-    expect(queue.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('AC-11: queues an admin pass for one of the project repositories', async () => {
-    const { controller, queue, index } = harness();
-
-    const response = await controller.reindex('repo-1', PROJECT);
-
-    expect(index.resolveProjectRepo).toHaveBeenCalledWith(PROJECT_ID, { repoId: 'repo-1' });
-    expect(queue.enqueue).toHaveBeenCalledTimes(1);
-    expect(queue.enqueue).toHaveBeenCalledWith('repo-1', 'admin');
-    expect(response).toEqual({ ret: 0, data: { queued: true } });
-  });
-
-  it('AC-12: answers 404 for a repository the project does not own and queues nothing', async () => {
-    const { controller, queue } = harness({ repo: null });
-
-    const error = await rejectionOf(() => controller.reindex('foreign', PROJECT));
-
-    expect(error).toBeInstanceOf(NotFoundAppException);
-    expect((error as NotFoundAppException).getStatus()).toBe(404);
-    expect((error as NotFoundAppException).prefix).toBe('knowledge.repoNotFound');
-    expect(queue.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('AC-13: answers 409 while the kill switch is off and queues nothing', async () => {
-    const { controller, queue, index } = harness({ enabled: false });
-
-    const error = await rejectionOf(() => controller.reindex('repo-1', PROJECT));
-
-    expect(error).toBeInstanceOf(ConflictAppException);
-    expect((error as ConflictAppException).getStatus()).toBe(409);
-    expect((error as ConflictAppException).prefix).toBe('knowledge.disabled');
-    expect(queue.enqueue).not.toHaveBeenCalled();
+  it('gates the frozen repository and maps executed results', async () => {
+    const { controller, gate, index } = harness();
+    expect(await controller.reindex('repo-1', PROJECT)).toEqual({ ret: 0, data: { queued: true } });
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.knowledge.repo.reindex', variant: 'rest:project-knowledge.reindex', projectId: PROJECT_ID, input: { slug: 'koda', projectId: PROJECT_ID, repoId: 'repo-1' } });
     expect(index.resolveProjectRepo).not.toHaveBeenCalled();
+  });
+  it('refuses disabled indexing before calling the gate', async () => {
+    const { controller, gate } = harness({ enabled: false });
+    await expect(controller.reindex('repo-1', PROJECT)).rejects.toMatchObject({ prefix: 'knowledge.disabled' });
+    expect(gate.run).not.toHaveBeenCalled();
+  });
+  it.each(['patterns', 'reindex'] as const)('maps pending %s to ApprovalPending', async (method) => {
+    const { controller, gate } = harness();
+    const request = { id: 'ask-1' };
+    gate.run.mockResolvedValue({ status: 'pending', request });
+    const call = method === 'patterns' ? controller.patterns({ patterns: null }, PROJECT) : controller.reindex('repo-1', PROJECT);
+    await expect(call).rejects.toBeInstanceOf(ApprovalPending);
+    await expect(call).rejects.toMatchObject({ request });
   });
 
   it('US-007 AC-9/AC-10: reindex declares fleet.knowledge.repo.reindex behind the membership guard', () => {
@@ -391,73 +365,13 @@ describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
   });
 });
 
-describe('ProjectKnowledgeController patterns (US-002)', () => {
-  it('AC-12: saves the list, queues every project repository and answers the count', async () => {
-    const { controller, index, queue } = harness({ repos: [REPO, GITLAB_REPO] });
-
-    const response = await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
-
-    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
-    expect(queue.enqueue.mock.calls).toEqual([[REPO.id, 'admin'], [GITLAB_REPO.id, 'admin']]);
-    expect(response).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 2 } });
-  });
-
-  it('AC-13: a null body clears the project list and answers the default corpus', async () => {
-    const { controller, index } = harness({ stored: ['handbook/*.md'] });
-
-    const response = await controller.patterns({ patterns: null }, PROJECT);
-
-    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, null);
-    expect(response).toEqual({ ret: 0, data: { patterns: [...DEFAULT_KNOWLEDGE_PATTERNS], custom: false, queued: 0 } });
-  });
-
-  it('AC-14: rejects a list the parser refuses with 400 knowledge.input and the failing reason', async () => {
-    const { controller, index, queue } = harness({ repos: [REPO] });
-
-    const error = await rejectionOf(() => controller.patterns({ patterns: ['README.md', 'src/a.ts'] }, PROJECT));
-
-    expect(error).toBeInstanceOf(ValidationAppException);
-    expect((error as ValidationAppException).getStatus()).toBe(400);
-    expect((error as ValidationAppException).prefix).toBe('knowledge.input');
-    expect(JSON.stringify((error as ValidationAppException).args)).toContain('patterns[1]');
+describe('ProjectKnowledgeController patterns', () => {
+  it('passes the body to command parsing before a request opens', async () => {
+    const { controller, gate, index } = harness();
+    gate.run.mockResolvedValue({ status: 'executed', result: { patterns: ['docs/**/*.md'], custom: true, queued: 2 } });
+    expect(await controller.patterns({ patterns: ['docs/**/*.md'] }, PROJECT)).toEqual({ ret: 0, data: { patterns: ['docs/**/*.md'], custom: true, queued: 2 } });
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.knowledge.patterns.update', variant: 'rest:project-knowledge.patterns', projectId: PROJECT_ID, input: { slug: 'koda', projectId: PROJECT_ID, patterns: ['docs/**/*.md'] } });
     expect(index.savePatterns).not.toHaveBeenCalled();
-    expect(queue.enqueue).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['a missing patterns field', {}],
-    ['a string instead of a list', { patterns: 'docs/*.md' }],
-    ['an empty list', { patterns: [] }],
-    ['a non-Markdown entry', { patterns: ['docs/a.txt'] }],
-    ['too many patterns', { patterns: Array.from({ length: 51 }, (_, i) => `docs/f${i}.md`) }],
-  ])('AC-14: rejects %s with 400 and saves nothing', async (_label, body) => {
-    const { controller, index } = harness();
-
-    const error = await rejectionOf(() => controller.patterns(body as KnowledgePatternsBodyDto, PROJECT));
-
-    expect(error).toBeInstanceOf(ValidationAppException);
-    expect((error as ValidationAppException).getStatus()).toBe(400);
-    expect(index.savePatterns).not.toHaveBeenCalled();
-  });
-
-  it('AC-15: saves while indexing is disabled but queues nothing', async () => {
-    const { controller, index, queue } = harness({ enabled: false, repos: [REPO, GITLAB_REPO] });
-
-    const response = await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
-
-    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
-    expect(queue.enqueue).not.toHaveBeenCalled();
-    expect(response).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 0 } });
-  });
-
-  it('queues every repository, including ones that have never been indexed', async () => {
-    const { controller, queue } = harness({ repos: [REPO, GITLAB_REPO] });
-
-    await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
-
-    expect(queue.enqueue).toHaveBeenCalledTimes(2);
-    expect(queue.enqueue).toHaveBeenNthCalledWith(1, 'repo-1', 'admin');
-    expect(queue.enqueue).toHaveBeenNthCalledWith(2, 'repo-2', 'admin');
   });
 });
 
@@ -478,7 +392,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
     getPatterns: ReturnType<typeof vi.fn>;
     savePatterns: ReturnType<typeof vi.fn>;
   };
-  let queue: { enqueue: ReturnType<typeof vi.fn> };
+  let gate: { run: ReturnType<typeof vi.fn> };
   let permissions: { can: ReturnType<typeof vi.fn> };
   let stored: string[] | null = null;
   const config = { knowledgeIndexEnabled: true };
@@ -495,7 +409,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
         return patternsAnswer(stored);
       }),
     };
-    queue = { enqueue: vi.fn() };
+    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { queued: true } }) };
     permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) };
     const module = await Test.createTestingModule({
       controllers: [ProjectKnowledgeController],
@@ -503,8 +417,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
         { provide: KnowledgeSearchService, useValue: search },
         { provide: KnowledgeIndexService, useValue: index },
         { provide: FLEET_CFG, useValue: config },
-        { provide: KnowledgeIndexQueue, useValue: queue },
-        { provide: AuditRecorder, useValue: { record: vi.fn(), audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
+        { provide: ApprovalRouteGate, useValue: gate },
         // US-007: `RequiresGuard` resolves the global PermissionService when the route's guards are instantiated.
         { provide: PermissionService, useValue: permissions },
       ],
@@ -539,7 +452,8 @@ describe('POST /projects/:slug/knowledge/search', () => {
     index.savePatterns.mockClear();
     index.listProjectRepos.mockClear();
     stored = null;
-    queue.enqueue.mockClear();
+    gate.run.mockReset();
+    gate.run.mockResolvedValue({ status: 'executed', result: { queued: true } });
     permissions.can.mockReset();
     permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
     config.knowledgeIndexEnabled = true;
@@ -684,16 +598,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
 
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ ret: 0, data: { queued: true } });
-    expect(queue.enqueue).toHaveBeenCalledWith('repo-1', 'admin');
-  });
-
-  it('AC-12: POST reindex answers 404 for a repository outside the project', async () => {
-    index.resolveProjectRepo.mockResolvedValueOnce(null);
-
-    const res = await reindex('foreign');
-
-    expect(res.statusCode).toBe(404);
-    expect(queue.enqueue).not.toHaveBeenCalled();
+    expect(gate.run).toHaveBeenCalledWith(expect.objectContaining({ key: 'fleet.knowledge.repo.reindex', input: { slug: 'koda', projectId: PROJECT_ID, repoId: 'repo-1' } }));
   });
 
   it('AC-13: POST reindex answers 409 while the kill switch is off', async () => {
@@ -702,7 +607,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
     const res = await reindex('repo-1');
 
     expect(res.statusCode).toBe(409);
-    expect(queue.enqueue).not.toHaveBeenCalled();
+    expect(gate.run).not.toHaveBeenCalled();
   });
 
   // ── US-002: PUT patterns over the same app, with the real body pipe ───────────────────────────────────
@@ -713,68 +618,15 @@ describe('POST /projects/:slug/knowledge/search', () => {
     payload,
   });
 
-  it('AC-12: PUT patterns answers 200 with the saved list and queues one pass per repository', async () => {
-    const res = await putPatterns({ patterns: ['handbook/*.md'] });
-
+  it('PUT patterns keeps the body pipe and gates the write', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { patterns: ['handbook/*.md'], custom: true, queued: 2 } });
+    const res = await putPatterns({ patterns: ['handbook/*.md'], ignored: true });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 2 } });
-    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
-    expect(queue.enqueue.mock.calls).toEqual([['repo-1', 'admin'], ['repo-2', 'admin']]);
-  });
-
-  it('AC-13: PUT patterns with null answers the default corpus, and GET repos follows it', async () => {
-    const put = await putPatterns({ patterns: null });
-
-    expect(put.statusCode).toBe(200);
-    expect(put.json()).toEqual({ ret: 0, data: { patterns: [...DEFAULT_KNOWLEDGE_PATTERNS], custom: false, queued: 2 } });
-
-    const res = await get();
-
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({
-      data: { customPatterns: false, defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS], patterns: [...DEFAULT_KNOWLEDGE_PATTERNS] },
-    });
-  });
-
-  it('AC-13: GET repos reports a saved list as the custom one', async () => {
-    await putPatterns({ patterns: ['handbook/*.md'] });
-
-    const res = await get();
-
-    expect(res.json()).toMatchObject({
-      data: { patterns: ['handbook/*.md'], customPatterns: true, defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS] },
-    });
-  });
-
-  it('AC-14: PUT patterns answers 400 knowledge.input carrying the failing reason and saves nothing', async () => {
-    const res = await putPatterns({ patterns: ['README.md', 'src/a.ts'] });
-
-    expect(res.statusCode).toBe(400);
-    // This app has no global i18n filter, so the refusal body is the raw AppException payload; the rendered
-    // sentence is pinned by the endpoint e2e suite.
-    expect((res.json() as { args?: { reason?: string } }).args?.reason).toBe('patterns[1]');
-    expect(index.savePatterns).not.toHaveBeenCalled();
-    expect(queue.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('AC-14: PUT patterns answers 400 for any other body, including a missing patterns field', async () => {
-    for (const payload of [{}, { patterns: 'docs/*.md' }, { patterns: [] }, { pattern: ['docs/*.md'] }]) {
-      const res = await putPatterns(payload);
-      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
-    }
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.knowledge.patterns.update', variant: 'rest:project-knowledge.patterns', projectId: PROJECT_ID, input: { slug: 'koda', projectId: PROJECT_ID, patterns: ['handbook/*.md'] } });
     expect(index.savePatterns).not.toHaveBeenCalled();
   });
 
-  it('AC-15: PUT patterns saves while indexing is disabled but queues nothing', async () => {
-    config.knowledgeIndexEnabled = false;
-
-    const res = await putPatterns({ patterns: ['handbook/*.md'] });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 0 } });
-    expect(queue.enqueue).not.toHaveBeenCalled();
-    expect(index.listProjectRepos).not.toHaveBeenCalled();
-  });
 });
 
 /**
@@ -806,7 +658,7 @@ describe('POST /projects/:slug/knowledge/search without project membership', () 
         { provide: KnowledgeSearchService, useValue: search },
         { provide: KnowledgeIndexService, useValue: { resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })), listProjectStates: vi.fn(async () => []) } },
         { provide: FLEET_CFG, useValue: { knowledgeIndexEnabled: true } },
-        { provide: KnowledgeIndexQueue, useValue: { enqueue: vi.fn() } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
         // The API authenticates with CombinedAuthGuard before ProjectMembershipGuard; without a principal every
         // request is refused for the wrong reason (`!req.user`), so the member case would prove nothing.
         { provide: APP_GUARD, useValue: {

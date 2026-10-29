@@ -4,6 +4,7 @@ import { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { isAgentPrincipal, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ApprovalExecutionService } from '../../approvals/approval-execution.service';
 import { ApprovalDecisionService } from '../../approvals/approval-decision.service';
 import { decideEligibility } from '../../approvals/approval-eligibility';
 import { ApprovalRequestQueries } from '../../approvals/approval-request.queries';
@@ -25,6 +26,7 @@ import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 /** Which prefix a request came through (plan D230). Permissions P1 US-004: the project variant carries the project's id only. */
 export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string };
 export interface ApprovalCaller { id: string }
+export interface FleetDecideInput { requestId: string; decision: 'approve' | 'reject'; comment: string | null; params?: unknown }
 
 /** The principal deciding, as the engine names it. */
 type Decider = { type: 'USER' | 'AGENT'; id: string };
@@ -55,6 +57,7 @@ export class ApprovalsService {
     private readonly decisions: ApprovalDecisionService,
     private readonly budgets: BudgetsService,
     private readonly permissions: PermissionService,
+    private readonly execution: ApprovalExecutionService,
   ) {}
 
   async list(route: ApprovalRoute, q: { status?: ApprovalStatus; type?: ApprovalType; jobId?: string }, page: IPageOption): Promise<IPageResult<FleetApprovalDto>> {
@@ -99,6 +102,54 @@ export class ApprovalsService {
     // `FleetAskEventsSubscriber` from the durable `approval_request_changed` event the engine wrote in the deciding
     // transaction, once per engine status (permissions P3 US-009): a crash here loses nothing and a redelivery is a
     // no-op, which a write in this adapter could not promise.
+    return FleetApprovalDto.from(view);
+  }
+
+  /** Validate the fleet offer and eligibility before opening an outer approval request. */
+  async checkDecide(caller: ApprovalCaller & { principal: KodaPrincipal }, route: ApprovalRoute, id: string, dto: DecideApprovalDto, now = new Date()): Promise<{ key: string; input: FleetDecideInput }> {
+    const current = await this.findVisible(route, id);
+    if (current.status !== 'pending') throw new ConflictAppException({}, 'fleet.approvalNotPending');
+    const request = await this.queries.findById(id);
+    if (request === null) throw new NotFoundAppException({}, 'fleet.approvals');
+    const decider: Decider = { type: isAgentPrincipal(caller.principal) ? 'AGENT' : 'USER', id: caller.id };
+    const keys = await this.permissions.effectiveKeys(decider, request.projectId ? { projectId: request.projectId } : 'global');
+    const eligibility = decideEligibility(request, decider, keys);
+    if (eligibility.ok === false) throw refusalOf(eligibility.reason, request, decider);
+    const engine = await this.engineDecision(current, dto, now);
+    return {
+      key: request.permissionKey === 'fleet.job.shell.escalate' ? 'fleet.approval.decide.bash' : 'fleet.approval.decide.budget',
+      input: { requestId: id, decision: engine.decision, comment: dto.comment ?? null, ...(engine.params === undefined ? {} : { params: engine.params }) },
+    };
+  }
+
+  /** Joins the outer execution transaction; never executes the approved inner command here. */
+  async recordDecide(principal: KodaPrincipal, input: FleetDecideInput): Promise<ApprovalRequestRecord> {
+    const request = await this.queries.findById(input.requestId);
+    if (request === null) throw new NotFoundAppException({}, 'fleet.approvals');
+    const decider: Decider = { type: isAgentPrincipal(principal) ? 'AGENT' : 'USER', id: principal.id };
+    try {
+      return await this.decisions.recordDecision(input.requestId, input.decision, input.comment, new Date(), input.params);
+    } catch (error) {
+      throw decideFailure(error, request, decider);
+    }
+  }
+
+  /** Immediate route execution, after recording has committed, with the fleet error vocabulary. */
+  async executeDecided(principal: KodaPrincipal, requestId: string): Promise<ApprovalRequestRecord> {
+    const request = await this.queries.findById(requestId);
+    if (request === null) throw new NotFoundAppException({}, 'fleet.approvals');
+    const decider: Decider = { type: isAgentPrincipal(principal) ? 'AGENT' : 'USER', id: principal.id };
+    try {
+      return await this.execution.execute(requestId);
+    } catch (error) {
+      throw decideFailure(error, request, decider);
+    }
+  }
+
+  async view(id: string): Promise<FleetApprovalDto> {
+    const view = await this.store.findApproval(id);
+    if (view === null) throw new NotFoundAppException({}, 'fleet.approvals');
+    if (view.type === 'nax_bash_escalate' && view.resolvedBy === 'job_ended') throw new ConflictAppException({}, 'fleet.approvalNotPending');
     return FleetApprovalDto.from(view);
   }
 

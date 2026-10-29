@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { TicketFleetJobRouteCommands } from './ticket-fleet-job-route.commands';
 import { EventsModule } from '../../events/events.module';
 import { TicketsModule } from '../../tickets/tickets.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
@@ -18,9 +21,9 @@ import { TicketFleetJobsController } from './ticket-fleet-jobs.controller';
  * module never imports `KnowledgeModule`.
  */
 @Module({
-  imports: [PrismaModule, TicketsModule, EventsModule, ProjectAccessModule, VcsModule, GitBrokerModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, TicketsModule, EventsModule, ProjectAccessModule, VcsModule, GitBrokerModule],
   controllers: [TicketFleetJobsController],
-  providers: [PrismaFleetTicketsRepository, FleetTicketsService, FleetTicketEventRecorder, FleetJobTicketEffects, FleetPrStateRefresher],
+  providers: [TicketFleetJobRouteCommands, PrismaFleetTicketsRepository, FleetTicketsService, FleetTicketEventRecorder, FleetJobTicketEffects, FleetPrStateRefresher],
   exports: [PrismaFleetTicketsRepository, FleetTicketsService, FleetJobTicketEffects, FleetPrStateRefresher],
 })
 export class FleetTicketsModule {}

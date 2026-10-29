@@ -66,11 +66,19 @@ export class ConfigJobsService {
   }
 
   async submitRegenerate(actorId: string, projectId: string, repoId: string, body: RegenerateConfigDto): Promise<DispatchResultDto> {
+    return (await this.prepareRegenerate(actorId, projectId, repoId, body))();
+  }
+
+  async prepareRegenerate(actorId: string, projectId: string, repoId: string, body: RegenerateConfigDto): Promise<() => Promise<DispatchResultDto>> {
     const repo = await this.repoIn(projectId, repoId);
     const prTitle = validatePrTitle(body.prTitle);
     const prBody = validatePrBody(body.prBody);
     const { baseSha } = await this.reader.list(repo);
-    return this.create(actorId, repo, 'regenerate', [], prTitle, prBody, baseSha);
+    return async () => {
+      const current = await this.repoIn(projectId, repoId);
+      if (!isDeepStrictEqual(current, repo)) throw new ConflictAppException({}, 'fleet.repos');
+      return this.create(actorId, current, 'regenerate', [], prTitle, prBody, baseSha);
+    };
   }
 
   async submitDrift(actorId: string, projectId: string, repoId: string): Promise<DispatchResultDto> {

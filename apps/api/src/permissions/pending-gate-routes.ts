@@ -17,8 +17,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
-PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
 PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
@@ -27,22 +25,8 @@ POST /admin/users=gate-secret
 POST /agents=gate-secret
 POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
-POST /fleet/ingest/backfill=gate-fleet
-POST /fleet/ingest/jobs/:jobId/rerun=gate-fleet
-POST /fleet/ingest/rerun-outdated=gate-fleet
-POST /fleet/test-hooks/schedules/:id/fire=gate-fleet
-POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
-POST /projects/:slug/fleet/jobs=gate-fleet
-POST /projects/:slug/fleet/jobs/:id/cancel=gate-fleet
-POST /projects/:slug/fleet/jobs/:id/requeue=gate-fleet
-POST /projects/:slug/fleet/repos/:repoId/config-edits=gate-fleet
-POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate=gate-fleet
-POST /projects/:slug/fleet/schedules=gate-fleet
-POST /projects/:slug/fleet/schedules/:id/disable=gate-fleet
-POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet
 POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet
 POST /projects/:slug/threads/:id/archive=gate-fleet
@@ -62,8 +46,6 @@ POST /threads/:id/archive=gate-fleet
 POST /threads/:id/end-session=gate-fleet
 POST /threads/:id/messages=gate-fleet
 POST /threads/:id/stop=gate-fleet
-PUT /fleet/test-hooks/repos/:repoId/nax-files=gate-fleet
-PUT /projects/:slug/knowledge/patterns=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {

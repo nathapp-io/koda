@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus } from '../../common/enums';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { TicketTransitionsService } from '../../tickets/state-machine/ticket-transitions.service';
 import { prNumberFor } from '../sync/pr-attribution.service';
@@ -33,6 +34,7 @@ export class FleetJobTicketEffects {
     private readonly events: FleetTicketEventRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   /**
@@ -41,13 +43,17 @@ export class FleetJobTicketEffects {
    * authorized for `fleet.job.dispatch` and not for the ticket's edge key.
    */
   async onRunDispatched(actor: TicketActor, tickets: readonly DispatchTicket[]): Promise<void> {
-    for (const ticket of tickets.filter((t) => STARTABLE.has(t.status))) {
-      try {
-        await this.transitions.startForDispatch(actor.projectSlug, ticket.ref, actor.principal);
-      } catch (error) {
-        this.logger.warn(`Fleet ticket ${ticket.ref}: start failed: ${error instanceof Error ? error.message : String(error)}`);
+    const start = async () => {
+      for (const ticket of tickets.filter((t) => STARTABLE.has(t.status))) {
+        try {
+          await this.transitions.startForDispatch(actor.projectSlug, ticket.ref, actor.principal);
+        } catch (error) {
+          this.logger.warn(`Fleet ticket ${ticket.ref}: start failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-    }
+    };
+    // Approval execution owns the outer commit; a failed start must never poison its transaction.
+    if (!this.afterCommit.defer(start)) await start();
   }
 
   /** D453/D454/D455: after commit, from sync afterTerminal and the sweeper. Failure comment, then the PR link. */
