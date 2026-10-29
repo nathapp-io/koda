@@ -105,10 +105,15 @@ export class WorkspaceThreadsController {
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
   @ApiResponse({ status: 403, description: 'thread.workspace.message.send is missing, or thread.create is refused in the home project' })
+  @ApprovalGated()
   async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Principal() principal: UserPrincipal | AgentPrincipal, @Res({ passthrough: true }) response: { status: (code: number) => unknown }) {
-    const result = await this.threads.sendMessage(principal, id, dto);
-    if (result.deduplicated) response.status(200);
-    return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
+    const outcome = await this.routeGate.run<{ message: Awaited<ReturnType<WorkspaceThreadsService['sendMessage']>>['message']; jobId: string | null; deduplicated: boolean }>({
+      key: 'thread.workspace.message.send', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.message, projectId: null,
+      input: { id, message: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    if (outcome.result.deduplicated) response.status(200);
+    return JsonResponse.Ok({ message: outcome.result.message, jobId: outcome.result.jobId });
   }
 
   @Post(':id/archive')

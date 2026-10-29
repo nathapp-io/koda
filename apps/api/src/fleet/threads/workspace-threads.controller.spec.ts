@@ -24,6 +24,22 @@ describe('WorkspaceThreadsController gated stop', () => {
     expect(routeGate.run).toHaveBeenCalledWith({ key: 'thread.stop', variant: 'rest:workspace-threads.stop', projectId: 'p1', input: { id: 't1' } });
   });
 });
+describe('WorkspaceThreadsController gated message send', () => {
+  it('AC-6: preserves the 200 duplicate response and omits the deduplicated flag', async () => {
+    const message = { id: 'm1', content: 'hello' };
+    const response = { status: vi.fn() };
+    const routeGate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { message, jobId: null, deduplicated: true } }) };
+    const controller = new WorkspaceThreadsController({} as WorkspaceThreadsService, routeGate as unknown as ApprovalRouteGate);
+
+    const result = await controller.send('t1', { text: 'hello', clientMessageId: 'c1' }, { actorType: 'agent', id: 'a1' } as never, response);
+
+    expect(routeGate.run).toHaveBeenCalledWith({ key: 'thread.workspace.message.send', variant: 'rest:workspace-threads.message', projectId: null, input: { id: 't1', message: { text: 'hello', clientMessageId: 'c1' } } });
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(result).toEqual(expect.objectContaining({ data: { message, jobId: null } }));
+    expect(result).not.toEqual(expect.objectContaining({ data: expect.objectContaining({ deduplicated: true }) }));
+  });
+});
+
 describe('workspace POST body whitelist', () => {
   let app: NestFastifyApplication;
   let module: TestingModule;

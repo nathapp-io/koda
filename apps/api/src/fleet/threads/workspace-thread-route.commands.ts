@@ -6,7 +6,7 @@ import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { CreateWorkspaceThreadDto } from './dto/workspace-thread.dto';
-import { AnswerQuestionDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
 
 export const WORKSPACE_THREAD_ROUTE_VARIANTS = {
   create: 'rest:workspace-threads.create',
@@ -15,6 +15,7 @@ export const WORKSPACE_THREAD_ROUTE_VARIANTS = {
   stop: 'rest:workspace-threads.stop',
   endSession: 'rest:workspace-threads.end-session',
   answer: 'rest:workspace-threads.answer',
+  message: 'rest:workspace-threads.message',
 } as const;
 
 @Injectable()
@@ -72,6 +73,16 @@ export class WorkspaceThreadRouteCommands implements OnModuleInit {
       run: async (principal, input) => { await this.workspace.answer(principal, input.id, input.answer); return {}; },
       toResult: (result) => result,
       skipKeyRecheck: true,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ id: string; message: SendMessageDto }, Awaited<ReturnType<WorkspaceThreadsService['sendMessage']>>>({
+      key: 'thread.workspace.message.send', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.message,
+      parse: (input) => {
+        const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        return { id: parseRouteInput(value, ['id']).id, message: parseBody(SendMessageDto, value.message ?? {}) };
+      },
+      run: (principal, input) => this.workspace.sendMessage(principal, input.id, input.message),
+      toResult: ({ message, jobId }) => ({ message, jobId }),
     }, this.loader));
 
     this.commands.register(routeCommand<{ id: string }, Awaited<ReturnType<WorkspaceThreadsService['get']>>>({

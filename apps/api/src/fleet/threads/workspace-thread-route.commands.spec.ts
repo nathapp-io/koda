@@ -20,6 +20,17 @@ describe('WorkspaceThreadRouteCommands', () => {
     }
   });
 
+  it('AC-5: registers the global workspace message command without prepare', () => {
+    const registry = new ApprovalCommandRegistry();
+    const service = { sendMessage: vi.fn() } as unknown as WorkspaceThreadsService;
+    const commands = new WorkspaceThreadRouteCommands(registry, service, {} as ActorPrincipalLoader);
+    commands.onModuleInit();
+
+    const command = registry.get('thread.workspace.message.send', WORKSPACE_THREAD_ROUTE_VARIANTS.message);
+    expect(command).toMatchObject({ key: 'thread.workspace.message.send', variant: 'rest:workspace-threads.message' });
+    expect(command?.prepare).toBeUndefined();
+  });
+
   it('AC-7: registers the global workspace create and archive route variants', () => {
     const registry = new ApprovalCommandRegistry();
     const service = { create: vi.fn(), archive: vi.fn(), get: vi.fn() } as unknown as WorkspaceThreadsService;

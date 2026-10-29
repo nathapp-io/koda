@@ -28,7 +28,6 @@ POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/vcs=gate-secret
 POST /projects/:slug/vcs/webhook-secret/rotate=gate-secret
 POST /projects/:slug/webhooks=gate-secret
-POST /threads/:id/messages=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {
