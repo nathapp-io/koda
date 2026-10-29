@@ -108,13 +108,21 @@ describeIntegration('gated project-agent updates', () => {
     let updateSettled = false;
     const update = service.updateRosteredAgent('web', targetAgent.slug, { status: 'PAUSED' }, world.projectId, targetAgent.id)
       .finally(() => { updateSettled = true; });
-    let waiting = false;
-    for (let attempt = 0; attempt < 50 && !waiting; attempt += 1) {
-      const rows = await db.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM pg_stat_activity WHERE wait_event_type = 'Lock'`;
-      waiting = Number(rows[0]?.count ?? 0) > 0;
-      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+    let waiterPid: number | undefined;
+    for (let attempt = 0; attempt < 50 && waiterPid === undefined; attempt += 1) {
+      const waiters = await db.$queryRaw<Array<{ pid: number }>>`SELECT activity.pid
+        FROM pg_locks AS lock
+        JOIN pg_stat_activity AS activity USING (pid)
+        WHERE lock.locktype = 'advisory'
+          AND lock.classid = 72402::oid
+          AND lock.objid = hashtext(${world.projectId})::oid
+          AND lock.granted = false
+          AND activity.wait_event_type = 'Lock'
+          AND activity.query LIKE '%pg_advisory_xact_lock%'`;
+      waiterPid = waiters[0]?.pid;
+      if (waiterPid === undefined) await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(waiting).toBe(true);
+    expect(waiterPid).toEqual(expect.any(Number));
     expect(updateSettled).toBe(false);
     release();
     await removal;
