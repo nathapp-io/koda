@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T05:40:45.850Z",
+  "updatedAt": "2026-10-29T05:50:39.043Z",
   "userStories": [
     {
       "id": "US-001",
@@ -851,14 +851,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Splits external resolution from writes with source/name ownership races and approval authorization; security override applies."
+        "reasoning": "Splits external resolution from writes with source/name ownership races and approval authorization; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/skills/skills.service.ts",
@@ -904,7 +907,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "756ca5b1bdbf18e01d1b1702bc92c594c8ef36ab"
     },
     {
       "id": "US-011",
