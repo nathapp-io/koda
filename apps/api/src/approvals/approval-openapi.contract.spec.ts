@@ -45,6 +45,7 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/fleet/repos/{repoId}/drift-checks'],
   ['delete', '/api/projects/{slug}'],
   ['delete', '/api/projects/{slug}/kb/documents/{sourceId}'],
+  ['post', '/api/projects/{slug}/kb/documents'],
   ['delete', '/api/agents/{slug}'],
   ['delete', '/api/admin/skills/sources/{id}'],
   ['post', '/api/admin/skills/sources'],
