@@ -31,7 +31,23 @@ describe('PrismaVcsRepository', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTxManager.isInTransaction.mockReturnValue(false);
     repo = new PrismaVcsRepository(mockTxManager as never, mockPrisma as never);
+  });
+
+  it('refuses a connection lock outside a transaction', async () => {
+    await expect(repo.findVcsConnectionByProjectId('p1', { lock: true })).rejects.toThrow('Connection locking requires an active transaction');
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+  });
+
+  it('reads a missing connection under FOR UPDATE in the caller transaction', async () => {
+    mockTxManager.isInTransaction.mockReturnValue(true);
+    mockQueryRaw.mockResolvedValue([]);
+    expect(await repo.findVcsConnectionByProjectId('p1', { lock: true })).toBeNull();
+    const [sql, projectId] = mockQueryRaw.mock.calls[0];
+    expect(sql.join('?')).toContain('SELECT * FROM "VcsConnection" WHERE "projectId" = ? FOR UPDATE');
+    expect(projectId).toBe('p1');
+    expect(mockRun).not.toHaveBeenCalled();
   });
 
   it('createTicketFromIssue allocates next number in txManager.run', async () => {

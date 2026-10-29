@@ -1,3 +1,4 @@
+import { createTestPrismaClient, testDatabaseUrl } from '../../helpers/test-prisma';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
@@ -128,6 +129,44 @@ describeIntegration('gated manual VCS sync', () => {
     const req = pending(await post());
     expect((await approve(req.id)).status).toBe('failed');
     expect(await tickets()).toEqual([]);
+  });
+  it.each([
+    ['/7', 'update'], ['/7', 'delete'], ['', 'update'], ['', 'delete'],
+  ] as const)('F2: deferred sync%s holds the connection lock against concurrent %s through writes', async (suffix, mutation) => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssue').mockResolvedValue(issue(7));
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(7)], cursor: null, capped: false });
+    const req = pending(await post(suffix));
+    // A separate session must not inherit the approval transaction's Prisma proxy.
+    const url = new URL(testDatabaseUrl());
+    url.searchParams.set('options', '-c lock_timeout=200ms');
+    const concurrent = createTestPrismaClient(url.toString());
+    const sql = mutation === 'update'
+      ? `UPDATE "VcsConnection" SET "repoName" = 'changed', "allowedAuthors" = '["bob"]' WHERE "projectId" = $1`
+      : 'DELETE FROM "VcsConnection" WHERE "projectId" = $1';
+    let concurrentError: unknown;
+    const original = PrismaVcsRepository.prototype.createTicketFromIssue;
+    const write = vi.spyOn(PrismaVcsRepository.prototype, 'createTicketFromIssue').mockImplementation(async function (...args) {
+      // The drift comparison has completed but the ticket write has not started yet.
+      try {
+        await concurrent.$executeRawUnsafe(sql, p.id);
+      } catch (error) {
+        concurrentError = error;
+      }
+      return original.apply(this, args);
+    });
+    await concurrent.$connect();
+    try {
+      expect((await approve(req.id)).status).toBe('executed');
+      expect(write).toHaveBeenCalledOnce();
+      expect(concurrentError).toBeInstanceOf(Error);
+      expect(String(concurrentError)).toContain('lock timeout');
+      expect(await tickets()).toMatchObject([{ externalVcsId: `acme/${p.slug}#7` }]);
+      expect(await db.vcsConnection.findUniqueOrThrow({ where: { projectId: p.id } })).toMatchObject({ repoName: p.slug, allowedAuthors: '[]' });
+      // Commit releases the lock: the same mutation can now finish normally.
+      expect(await concurrent.$executeRawUnsafe(sql, p.id)).toBe(1);
+    } finally {
+      await concurrent.$disconnect();
+    }
   });
   it('AC-14: provider fetch failure settles failed with execution-failed', async () => {
     vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockRejectedValue(new Error('fetch failed'));

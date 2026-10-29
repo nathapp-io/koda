@@ -34,7 +34,7 @@ export class VcsManualSync {
   }
 
   private async assertTarget(projectId: string, connection: VcsConnectionDomain, authors: boolean) {
-    const current = await this.connections.getFullByProject(projectId).catch((error: unknown) => {
+    const current = await this.connections.getFullByProject(projectId, { lock: true }).catch((error: unknown) => {
       if (error instanceof NotFoundAppException) throw new ValidationAppException({}, 'vcs');
       throw error;
     });

@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
-import type { Ticket, VcsSyncLog } from '../generated/prisma/client';
+import type { Ticket, VcsSyncLog, VcsConnection } from '../generated/prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { ConnectionRepo, linkMatchesConnection } from './connection-pr-match';
@@ -91,7 +91,15 @@ export class PrismaVcsRepository implements IVcsRepository {
   // VcsConnection
   // ---------------------------------------------------------------------------
 
-  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionDomain | null> {
+  async findVcsConnectionByProjectId(projectId: string, options?: { lock: boolean }): Promise<VcsConnectionDomain | null> {
+    if (options?.lock) {
+      // The caller owns the transaction, keeping this lock through drift validation and all writes.
+      if (!this.txManager.isInTransaction()) throw new Error('Connection locking requires an active transaction');
+      const rows = await this.db.$queryRaw<VcsConnection[]>`
+        SELECT * FROM "VcsConnection" WHERE "projectId" = ${projectId} FOR UPDATE
+      `;
+      return rows[0] ? this.toConnectionDomain(rows[0]) : null;
+    }
     const m = await this.db.vcsConnection.findUnique({ where: { projectId } });
     return m ? this.toConnectionDomain(m) : null;
   }

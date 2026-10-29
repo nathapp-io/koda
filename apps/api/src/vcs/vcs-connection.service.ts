@@ -324,10 +324,13 @@ export class VcsConnectionService {
   }
 
   /**
-   * Get full connection for internal use (includes encryptedToken)
+   * Get full connection for internal use (includes encryptedToken).
+   * Deferred apply uses lock to keep target validation and writes in the same caller transaction.
    */
-  async getFullByProject(projectId: string): Promise<VcsConnectionDomain> {
-    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
+  async getFullByProject(projectId: string, options?: { lock: boolean }): Promise<VcsConnectionDomain> {
+    const connection = options?.lock
+      ? await this.vcsRepo.findVcsConnectionByProjectId(projectId, options)
+      : await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');

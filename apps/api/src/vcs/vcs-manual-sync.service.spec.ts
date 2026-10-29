@@ -45,9 +45,11 @@ describe('VcsManualSync', () => {
   });
   it('AC-11: fetches once before the callback and never in apply', async () => {
     const apply = await service.prepareSyncAll('alpha');
+    expect(connections.getFullByProject).toHaveBeenLastCalledWith('p');
     expect(provider.fetchIssues).toHaveBeenCalledOnce();
     expect(sync.syncIssues).not.toHaveBeenCalled();
     expect(await apply()).toEqual({ syncType: 'manual', issuesSynced: 1, issuesSkipped: 0, tickets: [{ ref: 'ALPHA-3', title: issue.title }] });
+    expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
     expect(provider.fetchIssues).toHaveBeenCalledOnce();
     expect(provider.fetchIssue).not.toHaveBeenCalled();
     expect(sync.syncIssues).toHaveBeenCalledWith({ id: 'p', key: 'ALPHA' }, [issue], expect.objectContaining({ id: 'c' }), 'vcs.sync.all', { isolate: false });
@@ -74,6 +76,7 @@ describe('VcsManualSync', () => {
     const apply = await service.prepareSyncIssue('alpha', '7');
     connection.allowedAuthors = '["bob"]';
     expect(await apply()).toMatchObject({ issuesSynced: 1 });
+    expect(connections.getFullByProject).toHaveBeenLastCalledWith('p', { lock: true });
     expect(provider.fetchIssue).toHaveBeenCalledOnce();
     expect(sync.filterByAllowedAuthors).not.toHaveBeenCalled();
   });
