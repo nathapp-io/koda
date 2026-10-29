@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T04:38:01.812Z",
+  "updatedAt": "2026-10-29T04:54:33.701Z",
   "userStories": [
     {
       "id": "US-001",
@@ -571,14 +571,17 @@
         "US-001",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Registers three standard route commands over the already-extracted MemoryWriteService and existing engine; project authorization and deferred replacement checks mandate security-isolated TDD."
+        "reasoning": "Registers three standard route commands over the already-extracted MemoryWriteService and existing engine; project authorization and deferred replacement checks mandate security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/memory-write.service.ts",
@@ -618,7 +621,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "007e481a2a5c9459b6936285274f34e4d133f788"
     },
     {
       "id": "US-008",
