@@ -125,6 +125,8 @@ describe('permission contract checker', () => {
       'POST /projects/:slug/vcs/webhook-secret/rotate',
       'POST /projects/:slug/webhooks',
       'PATCH /projects/:slug/webhooks/:id',
+      'POST /projects/:slug/invites',
+      'POST /projects/:slug/invites/:id/resend',
     ]));
   });
 
@@ -132,16 +134,40 @@ describe('permission contract checker', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
   });
 
+  it('US-011 AC-3: holds exactly 25 core, 36 fleet and 8 secret rollout routes', () => {
+    const counts = [...PENDING_GATE_ROUTES.values()].reduce<Record<string, number>>((result, feature) => {
+      result[feature] = (result[feature] ?? 0) + 1;
+      return result;
+    }, {});
+    expect(counts).toEqual({ 'gate-core-domains': 25, 'gate-fleet': 36, 'gate-secret': 8 });
+  });
+
   it('AC-1 (US-010): has no gate-high pending assignments', () => {
     expect([...PENDING_GATE_ROUTES.values()]).not.toContain('gate-high');
+  });
+
+  it('US-008 AC-8: gated project create and update are not pending rollout routes', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('PATCH /projects/:slug')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets/:ref/verify')).toBeUndefined();
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets/:ref/verify-fix')).toBeUndefined();
   });
 
   it('AC-10: has no pending entry for gated project deletion', () => {
     expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
-  it('AC-11: assigns project ticket creation to gate-core-domains', () => {
-    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/tickets')).toBe('gate-core-domains');
+  it('AC-11: assigns memory creation to gate-core-domains', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /memory')).toBe('gate-core-domains');
+  });
+
+  it('US-001 AC-2: assigns invite resend to gate-secret', () => {
+    expect(PENDING_GATE_ROUTES.get('POST /projects/:slug/invites/:id/resend')).toBe('gate-secret');
+  });
+
+  it('US-009: member addition and invite cancellation are no longer pending', () => {
+    expect(PENDING_GATE_ROUTES.has('POST /projects/:slug/members')).toBe(false);
+    expect(PENDING_GATE_ROUTES.has('DELETE /projects/:slug/invites/:id')).toBe(false);
   });
 
   it('AC-12: assigns project thread creation to gate-fleet', () => {

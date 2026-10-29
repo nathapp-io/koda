@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
-import type { IPageOption } from '@nathapp/nestjs-common';
+import { ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import type { DecidePatterns, DecideScopes } from '../permissions/permission.service';
 import type { PrincipalRef } from '../permissions/permissions.types';
 import type { ApprovalRequestFilter } from './approval-request.queries';
@@ -51,6 +51,16 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
       ...(input !== undefined ? { input: input === null ? Prisma.JsonNull : input as Prisma.InputJsonValue } : {}),
       ...(result !== undefined ? { result: result === null ? Prisma.DbNull : result as Prisma.InputJsonValue } : {}),
     };
+  }
+
+  /** Called only inside the execution transaction. A rename/reuse fails closed. */
+  async lockProjectSlug(projectId: string, slug: string): Promise<void> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ slug: string }>>`
+      SELECT "slug" FROM "Project" WHERE "id" = ${projectId} AND "deletedAt" IS NULL FOR UPDATE
+    `;
+    if (rows.length !== 1 || rows[0].slug !== slug) {
+      throw new ValidationAppException({}, 'approvals.invalidInput');
+    }
   }
 
   async findVisiblePage(

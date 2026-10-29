@@ -200,6 +200,12 @@ export class ApprovalExecutionService {
             if (!revoked) throw new ApprovalRequestNotPendingError(locked.status);
             return revoked;
           }
+          // The request's immutable project scope is the authority. Hold that project row
+          // until commit so a slug lookup cannot drift to a different project during execution.
+          if (locked.variant?.startsWith('rest:') && locked.projectId !== null &&
+              typeof parsed === 'object' && parsed !== null && 'slug' in parsed && typeof parsed.slug === 'string') {
+            await this.requests.lockProjectSlug(locked.projectId, parsed.slug);
+          }
           const result = await (prepared ? prepared() : command.execute(parsed, decision));
           raw = { result };
           const settled = await bookkeeping('approval.request-settle', async () => {

@@ -28,6 +28,8 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { Requires } from '../permissions/requires.decorator';
+import { CurrentProject } from '../projects/current-project.decorator';
+import type { ProjectContext } from '../projects/project-context';
 
 @ApiTags('comments')
 @ApiBearerAuth()
@@ -73,6 +75,7 @@ export class CommentsController {
   // HTTP route handlers
   @Post('projects/:slug/tickets/:ref/comments')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @ApprovalGated()
   @Requires('comment.create')
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a comment on a ticket' })
@@ -85,9 +88,14 @@ export class CommentsController {
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.create(slug, ref, createCommentDto, principal);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run({
+      key: 'comment.create', variant: COMMENT_ROUTE_VARIANTS.create, projectId: project.project.id,
+      input: { slug, ref, comment: createCommentDto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
@@ -108,6 +116,7 @@ export class CommentsController {
   }
 
   @Patch('comments/:id')
+  @ApprovalGated()
   // US-005: slug-less mutation — the project and the comment's author are only
   // known after the row lookup, so `CommentsService.update` makes the check.
   @Requires('comment.update', { enforcedBy: 'service' })
@@ -120,8 +129,13 @@ export class CommentsController {
     @Body() updateCommentDto: UpdateCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.update(id, updateCommentDto, principal);
-    return JsonResponse.Ok(data);
+    const projectId = await this.commentsService.resolveCommentProject(id, principal);
+    const outcome = await this.routeGate.run({
+      key: 'comment.update', variant: COMMENT_ROUTE_VARIANTS.update, projectId,
+      input: { id, patch: updateCommentDto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete('comments/:id')

@@ -99,6 +99,26 @@ describeIntegration('gated webhook and VCS routes', () => {
     expect(settled).toMatchObject({ status: 'executed', result: { ok, latencyMs: expect.any(Number), ...(!ok && { error: 'Invalid token' }) } });
     expect(test).toHaveBeenCalledOnce();
   });
+  it('AC-8: approved VCS test settles when provider polling updates connection timestamps', async () => {
+    await createConnection();
+    const test = vi.spyOn(GitHubProvider.prototype, 'testConnection').mockImplementation(async () => {
+      await db.vcsConnection.update({
+        where: { projectId: p.id },
+        data: { lastSyncedAt: new Date('2026-01-02T03:04:05Z') },
+      });
+      return { ok: true };
+    });
+
+    const summary = pending(await request(server()).post(`/api/projects/${p.slug}/vcs/test`).set(auth()));
+    const settled = await approve(summary.id);
+
+    expect(settled).toMatchObject({ status: 'executed', result: { ok: true, latencyMs: expect.any(Number) } });
+    expect(test).toHaveBeenCalledOnce();
+    expect(await db.vcsConnection.findUniqueOrThrow({ where: { projectId: p.id } })).toMatchObject({
+      lastSyncedAt: new Date('2026-01-02T03:04:05Z'),
+    });
+  });
+
   it('AC-7: immediate root VCS test retains default POST 201 and opens no request', async () => {
     await createConnection();
     const test = vi.spyOn(GitHubProvider.prototype, 'testConnection').mockResolvedValue({ ok: true });

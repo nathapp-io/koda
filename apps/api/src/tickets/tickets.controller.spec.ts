@@ -101,6 +101,8 @@ describe('TicketsController', () => {
     authorities: ['WORKER'],
   };
 
+  const mockRouteGate = { run: vi.fn() };
+
   const mockTicketsService = {
     create: vi.fn(),
     findAll: vi.fn(),
@@ -129,10 +131,11 @@ describe('TicketsController', () => {
   let module: TestingModule;
   beforeEach(async () => {
     mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
+    mockRouteGate.run.mockReset().mockResolvedValue({ status: 'executed', result: mockTicket });
     module = await Test.createTestingModule({
       controllers: [TicketsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
+        { provide: ApprovalRouteGate, useValue: mockRouteGate },
         { provide: TicketsService, useValue: mockTicketsService },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: ProjectsService, useValue: mockProjectsService },
@@ -517,26 +520,20 @@ describe('TicketsController', () => {
       ).rejects.toThrow();
     });
 
-    // US-001 AC9: the membership gate for this route lives in ProjectMembershipGuard
-    // (applied to TicketsController). The handler performs no project lookup and no
-    // membership check of its own — it hands the request straight to the service.
-    it('AC9: assign called directly performs no project lookup and hands the call to the service', async () => {
+    // Membership remains enforced by ProjectMembershipGuard; this handler uses the resolved project scope.
+    it('AC9: assign handler performs no project lookup and gates the call', async () => {
       mockTicketsService.assign.mockResolvedValue(mockTicket);
 
       await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
       expect(mockProjectsService.findProjectIdBySlug).not.toHaveBeenCalled();
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.assign', variant: 'rest:tickets.assign', projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1', assignee: {} } });
     });
 
-    it('AC-6 (US-004): assign hands the received principal object itself to the service', async () => {
-      mockTicketsService.assign.mockResolvedValue(mockTicket);
-
+    it('AC-6 (US-004): assign gates the frozen input in project scope', async () => {
       await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
-      // Identity, not shape: the very object the handler received, never a spread copy.
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
-      expect(vi.mocked(service.assign).mock.calls[0]?.[3]).toBe(mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.assign', variant: 'rest:tickets.assign', projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1', assignee: {} } });
     });
 
     it('AC9 boundary: assign called directly does not resolve the project by slug either', async () => {
@@ -545,6 +542,8 @@ describe('TicketsController', () => {
       await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
       expect(mockProjectsService.findProjectIdBySlug).not.toHaveBeenCalled();
+      expect(mockRouteGate.run).toHaveBeenCalledOnce();
+      expect(service.assign).not.toHaveBeenCalled();
     });
   });
 
@@ -600,8 +599,11 @@ describe('TicketsController', () => {
 
       await controller.start('koda', 'KODA-1', mockMemberUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockMemberUser);
-      expect(vi.mocked(mockTransitionsService.start).mock.calls[0]?.[2]).toBe(mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.start', variant: 'rest:tickets.start',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1' },
+      });
+      expect(mockTransitionsService.start).not.toHaveBeenCalled();
     });
   });
 
@@ -645,12 +647,11 @@ describe('TicketsController', () => {
 
       await controller.verify('koda', 'KODA-1', { body: 'Verified against staging' }, mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.verify).toHaveBeenCalledWith(
-        'koda',
-        'KODA-1',
-        'Verified against staging',
-        mockAdminUser,
-      );
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify', variant: 'rest:tickets.verify',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1', body: 'Verified against staging' },
+      });
+      expect(mockTransitionsService.verify).not.toHaveBeenCalled();
     });
 
     it('M1: start route has no required comment and still works without a body', async () => {
@@ -658,7 +659,26 @@ describe('TicketsController', () => {
 
       await controller.start('koda', 'KODA-1', mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.start', variant: 'rest:tickets.start',
+        projectId: 'proj-1', input: { slug: 'koda', ref: 'KODA-1' },
+      });
+      expect(mockTransitionsService.start).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('US-005 verify-fix approval route gate', () => {
+    it.each([
+      ['true', 'ticket.transition.verify-fix.approve'],
+      [true, 'ticket.transition.verify-fix.approve'],
+      ['false', 'ticket.transition.verify-fix.return'],
+      [undefined, 'ticket.transition.verify-fix.return'],
+    ] as const)('gates approve=%s with the matching key and frozen input', async (approve, key) => {
+      await controller.verifyFix('alpha', 'AL-1', { body: 'good' }, approve, mockAgent, adminProject);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key, variant: 'rest:tickets.verify-fix', projectId: 'proj-1',
+        input: { slug: 'alpha', ref: 'AL-1', body: 'good' },
+      });
     });
   });
 
@@ -672,7 +692,8 @@ describe('TicketsController', () => {
 
       await controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockMemberUser);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'why' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
     it('lets an agent through to the service (the guard, not the principal type, decides)', async () => {
@@ -680,7 +701,8 @@ describe('TicketsController', () => {
 
       await controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockAgent);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'why' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
     it.each([undefined, '', '   '])('400 for a blank reason %j, without reaching the service', async (body) => {
@@ -701,9 +723,51 @@ describe('TicketsController', () => {
     it('closes with a reason, passing the principal itself', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
       const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project);
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', mockMemberUser);
-      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
+      expect(mockRouteGate.run).toHaveBeenCalledWith({ key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', body: 'dup' } });
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+      expect(res).toEqual(expect.objectContaining({ data: mockTicket }));
     });
+  });
+});
+
+describe('ticket write HTTP approval wrappers (US-003)', () => {
+  function build() {
+    const run = vi.fn();
+    const gate = { run } as unknown as ApprovalRouteGate;
+    const controller = new TicketsController({} as TicketsService, {} as TicketTransitionsService, gate);
+    const project = { project: { id: 'project-1', slug: 'alpha' } };
+    return { run, controller, project };
+  }
+
+  it('update gates the DTO under ticket.update in CurrentProject scope', async () => {
+    const { run, controller, project } = build();
+    const patch = { title: 'renamed' } as UpdateTicketDto;
+    run.mockResolvedValue({ status: 'executed', result: { id: 'ticket-1' } });
+
+    const principal = { actorType: 'agent' } as unknown as KodaPrincipal;
+    await controller.update('alpha', 'AL-1', patch, principal, project);
+
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'ticket.update', variant: 'rest:tickets.update', projectId: 'project-1',
+      input: { slug: 'alpha', ref: 'AL-1', patch },
+    });
+  });
+
+  it('AC-10: create gates the DTO in CurrentProject scope and returns the executed result', async () => {
+    const { run, controller, project } = build();
+    const dto = { type: 'BUG', title: 'New', priority: 'HIGH' } as CreateTicketDto;
+    const result = { id: 'ticket-1' };
+    run.mockResolvedValue({ status: 'executed', result });
+
+    const principal = { actorType: 'agent' } as unknown as KodaPrincipal;
+    const response = await controller.create('alpha', dto, principal, project);
+
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'ticket.create', variant: 'rest:tickets.create', projectId: 'project-1',
+      input: { slug: 'alpha', ticket: dto },
+    });
+    expect(response).toMatchObject({ data: result });
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.create)).toBe(true);
   });
 });
 

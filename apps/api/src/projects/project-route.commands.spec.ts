@@ -8,13 +8,28 @@ describe('ProjectRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { slug: 'alpha' };
-    const service = { softDeleteById: vi.fn().mockResolvedValue(result) };
+    const service = {
+      create: vi.fn().mockResolvedValue(result),
+      update: vi.fn().mockResolvedValue(result),
+      softDeleteById: vi.fn().mockResolvedValue(result),
+    };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new ProjectRouteCommands(registry, service as unknown as ProjectsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
   }
-  it('AC-9: registers the exact deletion variant', () => {
+  it('refuses secret-bearing input before it can be frozen or serialized', () => {
     const { registry } = build();
+    const command = registry.get('project.update', PROJECT_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing command');
+    for (const ciWebhookToken of ['s'.repeat(32), '', null]) {
+      expect(() => command.parse({ slug: 'alpha', patch: { ciWebhookToken } })).toThrow(ValidationAppException);
+    }
+    expect(command.parse({ slug: 'alpha', patch: { name: 'Safe' } })).toEqual({ slug: 'alpha', patch: { name: 'Safe' } });
+  });
+  it('AC-8: registers create, update and delete variants', () => {
+    const { registry } = build();
+    expect(registry.get('project.create', PROJECT_ROUTE_VARIANTS.create)).toMatchObject({ key: 'project.create', variant: 'rest:projects.create' });
+    expect(registry.get('project.update', PROJECT_ROUTE_VARIANTS.update)).toMatchObject({ key: 'project.update', variant: 'rest:projects.update' });
     expect(registry.get('project.delete', PROJECT_ROUTE_VARIANTS.delete)).toMatchObject({ key: 'project.delete', variant: 'rest:projects.delete' });
   });
   it('AC-10: parses frozen identifiers, reloads the actor and calls the deletion service', async () => {
@@ -22,12 +37,12 @@ describe('ProjectRouteCommands', () => {
     const command = registry.get('project.delete', PROJECT_ROUTE_VARIANTS.delete);
     if (!command) throw new Error('Missing command');
     const input = command.parse({ slug: 'alpha', projectId: 'target-1', extra: 1 });
-    expect(input).toEqual({ slug: 'alpha', projectId: 'target-1' });
+    expect(input).toEqual({ projectId: 'target-1' });
     expect(command.parse(input)).toEqual(input);
     const output = await command.execute(input);
     expect(loader.forContext).toHaveBeenCalledOnce();
     expect(service.softDeleteById).toHaveBeenCalledExactlyOnceWith('target-1');
     expect(output).toBeNull(); expect(command.toResult).toBeUndefined();
-    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }, { slug: 'alpha' }, { slug: 'alpha', projectId: '' }, { slug: 'alpha', projectId: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
+    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }, { slug: 'alpha' }, { projectId: '' }, { projectId: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
   });
 });

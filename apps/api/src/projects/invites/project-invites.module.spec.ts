@@ -1,3 +1,5 @@
+import { InviteRouteCommands } from './invite-route.commands';
+import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { InviteMailer } from './invite-mailer';
@@ -19,6 +21,12 @@ describe('ProjectInvitesModule (DI wiring, no database)', () => {
 
   afterEach(async () => {
     await moduleRef?.close();
+  });
+
+  it('AC-11: registers the route command after init', async () => {
+    await moduleRef.init();
+    expect(moduleRef.get(InviteRouteCommands)).toBeInstanceOf(InviteRouteCommands);
+    expect(moduleRef.get(ApprovalCommandRegistry).get('invite.cancel', 'rest:project-invites.cancel')).toBeDefined();
   });
 
   it('exposes the controller behind the service', () => {

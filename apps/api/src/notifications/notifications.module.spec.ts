@@ -4,6 +4,7 @@ import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { NotificationWriter } from './notification-writer';
 import { NotificationsModule } from './notifications.module';
 import { TicketNotificationSubscriber } from './ticket-notification.subscriber';
+import { TicketWatchRouteCommands } from './ticket-watch-route.commands';
 
 describe('NotificationsModule (DI wiring, no database)', () => {
   let moduleRef: TestingModule;
@@ -16,9 +17,10 @@ describe('NotificationsModule (DI wiring, no database)', () => {
     await moduleRef?.close();
   });
 
-  it('resolves the writer and the ticket producer', () => {
+  it('resolves the writer, ticket producer and watch route command', () => {
     expect(moduleRef.get(NotificationWriter)).toBeInstanceOf(NotificationWriter);
     expect(moduleRef.get(TicketNotificationSubscriber)).toBeInstanceOf(TicketNotificationSubscriber);
+    expect(moduleRef.get(TicketWatchRouteCommands)).toBeInstanceOf(TicketWatchRouteCommands);
   });
 
   it('registers the ticket producer on ticket_event at init', async () => {

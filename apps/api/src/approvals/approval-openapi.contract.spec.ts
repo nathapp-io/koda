@@ -51,6 +51,27 @@ const gatedOperations = [
   ['delete', '/api/webhooks/{id}'],
   ['delete', '/api/projects/{slug}/vcs'],
   ['post', '/api/projects/{slug}/vcs/test'],
+  ['post', '/api/projects/{slug}/tickets'],
+  ['patch', '/api/projects/{slug}/tickets/{ref}'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/assign'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/verify'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/start'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/fix'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/verify-fix'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/close'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/reject'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/comments'],
+  ['patch', '/api/comments/{id}'],
+  ['post', '/api/projects/{slug}/labels'],
+  ['patch', '/api/projects/{slug}/labels/{id}'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/labels'],
+  ['post', '/api/projects/{slug}/tickets/{ref}/links'],
+  ['post', '/api/projects'],
+  ['patch', '/api/projects/{slug}'],
+  ['post', '/api/projects/{slug}/members'],
+  ['delete', '/api/projects/{slug}/invites/{id}'],
+  ['put', '/api/projects/{slug}/tickets/{ref}/watch'],
+  ['delete', '/api/projects/{slug}/tickets/{ref}/watch'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
@@ -92,7 +113,15 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/fleet/enrollments']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-8 (US-010): 202 responses exist on exactly the 41 gated operations and existing reindex operation', () => {
+  it('AC-4: POST /api/projects/{slug}/tickets has a 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/tickets']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('AC-5: POST /api/projects/{slug}/invites has no 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/invites']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-6: 202 responses exist on exactly the 62 gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });

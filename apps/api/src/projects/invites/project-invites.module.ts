@@ -1,3 +1,6 @@
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { InviteRouteCommands } from './invite-route.commands';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AuthModule } from '../../auth/auth.module';
@@ -17,9 +20,10 @@ import { PublicInvitesController } from './public-invites.controller';
  * `AuthModule` supplies `AuthService` — the accept flow issues the new member's session through it.
  */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, NotificationsModule, AuthModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, NotificationsModule, AuthModule],
   controllers: [ProjectInvitesController, PublicInvitesController],
   providers: [
+    InviteRouteCommands,
     PrismaProjectInvitesRepository,
     PrismaProjectInvitesMembersRepository,
     InviteMailer,

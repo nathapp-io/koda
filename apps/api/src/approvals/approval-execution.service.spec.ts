@@ -1,3 +1,6 @@
+import { ProjectRouteCommands, PROJECT_ROUTE_VARIANTS } from '../projects/project-route.commands';
+import type { ProjectsService } from '../projects/projects.service';
+import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { VcsConnectionService } from '../vcs/vcs-connection.service';
 import { FleetReposService } from '../fleet/repos/fleet-repos.service';
 import { FleetRepoRouteCommands } from '../fleet/repos/fleet-repo-route.commands';
@@ -14,7 +17,7 @@ import { ApprovalExecutionService } from './approval-execution.service';
 import { approvalInputHash } from './approval-input';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalRequestNotPendingError } from './domain/approval.errors';
-import type { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { configurableTestCommand } from './test-helpers/test-approval-command';
 
 const now = new Date('2026-11-05T09:00:00Z');
@@ -65,6 +68,60 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it.each([{ projectId: 'p1' }, { projectId: 'p1', slug: 'old-slug' }])(
+    'executes ID-based project deletion without fencing an unused slug (%j)', async (frozen) => {
+      const s = setup({ permissionKey: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,
+        input: frozen, inputHash: approvalInputHash(frozen) });
+      s.permissions.effectiveKeys.mockResolvedValue(new Set(['project.delete']));
+      const softDeleteById = vi.fn().mockResolvedValue({ id: 'p1' });
+      const loader = { forContext: vi.fn().mockResolvedValue({ actorType: 'agent', id: 'a1' }) };
+      new ProjectRouteCommands(s.registry, { softDeleteById } as unknown as ProjectsService,
+        loader as unknown as ActorPrincipalLoader).onModuleInit();
+      const fence = vi.fn().mockRejectedValue(new Error('project was renamed'));
+      Object.assign(s.repo, { lockProjectSlug: fence });
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed', result: null });
+      expect(fence).not.toHaveBeenCalled();
+      expect(softDeleteById).toHaveBeenCalledExactlyOnceWith('p1');
+    },
+  );
+  it.each(['project.update', 'ticket.create', 'ticket.update', 'ticket.assign', 'ticket.transition.start', 'comment.create', 'label.create', 'label.update', 'ticket.label.assign', 'ticket.link.add', 'member.add', 'invite.cancel'])(
+    'fences %s against a renamed project and reused slug before mutation', async (key) => {
+      const frozen = { slug: 'old-slug' };
+      const variant = 'rest:identity-regression';
+      const s = setup({ permissionKey: key, variant, input: frozen, inputHash: approvalInputHash(frozen) });
+      s.permissions.effectiveKeys.mockResolvedValue(new Set([key]));
+      const execute = vi.fn(async () => null);
+      s.registry.register({ key, variant, parse: (value) => value, execute });
+      const fence = vi.fn(async (projectId: string, slug: string) => {
+        expect(s.tx.run).toHaveBeenCalled();
+        expect(projectId).toBe('p1'); // the authorized identity, NOT the new owner of old-slug
+        expect(slug).toBe('old-slug');
+        const query = vi.fn(async (_sql: TemplateStringsArray, id: string) => {
+          expect(id).toBe('p1');
+          return [{ slug: 'renamed-p' }]; // Q now owns old-slug; P is still the locked target
+        });
+        const repository = new PrismaApprovalRequestRepository(s.tx as never, { client: { $queryRaw: query } } as never);
+        await repository.lockProjectSlug(projectId, slug);
+      });
+      Object.assign(s.repo, { lockProjectSlug: fence });
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed' });
+      expect(fence).toHaveBeenCalledOnce();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+  it.each([{ rows: [] }, { rows: [{ slug: 'renamed' }] }, { rows: [{ slug: 'old' }] }])('locks the immutable project row and validates its current slug (%j)', async ({ rows }) => {
+    const s = setup();
+    const query = vi.fn(async (sql: TemplateStringsArray, id: string) => {
+      expect(sql.join('?')).toContain('WHERE "id" = ? AND "deletedAt" IS NULL FOR UPDATE');
+      expect(id).toBe('p1');
+      return rows;
+    });
+    const repository = new PrismaApprovalRequestRepository(s.tx as never, { client: { $queryRaw: query } } as never);
+    if (rows[0]?.slug === 'old') await expect(repository.lockProjectSlug('p1', 'old')).resolves.toBeUndefined();
+    else await expect(repository.lockProjectSlug('p1', 'old')).rejects.toThrow();
+    expect(query).toHaveBeenCalledOnce();
+  });
   it('prepares slow external work without a transaction or request lock, then executes atomically', async () => {
     const s = setup();
     let active = false;

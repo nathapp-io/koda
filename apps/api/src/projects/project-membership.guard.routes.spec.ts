@@ -1,4 +1,5 @@
 import { KbDocumentDeletion } from '../rag/kb-document-deletion.service';
+import { disableEnvProxy } from '../../test/helpers/no-env-proxy';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock } from 'vitest';
 /**
@@ -234,6 +235,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   });
 
   beforeEach(() => {
+    // Re-apply the hermetic loopback setup in this HTTP suite in case another test
+    // in the same worker restored or changed proxy variables after test-setup ran.
+    disableEnvProxy();
     vi.clearAllMocks();
 
     currentPrincipal = developerUser;
@@ -293,7 +297,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(403);
     expect(ticketsService.assign).not.toHaveBeenCalled();
@@ -302,7 +306,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   it('AC8 boundary: POST /api/projects/:slug/tickets/:ref/assign returns 200 for a member DEVELOPER user', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(200);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
@@ -329,7 +333,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(200);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
@@ -359,7 +363,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(403);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });

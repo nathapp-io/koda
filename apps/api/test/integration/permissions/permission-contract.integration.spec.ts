@@ -29,7 +29,7 @@ import { resetDb } from '../../helpers/reset-db';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TIMEOUT = 120_000;
 
-describeIntegration('permission contract over the booted API (US-007)', () => {
+describeIntegration('permission contract over the booted API (US-011)', () => {
   let app: NathApplication;
   let declarations: PermissionDeclarations;
   const previousStrategy = process.env.FTS_OPTIMIZE_STRATEGY;
@@ -63,8 +63,8 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  it('AC-2 (US-010): collects exactly 41 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(41);
+  it('US-011 AC-1: collects exactly 62 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated)).toHaveLength(62);
   });
 
   it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
@@ -72,7 +72,7 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     expect([...PENDING_GATE_ROUTES]).toEqual(expected);
   });
 
-  it('AC-11 (US-010): catches an unlisted, ungated high-risk write', () => {
+  it('FM-1 (US-011): catches an unlisted ungated approvable write', () => {
     const route = {
       route: 'DELETE /projects/:slug/new-high-risk-resource',
       method: 'DELETE',

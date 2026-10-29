@@ -22,6 +22,19 @@ import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
 
+export function vcsTestTarget(connection: VcsConnectionDomain): Pick<
+  VcsConnectionDomain,
+  'id' | 'provider' | 'repoOwner' | 'repoName' | 'encryptedToken'
+> {
+  return {
+    id: connection.id,
+    provider: connection.provider,
+    repoOwner: connection.repoOwner,
+    repoName: connection.repoName,
+    encryptedToken: connection.encryptedToken,
+  };
+}
+
 @Injectable()
 export class VcsConnectionService {
   constructor(
@@ -256,7 +269,9 @@ export class VcsConnectionService {
     const result = await this.testTarget(connection, encryptionKey);
     return async () => {
       const current = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
-      if (!isDeepStrictEqual(current, connection)) throw new ValidationAppException({}, 'vcs');
+      if (!isDeepStrictEqual(current && vcsTestTarget(current), vcsTestTarget(connection))) {
+        throw new ValidationAppException({}, 'vcs');
+      }
       return result;
     };
   }

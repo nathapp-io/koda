@@ -147,7 +147,7 @@ describe('ProjectsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: mockProject }) } },
         { provide: ProjectsService, useValue: projectsService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: AgentsService, useValue: agentsService },
@@ -174,7 +174,13 @@ describe('ProjectsController', () => {
 
       const result = await controller.create({ name: 'Alpha', slug: 'alpha', key: 'ALP' } as any);
 
-      expect(projectsService.create).toHaveBeenCalled();
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.create',
+        variant: 'rest:projects.create',
+        projectId: null,
+        input: { name: 'Alpha', slug: 'alpha', key: 'ALP' },
+      });
+      expect(projectsService.create).not.toHaveBeenCalled();
       expect((result as any).data).toEqual(mockProject);
     });
   });
@@ -251,20 +257,49 @@ describe('ProjectsController', () => {
   });
 
   describe('update', () => {
+    it.each(['a'.repeat(32), null])('keeps token-only patches out of approvals (%s)', async (ciWebhookToken) => {
+      projectsService.update.mockResolvedValue(mockProject as any);
+      const patch = { ciWebhookToken };
+      await controller.update('alpha', patch as any, { project: { id: 'proj-1', slug: 'alpha' } });
+      expect(routeGate.run).not.toHaveBeenCalled();
+      expect(projectsService.update).toHaveBeenCalledExactlyOnceWith('alpha', patch);
+    });
+
+    it.each([
+      { name: 'Updated' }, { slug: 'renamed' }, { key: 'NEW' },
+      { description: 'changed' }, { brief: null },
+      { gitRemoteUrl: 'https://github.com/example/repo' },
+      { autoIndexOnClose: false }, { autoAssign: 'AUTO' }, { graphifyEnabled: true },
+    ].flatMap((ordinary) => [null, 'a'.repeat(32)].map((ciWebhookToken) => ({ ...ordinary, ciWebhookToken }))))(
+      'B3: rejects mixed secret and ordinary patches before any mutation: %j', async (patch) => {
+        await expect(controller.update('alpha', patch as any, {
+          project: { id: 'proj-1', slug: 'alpha' },
+        })).rejects.toMatchObject({ status: 400, response: { prefix: 'approvals.invalidInput' } });
+        expect(routeGate.run).not.toHaveBeenCalled();
+        expect(projectsService.update).not.toHaveBeenCalled();
+      },
+    );
     it('updates a project', async () => {
       projectsService.update.mockResolvedValue({ ...mockProject, name: 'Updated' } as any);
 
-      const result = await controller.update('alpha', { name: 'Updated' } as any);
+      const projectContext: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' } };
+      const result = await controller.update('alpha', { name: 'Updated' } as any, projectContext);
 
-      expect(projectsService.update).toHaveBeenCalledWith('alpha', { name: 'Updated' });
-      expect((result as any).data.name).toBe('Updated');
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.update',
+        variant: 'rest:projects.update',
+        projectId: 'proj-1',
+        input: { slug: 'alpha', patch: { name: 'Updated' } },
+      });
+      expect(projectsService.update).not.toHaveBeenCalled();
+      expect((result as any).data).toEqual(mockProject);
     });
   });
 
   describe('remove', () => {
     it('gates project deletion with the guard-resolved project id', async () => {
       expect(await controller.remove('alpha', { project: { id: 'proj-1', slug: 'alpha' } })).toBeUndefined();
-      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({ key: 'project.delete', variant: 'rest:projects.delete', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1' } });
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({ key: 'project.delete', variant: 'rest:projects.delete', projectId: 'proj-1', input: { projectId: 'proj-1' } });
       expect(projectsService.softDelete).not.toHaveBeenCalled();
     });
   });

@@ -9,23 +9,19 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
   'POST /projects/:slug/vcs/webhook-secret/rotate',
   'POST /projects/:slug/webhooks',
   'PATCH /projects/:slug/webhooks/:id',
+  'POST /projects/:slug/invites',
+  'POST /projects/:slug/invites/:id/resend',
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /projects/:slug/invites/:id=gate-core-domains
 DELETE /projects/:slug/skills/:skillId=gate-core-domains
 DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
-DELETE /projects/:slug/tickets/:ref/watch=gate-core-domains
 PATCH /admin/users/:id=gate-core-domains
 PATCH /agents/:slug=gate-core-domains
 PATCH /agents/:slug/update-capabilities=gate-core-domains
-PATCH /comments/:id=gate-core-domains
-PATCH /projects/:slug=gate-core-domains
 PATCH /projects/:slug/agents/:agentSlug=gate-core-domains
 PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
-PATCH /projects/:slug/labels/:id=gate-core-domains
 PATCH /projects/:slug/threads/:id=gate-fleet
-PATCH /projects/:slug/tickets/:ref=gate-core-domains
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
 PATCH /threads/:id=gate-fleet
@@ -45,7 +41,6 @@ POST /fleet/test-hooks/schedules/:id/fire=gate-fleet
 POST /memory=gate-core-domains
 POST /memory/decisions=gate-core-domains
 POST /memory/extract=gate-core-domains
-POST /projects=gate-core-domains
 POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
 POST /projects/:slug/fleet/jobs=gate-fleet
 POST /projects/:slug/fleet/jobs/:id/cancel=gate-fleet
@@ -55,16 +50,14 @@ POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate=gate-fleet
 POST /projects/:slug/fleet/schedules=gate-fleet
 POST /projects/:slug/fleet/schedules/:id/disable=gate-fleet
 POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
-POST /projects/:slug/invites=gate-core-domains
-POST /projects/:slug/invites/:id/resend=gate-core-domains
+POST /projects/:slug/invites=gate-secret
+POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/kb/documents=gate-core-domains
 POST /projects/:slug/kb/evaluate/retrieval=gate-core-domains
 POST /projects/:slug/kb/import/graphify=gate-core-domains
 POST /projects/:slug/kb/optimize=gate-core-domains
 POST /projects/:slug/kb/search=gate-core-domains
 POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet
-POST /projects/:slug/labels=gate-core-domains
-POST /projects/:slug/members=gate-core-domains
 POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet
 POST /projects/:slug/threads/:id/archive=gate-fleet
@@ -75,17 +68,6 @@ POST /projects/:slug/threads/:id/plan=gate-fleet
 POST /projects/:slug/threads/:id/publish=gate-fleet
 POST /projects/:slug/threads/:id/run=gate-fleet
 POST /projects/:slug/threads/:id/stop=gate-fleet
-POST /projects/:slug/tickets=gate-core-domains
-POST /projects/:slug/tickets/:ref/assign=gate-core-domains
-POST /projects/:slug/tickets/:ref/close=gate-core-domains
-POST /projects/:slug/tickets/:ref/comments=gate-core-domains
-POST /projects/:slug/tickets/:ref/fix=gate-core-domains
-POST /projects/:slug/tickets/:ref/labels=gate-core-domains
-POST /projects/:slug/tickets/:ref/links=gate-core-domains
-POST /projects/:slug/tickets/:ref/reject=gate-core-domains
-POST /projects/:slug/tickets/:ref/start=gate-core-domains
-POST /projects/:slug/tickets/:ref/verify=gate-core-domains
-POST /projects/:slug/tickets/:ref/verify-fix=gate-core-domains
 POST /projects/:slug/vcs=gate-secret
 POST /projects/:slug/vcs/sync=gate-core-domains
 POST /projects/:slug/vcs/sync-pr=gate-core-domains
@@ -101,7 +83,6 @@ POST /threads/:id/stop=gate-fleet
 PUT /fleet/test-hooks/repos/:repoId/nax-files=gate-fleet
 PUT /projects/:slug/knowledge/patterns=gate-fleet
 PUT /projects/:slug/skills/:skillId=gate-core-domains
-PUT /projects/:slug/tickets/:ref/watch=gate-core-domains
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {

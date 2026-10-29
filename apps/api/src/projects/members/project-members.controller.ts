@@ -1,3 +1,9 @@
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { CurrentProject } from '../current-project.decorator';
+import { ProjectContext } from '../project-context';
+import { MEMBER_ROUTE_VARIANTS } from './member-route.commands';
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
@@ -30,7 +36,10 @@ import { ProjectMemberDto } from './dto/project-member.dto';
 @Controller('projects/:slug/members')
 @UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class ProjectMembersController {
-  constructor(private readonly members: ProjectMembersService) {}
+  constructor(
+    private readonly members: ProjectMembersService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @Requires('member.read')
@@ -49,13 +58,21 @@ export class ProjectMembersController {
 
   @Post()
   @HttpCode(201)
+  @ApprovalGated()
   @Requires('member.add')
   @ApiOperation({ summary: 'Add an existing user by email (member.add)' })
   @ApiResponse({ status: 201, type: ProjectMemberDto })
   @ApiResponse({ status: 403, description: 'Not a project member, or member.add is missing' })
   @ApiResponse({ status: 404, description: 'Project or user not found' })
   @ApiResponse({ status: 409, description: 'Already a member' })
-  async add(@Param('slug') slug: string, @Body() dto: AddMemberDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.members.add(slug, dto, principal));
+  async add(
+    @Param('slug') slug: string,
+    @Body() dto: AddMemberDto,
+    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
+  ) {
+    const outcome = await this.routeGate.run<ProjectMemberDto>({ key: 'member.add', variant: MEMBER_ROUTE_VARIANTS.add, projectId: project.project.id, input: { slug, member: dto } });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

@@ -87,6 +87,12 @@ function createMockPollingService(): Mocked<Pick<VcsPollingService, 'refreshConn
   };
 }
 
+async function expectVcsValidation(promise: Promise<unknown>): Promise<void> {
+  const error = await promise.then(() => undefined, (reason: unknown) => reason);
+  expect(error).toBeInstanceOf(ValidationAppException);
+  expect(error).toMatchObject({ prefix: 'vcs' });
+}
+
 describe('VcsConnectionService', () => {
   let service: VcsConnectionService;
   let mockRepo: Mocked<IVcsRepository>;
@@ -103,6 +109,58 @@ describe('VcsConnectionService', () => {
     mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ repoName: 'changed' }));
     await expect(run()).rejects.toBeInstanceOf(ValidationAppException);
     expect(testConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles with the provider result when only polling timestamps changed', async () => {
+    const tested = makeConnection();
+    mockRepo.findVcsConnectionByProjectId
+      .mockResolvedValueOnce(tested)
+      .mockResolvedValueOnce(makeConnection({
+        lastSyncedAt: new Date('2024-01-02T00:00:00Z'),
+        updatedAt: new Date('2024-01-02T00:00:00Z'),
+      }));
+    const testConnection = vi.fn(async () => ({ ok: true }));
+    (createVcsProvider as Mock).mockReturnValue({ testConnection });
+
+    const settle = await service.prepareTestConnection('proj-1', ENCRYPTION_KEY);
+
+    await expect(settle()).resolves.toMatchObject({ ok: true });
+    expect(testConnection).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['repoOwner', { repoOwner: 'changed-owner' }],
+    ['provider', { provider: 'gitlab' }],
+    ['encryptedToken', { encryptedToken: 'changed-token' }],
+  ] as const)('rejects settlement when %s changed', async (_field, change) => {
+    mockRepo.findVcsConnectionByProjectId
+      .mockResolvedValueOnce(makeConnection())
+      .mockResolvedValueOnce(makeConnection(change));
+    (createVcsProvider as Mock).mockReturnValue({ testConnection: vi.fn().mockResolvedValue({ ok: true }) });
+
+    const settle = await service.prepareTestConnection('proj-1', ENCRYPTION_KEY);
+
+    await expectVcsValidation(settle());
+  });
+
+  it('rejects settlement when the connection is gone', async () => {
+    mockRepo.findVcsConnectionByProjectId.mockResolvedValueOnce(makeConnection()).mockResolvedValueOnce(null);
+    (createVcsProvider as Mock).mockReturnValue({ testConnection: vi.fn().mockResolvedValue({ ok: true }) });
+
+    const settle = await service.prepareTestConnection('proj-1', ENCRYPTION_KEY);
+
+    await expectVcsValidation(settle());
+  });
+
+  it('rejects settlement when the connection is replaced by a different row with the same target', async () => {
+    mockRepo.findVcsConnectionByProjectId
+      .mockResolvedValueOnce(makeConnection())
+      .mockResolvedValueOnce(makeConnection({ id: 'replacement-connection' }));
+    (createVcsProvider as Mock).mockReturnValue({ testConnection: vi.fn().mockResolvedValue({ ok: true }) });
+
+    const settle = await service.prepareTestConnection('proj-1', ENCRYPTION_KEY);
+
+    await expectVcsValidation(settle());
   });
 
   it.each(['settlement', 'commit'])('retains polling when the owning %s fails', async () => {

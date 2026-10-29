@@ -1,4 +1,6 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import type { ProjectContext } from '../projects/project-context';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
@@ -15,29 +17,39 @@ const agent: KodaPrincipal = {
 const ctx: ProjectContext = { project: { id: 'p1', slug: 'koda' } };
 
 function setup() {
+  const routeGate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { watching: true, count: 1 } }) };
   const service = {
     state: vi.fn().mockResolvedValue({ watching: false, count: 0 }),
     watch: vi.fn().mockResolvedValue({ watching: true, count: 1 }),
     unwatch: vi.fn().mockResolvedValue({ watching: false, count: 0 }),
   };
-  return { service, controller: new TicketWatchController(service as never) };
+  return { service, routeGate, controller: new TicketWatchController(service as never, routeGate as unknown as ApprovalRouteGate) };
 }
 
 describe('TicketWatchController (S4a §3)', () => {
   it('lets any project member (even a VIEWER) watch, scoped to the guard-resolved project', async () => {
-    const { controller, service } = setup();
+    const { controller, service, routeGate } = setup();
     await controller.watch('KODA-1', ctx, user);
-    expect(service.watch).toHaveBeenCalledWith('p1', 'KODA-1', 'u1');
+    expect(routeGate.run).toHaveBeenCalledWith({
+      key: 'ticket.watch.set', variant: 'rest:ticket-watch.set', projectId: 'p1', input: { projectId: 'p1', ref: 'KODA-1' },
+    });
+    expect(service.watch).not.toHaveBeenCalled();
+    routeGate.run.mockClear();
+    routeGate.run.mockResolvedValue({ status: 'executed', result: { watching: false, count: 0 } });
     await controller.unwatch('KODA-1', ctx, user);
-    expect(service.unwatch).toHaveBeenCalledWith('p1', 'KODA-1', 'u1');
+    expect(routeGate.run).toHaveBeenCalledWith({
+      key: 'ticket.watch.unset', variant: 'rest:ticket-watch.unset', projectId: 'p1', input: { projectId: 'p1', ref: 'KODA-1' },
+    });
+    expect(service.unwatch).not.toHaveBeenCalled();
     await controller.state('KODA-1', ctx, user);
     expect(service.state).toHaveBeenCalledWith('p1', 'KODA-1', 'u1');
   });
 
   it('refuses agents (403)', async () => {
-    const { controller } = setup();
+    const { controller, routeGate } = setup();
     await expect(controller.watch('KODA-1', ctx, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.state('KODA-1', ctx, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
+    expect(routeGate.run).not.toHaveBeenCalled();
   });
 });
 
@@ -52,6 +64,12 @@ describe('TicketWatchController permission metadata (US-005)', () => {
     const fn = TicketWatchController.prototype[handler] as unknown as object;
     expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({ keys: [key], mode: 'all', enforcedBy: 'guard' });
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+  });
+
+  it('marks both write handlers as approval-gated', () => {
+    for (const handler of ['watch', 'unwatch'] as const) {
+      expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, TicketWatchController.prototype[handler])).toBe(true);
+    }
   });
 
   it('runs ProjectMembershipGuard before RequiresGuard at the class level', () => {

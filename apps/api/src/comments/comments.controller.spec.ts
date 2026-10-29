@@ -52,7 +52,9 @@ describe('CommentsController route permission metadata (US-005)', () => {
 });
 
 describe('CommentsController', () => {
-  it('marks the HTTP deletion route as approval-gated', () => {
+  it('marks the HTTP comment write routes as approval-gated', () => {
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, CommentsController.prototype.createFromHttp)).toBe(true);
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, CommentsController.prototype.updateFromHttp)).toBe(true);
     expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, CommentsController.prototype.deleteFromHttp)).toBe(true);
   });
   let controller: CommentsController;
@@ -161,6 +163,17 @@ describe('CommentsController', () => {
     expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockMemberUser);
     expect(mockRouteGate.run).toHaveBeenCalledExactlyOnceWith({
       key: 'comment.delete', variant: 'rest:comments.delete', projectId: 'project-1', input: { id: 'c1' },
+    });
+  });
+
+  it('AC-11: resolves comment project before gating update with ownable route key', async () => {
+    const patch = { body: 'x' };
+    mockCommentsService.resolveCommentProject.mockResolvedValue('project-p');
+    mockRouteGate.run.mockResolvedValue({ status: 'executed', result: mockComment });
+    await controller.updateFromHttp('c1', patch, mockAgent);
+    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockAgent);
+    expect(mockRouteGate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'comment.update', variant: 'rest:comments.update', projectId: 'project-p', input: { id: 'c1', patch },
     });
   });
 
