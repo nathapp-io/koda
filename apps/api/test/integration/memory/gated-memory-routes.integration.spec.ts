@@ -1,4 +1,6 @@
 import request from 'supertest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
@@ -11,6 +13,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 interface Pending { id: string; permissionKey: string; projectId: string }
 interface Settled { status: string; result: unknown }
+const permissionsRefusedMessage = (JSON.parse(readFileSync(join(__dirname, '../../../src/i18n/en/permissions.json'), 'utf8')) as Record<string, string>)['40003'];
 
 describeIntegration('gated memory routes (US-007)', () => {
   let app: NathApplication;
@@ -102,6 +105,7 @@ describeIntegration('gated memory routes (US-007)', () => {
     const response = await request(server()).post('/api/memory').set(auth(keyless.apiKey)).send({ projectId: project.id, kind: 'FACT', subject: subject(), predicate: 'uses' });
     expect(response.status).toBe(403);
     expect(response.body.ret).toBe(40003);
+    expect(response.body.message).toBe(permissionsRefusedMessage);
     expect(await db.approvalRequest.count()).toBe(0);
   });
 
