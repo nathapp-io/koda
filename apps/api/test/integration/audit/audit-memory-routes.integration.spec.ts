@@ -53,11 +53,18 @@ describeIntegration('US-002 audited memory routes', () => {
   const factBody = (subject: string, object: string) =>
     ({ subject, predicate: 'owner', object, sourceId: 'note-1' });
 
-  /** The created item's id, as the route answers it (the handler returns the item, unwrapped). */
+  /** Executed gated writes return their result inside the JsonResponse envelope. */
   const itemIdOf = (response: request.Response): string => {
-    const body = response.body as { id?: unknown };
+    const body = data<{ id: unknown }>(response);
     expect(typeof body.id).toBe('string');
     return String(body.id);
+  };
+
+  const decisionIdOf = (response: request.Response): string => {
+    const body = data<{ memoryId: unknown }>(response);
+    // Never pass undefined to Prisma: it would omit the resourceId filter entirely.
+    expect(typeof body.memoryId).toBe('string');
+    return String(body.memoryId);
   };
 
   /** One memory row as the database holds it, narrowed to what these cases assert. */
@@ -250,7 +257,7 @@ describeIntegration('US-002 audited memory routes', () => {
     const response = await request(server).post('/api/memory/decisions').set(auth(devToken))
       .send({ projectId, topic: 'Private topic', decision: 'Private decision' }).expect(201);
 
-    const memoryId = (response.body as { memoryId: string }).memoryId;
+    const memoryId = decisionIdOf(response);
     const rows = await entries('memory.decision.record', memoryId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -265,8 +272,8 @@ describeIntegration('US-002 audited memory routes', () => {
     const second = await request(server).post('/api/memory/decisions').set(auth(devToken))
       .send({ projectId, topic: 't2', decision: 'Second' }).expect(201);
 
-    const firstId = (first.body as { memoryId: string }).memoryId;
-    const secondId = (second.body as { memoryId: string }).memoryId;
+    const firstId = decisionIdOf(first);
+    const secondId = decisionIdOf(second);
     const rows = await entries('memory.decision.record', secondId);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.summary).toBe(`created DECISION, superseded ${firstId}`);

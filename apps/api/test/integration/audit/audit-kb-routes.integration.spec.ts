@@ -81,14 +81,24 @@ describeIntegration('US-001 audited KB routes', () => {
     expect(await entries('kb.document.delete', 'manual:root-doc')).toHaveLength(0);
   }, timeout);
 
-  it('AC-6/7: failed audit responds in error after preserving the completed KB store write', async () => {
+  it.each(['new', 'replacement'] as const)('AC-6/7: failed audit compensates a %s KB store write', async (scenario) => {
+    const sourceId = `failing-add-${scenario}`;
+    if (scenario === 'replacement') await add(devToken, 'manual', sourceId, 'original content').expect(201);
+    // LanceDB's unordered scan may move a restored row; compare identities and values, not scan order.
+    const snapshot = async () => (await rag.listDocuments(projectId, 500)).sort((a, b) => a.id.localeCompare(b.id));
+    const before = await snapshot();
+    const priorEntries = await entries('kb.document.add', `manual:${sourceId}`);
+    const record = audit.record.bind(audit);
     const spy = vi.spyOn(audit, 'record').mockImplementation(async (input) => {
       if (input.key === 'kb.document.add') throw new Error('audit down');
+      return record(input);
     });
     try {
-      const response = await add(devToken, 'manual', 'failing-add');
-      expect(response.status).toBeGreaterThanOrEqual(400);
-      expect((await rag.listDocuments(projectId, 500)).some((row) => row.source === 'manual' && row.sourceId === 'failing-add')).toBe(true);
+      await add(devToken, 'manual', sourceId, 'never committed').expect(500);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ key: 'kb.document.add', resourceId: `manual:${sourceId}` }));
+      // The addition journal restores the pre-write snapshot when its audit transaction rolls back.
+      expect(await snapshot()).toEqual(before);
+      expect(await entries('kb.document.add', `manual:${sourceId}`)).toEqual(priorEntries);
     } finally { spy.mockRestore(); }
   }, timeout);
 
