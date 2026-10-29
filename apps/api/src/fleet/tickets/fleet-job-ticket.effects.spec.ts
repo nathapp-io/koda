@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { FleetJobTicketEffects } from './fleet-job-ticket.effects';
 import { currentAuditScope, currentBookkeepingReason, noteAuditWrite, runInAuditScope, UnauditedWriteError } from '../../action-context/audit-coverage';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
@@ -17,10 +18,34 @@ describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
     auditRecord.mockReset();
     auditRecord.mockImplementation(async () => undefined);
     transitions = { startForDispatch: vi.fn().mockResolvedValue({}) };
-    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, new AfterCommitService());
   });
 
-  it('starts CREATED and VERIFIED tickets only, as the requester, through the dispatch-only start', async () => {
+  it('AC-13: starts only after the owning scope callback returned', async () => {
+    const afterCommit = new AfterCommitService();
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit);
+    const order: string[] = [];
+    transitions.startForDispatch.mockImplementation(async () => { order.push('start'); });
+    await afterCommit.scope(async () => {
+      await effects.onRunDispatched(actor, [t('WEB-1', 'CREATED')]);
+      expect(transitions.startForDispatch).not.toHaveBeenCalled();
+      order.push('callback returned');
+    });
+    expect(order).toEqual(['callback returned', 'start']);
+    expect(transitions.startForDispatch).toHaveBeenCalledWith('web', 'WEB-1', principal);
+  });
+
+  it('drops deferred starts when the scope rolls back', async () => {
+    const afterCommit = new AfterCommitService();
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit);
+    await expect(afterCommit.scope(async () => {
+      await effects.onRunDispatched(actor, [t('WEB-1', 'CREATED')]);
+      throw new Error('rollback');
+    })).rejects.toThrow('rollback');
+    expect(transitions.startForDispatch).not.toHaveBeenCalled();
+  });
+
+  it('AC-14: outside a scope starts CREATED and VERIFIED tickets before answering, as the requester', async () => {
     await effects.onRunDispatched(actor, [t('WEB-1', 'CREATED'), t('WEB-2', 'VERIFIED'), t('WEB-3', 'IN_PROGRESS'), t('WEB-4', 'VERIFY_FIX')]);
     expect(transitions.startForDispatch.mock.calls).toEqual([['web', 'WEB-1', principal], ['web', 'WEB-2', principal]]);
   });
@@ -54,7 +79,7 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
       upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService());
   });
 
   it('AC-3: loads failed-job linked tickets inside the task scope', async () => {
@@ -182,7 +207,7 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
       upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService());
   });
 
   it('links the PR on every linked ticket and records TICKET_UPDATED for each created row', async () => {

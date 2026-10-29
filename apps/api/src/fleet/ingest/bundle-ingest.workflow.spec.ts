@@ -1,4 +1,5 @@
 import { Readable } from 'stream';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { BundleIngestService } from './bundle-ingest.service';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
@@ -116,7 +117,7 @@ describe('BundleIngestService workflow draft correction (US-005 AC-13/AC-14)', (
     const events = { record: vi.fn() };
     const txManager = { run: (fn: () => unknown) => fn() };
     const audit = { record: vi.fn(async () => undefined) };
-    const realEffects = new FleetJobTicketEffects({} as never, effectRepo as never, events as never, txManager as never, audit as never);
+    const realEffects = new FleetJobTicketEffects({} as never, effectRepo as never, events as never, txManager as never, audit as never, new AfterCommitService());
     const svc = new BundleIngestService(
       ingestRepo as never, store as never, jobs as never, live as never, activity as never, { signal: vi.fn() } as never,
       txManager as never, realEffects as never, outcomes as never, { emit: vi.fn() } as never, { record: vi.fn(async () => undefined) } as never,
