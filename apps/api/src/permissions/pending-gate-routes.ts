@@ -28,7 +28,6 @@ POST /fleet/enrollments=gate-secret
 POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet
 POST /projects/:slug/threads=gate-fleet
 POST /projects/:slug/threads/:id/answer=gate-fleet
 POST /projects/:slug/threads/:id/archive=gate-fleet
@@ -48,7 +47,6 @@ POST /threads/:id/archive=gate-fleet
 POST /threads/:id/end-session=gate-fleet
 POST /threads/:id/messages=gate-fleet
 POST /threads/:id/stop=gate-fleet
-PUT /projects/:slug/knowledge/patterns=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {

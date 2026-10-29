@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { KnowledgeIndexAdmin } from './knowledge-index-admin.service';
+import { KnowledgeRouteCommands } from './knowledge-route.commands';
 import { RagModule } from '../../rag/rag.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
@@ -19,9 +23,11 @@ import { PrismaKnowledgeIndexRepository } from './prisma-knowledge-index.reposit
  * `common/knowledge-events.ts`, so neither of their modules imports this one.
  */
 @Module({
-  imports: [PrismaModule, RagModule, GitBrokerModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, RagModule, GitBrokerModule, ProjectAccessModule],
   controllers: [ProjectKnowledgeController],
   providers: [
+    KnowledgeIndexAdmin,
+    KnowledgeRouteCommands,
     PrismaKnowledgeIndexRepository,
     { provide: KNOWLEDGE_INDEX_REPOSITORY, useExisting: PrismaKnowledgeIndexRepository },
     KnowledgeChunkStore,
