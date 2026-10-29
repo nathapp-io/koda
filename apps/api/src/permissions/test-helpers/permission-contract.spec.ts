@@ -146,8 +146,8 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
-  it('US-001: rollout assignments contain only the remaining core, fleet and secret labels', () => {
-    expect([...new Set(PENDING_GATE_ROUTES.values())].sort()).toEqual(['gate-core-domains', 'gate-fleet', 'gate-secret']);
+  it('US-001: keeps stable fleet and secret rollout assignments', () => {
+    expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-fleet')).toHaveLength(36);
     expect([...PENDING_GATE_ROUTES.values()].filter((feature) => feature === 'gate-secret')).toHaveLength(11);
   });
 

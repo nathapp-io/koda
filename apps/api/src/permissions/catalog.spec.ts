@@ -412,17 +412,20 @@ describe('catalog approval metadata', () => {
     expect(findCatalogEntry('kb.document.add')?.approval.approvable).toBe(true);
   });
 
-  it('US-001 AC-5: exposes only approvable DTO entries, excluding POST read keys', () => {
-    const keys = approvableKeys().map((entry) => entry.key);
-    expect(keys).not.toEqual(expect.arrayContaining(['kb.search', 'context.query', 'retrieval.evaluate']));
-    expect(approvableKeys()[0]).toMatchObject({
-      key: expect.any(String),
-      scope: expect.any(String),
-      risk: expect.any(String),
-      floor: expect.any(String),
-      default: expect.any(String),
-    });
-  });
+  it.each(['kb.search', 'context.query', 'retrieval.evaluate'])(
+    'US-001 AC-5: excludes non-approvable key %s from the DTO list',
+    (key) => {
+      const entries = approvableKeys();
+      expect(entries.map((entry) => entry.key)).not.toContain(key);
+      expect(entries[0]).toMatchObject({
+        key: expect.any(String),
+        scope: expect.any(String),
+        risk: expect.any(String),
+        floor: expect.any(String),
+        default: expect.any(String),
+      });
+    },
+  );
 
   it('US-001 AC-1: shell escalation is a high-risk project ask', () => {
     expect(findCatalogEntry('fleet.job.shell.escalate')).toMatchObject({
