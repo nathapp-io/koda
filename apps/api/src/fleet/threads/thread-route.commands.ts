@@ -6,7 +6,7 @@ import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { PermissionService } from '../../permissions/permission.service';
 import { ThreadsService } from './threads.service';
-import { CreateThreadDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, CreateThreadDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 
 export const THREAD_ROUTE_VARIANTS = {
@@ -15,6 +15,9 @@ export const THREAD_ROUTE_VARIANTS = {
   archive: 'rest:threads.archive',
   plan: 'rest:threads.plan',
   run: 'rest:threads.run',
+  stop: 'rest:threads.stop',
+  endSession: 'rest:threads.end-session',
+  answer: 'rest:threads.answer',
 } as const;
 
 @Injectable()
@@ -87,6 +90,43 @@ export class ThreadRouteCommands implements OnModuleInit {
       run: async (principal, input) => {
         const canOperate = (await this.permissions.can(principal, 'thread.run', { projectId: input.projectId })).allowed;
         return this.threads.run(input.projectId, input.id, principal.id, input.run, canOperate);
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string }, Record<string, never>>({
+      key: 'thread.stop', variant: THREAD_ROUTE_VARIANTS.stop,
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId', 'id']),
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.stop', { projectId: input.projectId })).allowed;
+        await this.threads.stop(input.projectId, input.id, principal.id, canOperate);
+        return {};
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string }, Record<string, never>>({
+      key: 'thread.end-session', variant: THREAD_ROUTE_VARIANTS.endSession,
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId', 'id']),
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.end-session', { projectId: input.projectId })).allowed;
+        await this.threads.endSession(input.projectId, input.id, principal.id, canOperate);
+        return {};
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string; answer: AnswerQuestionDto }, Record<string, never>>({
+      key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.answer,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['slug', 'projectId', 'id']);
+        const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        return { ...route, answer: parseBody(AnswerQuestionDto, value.answer ?? {}) };
+      },
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.answer', { projectId: input.projectId })).allowed;
+        await this.threads.answer(input.projectId, input.id, principal.id, input.answer, canOperate);
+        return {};
       },
       toResult: (result) => result,
     }, this.loader));

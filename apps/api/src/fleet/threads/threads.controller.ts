@@ -146,10 +146,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Stop the live turn of a chat thread (thread.stop: the creator, or the any-row key)' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.stop nor created the thread' })
+  @ApprovalGated()
   async stop(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.stop', ctx);
-    await this.threads.stop(ctx.project.id, id, principal.id, canOperate);
-    return JsonResponse.Ok({});
+    const outcome = await this.routeGate.run<void>({
+      key: 'thread.stop', variant: THREAD_ROUTE_VARIANTS.stop, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/end-session')
@@ -159,10 +163,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Close the live session of a chat thread (thread.end-session: the creator, or the any-row key)' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.end-session nor created the thread' })
+  @ApprovalGated()
   async endSession(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.end-session', ctx);
-    await this.threads.endSession(ctx.project.id, id, principal.id, canOperate);
-    return JsonResponse.Ok({});
+    const outcome = await this.routeGate.run<void>({
+      key: 'thread.end-session', variant: THREAD_ROUTE_VARIANTS.endSession, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/answer')
@@ -173,10 +181,14 @@ export class ThreadsController {
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
   @ApiResponse({ status: 409, description: 'threads.noQuestion, threads.noSession, or threads.sessionOtherPrincipal' })
+  @ApprovalGated()
   async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.answer', ctx);
-    await this.threads.answer(ctx.project.id, id, principal.id, dto, canOperate);
-    return JsonResponse.Ok({});
+    const outcome = await this.routeGate.run<void>({
+      key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.answer, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, answer: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/archive')

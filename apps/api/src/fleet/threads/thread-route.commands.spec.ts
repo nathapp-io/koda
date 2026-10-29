@@ -11,7 +11,7 @@ describe('ThreadRouteCommands', () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
-    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }) };
+    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined) };
     const permissions = { can: vi.fn().mockResolvedValue({ allowed: false }) };
     new ThreadRouteCommands(registry, threads as unknown as ThreadsService, permissions as unknown as PermissionService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, threads, permissions, principal, loader };
@@ -22,6 +22,23 @@ describe('ThreadRouteCommands', () => {
     for (const [key, variant] of [['thread.create', THREAD_ROUTE_VARIANTS.create], ['thread.cap.update', THREAD_ROUTE_VARIANTS.update], ['thread.archive', THREAD_ROUTE_VARIANTS.archive]]) {
       expect(registry.get(key, variant)).toMatchObject({ key, variant });
     }
+  });
+
+  it('AC-7: registers stop, end-session and answer REST variants', () => {
+    const { registry } = build();
+    expect(registry.get('thread.stop', THREAD_ROUTE_VARIANTS.stop)).toMatchObject({ key: 'thread.stop', variant: 'rest:threads.stop' });
+    expect(registry.get('thread.end-session', THREAD_ROUTE_VARIANTS.endSession)).toMatchObject({ key: 'thread.end-session', variant: 'rest:threads.end-session' });
+    expect(registry.get('thread.answer', THREAD_ROUTE_VARIANTS.answer)).toMatchObject({ key: 'thread.answer', variant: 'rest:threads.answer' });
+  });
+
+  it('AC-8: recomputes thread.answer authority and passes its validated request to the service', async () => {
+    const { registry, threads, permissions, principal } = build();
+    const command = registry.get('thread.answer', THREAD_ROUTE_VARIANTS.answer);
+    if (!command) throw new Error('Missing answer command');
+    const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', id: 't1', answer: { requestId: 'q1', text: 'yes' } }));
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.answer', { projectId: 'p1' });
+    expect(threads.answer).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', { requestId: 'q1', text: 'yes' }, false);
+    expect(command.toResult?.(result)).toEqual({});
   });
 
   it('AC-7: registers plan and run REST variants', () => {
