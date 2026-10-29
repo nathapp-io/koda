@@ -19,7 +19,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 const ROUTE_ASSIGNMENTS = `
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
-PATCH /threads/:id=gate-fleet
 POST /admin/users=gate-secret
 POST /agents=gate-secret
 POST /agents/:slug/rotate-key=gate-secret
@@ -29,10 +28,7 @@ POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/vcs=gate-secret
 POST /projects/:slug/vcs/webhook-secret/rotate=gate-secret
 POST /projects/:slug/webhooks=gate-secret
-POST /threads/:id/answer=gate-fleet
-POST /threads/:id/end-session=gate-fleet
 POST /threads/:id/messages=gate-fleet
-POST /threads/:id/stop=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {

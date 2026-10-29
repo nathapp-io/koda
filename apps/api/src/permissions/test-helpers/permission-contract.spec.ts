@@ -154,6 +154,15 @@ describe('permission contract checker', () => {
     expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
   });
 
+  it('US-007: removes gated workspace thread actions from pending rollout routes', () => {
+    for (const route of [
+      'PATCH /threads/:id',
+      'POST /threads/:id/stop',
+      'POST /threads/:id/end-session',
+      'POST /threads/:id/answer',
+    ]) expect(PENDING_GATE_ROUTES.has(route)).toBe(false);
+  });
+
   it('keeps exactly 11 secret rollout assignments while thread gates roll out', () => {
     const secretRoutes = [...PENDING_GATE_ROUTES].filter(([, feature]) => feature === 'gate-secret');
     expect(secretRoutes).toHaveLength(11);
