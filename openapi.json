@@ -1312,6 +1312,24 @@
           "201": {
             "description": "Memory items extracted"
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "memory.extract is missing, or an extracted item may not replace its active item"
           },
@@ -1348,6 +1366,24 @@
           "201": {
             "description": "Decision recorded"
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "memory.decision.record is missing, or it may not replace its active decision"
           }
@@ -1380,6 +1416,24 @@
         "responses": {
           "201": {
             "description": "Memory item created"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "403": {
             "description": "memory.create is missing, or the item may not replace its active item"
@@ -4065,6 +4119,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -4109,6 +4181,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SyncResultDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }

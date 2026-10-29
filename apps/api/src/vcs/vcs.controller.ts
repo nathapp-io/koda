@@ -12,7 +12,6 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  HttpException,
   Inject,
   UseGuards,
 } from '@nestjs/common';
@@ -26,7 +25,6 @@ import {
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
-import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
@@ -44,8 +42,6 @@ import {
 } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
-import { decryptToken } from '../common/utils/encryption.util';
-import { providerForConnection } from './provider-for-connection';
 
 @ApiTags('vcs')
 @ApiBearerAuth()
@@ -54,7 +50,6 @@ import { providerForConnection } from './provider-for-connection';
 export class VcsController {
   constructor(
     private readonly vcsService: VcsConnectionService,
-    private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
     private readonly projectsService: ProjectsService,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
@@ -215,6 +210,7 @@ export class VcsController {
    */
   @Post('/sync/:issueNumber')
   @Requires('vcs.sync.issue')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync a specific issue by number' })
   @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
@@ -225,50 +221,16 @@ export class VcsController {
   async syncIssue(
     @Param('slug') slug: string,
     @Param('issueNumber') issueNumber: string,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
-      this.throwEncryptionKeyNotConfigured();
-    }
-
-    // Get the full connection with all fields
-    const connection = await this.vcsService.getFullByProject(project.id);
-
-    // Decrypt token and create provider
-    const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
-
-    // Fetch specific issue
-    const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
-
-    // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project, issue, 'manual', connection, 'vcs.sync.issue');
-
-    // Return HTTP 409 if issue is already synced
-    if (result.action === 'skipped') {
-      throw new HttpException('Issue already synced', HttpStatus.CONFLICT);
-    }
-
-    const ref = result.ticketNumber ? `${project.key}-${result.ticketNumber}` : undefined;
-
-    return JsonResponse.Ok({
-      syncType: 'manual',
-      issuesSynced: 1,
-      issuesSkipped: 0,
-      tickets:
-        ref
-          ? [
-              {
-                ref,
-                title: issue.title,
-              },
-            ]
-          : [],
+    if (!this.vcsConfig.encryptionKey) this.throwEncryptionKeyNotConfigured();
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run<SyncResultDto>({
+      key: 'vcs.sync.issue', variant: VCS_ROUTE_VARIANTS.syncIssue,
+      projectId, input: { slug, projectId, issueNumber },
     });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**
@@ -277,6 +239,7 @@ export class VcsController {
    */
   @Post('/sync')
   @Requires('vcs.sync.all')
+  @ApprovalGated()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
   @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
@@ -285,31 +248,16 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncAll(
     @Param('slug') slug: string,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
-      this.throwEncryptionKeyNotConfigured();
-    }
-
-    // Get the full connection with all fields
-    const connection = await this.vcsService.getFullByProject(project.id);
-
-    // Run full sync
-    const result = await this.syncService.fullSync(project, connection, encryptionKey);
-
-    return JsonResponse.Ok({
-      syncType: 'manual',
-      issuesSynced: result.issuesSynced,
-      issuesSkipped: result.issuesSkipped,
-      tickets: result.createdTickets.map((ticket) => ({
-        ref: `${project.key}-${ticket.number}`,
-        title: ticket.title,
-      })),
+    if (!this.vcsConfig.encryptionKey) this.throwEncryptionKeyNotConfigured();
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run<SyncResultDto>({
+      key: 'vcs.sync.all', variant: VCS_ROUTE_VARIANTS.syncAll,
+      projectId, input: { slug, projectId },
     });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**

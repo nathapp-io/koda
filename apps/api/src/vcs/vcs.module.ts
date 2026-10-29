@@ -1,3 +1,4 @@
+import { VcsManualSync } from './vcs-manual-sync.service';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { VcsRouteCommands } from './vcs-route.commands';
@@ -23,6 +24,7 @@ import { WebhookSecurityModule } from '../webhook-security/webhook-security.modu
   controllers: [VcsController, VcsWebhookController],
   providers: [
     VcsRouteCommands,
+    VcsManualSync,
     PrismaVcsRepository,
     { provide: VCS_REPOSITORY, useExisting: PrismaVcsRepository },
     VcsConnectionService,

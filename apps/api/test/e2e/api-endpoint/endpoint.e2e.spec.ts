@@ -1,3 +1,4 @@
+import { GitHubProvider } from '../../../src/vcs/providers/github.provider';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * API E2E Tests — Full lifecycle via supertest + real Postgres DB
@@ -5679,5 +5680,46 @@ describeIntegration('admin write approval lifecycle', () => {
     const retried = await request(server()).post(`/api/admin/outbox/${event.id}/retry`).set(auth(world.tokens.root)).expect(200);
     expect(retried.text).toBe('');
     expect((await db.outboxEvent.findUniqueOrThrow({ where: { id: event.id } })).status).toBe('pending');
+  });
+});
+
+
+describeIntegration('VCS manual issue sync lifecycle', () => {
+  let app: NathApplication;
+  let world: FleetHttpWorld;
+  let slug: string;
+  let sequence = 0;
+  const server = () => app.getHttpServer();
+  const root = () => ({ Authorization: `Bearer ${world.tokens.root}` });
+  const post = (suffix = '') => request(server()).post(`/api/projects/${slug}/vcs/sync${suffix}`).set(root());
+  const issue = (number: number) => ({ number, title: `Issue ${number}`, body: null, authorLogin: 'alice', url: `https://github.com/acme/manual/issues/${number}`, labels: [], createdAt: new Date() });
+  beforeAll(async () => {
+    vi.stubEnv('VCS_ENCRYPTION_KEY', 'ab'.repeat(32));
+    try {
+      await resetDb();
+      app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+      world = await seedFleetHttpWorld(server(), fixtureDb(app));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 60000);
+  beforeEach(async () => {
+    resetThrottle(app);
+    slug = `manual-sync-e2e-${++sequence}`;
+    await request(server()).post('/api/projects').set(root()).send({ slug, key: `SYNC${String.fromCharCode(64 + sequence)}`, name: 'Manual sync' }).expect(201);
+    await request(server()).post(`/api/projects/${slug}/vcs`).set(root()).send({ provider: 'github', repoOwner: 'acme', repoName: 'manual', token: 'fixture-token', syncMode: 'off' }).expect(201);
+  });
+  afterEach(() => vi.restoreAllMocks());
+  afterAll(async () => { await app?.close(); });
+  it('single import returns project-key refs and a duplicate remains 409', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssue').mockResolvedValue(issue(7));
+    expect(data(await post('/7').expect(200))).toMatchObject({ issuesSynced: 1, tickets: [{ ref: `SYNC${String.fromCharCode(64 + sequence)}-1`, title: 'Issue 7' }] });
+    await post('/7').expect(409);
+  });
+  it('full import returns a summary and a removed connection remains 404', async () => {
+    vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockResolvedValue({ issues: [issue(8)], cursor: null, capped: false });
+    expect(data(await post().expect(200))).toMatchObject({ issuesSynced: 1, issuesSkipped: 0, tickets: [{ title: 'Issue 8' }] });
+    await request(server()).delete(`/api/projects/${slug}/vcs`).set(root()).expect(204);
+    await post().expect(404);
   });
 });

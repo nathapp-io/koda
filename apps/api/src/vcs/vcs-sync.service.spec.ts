@@ -86,6 +86,13 @@ describe('VcsSyncService', () => {
   let mockRepo: Mocked<IVcsRepository>;
   const auditRecord = vi.mocked(mockAuditRecorder.record);
 
+  it('AC-10: strict syncIssues propagates the first write error and stops', async () => {
+    const error = new Error('write failed');
+    mockRepo.createTicketFromIssue.mockRejectedValue(error);
+    await expect(service.syncIssues(makeProject(), [makeIssue(), makeIssue({ number: 2 })], makeConnection(), 'vcs.sync.all', { isolate: false })).rejects.toBe(error);
+    expect(mockRepo.createTicketFromIssue).toHaveBeenCalledOnce();
+  });
+
   beforeEach(async () => {
     mockRepo = createMockRepo();
     auditRecord.mockClear();

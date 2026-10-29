@@ -107,56 +107,47 @@ export class VcsSyncService {
     createdTickets: Array<{ id: string; number: number; title: string }>;
     errors: string[];
   }> {
+    try {
+      const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
+      const { issues } = await provider.fetchIssues();
+      return await this.syncIssues(project, this.filterByAllowedAuthors(issues, connection.allowedAuthors), connection, 'vcs.sync.all', { isolate: true });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return { issuesSynced: 0, issuesSkipped: 0, createdTickets: [], errors: [`Sync failed: ${errorMsg}`] };
+    }
+  }
+
+  /** Deferred callers propagate the first failure so the enclosing transaction rolls back. */
+  async syncIssues(
+    project: { id: string; key: string },
+    issues: VcsIssue[],
+    repo: VcsRepoRef,
+    auditKey: VcsIssueAuditKey,
+    { isolate }: { isolate: boolean },
+  ) {
     const createdTickets: Array<{ id: string; number: number; title: string }> = [];
     const errors: string[] = [];
     let issuesSynced = 0;
     let issuesSkipped = 0;
-
-    try {
-      // Decrypt token
-      const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-
-      // Create provider
-      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
-
-      // Fetch all issues
-      const { issues } = await provider.fetchIssues();
-
-      // Filter by allowed authors
-      const filteredIssues = this.filterByAllowedAuthors(issues, connection.allowedAuthors);
-
-      // Sync each issue
-      for (const issue of filteredIssues) {
-        try {
-          const result = await this.syncIssue(project, issue, 'manual', connection, 'vcs.sync.all');
-          if (result.action === 'created') {
-            issuesSynced++;
-            if (result.ticketId && result.ticketNumber) {
-              createdTickets.push({
-                id: result.ticketId,
-                number: result.ticketNumber,
-                title: result.ticketTitle ?? issue.title,
-              });
-            }
-          } else {
-            issuesSkipped++;
+    for (const issue of issues) {
+      try {
+        const result = await this.syncIssue(project, issue, 'manual', repo, auditKey);
+        if (result.action === 'created') {
+          issuesSynced++;
+          if (result.ticketId && result.ticketNumber) {
+            createdTickets.push({ id: result.ticketId, number: result.ticketNumber, title: result.ticketTitle ?? issue.title });
           }
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          errors.push(`Issue ${issue.number}: ${errorMsg}`);
+        } else {
           issuesSkipped++;
         }
+      } catch (error) {
+        if (!isolate) throw error;
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errors.push(`Issue ${issue.number}: ${errorMsg}`);
+        issuesSkipped++;
       }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      errors.push(`Sync failed: ${errorMsg}`);
     }
-
-    return {
-      issuesSynced,
-      issuesSkipped,
-      createdTickets,
-      errors,
-    };
+    return { issuesSynced, issuesSkipped, createdTickets, errors };
   }
 }
