@@ -52,6 +52,32 @@ it('AC-1: recordDecision records and approves without executing', async () => {
   expect(s.execution.execute).not.toHaveBeenCalled();
 });
 
+it('US-002 AC-2: resets redeem expiry to the original ask window on approval', async () => {
+  const s = setup();
+  s.request.redeem = true;
+  s.request.createdAt = now;
+  s.request.expiresAt = new Date(now.getTime() + 600_000);
+  await runWithActionContext({ actor: { type: 'USER', id: 'u1' }, origin: 'rest' },
+    () => s.service.recordDecision('r1', 'approve', null, new Date(now.getTime() + 100_000)));
+  expect(s.repo.transition).toHaveBeenCalledWith('r1', 'pending', expect.objectContaining({
+    status: 'approved', expiresAt: new Date(now.getTime() + 700_000),
+  }));
+});
+
+it('US-002 AC-3: does not add expiry to an ordinary approval patch', async () => {
+  const s = setup();
+  await runWithActionContext({ actor: { type: 'USER', id: 'u1' }, origin: 'rest' },
+    () => s.service.recordDecision('r1', 'approve', null, now));
+  expect(s.repo.transition.mock.calls[0]?.[2]).not.toHaveProperty('expiresAt');
+});
+
+it('US-002 AC-4: returns approved redeem state without executing', async () => {
+  const s = setup();
+  s.request.redeem = true;
+  expect(await s.decide()).toMatchObject({ status: 'approved' });
+  expect(s.execution.execute).not.toHaveBeenCalled();
+});
+
 it('AC-2: decide records first and then executes an approval', async () => {
   const s = setup();
   const recordDecision = vi.spyOn(s.service, 'recordDecision');

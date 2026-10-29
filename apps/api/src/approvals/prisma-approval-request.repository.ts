@@ -183,7 +183,7 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
 
   async findStaleApproved(before: Date, limit: number): Promise<ApprovalRequestRecord[]> {
     const rows = await this.prisma.client.approvalRequest.findMany({
-      where: { status: 'approved', decidedAt: { lte: before } },
+      where: { status: 'approved', redeem: false, decidedAt: { lte: before } },
       orderBy: [{ decidedAt: 'asc' }, { id: 'asc' }], take: limit,
     });
     return rows.map((row) => this.toDomain(row));

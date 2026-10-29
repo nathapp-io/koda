@@ -244,6 +244,16 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     expect(b.execution.execute).not.toHaveBeenCalled();
   });
 
+  it('US-002 AC-5: restarts redeem timeout window and does not execute', async () => {
+    const due = request({ onTimeout: 'approve', redeem: true, createdAt: new Date(NOW.getTime() - 600 * SECOND), expiresAt: NOW });
+    const b = build({ due: [due] });
+    expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, approved: 1, failed: 0 });
+    expect(b.requests.transition).toHaveBeenCalledWith('r1', 'pending', {
+      status: 'approved', decidedAt: NOW, satisfiedBy: 'none', expiresAt: new Date(NOW.getTime() + 600 * SECOND),
+    });
+    expect(b.execution.execute).not.toHaveBeenCalled();
+  });
+
   it('approves on timeout with no approver and executes only after the commit', async () => {
     const due = request({ onTimeout: 'approve' });
     const b = build({ due: [due] });

@@ -71,6 +71,29 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it('US-002 AC-1: returns approved redeem requests without parsing or running commands', async () => {
+    const s = setup({ redeem: true });
+    const execute = vi.spyOn(s.test.command, 'execute');
+    const prepare = vi.fn(async () => vi.fn());
+    s.test.command.prepare = prepare;
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'approved', redeem: true });
+    expect(s.test.state.calls).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(s.repo.transition).not.toHaveBeenCalled();
+  });
+
+  it('US-002 REG-1: validates pending status before returning for redeem requests', async () => {
+    const s = setup({ redeem: true, status: 'pending' });
+    const execute = vi.spyOn(s.test.command, 'execute');
+    const prepare = vi.fn(async () => vi.fn());
+    s.test.command.prepare = prepare;
+    await expect(s.service.execute('r1', now)).rejects.toEqual(new ApprovalRequestNotPendingError('pending'));
+    expect(s.test.state.calls).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(s.repo.transition).not.toHaveBeenCalled();
+  });
   it('fails a global agent update after deletion/recreation and leaves the replacement untouched', async () => {
     const frozen = { slug: 'bot', agentId: 'original', patch: { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 } };
     const s = setup({ permissionKey: 'agent.update', projectId: null, variant: AGENT_ROUTE_VARIANTS.update,

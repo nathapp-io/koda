@@ -62,6 +62,7 @@ export class ApprovalExecutionService {
     const request = await this.requests.findById(requestId);
     if (!request) throw new ApprovalRequestNotFoundError(requestId);
     if (request.status !== 'approved') throw new ApprovalRequestNotPendingError(request.status);
+    if (request.redeem === true) return request;
 
     // Every write below, the settle rows included, runs as the request's actor: the caller's own
     // context (the decider's, or none for a direct call) is not the one the command was asked under.

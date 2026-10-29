@@ -34,7 +34,7 @@ export class ApprovalDecisionService {
     const decided = await this.recordDecision(requestId, decision, comment, now, params ?? undefined);
     // The decision is committed before the command runs, in its own transaction, so a failing
     // command leaves the approval on record and settles the request as failed.
-    return decision === 'approve' ? this.execution.execute(requestId) : decided;
+    return decision === 'approve' && decided.redeem !== true ? this.execution.execute(requestId) : decided;
   }
 
   /** Read-only eligibility check used before a decision is deferred behind another approval. */
@@ -110,8 +110,11 @@ export class ApprovalDecisionService {
       });
       const approved = decision === 'approve';
       const attribution = approved ? { satisfiedBy: eligibility.satisfiedBy, approverType: decider.type, approverId: decider.id } : {};
+      const redeemWindow = approved && request.redeem === true
+        ? { expiresAt: new Date(now.getTime() + (request.expiresAt.getTime() - request.createdAt.getTime())) }
+        : {};
       const updated = await this.requests.transition(requestId, 'pending', {
-        status: approved ? 'approved' : 'rejected', decidedAt: now, ...attribution,
+        status: approved ? 'approved' : 'rejected', decidedAt: now, ...attribution, ...redeemWindow,
       });
       // A lost CAS under our row lock indicates a broken transaction boundary: roll back all writes.
       if (!updated) throw new ApprovalRequestNotPendingError(request.status);

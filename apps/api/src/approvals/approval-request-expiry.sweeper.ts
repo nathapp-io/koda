@@ -122,6 +122,7 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
       // Counted as approved before its execution, which ends on its own: a command that throws or
       // fails its pre-checks still leaves the request approved by the timeout.
       result.approved += 1;
+      if (settled.redeem === true) continue;
       try {
         await this.execution.execute(settled.id);
       } catch (error) {
@@ -145,7 +146,12 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
     const approved = locked.onTimeout === 'approve';
     const settled = await this.requests.transition(locked.id, 'pending', approved
       // No approver at all: the timeout released it, so nothing but the clock satisfies the mode.
-      ? { status: 'approved', decidedAt: now, satisfiedBy: 'none' }
+      ? {
+        status: 'approved', decidedAt: now, satisfiedBy: 'none',
+        ...(locked.redeem === true
+          ? { expiresAt: new Date(now.getTime() + (locked.expiresAt.getTime() - locked.createdAt.getTime())) }
+          : {}),
+      }
       : { status: 'expired', settledAt: now });
     // The row is locked by this transaction, so a lost transition means a broken boundary: throw so the
     // transaction rolls back, instead of recording an entry for a settlement that did not happen.

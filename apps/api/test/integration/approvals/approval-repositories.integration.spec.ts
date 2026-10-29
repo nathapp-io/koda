@@ -124,6 +124,12 @@ describeDb('approval repositories through AppModule', () => {
     expect((await requests.findDue(now, 10)).map((r) => r.id)).toEqual([older.id, due.id]);
     expect(await requests.findDue(now, 1)).toHaveLength(1);
   });
+  it('US-002 AC-6: stale approved selection excludes redeem requests', async () => {
+    const before = new Date(now.getTime());
+    const ordinary = await create({ status: 'approved', decidedAt: new Date(before.getTime() - 2_000) });
+    await create({ status: 'approved', redeem: true, decidedAt: new Date(before.getTime() - 1_000) });
+    expect((await requests.findStaleApproved(before, 100)).map((row) => row.id)).toEqual([ordinary.id]);
+  });
   it('AC-7: conditionally transitions a pending row', async () => {
     const row = await create();
     expect(await write(() => tx.run(() => requests.transition(row.id, 'pending', { status: 'approved' })))).toMatchObject({ id: row.id, status: 'approved' });
