@@ -72,6 +72,12 @@ const gatedOperations = [
   ['delete', '/api/projects/{slug}/invites/{id}'],
   ['put', '/api/projects/{slug}/tickets/{ref}/watch'],
   ['delete', '/api/projects/{slug}/tickets/{ref}/watch'],
+  ['patch', '/api/agents/{slug}'],
+  ['patch', '/api/agents/{slug}/update-capabilities'],
+  ['patch', '/api/projects/{slug}/agents/{agentSlug}'],
+  ['patch', '/api/admin/users/{id}'],
+  // JWT-only over REST, but still a gated command with a documented pending response.
+  ['post', '/api/admin/outbox/{eventId}/retry'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
@@ -121,7 +127,7 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/invites']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-6: 202 responses exist on exactly the 62 gated operations and existing reindex operation', () => {
+  it('AC-6: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });
