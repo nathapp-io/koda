@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T05:50:39.043Z",
+  "updatedAt": "2026-10-29T06:37:34.334Z",
   "userStories": [
     {
       "id": "US-001",
@@ -937,14 +937,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces a write service and embedding/write split while preserving creator authorization, replacement races and shared-store compatibility; security override applies."
+        "reasoning": "Introduces a write service and embedding/write split while preserving creator authorization, replacement races and shared-store compatibility; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/rag/vector-store.service.ts",
@@ -1009,7 +1012,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5cc8b516ba59655ebf0efd7e1a58dde8b254dc00"
     },
     {
       "id": "US-012",
