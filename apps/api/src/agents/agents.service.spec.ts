@@ -532,6 +532,17 @@ describe('AgentsService', () => {
     });
   });
 
+  describe('updateRosteredAgent', () => {
+    it('AC-11: refuses a target removed from the project roster without updating it', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+      await expect(service.updateRosteredAgent('alpha', 'test-agent', { status: 'PAUSED' }))
+        .rejects.toMatchObject({ prefix: 'projectAgents' });
+      expect(mockAgentRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('update', () => {
     it('should update agent with basic fields', async () => {
       const updateData = {

@@ -76,7 +76,7 @@ describe('ApprovalExecutionService', () => {
       const softDeleteById = vi.fn().mockResolvedValue({ id: 'p1' });
       const loader = { forContext: vi.fn().mockResolvedValue({ actorType: 'agent', id: 'a1' }) };
       new ProjectRouteCommands(s.registry, { softDeleteById } as unknown as ProjectsService,
-        loader as unknown as ActorPrincipalLoader).onModuleInit();
+        loader as unknown as ActorPrincipalLoader, {} as never).onModuleInit();
       const fence = vi.fn().mockRejectedValue(new Error('project was renamed'));
       Object.assign(s.repo, { lockProjectSlug: fence });
 

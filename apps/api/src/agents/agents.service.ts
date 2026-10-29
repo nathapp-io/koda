@@ -216,6 +216,13 @@ export class AgentsService {
     return this.agentRepo.isOnProjectRoster(agent.id, project.id);
   }
 
+  async updateRosteredAgent(projectSlug: string, agentSlug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
+    if (!(await this.isOnProjectRosterBySlug(projectSlug, agentSlug))) {
+      throw new NotFoundAppException({}, 'projectAgents');
+    }
+    return this.update(agentSlug, updateData);
+  }
+
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
     const existing = await this.agentRepo.findBySlugScalar(slug);
     if (!existing) throw new NotFoundAppException({}, 'agents');

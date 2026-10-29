@@ -20,7 +20,6 @@ const ROUTE_ASSIGNMENTS = `
 DELETE /projects/:slug/skills/:skillId=gate-core-domains
 DELETE /projects/:slug/tickets/:ref/fleet-jobs/:jobId=gate-fleet
 PATCH /admin/users/:id=gate-core-domains
-PATCH /projects/:slug/agents/:agentSlug=gate-core-domains
 PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
 PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
