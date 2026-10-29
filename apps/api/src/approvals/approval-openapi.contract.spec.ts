@@ -141,7 +141,19 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/invites']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-6: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
+  it('AC-5: POST /api/memory has a 202 response', () => {
+    expect(openapi.paths['/api/memory']?.post?.responses).toHaveProperty('202');
+  });
+
+  it('AC-6: secret agent creation has no 202 response', () => {
+    expect(openapi.paths['/api/agents']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-7: POST knowledge-base search has no 202 response', () => {
+    expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
+  });
+
+  it('AC-8: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });

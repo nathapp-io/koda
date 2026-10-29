@@ -179,7 +179,7 @@ export function findContractViolations(
   declarations: PermissionDeclarations,
   catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,
   pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,
-  pendingGateRoutes: ReadonlyMap<string, PendingGateFeature> = PENDING_GATE_ROUTES,
+  pendingGateRoutes: ReadonlyMap<string, string> = PENDING_GATE_ROUTES,
 ): ContractViolation[] {
   const catalogKeys = new Set(catalog.map(({ key }) => key));
   const catalogByKey = new Map(catalog.map((entry) => [entry.key, entry]));

@@ -3616,6 +3616,21 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ id: string; enabled: boolean }>(res)).toMatchObject({ id: skillId, enabled: true });
     });
 
+    it('AC-9: agent project-skill enable under a wait policy answers exactly 202', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const skillId = await seedSkill(uniqueName());
+      await grantKeys(db, { type: 'AGENT', id: agentId }, ['skill.project.enable', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db, 'skill.project.enable', project.id);
+      try {
+        await request(httpServer).put(`/api/projects/${projectSlug}/skills/${skillId}`)
+          .set('Authorization', `Bearer ${agentApiKey}`).send({}).expect(202);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
     it('PUT /api/projects/:slug/skills/:skillId — human bypasses a wait policy without an approval row', async () => {
       const db = fixtureDb(app);
       const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
@@ -3627,6 +3642,21 @@ describeIntegration('API Integration Tests', () => {
           .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
         expect(body<{ enabled: boolean }>(res).enabled).toBe(true);
         expect(await db.approvalRequest.count()).toBe(before);
+      } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
+    it('AC-10: agent memory create under a wait policy answers exactly 202', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(db, { type: 'AGENT', id: agentId }, ['memory.create', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(db, 'memory.create', project.id);
+      try {
+        await request(httpServer).post('/api/memory').set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ projectId: project.id, kind: 'FACT', subject: 'approval-test', predicate: 'is', object: 'gated' })
+          .expect(202);
       } finally {
         await db.approvalPolicy.delete({ where: { id: policy.id } });
       }

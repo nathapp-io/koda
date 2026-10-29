@@ -1,5 +1,5 @@
 /** Routes whose approval gates are assigned to a later permissions rollout feature. */
-export type PendingGateFeature = 'gate-secret' | 'gate-core-domains' | 'gate-fleet';
+export type PendingGateFeature = 'gate-secret' | 'gate-fleet';
 
 /** Explicitly identified secret-bearing routes remain outside the high-risk rollout. */
 export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
@@ -67,7 +67,7 @@ PUT /projects/:slug/knowledge/patterns=gate-fleet
 `;
 
 function isPendingGateFeature(value: string): value is PendingGateFeature {
-  return value === 'gate-secret' || value === 'gate-core-domains' || value === 'gate-fleet';
+  return value === 'gate-secret' || value === 'gate-fleet';
 }
 
 export const PENDING_GATE_ROUTES: ReadonlyMap<string, PendingGateFeature> = new Map(

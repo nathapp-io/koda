@@ -63,8 +63,12 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  it('US-001: collects at least the 62 previously gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBeGreaterThanOrEqual(62);
+  it('AC-1: collects exactly 81 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated)).toHaveLength(81);
+  });
+
+  it('AC-2: reports no permission contract violations over the booted app', () => {
+    expect(findContractViolations(declarations)).toEqual([]);
   });
 
   it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
