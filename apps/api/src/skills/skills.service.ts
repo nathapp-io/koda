@@ -17,6 +17,10 @@ export class SkillsService {
   ) {}
 
   async createSource(input: { gitUrl: string; ref: string; path: string }, principal: KodaPrincipal): Promise<SkillSourceDomain> {
+    return (await this.prepareCreateSource(input, principal))();
+  }
+
+  async prepareCreateSource(input: { gitUrl: string; ref: string; path: string }, principal: KodaPrincipal): Promise<() => Promise<SkillSourceDomain>> {
     const parsed = parseGitHubUrl(input.gitUrl);
     if (await this.catalog.findSource(parsed.owner, parsed.repo, input.ref, input.path)) {
       throw new ConflictAppException({}, 'skills.sourceExists');
@@ -26,85 +30,105 @@ export class SkillsService {
     let statusReason: string | null = null;
     try {
       resolution = await this.resolver.resolve({ owner: parsed.owner, repo: parsed.repo, ref: input.ref, path: input.path });
-      const owners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
-      const taken = owners[0];
-      if (taken) throw new ConflictAppException({ name: taken.name, gitUrl: taken.source.gitUrl }, 'skills.nameConflict');
     } catch (error) {
-      if (error instanceof ConflictAppException) throw error;
       if (!(error instanceof SkillResolveError)) throw error;
       statusReason = formatSkillResolveReason(error.reason, error.detail);
     }
 
-    const created = await this.audit.audited(
-      () => this.catalog.createSource({
-        gitUrl: parsed.gitUrl,
-        owner: parsed.owner,
-        repo: parsed.repo,
-        ref: input.ref,
-        path: input.path,
-        resolvedSha: resolution?.sha ?? null,
-        resolvedAt: resolution ? new Date() : null,
-        status: resolution ? 'OK' : 'RESOLVE_FAILED',
-        statusReason,
-        createdById: principal.id,
-        skills: resolution?.skills ?? [],
-      }),
-      (source) => source ? {
-        key: 'skill.source.create', resourceType: 'skill-source', resourceId: source.id, projectId: null,
-        summary: `created, status ${source.status}, skills ${source.skills.length}`,
-      } : [],
-    );
-    return created;
+    return async () => {
+      if (await this.catalog.findSource(parsed.owner, parsed.repo, input.ref, input.path)) {
+        throw new ConflictAppException({}, 'skills.sourceExists');
+      }
+      if (resolution) {
+        const owners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
+        const taken = owners[0];
+        if (taken) throw new ConflictAppException({ name: taken.name, gitUrl: taken.source.gitUrl }, 'skills.nameConflict');
+      }
+      const created = await this.audit.audited(
+        () => this.catalog.createSource({
+          gitUrl: parsed.gitUrl,
+          owner: parsed.owner,
+          repo: parsed.repo,
+          ref: input.ref,
+          path: input.path,
+          resolvedSha: resolution?.sha ?? null,
+          resolvedAt: resolution ? new Date() : null,
+          status: resolution ? 'OK' : 'RESOLVE_FAILED',
+          statusReason,
+          createdById: principal.id,
+          skills: resolution?.skills ?? [],
+        }),
+        (source) => source ? {
+          key: 'skill.source.create', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+          summary: `created, status ${source.status}, skills ${source.skills.length}`,
+        } : [],
+      );
+      return created;
+    };
   }
 
   async updateSource(id: string): Promise<SkillSourceDomain> {
+    return (await this.prepareUpdateSource(id))();
+  }
+
+  async prepareUpdateSource(id: string): Promise<() => Promise<SkillSourceDomain>> {
     const source = await this.catalog.findSourceById(id);
     if (!source) throw new NotFoundAppException({}, 'skills.sourceNotFound');
 
-    let resolution: Awaited<ReturnType<SkillResolver['resolve']>>;
+    let resolution: Awaited<ReturnType<SkillResolver['resolve']>> | undefined;
+    let statusReason = formatSkillResolveReason('no_skills');
     try {
       resolution = await this.resolver.resolve({ owner: source.owner, repo: source.repo, ref: source.ref, path: source.path });
       if (resolution.skills.length === 0) throw new SkillResolveError('no_skills');
     } catch (error) {
       if (!(error instanceof SkillResolveError)) throw error;
-      const failed = await this.audit.audited(
-        () => this.catalog.markResolveFailed(id, formatSkillResolveReason(error.reason, error.detail)),
-        (source) => source ? {
-          key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
-          summary: `updated, status ${source.status}, skills ${source.skills.length}`,
-        } : [],
-      );
-      if (!failed) throw new NotFoundAppException({}, 'skills.sourceNotFound');
-      return failed;
+      resolution = undefined;
+      statusReason = formatSkillResolveReason(error.reason, error.detail);
     }
 
-    const owners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
-    const otherOwner = owners.find(({ source }) => source.id !== id);
-    if (otherOwner) {
-      throw new ConflictAppException({ name: otherOwner.name, gitUrl: otherOwner.source.gitUrl }, 'skills.nameConflict');
-    }
+    return async () => {
+      if (!await this.catalog.findSourceById(id)) throw new NotFoundAppException({}, 'skills.sourceNotFound');
+      if (!resolution) {
+        const failed = await this.audit.audited(
+          () => this.catalog.markResolveFailed(id, statusReason),
+          (source) => source ? {
+            key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+            summary: `updated, status ${source.status}, skills ${source.skills.length}`,
+          } : [],
+        );
+        if (!failed) throw new NotFoundAppException({}, 'skills.sourceNotFound');
+        return failed;
+      }
 
-    try {
-      const updated = await this.audit.audited(
-        () => this.catalog.replaceSourceSkills(id, {
-          resolvedSha: resolution.sha,
-          resolvedAt: new Date(),
-          skills: resolution.skills,
-        }),
-        (source) => source ? {
-          key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
-          summary: `updated, status ${source.status}, skills ${source.skills.length}`,
-        } : [],
-      );
-      if (!updated) throw new NotFoundAppException({}, 'skills.sourceNotFound');
-      return updated;
-    } catch (error) {
-      if (!isUniqueViolation(error, 'name')) throw error;
-      const racedOwners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
-      const racedOwner = racedOwners.find(({ source }) => source.id !== id);
-      if (!racedOwner) throw error;
-      throw new ConflictAppException({ name: racedOwner.name, gitUrl: racedOwner.source.gitUrl }, 'skills.nameConflict');
-    }
+      const resolved = resolution;
+      const owners = await this.catalog.findSkillOwners(resolved.skills.map((skill) => skill.name));
+      const otherOwner = owners.find(({ source }) => source.id !== id);
+      if (otherOwner) {
+        throw new ConflictAppException({ name: otherOwner.name, gitUrl: otherOwner.source.gitUrl }, 'skills.nameConflict');
+      }
+
+      try {
+        const updated = await this.audit.audited(
+          () => this.catalog.replaceSourceSkills(id, {
+            resolvedSha: resolved.sha,
+            resolvedAt: new Date(),
+            skills: resolved.skills,
+          }),
+          (source) => source ? {
+            key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+            summary: `updated, status ${source.status}, skills ${source.skills.length}`,
+          } : [],
+        );
+        if (!updated) throw new NotFoundAppException({}, 'skills.sourceNotFound');
+        return updated;
+      } catch (error) {
+        if (!isUniqueViolation(error, 'name')) throw error;
+        const racedOwners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
+        const racedOwner = racedOwners.find(({ source }) => source.id !== id);
+        if (!racedOwner) throw error;
+        throw new ConflictAppException({ name: racedOwner.name, gitUrl: racedOwner.source.gitUrl }, 'skills.nameConflict');
+      }
+    };
   }
 
   async deleteSource(id: string): Promise<void> {

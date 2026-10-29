@@ -47,6 +47,8 @@ const gatedOperations = [
   ['delete', '/api/projects/{slug}/kb/documents/{sourceId}'],
   ['delete', '/api/agents/{slug}'],
   ['delete', '/api/admin/skills/sources/{id}'],
+  ['post', '/api/admin/skills/sources'],
+  ['post', '/api/admin/skills/sources/{id}/update'],
   ['delete', '/api/projects/{slug}/webhooks/{id}'],
   ['delete', '/api/webhooks/{id}'],
   ['delete', '/api/projects/{slug}/vcs'],

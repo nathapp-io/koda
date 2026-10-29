@@ -3438,7 +3438,10 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ items: unknown[] }>(res)).toHaveProperty('items');
     });
 
-    it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
+    it('POST /api/admin/skills/sources — 201 for a human under wait with no approval row', async () => {
+      const db = fixtureDb(app);
+      const policy = await seedWaitPolicy(db, 'skill.source.create', null);
+      const before = await db.approvalRequest.count();
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
       const resolve = vi.spyOn(resolver, 'resolve');
       resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
@@ -3451,7 +3454,9 @@ describeIntegration('API Integration Tests', () => {
           .expect(201);
 
         expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's1' });
+        expect(await db.approvalRequest.count()).toBe(before);
       } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
         if (resolver) resolve.mockRestore();
       }
     });
@@ -3470,7 +3475,10 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('US-004 Skill source update & delete', () => {
-    it('POST /api/admin/skills/sources/:id/update — 200 with the booted app resolver spied', async () => {
+    it('POST /api/admin/skills/sources/:id/update — 200 for a human under wait with no approval row', async () => {
+      const db = fixtureDb(app);
+      const policy = await seedWaitPolicy(db, 'skill.source.update', null);
+      const before = await db.approvalRequest.count();
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
       const resolve = vi.spyOn(resolver, 'resolve');
       try {
@@ -3490,7 +3498,9 @@ describeIntegration('API Integration Tests', () => {
           .expect(200);
 
         expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's2' });
+        expect(await db.approvalRequest.count()).toBe(before);
       } finally {
+        await db.approvalPolicy.delete({ where: { id: policy.id } });
         if (resolver) resolve.mockRestore();
       }
     });
