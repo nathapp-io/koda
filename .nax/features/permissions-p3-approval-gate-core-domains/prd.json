@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T05:18:13.838Z",
+  "updatedAt": "2026-10-29T05:40:45.850Z",
   "userStories": [
     {
       "id": "US-001",
@@ -753,14 +753,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends the route adapter to expose the engine's existing afterCommit hook and splits PR fetch/apply with merge/404 rethrow and extraction ordering; authorization mandates security-isolated TDD."
+        "reasoning": "Extends the route adapter to expose the engine's existing afterCommit hook and splits PR fetch/apply with merge/404 rethrow and extraction ordering; authorization mandates security-isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-pr-sync.service.ts",
@@ -814,7 +817,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d4a5d30111e04cf1d008583b0a90c639d8d5414f"
     },
     {
       "id": "US-010",
