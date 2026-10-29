@@ -1,4 +1,5 @@
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -341,6 +342,17 @@ describe('AgentsController', () => {
   });
 
   describe('PATCH /api/agents/:slug', () => {
+    it('answers the executed update result from the gate', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      gate.run.mockResolvedValue({ status: 'executed', result: mockAgent });
+      await expect(controller.update('bot', { name: 'x' }, mockMemberUser)).resolves.toMatchObject({ data: mockAgent });
+    });
+    it('maps a pending update outcome to ApprovalPending', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const request = { id: 'pending-1' };
+      gate.run.mockResolvedValue({ status: 'pending', request });
+      await expect(controller.update('bot', { name: 'x' }, mockMemberUser)).rejects.toMatchObject({ constructor: ApprovalPending, request });
+    });
     it('AC-8: gates the immutable route input', async () => {
       const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
       const update = { name: 'x' };
@@ -416,6 +428,24 @@ describe('AgentsController', () => {
   });
 
   describe('PATCH /api/agents/:slug/update-capabilities', () => {
+    it('resolves the target id and returns the executed gate result', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const target = { ...mockAgent, id: 'target-1' };
+      const result = { ...mockAgent, capabilities: [] };
+      mockAgentsService.findBySlug.mockResolvedValue(target);
+      gate.run.mockResolvedValue({ status: 'executed', result });
+      await expect(controller.updateCapabilities('bot', { capabilities: ['ts'] }, mockMemberUser)).resolves.toMatchObject({ data: result });
+      expect(service.findBySlug).toHaveBeenCalledWith('bot');
+      expect(gate.run).toHaveBeenCalledWith({ key: 'agent.capabilities.update', variant: 'rest:agents.update-capabilities', projectId: null, input: { slug: 'bot', agentId: 'target-1', capabilities: { capabilities: ['ts'] } } });
+      expect(service.updateCapabilities).not.toHaveBeenCalled();
+    });
+    it('maps pending capabilities update to ApprovalPending', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const request = { id: 'pending-capabilities' };
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
+      gate.run.mockResolvedValue({ status: 'pending', request });
+      await expect(controller.updateCapabilities('bot', { capabilities: ['ts'] }, mockMemberUser)).rejects.toMatchObject({ constructor: ApprovalPending, request });
+    });
     it('should update agent capabilities for ADMIN user', async () => {
       const updateCapabilitiesDto = {
         capabilities: ['typescript', 'react', 'nodejs'],

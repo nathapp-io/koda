@@ -14,11 +14,14 @@ import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.servi
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 import { AfterCommitService } from '../permissions/after-commit.service';
+import { AgentAuthProvider } from '../auth/agent-auth.provider';
 
 describe('AgentsService', () => {
   let service: AgentsService;
   let agentRepo: Mocked<PrismaAgentRepository>;
   let kodaDomainWriter: { writeAgentAction: Mock };
+  let afterCommit: AfterCommitService;
+  const authProvider = { invalidateByTag: vi.fn().mockResolvedValue(undefined) };
 
   const mockAgent = {
     id: 'agent-123',
@@ -67,6 +70,7 @@ describe('AgentsService', () => {
     updateApiKeyHash: vi.fn(),
     update: vi.fn(),
     deleteBySlug: vi.fn(),
+    deleteById: vi.fn(),
     createCapabilities: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
@@ -118,6 +122,7 @@ describe('AgentsService', () => {
       providers: [
         AgentsService,
         AfterCommitService,
+        { provide: AgentAuthProvider, useValue: authProvider },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -129,6 +134,7 @@ describe('AgentsService', () => {
     }).compile();
 
     service = module.get<AgentsService>(AgentsService);
+    afterCommit = module.get(AfterCommitService);
     agentRepo = module.get(PrismaAgentRepository);
     kodaDomainWriter = module.get(KodaDomainWriter);
 
@@ -558,6 +564,40 @@ describe('AgentsService', () => {
       mockAgentRepo.findBySlugScalar.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
+    });
+  });
+
+  describe('auth cache invalidation timing', () => {
+    it('AC-10: update defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.update.mockResolvedValue(mockAgent);
+      await afterCommit.scope(async () => {
+        await service.update(mockAgent.slug, { name: 'Changed' });
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-11: update invalidates immediately without a scope', async () => {
+      mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
+      mockAgentRepo.update.mockResolvedValue(mockAgent);
+      await service.update(mockAgent.slug, { name: 'Changed' });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-12: removeById defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.deleteById.mockResolvedValue(mockAgent);
+      await afterCommit.scope(async () => {
+        await service.removeById(mockAgent.id);
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
+    });
+    it('AC-13: capabilities update defers auth eviction until scope callback returns', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      await afterCommit.scope(async () => {
+        await service.updateCapabilities(mockAgent.id, { capabilities: ['ts'] });
+        expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+      });
+      expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
     });
   });
 
