@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-threads",
   "branchName": "feat/permissions-p3-approval-gate-threads",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T13:28:09.687Z",
+  "updatedAt": "2026-10-29T13:34:24.780Z",
   "userStories": [
     {
       "id": "US-001",
@@ -251,14 +251,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Reuses the registry pattern for two sensitive writes while preserving runner and ownership checks; access control mandates isolated TDD."
+        "reasoning": "Reuses the registry pattern for two sensitive writes while preserving runner and ownership checks; access control mandates isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/thread-route.commands.ts",
@@ -284,7 +287,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dfa7208b5d06930d42c41ecce9958f3d61be8580"
     },
     {
       "id": "US-005",
