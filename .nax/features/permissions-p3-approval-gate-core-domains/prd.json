@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T03:40:35.744Z",
+  "updatedAt": "2026-10-29T04:01:00.559Z",
   "userStories": [
     {
       "id": "US-001",
@@ -211,14 +211,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds one existing-pattern command and a roster helper across agent/project files; the self-bypass and global-key checks mandate security-isolated TDD."
+        "reasoning": "Adds one existing-pattern command and a roster helper across agent/project files; the self-bypass and global-key checks mandate security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/projects/projects.controller.ts",
@@ -268,7 +271,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7285aeffea05b70ad9c891599bc1f1a3a11656cb"
     },
     {
       "id": "US-004",
