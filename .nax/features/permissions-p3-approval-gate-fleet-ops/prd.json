@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-fleet-ops",
   "branchName": "feat/permissions-p3-approval-gate-fleet-ops",
   "createdAt": "2026-10-29T00:00:00Z",
-  "updatedAt": "2026-10-29T10:30:39.817Z",
+  "updatedAt": "2026-10-29T10:44:09.479Z",
   "userStories": [
     {
       "id": "US-001",
@@ -195,14 +195,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Requester authority intentionally bypasses engine key checks and must be proved before gating and recomputed under service locking; strict access-control TDD applies."
+        "reasoning": "Requester authority intentionally bypasses engine key checks and must be proved before gating and recomputed under service locking; strict access-control TDD applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-job-route.commands.ts",
@@ -246,7 +249,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9af497607878209686c32eda89ae669e0cb5d5f3"
     },
     {
       "id": "US-004",
