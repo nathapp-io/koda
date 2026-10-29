@@ -12,6 +12,8 @@ describe('MemoryWriteService', () => {
     );
     const principal = { actorType: 'user', id: 'user-1' } as never;
     await expect(service.create(principal, { projectId: 'p1', kind: MemoryKind.DECISION } as never))
+      .rejects.toMatchObject({ response: { prefix: 'memory' } });
+    await expect(service.create(principal, { projectId: 'p1', kind: MemoryKind.DECISION } as never))
       .rejects.toBeInstanceOf(ValidationAppException);
     expect(repository.upsert).not.toHaveBeenCalled();
   });

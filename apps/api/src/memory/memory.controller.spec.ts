@@ -206,12 +206,12 @@ describe('MemoryController', () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
       (repository.ticketInProject as Mock).mockResolvedValue(false);
 
-      await expect(
-        controller.extractFromEvent(
-          { projectId: 'project-123', ticketId: 'ticket-of-other-project', action: 'status_changed', data: {} },
-          principal,
-        ),
-      ).rejects.toThrow(NotFoundAppException);
+      const error = await controller.extractFromEvent(
+        { projectId: 'project-123', ticketId: 'ticket-of-other-project', action: 'status_changed', data: {} },
+        principal,
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ response: { prefix: 'tickets' } });
 
       expect(repository.ticketInProject).toHaveBeenCalledWith('project-123', 'ticket-of-other-project');
       expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
@@ -479,9 +479,11 @@ describe('MemoryController', () => {
         return { ...DENIED };
       });
 
-      await expect(
-        controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal),
-      ).rejects.toThrow(ForbiddenAppException);
+      const error = await controller.extractFromEvent(
+        { projectId: 'project-123', action: 'status_changed', data: {} }, principal,
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect(error).toMatchObject({ response: { prefix: 'permissions' } });
       expect(repository.findActive).toHaveBeenCalledWith('project-123', MemoryKind.FACT, 'ticket:1', 'status');
       expect(repository.upsert).not.toHaveBeenCalled();
     });
@@ -606,6 +608,17 @@ describe('MemoryController', () => {
   });
 
   describe('createMemory', () => {
+    it('AC-7 delegates to MemoryWriteService and returns its result unchanged', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      const input = { projectId: 'p1', kind: MemoryKind.FACT, subject: 's', predicate: 'p' };
+      const sentinel = { delegated: true };
+      const create = vi.fn().mockResolvedValue(sentinel);
+      const controllerWithService = new MemoryController({ create } as unknown as MemoryWriteService);
+
+      await expect(controllerWithService.createMemory(input, principal)).resolves.toBe(sentinel);
+      expect(create).toHaveBeenCalledExactlyOnceWith(principal, input);
+    });
+
     it('creates a memory item for ADMIN user', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
       const created = makeMemoryItem();
