@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-core",
   "branchName": "feat/permissions-p3-approval-gate-secret-core",
   "createdAt": "2026-11-09T09:00:00.000Z",
-  "updatedAt": "2026-10-29T17:25:30.707Z",
+  "updatedAt": "2026-10-29T17:43:35.741Z",
   "userStories": [
     {
       "id": "US-001",
@@ -439,14 +439,17 @@
         "US-004",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Integrates one-time API-key creation/rotation with requester ownership, target identity, auth-cache commit timing and live HTTP/permission contracts; credentials and access control require strict isolated TDD."
+        "reasoning": "Integrates one-time API-key creation/rotation with requester ownership, target identity, auth-cache commit timing and live HTTP/permission contracts; credentials and access control require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/agents/agents.service.ts",
@@ -508,7 +511,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0bda0d9930002b95c33277e01b8471d6b3c77969"
     },
     {
       "id": "US-007",
