@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core-domains",
   "branchName": "feat/permissions-p3-approval-gate-core-domains",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-10-29T04:01:00.559Z",
+  "updatedAt": "2026-10-29T04:15:34.558Z",
   "userStories": [
     {
       "id": "US-001",
@@ -301,14 +301,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Touches two modules, administrator safety invariants, authentication guards and commit-aware cache revocation; security override applies."
+        "reasoning": "Touches two modules, administrator safety invariants, authentication guards and commit-aware cache revocation; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/users/users-admin.service.ts",
@@ -370,7 +373,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a3cf1ee2043f6bb36448d37c86117753efc33618"
     },
     {
       "id": "US-005",
