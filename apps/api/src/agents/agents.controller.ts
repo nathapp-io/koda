@@ -1,8 +1,9 @@
-import { ApprovalGated, APPROVAL_REDEEM_HEADER } from '../approvals/route/approval-gated.decorator';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../approvals/route/approval-redeem-header.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { AGENT_ROUTE_VARIANTS } from './agent-route.commands';
-import { Controller, Post, Get, Patch, Delete, Body, Param, Query, Headers, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
@@ -93,7 +94,7 @@ export class AgentsController {
   async generateApiKey(
     @Body() createAgentDto: CreateAgentDto,
     @Principal() principal: KodaPrincipal,
-    @Headers(APPROVAL_REDEEM_HEADER) redeem?: string,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     // `gate-secret` (US-006): a wait policy stores the request without the body's secret and approving
     // it runs nothing, so the raw key only ever reaches the caller that redeems the request here.
@@ -230,7 +231,7 @@ export class AgentsController {
   async rotateApiKey(
     @Param('slug') slug: string,
     @Principal() principal: KodaPrincipal,
-    @Headers(APPROVAL_REDEEM_HEADER) redeem?: string,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     // The target is read before the gate, as `agent.delete` does: the request freezes the id, so a
     // slug reused after it opened is a different target and the command never rotates the replacement.

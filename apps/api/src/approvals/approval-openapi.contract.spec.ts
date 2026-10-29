@@ -137,6 +137,13 @@ const gatedOperations = [
   ['post', '/api/threads/{id}/answer'],
 ] as const;
 
+/** The `gate-secret` redeem pilots (US-006, US-007), as [method, path] pairs. */
+const REDEEM_PILOTS = [
+  ['post', '/api/agents'],
+  ['post', '/api/agents/{slug}/rotate-key'],
+  ['post', '/api/admin/users'],
+] as const;
+
 function operationsWith202(): string[] {
   return Object.entries(openapi.paths).flatMap(([path, methods]) =>
     Object.entries(methods)
@@ -187,16 +194,27 @@ describe('OpenAPI contract for 118 gated operations', () => {
   });
 
   it('AC-14 (US-007): the three redeem pilots document a 202 and the redemption header', () => {
-    for (const [method, path] of [
-      ['post', '/api/agents'],
-      ['post', '/api/agents/{slug}/rotate-key'],
-      ['post', '/api/admin/users'],
-    ] as const) {
+    for (const [method, path] of REDEEM_PILOTS) {
       const operation = openapi.paths[path]?.[method];
       expect(operation?.responses, `${method} ${path} 202`).toHaveProperty('202');
       expect(operation?.parameters ?? [], `${method} ${path} header`).toContainEqual(
         expect.objectContaining({ name: 'X-Koda-Approval-Request', in: 'header' }),
       );
+    }
+  });
+
+  /**
+   * Fix round 1 (F1): the header is optional, and a handler parameter reflected by `@Headers()`
+   * documented it a second time as a required one. Exactly one header parameter may exist, and it is
+   * the optional one the route advertises.
+   */
+  it('AC-14 (US-007): each redeem pilot documents the header exactly once, and as optional', () => {
+    for (const [method, path] of REDEEM_PILOTS) {
+      const headers = (openapi.paths[path]?.[method]?.parameters ?? [])
+        .filter((parameter) => parameter.in === 'header');
+
+      expect(headers, `${method} ${path}`).toHaveLength(1);
+      expect(headers[0]).toMatchObject({ name: 'X-Koda-Approval-Request', required: false });
     }
   });
 

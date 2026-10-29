@@ -238,14 +238,6 @@
         "operationId": "AdminUsersController_create",
         "parameters": [
           {
-            "name": "x-koda-approval-request",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "X-Koda-Approval-Request",
             "in": "header",
             "description": "Approval request id to redeem an approved request.",
@@ -389,14 +381,6 @@
       "post": {
         "operationId": "AgentsController_generateApiKey",
         "parameters": [
-          {
-            "name": "x-koda-approval-request",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "X-Koda-Approval-Request",
             "in": "header",
@@ -778,14 +762,6 @@
             "name": "slug",
             "required": true,
             "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "x-koda-approval-request",
-            "required": true,
-            "in": "header",
             "schema": {
               "type": "string"
             }
