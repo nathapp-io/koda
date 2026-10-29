@@ -1,4 +1,4 @@
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
@@ -89,9 +89,21 @@ describe('ThreadRouteCommands', () => {
     if (!command) throw new Error('Missing run command');
     const input = { slug: 'web', projectId: 'p1', id: 't1', run: { maxCostUsd: 3 } };
     const result = await command.execute(command.parse(input));
-    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.run', { projectId: 'p1' });
+    expect(permissions.can).toHaveBeenCalledTimes(2);
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'fleet.job.dispatch', { projectId: 'p1' });
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'thread.run', { projectId: 'p1' });
     expect(threads.run).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', { maxCostUsd: 3 }, true);
     expect(command.toResult?.(result)).toEqual({ job: { id: 'j2' } });
+  });
+
+  it.each(['plan', 'run'] as const)('B1: refuses %s when dispatch is revoked but the thread key remains', async (action) => {
+    const { registry, threads, permissions, principal } = build();
+    permissions.can.mockImplementation(async (_principal, key) => ({ allowed: key !== 'fleet.job.dispatch' }));
+    const command = registry.get(`thread.${action}`, THREAD_ROUTE_VARIANTS[action]);
+    if (!command) throw new Error('Missing handoff command');
+    await expect(command.execute(command.parse({ slug: 'web', projectId: 'p1', id: 't1', [action]: {} }))).rejects.toBeInstanceOf(ForbiddenAppException);
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'fleet.job.dispatch', { projectId: 'p1' });
+    expect(threads[action]).not.toHaveBeenCalled();
   });
 
   it('AC-10: recomputes requester authority for cap update at execution', async () => {

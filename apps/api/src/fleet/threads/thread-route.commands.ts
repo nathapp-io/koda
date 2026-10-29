@@ -1,4 +1,5 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { parseBody } from '../../approvals/route/parse-body';
 import { parseRouteInput } from '../../approvals/route/parse-route-input';
@@ -95,6 +96,10 @@ export class ThreadRouteCommands implements OnModuleInit {
         return { ...route, plan: parseBody(PlanThreadDto, value.plan ?? {}) };
       },
       run: async (principal, input) => {
+        // Dispatch is an execution prerequisite, not an additional approval-policy key.
+        if (!(await this.permissions.can(principal, 'fleet.job.dispatch', { projectId: input.projectId })).allowed) {
+          throw new ForbiddenAppException({}, 'permissions');
+        }
         const canOperate = (await this.permissions.can(principal, 'thread.plan', { projectId: input.projectId })).allowed;
         return this.threads.plan(input.projectId, input.id, principal.id, input.plan, canOperate);
       },
@@ -109,6 +114,10 @@ export class ThreadRouteCommands implements OnModuleInit {
         return { ...route, run: parseBody(RunThreadDto, value.run ?? {}) };
       },
       run: async (principal, input) => {
+        // Dispatch is an execution prerequisite, not an additional approval-policy key.
+        if (!(await this.permissions.can(principal, 'fleet.job.dispatch', { projectId: input.projectId })).allowed) {
+          throw new ForbiddenAppException({}, 'permissions');
+        }
         const canOperate = (await this.permissions.can(principal, 'thread.run', { projectId: input.projectId })).allowed;
         return this.threads.run(input.projectId, input.id, principal.id, input.run, canOperate);
       },

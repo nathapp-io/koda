@@ -98,6 +98,28 @@ describeIntegration('gated project thread handoff routes', () => {
     expect(await db.fleetJob.count({ where: { threadId: thread.id, command: 'RUN' } })).toBe(1);
   });
 
+  it.each(['plan', 'run'] as const)('B1: approved %s fails after only dispatch permission is revoked', async (action) => {
+    const requester = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: requester.id }, ['project.read', `thread.${action}`], world.projectId);
+    const dispatch = await grantKeys(db, { type: 'AGENT', id: requester.id }, ['fleet.job.dispatch'], world.projectId);
+    await app.get(PermissionCache).invalidate();
+    const thread = await createThread();
+    await prepare(thread.id);
+    if (action === 'run') {
+      await db.fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'PLAN', feature: `thread-${thread.id}`,
+        planFrom: `.nax/features/${thread.id}/spec.md`, profiles: [], maxCostUsd: 5, selectorLabels: [],
+        requestedById: requester.id, requestedByType: 'AGENT', threadId: thread.id, state: 'COMPLETED',
+      } });
+    }
+    await seedWaitPolicy(db, `thread.${action}`, world.projectId);
+    const ask = pending(await request(server()).post(`${path}/${thread.id}/${action}`).set(auth(requester.apiKey)).send({}), `thread.${action}`);
+    await db.roleBinding.delete({ where: { id: dispatch.id } });
+    await app.get(PermissionCache).invalidate();
+    expect((await approve(ask.id)).status).toBe('failed');
+    expect(await db.fleetJob.count({ where: { threadId: thread.id, command: action === 'plan' ? 'PLAN' : 'RUN' } })).toBe(0);
+  });
+
   it('AC-6: fleet.job.dispatch policy does not gate a plan under thread.plan', async () => {
     const thread = await createThread();
     await prepare(thread.id);
