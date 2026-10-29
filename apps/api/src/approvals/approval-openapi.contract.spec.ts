@@ -41,6 +41,17 @@ const gatedOperations = [
   ['delete', '/api/fleet/runners/{id}'],
   ['delete', '/api/fleet/analytics'],
   ['delete', '/api/projects/{slug}/fleet/schedules/{id}'],
+  ['post', '/api/projects/{slug}/fleet/schedules'],
+  ['patch', '/api/projects/{slug}/fleet/schedules/{id}'],
+  ['post', '/api/projects/{slug}/fleet/schedules/{id}/enable'],
+  ['post', '/api/projects/{slug}/fleet/schedules/{id}/disable'],
+  ['post', '/api/projects/{slug}/fleet/repos/{repoId}/config-edits'],
+  ['post', '/api/projects/{slug}/fleet/repos/{repoId}/config-edits/regenerate'],
+  ['post', '/api/fleet/ingest/backfill'],
+  ['post', '/api/fleet/ingest/jobs/{jobId}/rerun'],
+  ['post', '/api/fleet/ingest/rerun-outdated'],
+  ['put', '/api/projects/{slug}/knowledge/patterns'],
+  ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'],
   ['delete', '/api/comments/{id}'],
   ['delete', '/api/projects/{slug}/labels/{id}'],
   ['delete', '/api/projects/{slug}/tickets/{ref}'],
@@ -97,8 +108,6 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/vcs/sync'],
   ['post', '/api/projects/{slug}/vcs/sync/{issueNumber}'],
 ] as const;
-
-const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
 
 function operationsWith202(): string[] {
   return Object.entries(openapi.paths).flatMap(([path, methods]) =>
@@ -157,8 +166,8 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
   });
 
-  it('AC-8: 202 responses exist on exactly the gated operations and existing reindex operation', () => {
-    const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
+  it('AC-8: 202 responses exist on exactly the gated operations', () => {
+    const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });
 });
