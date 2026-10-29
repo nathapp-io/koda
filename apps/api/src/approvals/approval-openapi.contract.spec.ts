@@ -78,6 +78,9 @@ const gatedOperations = [
   ['patch', '/api/admin/users/{id}'],
   // JWT-only over REST, but still a gated command with a documented pending response.
   ['post', '/api/admin/outbox/{eventId}/retry'],
+  ['put', '/api/projects/{slug}/skills/{skillId}'],
+  ['delete', '/api/projects/{slug}/skills/{skillId}'],
+  ['post', '/api/code-intel/index'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
