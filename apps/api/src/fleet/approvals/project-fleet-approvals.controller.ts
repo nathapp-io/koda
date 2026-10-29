@@ -2,6 +2,10 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { FLEET_APPROVAL_ROUTE_VARIANTS } from './fleet-approval-route.commands';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Requires } from '../../permissions/requires.decorator';
@@ -19,7 +23,7 @@ const route = (ctx: ProjectContext): ApprovalRoute => ({ kind: 'project', projec
 /**
  * S1.5 §2.3 project routes, migrated onto permission keys by permissions P1d (US-006): a member reads
  * with `fleet.approval.read`; the decide route declares both type keys as metadata only, because
- * `ApprovalsService.decide` picks the one its approval's type needs after the row is loaded.
+ * `ApprovalsService.checkDecide` checks eligibility after the row is loaded.
  *
  * Every route declares `ProjectMembershipGuard, RequiresGuard` in one `@UseGuards`, so the membership
  * guard resolves `request.projectContext` before the key check and runs exactly once per request.
@@ -29,7 +33,7 @@ const route = (ctx: ProjectContext): ApprovalRoute => ({ kind: 'project', projec
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/fleet/approvals')
 export class ProjectFleetApprovalsController {
-  constructor(private readonly approvals: ApprovalsService) {}
+  constructor(private readonly approvals: ApprovalsService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
@@ -54,6 +58,7 @@ export class ProjectFleetApprovalsController {
   }
 
   @Post(':id/decide')
+  @ApprovalGated()
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires(['fleet.approval.decide.bash', 'fleet.approval.decide.budget'], { mode: 'any', enforcedBy: 'service' })
@@ -64,6 +69,12 @@ export class ProjectFleetApprovalsController {
   @ApiResponse({ status: 404, description: 'fleet.approvals: no such approval in this project' })
   @ApiResponse({ status: 409, description: 'fleet.approvalNotPending, fleet.budgetNotPaused' })
   async decide(@Param('id') id: string, @Body() dto: DecideApprovalDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.approvals.decide({ id: principal.id, principal }, route(ctx), id, dto));
+    const { key, input } = await this.approvals.checkDecide({ id: principal.id, principal }, route(ctx), id, dto);
+    const outcome = await this.routeGate.run({
+      key, variant: FLEET_APPROVAL_ROUTE_VARIANTS.decide, projectId: ctx.project.id, input, keyCheck: false,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    if (input.decision === 'approve') await this.approvals.executeDecided(principal, id);
+    return JsonResponse.Ok(await this.approvals.view(id));
   }
 }

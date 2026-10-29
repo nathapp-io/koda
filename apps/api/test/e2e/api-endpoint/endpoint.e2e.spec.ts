@@ -32,7 +32,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
-import { FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
+import { FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
@@ -5807,5 +5808,50 @@ describeIntegration('fleet cancel and unlink approval lifecycle', () => {
     expect(data<{ status: string }>(await request(server()).post(`/api/approvals/${pendingUnlink.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200)).status).toBe('executed');
     const unlinked = await request(server()).delete(link).set(auth(world.tokens.root)).expect(404);
     refusal(unlinked, 'fleet.ticketJobs.404');
+  });
+});
+
+
+/** Project fleet decide gates the translated decision, not the ask's execution. */
+describeIntegration('project fleet decide approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'approval.decide', 'fleet.job.shell.escalate'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+    await seedWaitPolicy(db, 'fleet.approval.decide.bash', world.projectId);
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  it('defers deny until approval and preserves missing and decided ask errors', async () => {
+    const decide = (id: string) => request(server()).post(`/api/projects/web/fleet/approvals/${id}/decide`).set(auth(agent.apiKey)).send({ decision: 'deny' });
+    refusal(await decide('missing').expect(404), 'fleet.approvals.404');
+    expect(await db.approvalRequest.count()).toBe(0);
+    const runner = await insertRunner(db, { createdById: world.ids.root, enabled: false });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: 'decide-smoke',
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING',
+      bashMode: 'escalate', runnerId: runner.id, leaseEpoch: 1, firstStartedAt: new Date(),
+    } });
+    const { requestId } = await seedFleetAsk(db, {
+      kind: 'bash', projectId: world.projectId, onBehalfOf: { type: 'USER', id: world.ids.dev },
+      input: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask', payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask' },
+    });
+    const outer = data<{ id: string; permissionKey: string }>(await decide(requestId).expect(202));
+    expect(outer.permissionKey).toBe('fleet.approval.decide.bash');
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'pending' });
+    expect(data<{ status: string }>(await request(server()).post(`/api/approvals/${outer.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200)).status).toBe('executed');
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'rejected' });
+    refusal(await decide(requestId).expect(409), 'fleet.approvalNotPending.409');
+    expect(await db.approvalRequest.count()).toBe(2);
   });
 });

@@ -1,4 +1,6 @@
 import { Module, type OnModuleInit } from '@nestjs/common';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { FleetApprovalRouteCommands } from './fleet-approval-route.commands';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { OutboxCoreModule } from '../../outbox/outbox-core.module';
@@ -23,12 +25,12 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
 /** S1.5 C8 approvals (plan D226): decide, list, counts. Storage and the close port are ApprovalStoreModule. */
 @Module({
   imports: [
-    PrismaModule, OutboxCoreModule, LiveModule, ApprovalEngineModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule,
+    PrismaModule, OutboxCoreModule, LiveModule, ApprovalEngineModule, AuthRepositoryModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule,
     BudgetsModule, FleetJobsModule, FleetActivityModule,
   ],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
   providers: [
-    ApprovalsService, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
+    FleetApprovalRouteCommands, ApprovalsService, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
     FleetShellEscalateCommand, FleetBudgetOverrideCommand,
   ],
   exports: [ApprovalsService],

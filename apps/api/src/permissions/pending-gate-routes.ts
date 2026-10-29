@@ -25,7 +25,6 @@ POST /admin/users=gate-secret
 POST /agents=gate-secret
 POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
-POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/threads=gate-fleet

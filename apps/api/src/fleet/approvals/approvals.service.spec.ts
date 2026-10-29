@@ -72,13 +72,14 @@ function build(over: {
     ]),
   };
   const queries = { findById: vi.fn(async () => (over.request === undefined ? engineRequest() : over.request)) };
-  const decisions = { decide: vi.fn(async () => engineRequest({ status: 'executed' })) };
+  const decisions = { decide: vi.fn(async () => engineRequest({ status: 'executed' })), recordDecision: vi.fn(async () => engineRequest({ status: 'approved' })) };
+  const execution = { execute: vi.fn(async () => engineRequest({ status: 'executed' })) };
   const budgets = { assertResumable: vi.fn(async () => undefined), resume: vi.fn() };
   const permissions = { effectiveKeys: vi.fn(async () => new Set(over.keys ?? DECIDE_KEYS)) };
   const service = new ApprovalsService(
-    store as unknown as FleetApprovalAskStore, queries as never, decisions as never, budgets as never, permissions as never,
+    store as unknown as FleetApprovalAskStore, queries as never, decisions as never, budgets as never, permissions as never, execution as never,
   );
-  return { service, store, queries, decisions, budgets, permissions };
+  return { service, store, queries, decisions, budgets, permissions, execution };
 }
 
 /** `AppException` carries its HTTP status in the `httpStatus` getter; 0 = resolved. */
@@ -308,5 +309,49 @@ describe('ApprovalsService.decide over the engine (fix round 1)', () => {
 
     expect(await failureOf(service.decide(DEV_CALLER, PROJECT, 'a1', { decision: 'allow' }, NOW)))
       .toMatchObject({ prefix: 'fleet.approvalNotPending', httpStatus: 409 });
+  });
+});
+
+describe('fleet decide steps for the project route', () => {
+  it('AC-8: checks and translates bash deny without recording or executing', async () => {
+    const { service, decisions, execution } = build({ before: pendingBash(), request: engineRequest({ permissionKey: 'fleet.job.shell.escalate' }) });
+    expect(await service.checkDecide(DEV_CALLER, PROJECT, 'a1', { decision: 'deny' }, NOW)).toEqual({
+      key: 'fleet.approval.decide.bash', input: { requestId: 'a1', decision: 'reject', comment: null },
+    });
+    expect(decisions.recordDecision).not.toHaveBeenCalled();
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+  it('AC-9: checks budget keep_paused under the budget type key', async () => {
+    expect(await build().service.checkDecide(DEV_CALLER, PROJECT, 'a1', { decision: 'keep_paused' }, NOW)).toEqual({
+      key: 'fleet.approval.decide.budget', input: { requestId: 'a1', decision: 'reject', comment: null },
+    });
+  });
+  it.each([new ApprovalRequestNotPendingError('rejected'), new ApprovalRequestExpiredError('a1')])('AC-10: maps recordDecision %s to the fleet 409', async (error) => {
+    const { service, decisions } = build();
+    decisions.recordDecision.mockRejectedValueOnce(error);
+    await expect(service.recordDecide(DEV_CALLER.principal, { requestId: 'a1', decision: 'reject', comment: null }))
+      .rejects.toMatchObject({ httpStatus: 409, prefix: 'fleet.approvalNotPending' });
+  });
+  it('records without executing, then explicitly executes and reloads the view', async () => {
+    const { service, decisions, execution } = build({ before: pendingBash() });
+    await service.recordDecide(DEV_CALLER.principal, { requestId: 'a1', decision: 'approve', comment: 'ok', params: { choice: 'allow' } });
+    expect(decisions.recordDecision).toHaveBeenCalledWith('a1', 'approve', 'ok', expect.any(Date), { choice: 'allow' });
+    expect(decisions.decide).not.toHaveBeenCalled();
+    expect(execution.execute).not.toHaveBeenCalled();
+    await service.executeDecided(DEV_CALLER.principal, 'a1');
+    expect(execution.execute).toHaveBeenCalledWith('a1');
+    expect(await service.view('a1')).toMatchObject({ id: 'a1' });
+  });
+  it('view preserves job_ended conflict and executeDecided maps engine errors', async () => {
+    const { service, execution } = build({ before: pendingBash({ resolvedBy: 'job_ended' }) });
+    await expect(service.view('a1')).rejects.toMatchObject({ httpStatus: 409, prefix: 'fleet.approvalNotPending' });
+    execution.execute.mockRejectedValueOnce(new ApprovalRequestExpiredError('a1'));
+    await expect(service.executeDecided(DEV_CALLER.principal, 'a1')).rejects.toMatchObject({ httpStatus: 409, prefix: 'fleet.approvalNotPending' });
+  });
+  it('checks pending and eligibility before body translation', async () => {
+    await expect(build({ before: pendingBash({ status: 'rejected' }) }).service.checkDecide(DEV_CALLER, PROJECT, 'a1', { decision: 'deny' }, NOW))
+      .rejects.toMatchObject({ httpStatus: 409, prefix: 'fleet.approvalNotPending' });
+    await expect(build({ before: pendingBash(), keys: ['project.read'] }).service.checkDecide(DEV_CALLER, PROJECT, 'a1', { decision: 'deny', amountUsd: 5 }, NOW))
+      .rejects.toMatchObject({ httpStatus: 403, prefix: 'permissions' });
   });
 });
