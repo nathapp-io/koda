@@ -89,6 +89,25 @@ describe('ConfigJobsService (fleet S3 §4)', () => {
     expect(jobs.createJob).not.toHaveBeenCalled();
   });
 
+  it('AC-8: prepareRegenerate rechecks the repo before creating a job', async () => {
+    const { svc, jobs, reader } = setup();
+    const run = await svc.prepareRegenerate('a1', 'p1', 'repo-1', { prTitle: 'Regen' });
+    expect(reader.list).toHaveBeenCalledTimes(1);
+    expect(jobs.createJob).not.toHaveBeenCalled();
+    jobs.findRepo.mockResolvedValue({ ...REPO, defaultBranch: 'changed' });
+    await expect(run()).rejects.toBeInstanceOf(ConflictAppException);
+    await expect(run()).rejects.toMatchObject({ response: { prefix: 'fleet.repos' } });
+    expect(jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: prepareRegenerate rejects a foreign repo before listing it', async () => {
+    const { svc, reader, jobs } = setup();
+    await expect(svc.prepareRegenerate('a1', 'p1', 'foreign', { prTitle: 'Regen' })).rejects.toBeInstanceOf(NotFoundAppException);
+    await expect(svc.prepareRegenerate('a1', 'p1', 'foreign', { prTitle: 'Regen' })).rejects.toMatchObject({ response: { prefix: 'fleet.repos' } });
+    expect(reader.list).not.toHaveBeenCalled();
+    expect(jobs.createJob).not.toHaveBeenCalled();
+  });
+
   it('regenerate and drift read the current head as baseSha and carry no edits', async () => {
     const { svc, jobs, edits } = setup();
     await svc.submitRegenerate('u1', 'p1', 'repo-1', { prTitle: 'Regenerate agent files' });
