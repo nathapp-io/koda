@@ -148,6 +148,11 @@ export class ApprovalExecutionService {
     // opens its own transaction. Holding this request's slot across both keeps a waiting execute from
     // taking the still-approved row in that gap and running the command a second time.
     return this.serialised(request.id, async () => {
+      // A queued caller may have read 'approved' before the preceding execution settled.
+      // Refuse it before prepare: store work there cannot be rolled back by the later row lock.
+      const current = await this.requests.findById(request.id);
+      if (!current) throw new ApprovalRequestNotFoundError(request.id);
+      if (current.status !== 'approved') throw new ApprovalRequestNotPendingError(current.status);
       const { settled, raw } = await this.executeOnce(request, command, parsed, decision, now);
       // Step 5: only a committed execution has a follow-up, and its failure changes nothing.
       if (settled.status === 'executed' && raw !== undefined) {

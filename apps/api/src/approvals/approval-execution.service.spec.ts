@@ -1,3 +1,4 @@
+import { KbRouteCommands, KB_ROUTE_VARIANTS } from '../rag/kb-route.commands';
 import { ProjectRouteCommands, PROJECT_ROUTE_VARIANTS } from '../projects/project-route.commands';
 import type { ProjectsService } from '../projects/projects.service';
 import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
@@ -143,6 +144,47 @@ describe('ApprovalExecutionService', () => {
     };
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
     expect(mutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('F2: queued execution does not repeat graphify prepare after the first execution settles', async () => {
+    const frozen = { slug: 'alpha', projectId: 'p1', graph: { nodes: [{ id: 'n1', label: 'Frozen' }], links: [] } };
+    const s = setup({ permissionKey: 'kb.graphify.import', variant: KB_ROUTE_VARIANTS.graphifyImport,
+      input: frozen, inputHash: approvalInputHash(frozen) });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['kb.graphify.import']));
+    s.repo.transition.mockImplementation(async (_id, _from, patch) => {
+      s.state.current = { ...s.state.current, ...patch };
+      return s.state.current;
+    });
+    Object.assign(s.repo, { lockProjectSlug: vi.fn() });
+    let entered!: () => void;
+    let release!: () => void;
+    const importing = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const importGraphify = vi.fn(async () => {
+      entered(); await resume;
+      return { imported: 1, cleared: 0 };
+    });
+    const audited = vi.fn(async (work: () => Promise<unknown>) => work());
+    new KbRouteCommands(s.registry, {} as never, { forContext: async () => ({ actorType: 'agent', id: 'a1' }) } as never,
+      {} as never, { importGraphify } as never, { audited } as never).onModuleInit();
+    const command = s.registry.get('kb.graphify.import', KB_ROUTE_VARIANTS.graphifyImport);
+    if (!command) throw new Error('graphify command missing');
+    const parse = vi.spyOn(command, 'parse');
+    const first = s.service.execute('r1', now);
+    await importing;
+    // Attach rejection handling immediately: the duplicate should fail, not import again.
+    const second = s.service.execute('r1', now).then(value => ({ value }), error => ({ error }));
+    try {
+      // Both calls passed the initial approved-status check; the second now waits for the slot.
+      await vi.waitFor(() => expect(parse).toHaveBeenCalledTimes(2));
+      expect(importGraphify).toHaveBeenCalledTimes(1);
+    } finally { release(); }
+    expect(await first).toMatchObject({ status: 'executed', result: { imported: 1, cleared: 0 } });
+    expect(await second).toMatchObject({ error: expect.any(ApprovalRequestNotPendingError) });
+    expect(importGraphify).toHaveBeenCalledTimes(1);
+    expect(audited).toHaveBeenCalledTimes(1);
+    expect(s.repo.transition).toHaveBeenCalledTimes(1);
+    parse.mockRestore();
   });
 
   it.each(['settlement', 'commit', 'success'])('real VCS deletion preserves polling on %s failure', async (mode) => {
