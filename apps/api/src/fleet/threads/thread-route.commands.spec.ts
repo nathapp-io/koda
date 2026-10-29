@@ -11,7 +11,7 @@ describe('ThreadRouteCommands', () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
-    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined) };
+    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined), publish: vi.fn().mockResolvedValue({ jobId: 'jp1' }), discard: vi.fn().mockResolvedValue({ jobId: 'jd1' }) };
     const permissions = { can: vi.fn().mockResolvedValue({ allowed: false }) };
     new ThreadRouteCommands(registry, threads as unknown as ThreadsService, permissions as unknown as PermissionService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, threads, permissions, principal, loader };
@@ -81,6 +81,33 @@ describe('ThreadRouteCommands', () => {
     for (const input of [null, {}, { slug: 'web', projectId: '' }, { slug: 'web', projectId: 'p1', thread: [] }]) expect(() => command.parse(input)).toThrow(ValidationAppException);
     // Domain validation stays in the service, including when the frozen body is missing.
     expect(command.parse({ slug: 'web', projectId: 'p1' })).toMatchObject({ thread: {} });
+  });
+
+  it('AC-6: registers publish and discard REST variants', () => {
+    const { registry } = build();
+    expect(registry.get('thread.publish', THREAD_ROUTE_VARIANTS.publish)).toMatchObject({ key: 'thread.publish', variant: 'rest:threads.publish' });
+    expect(registry.get('thread.discard', THREAD_ROUTE_VARIANTS.discard)).toMatchObject({ key: 'thread.discard', variant: 'rest:threads.discard' });
+  });
+
+  it('AC-7: recomputes publish authority and calls publish with requester identity', async () => {
+    const { registry, threads, permissions, principal } = build();
+    permissions.can.mockResolvedValue({ allowed: true });
+    const command = registry.get('thread.publish', THREAD_ROUTE_VARIANTS.publish);
+    if (!command) throw new Error('Missing publish command');
+    const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', id: 't1' }));
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.publish', { projectId: 'p1' });
+    expect(threads.publish).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', true);
+    expect(command.toResult?.(result)).toEqual({ jobId: 'jp1' });
+  });
+
+  it('recomputes discard authority and calls discard with requester identity', async () => {
+    const { registry, threads, permissions, principal } = build();
+    const command = registry.get('thread.discard', THREAD_ROUTE_VARIANTS.discard);
+    if (!command) throw new Error('Missing discard command');
+    const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', id: 't1' }));
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.discard', { projectId: 'p1' });
+    expect(threads.discard).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', false);
+    expect(command.toResult?.(result)).toEqual({ jobId: 'jd1' });
   });
 
   it('archives before reading and stores the archived detail', async () => {

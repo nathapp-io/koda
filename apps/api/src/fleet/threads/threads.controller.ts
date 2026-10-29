@@ -216,9 +216,14 @@ export class ThreadsController {
   @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string', nullable: true } } } })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.publish nor created the thread' })
   @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session' })
+  @ApprovalGated()
   async publish(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.publish', ctx);
-    return JsonResponse.Ok(await this.threads.publish(ctx.project.id, id, principal.id, canOperate));
+    const outcome = await this.routeGate.run<Awaited<ReturnType<ThreadsService['publish']>>>({
+      key: 'thread.publish', variant: THREAD_ROUTE_VARIANTS.publish, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/discard')
@@ -228,9 +233,14 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Discard the thread worktree changes (thread.discard: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string' } } } })
   @ApiResponse({ status: 403, description: 'The caller neither holds thread.discard nor created the thread' })
+  @ApprovalGated()
   async discard(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canOperate = await this.canOperate(principal, 'thread.discard', ctx);
-    return JsonResponse.Ok(await this.threads.discard(ctx.project.id, id, principal.id, canOperate));
+    const outcome = await this.routeGate.run<Awaited<ReturnType<ThreadsService['discard']>>>({
+      key: 'thread.discard', variant: THREAD_ROUTE_VARIANTS.discard, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/messages')

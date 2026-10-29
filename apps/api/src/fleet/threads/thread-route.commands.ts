@@ -18,6 +18,8 @@ export const THREAD_ROUTE_VARIANTS = {
   stop: 'rest:threads.stop',
   endSession: 'rest:threads.end-session',
   answer: 'rest:threads.answer',
+  publish: 'rest:threads.publish',
+  discard: 'rest:threads.discard',
 } as const;
 
 @Injectable()
@@ -112,6 +114,26 @@ export class ThreadRouteCommands implements OnModuleInit {
         const canOperate = (await this.permissions.can(principal, 'thread.end-session', { projectId: input.projectId })).allowed;
         await this.threads.endSession(input.projectId, input.id, principal.id, canOperate);
         return {};
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string }, Awaited<ReturnType<ThreadsService['publish']>>>({
+      key: 'thread.publish', variant: THREAD_ROUTE_VARIANTS.publish,
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId', 'id']),
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.publish', { projectId: input.projectId })).allowed;
+        return this.threads.publish(input.projectId, input.id, principal.id, canOperate);
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string }, Awaited<ReturnType<ThreadsService['discard']>>>({
+      key: 'thread.discard', variant: THREAD_ROUTE_VARIANTS.discard,
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId', 'id']),
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.discard', { projectId: input.projectId })).allowed;
+        return this.threads.discard(input.projectId, input.id, principal.id, canOperate);
       },
       toResult: (result) => result,
     }, this.loader));

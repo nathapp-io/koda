@@ -14,6 +14,8 @@ describe('ThreadsController approval gate', () => {
     { key: 'thread.create', variant: 'rest:threads.create', input: { thread: { kind: 'PROJECT', title: 'T', backend: { kind: 'native', model: 'm1' } } }, invoke: (c: ThreadsController) => c.create({ kind: 'PROJECT', title: 'T', backend: { kind: 'native', model: 'm1' } }, ctx, principal) },
     { key: 'thread.cap.update', variant: 'rest:threads.update', input: { id: 't1', patch: { maxCostUsd: 7 } }, invoke: (c: ThreadsController) => c.update('t1', { maxCostUsd: 7 }, ctx, principal) },
     { key: 'thread.archive', variant: 'rest:threads.archive', input: { id: 't1' }, invoke: (c: ThreadsController) => c.archive('t1', ctx, principal) },
+    { key: 'thread.publish', variant: 'rest:threads.publish', input: { id: 't1' }, invoke: (c: ThreadsController) => c.publish('t1', ctx, principal) },
+    { key: 'thread.discard', variant: 'rest:threads.discard', input: { id: 't1' }, invoke: (c: ThreadsController) => c.discard('t1', ctx, principal) },
   ];
   it.each(cases)('AC-12: $key sends frozen project input and returns executed result', async ({ key, variant, input, invoke }) => {
     const result = { id: 't1', status: 'ARCHIVED' };
