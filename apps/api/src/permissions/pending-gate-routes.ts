@@ -17,7 +17,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-PATCH /projects/:slug/fleet/schedules/:id=gate-fleet
 PATCH /projects/:slug/threads/:id=gate-fleet
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
@@ -32,9 +31,6 @@ POST /fleet/ingest/rerun-outdated=gate-fleet
 POST /projects/:slug/fleet/approvals/:id/decide=gate-fleet
 POST /projects/:slug/fleet/repos/:repoId/config-edits=gate-fleet
 POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate=gate-fleet
-POST /projects/:slug/fleet/schedules=gate-fleet
-POST /projects/:slug/fleet/schedules/:id/disable=gate-fleet
-POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet

@@ -7,7 +7,6 @@ import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { SCHEDULE_ROUTE_VARIANTS } from './schedule-route.commands';
-import { PermissionService } from '../../permissions/permission.service';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
@@ -37,7 +36,6 @@ import { SchedulesService } from './schedules.service';
 export class ProjectFleetSchedulesController {
   constructor(
     private readonly schedules: SchedulesService,
-    private readonly permissions: PermissionService,
     private readonly routeGate: ApprovalRouteGate,
   ) {}
 
@@ -72,8 +70,14 @@ export class ProjectFleetSchedulesController {
   @ApiResponse({ status: 403, description: 'fleet.schedule.create is missing' })
   @ApiResponse({ status: 404, description: 'Repo not in this project, or pinned runner unknown' })
   @ApiResponse({ status: 422, description: 'Pinned runner can never run this job' })
+  @ApprovalGated()
   async create(@Body() dto: CreateScheduleDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.schedules.create(principal.id, ctx.project.id, dto));
+    const outcome = await this.routeGate.run<ScheduleDto>({
+      key: 'fleet.schedule.create', variant: SCHEDULE_ROUTE_VARIANTS.create, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, schedule: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Patch(':id')
@@ -83,9 +87,14 @@ export class ProjectFleetSchedulesController {
   @ApiResponse({ status: 200, type: ScheduleDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds fleet.schedule.update nor created the schedule' })
   @ApiResponse({ status: 404, description: 'Schedule not found in this project' })
+  @ApprovalGated()
   async update(@Param('id') id: string, @Body() dto: UpdateScheduleDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canAdminister = await this.canAdminister(principal, 'fleet.schedule.update', ctx);
-    return JsonResponse.Ok(await this.schedules.update(principal.id, ctx.project.id, id, dto, canAdminister));
+    const outcome = await this.routeGate.run<ScheduleDto>({
+      key: 'fleet.schedule.update', variant: SCHEDULE_ROUTE_VARIANTS.update, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':id')
@@ -115,9 +124,14 @@ export class ProjectFleetSchedulesController {
   @ApiResponse({ status: 403, description: 'The caller neither holds fleet.schedule.update nor created the schedule' })
   @ApiResponse({ status: 404, description: 'Schedule not found in this project' })
   @ApiResponse({ status: 409, description: 'fleet.scheduleOwnerNoAccess: the owner no longer holds fleet.job.dispatch in this project' })
+  @ApprovalGated()
   async enable(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canAdminister = await this.canAdminister(principal, 'fleet.schedule.update', ctx);
-    return JsonResponse.Ok(await this.schedules.enable(principal.id, ctx.project.id, id, canAdminister));
+    const outcome = await this.routeGate.run<ScheduleDto>({
+      key: 'fleet.schedule.update', variant: SCHEDULE_ROUTE_VARIANTS.enable, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/disable')
@@ -128,17 +142,13 @@ export class ProjectFleetSchedulesController {
   @ApiResponse({ status: 200, type: ScheduleDto })
   @ApiResponse({ status: 403, description: 'The caller neither holds fleet.schedule.update nor created the schedule' })
   @ApiResponse({ status: 404, description: 'Schedule not found in this project' })
+  @ApprovalGated()
   async disable(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    const canAdminister = await this.canAdminister(principal, 'fleet.schedule.update', ctx);
-    return JsonResponse.Ok(await this.schedules.disable(principal.id, ctx.project.id, id, canAdminister));
-  }
-
-  /**
-   * The any-row half of "owner or project ADMIN": a caller holding the plain key administers every row;
-   * one holding only `X.own` is answered `not-owner` here (no resource is passed), so the service keeps
-   * the `createdById === actorId` rule.
-   */
-  private async canAdminister(principal: KodaPrincipal, key: string, ctx: ProjectContext): Promise<boolean> {
-    return (await this.permissions.can(principal, key, { projectId: ctx.project.id })).allowed;
+    const outcome = await this.routeGate.run<ScheduleDto>({
+      key: 'fleet.schedule.update', variant: SCHEDULE_ROUTE_VARIANTS.disable, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }
