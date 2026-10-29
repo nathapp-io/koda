@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-fleet-ops",
   "branchName": "feat/permissions-p3-approval-gate-fleet-ops",
   "createdAt": "2026-10-29T00:00:00Z",
-  "updatedAt": "2026-10-29T10:57:28.816Z",
+  "updatedAt": "2026-10-29T11:05:13.395Z",
   "userStories": [
     {
       "id": "US-001",
@@ -447,14 +447,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces a service/command boundary for global privileged writes and defers background wake effects through an outer transaction; security override applies."
+        "reasoning": "Introduces a service/command boundary for global privileged writes and defers background wake effects through an outer transaction; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/ingest/fleet-ingest.controller.ts",
@@ -488,7 +491,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "95197f70935540884e50ded428ae2563c16ee37e"
     },
     {
       "id": "US-007",
