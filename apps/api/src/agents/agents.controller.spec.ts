@@ -342,6 +342,7 @@ describe('AgentsController', () => {
   });
 
   describe('PATCH /api/agents/:slug', () => {
+    beforeEach(() => { mockAgentsService.findBySlug.mockResolvedValue(mockAgent); });
     it('answers the executed update result from the gate', async () => {
       const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
       gate.run.mockResolvedValue({ status: 'executed', result: mockAgent });
@@ -357,7 +358,7 @@ describe('AgentsController', () => {
       const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
       const update = { name: 'x' };
       await controller.update('bot', update, mockMemberUser);
-      expect(gate.run).toHaveBeenCalledWith({ key: 'agent.update', variant: 'rest:agents.update', projectId: null, input: { slug: 'bot', patch: update } });
+      expect(gate.run).toHaveBeenCalledWith({ key: 'agent.update', variant: 'rest:agents.update', projectId: null, input: { slug: 'bot', agentId: mockAgent.id, patch: update } });
     });
     it('should update agent for ADMIN user', async () => {
       const updateDto = {

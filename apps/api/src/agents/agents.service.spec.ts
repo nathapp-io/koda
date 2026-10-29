@@ -49,6 +49,30 @@ describe('AgentsService', () => {
     updatedAt: mockAgent.updatedAt,
   };
 
+  it('updates by immutable id and defers its auth eviction until commit', async () => {
+    const patch = { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 };
+    agentRepo.findByIdScalar.mockResolvedValue(mockAgent);
+    agentRepo.updateById.mockResolvedValue({ ...mockAgent, ...patch, capabilities: [] });
+    await afterCommit.scope(async () => {
+      expect(await service.updateById(mockAgent.id, patch)).toMatchObject({ id: mockAgent.id, ...patch });
+      expect(agentRepo.updateById).toHaveBeenCalledWith(mockAgent.id, patch);
+      expect(agentRepo.update).not.toHaveBeenCalled();
+      expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
+    });
+    expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith(`AGENT:${mockAgent.id}`);
+  });
+
+  it('a frozen update fails after deletion/recreation without mutating the replacement', async () => {
+    const replacement = { ...mockAgent, id: 'replacement' };
+    agentRepo.findByIdScalar.mockResolvedValue(null);
+    agentRepo.findBySlugScalar.mockResolvedValue(replacement);
+    await expect(service.updateById(mockAgent.id, { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 }))
+      .rejects.toThrow(NotFoundAppException);
+    expect(agentRepo.updateById).not.toHaveBeenCalled();
+    expect(agentRepo.update).not.toHaveBeenCalled();
+    expect(replacement).toMatchObject({ name: 'Test Agent', status: 'ACTIVE', maxConcurrentTickets: 3 });
+  });
+
   const mockAgentsDto = [mockAgentDto];
 
   const mockAgentWithRelations = {

@@ -8,7 +8,7 @@ describe('AgentRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { slug: 'alpha' };
-    const service = { removeById: vi.fn().mockResolvedValue(result), update: vi.fn().mockResolvedValue(result), updateCapabilities: vi.fn().mockResolvedValue(result) };
+    const service = { updateById: vi.fn().mockResolvedValue(result), removeById: vi.fn().mockResolvedValue(result), update: vi.fn().mockResolvedValue(result), updateCapabilities: vi.fn().mockResolvedValue(result) };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new AgentRouteCommands(registry, service as unknown as AgentsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
@@ -17,6 +17,17 @@ describe('AgentRouteCommands', () => {
     const { registry } = build();
     expect(registry.get('agent.update', 'rest:agents.update')).toMatchObject({ key: 'agent.update' });
     expect(registry.get('agent.capabilities.update', 'rest:agents.update-capabilities')).toMatchObject({ key: 'agent.capabilities.update' });
+  });
+  it('update executes only against the frozen id, never the reusable slug', async () => {
+    const { registry, service } = build();
+    const command = registry.get('agent.update', AGENT_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing command');
+    const input = command.parse({ slug: 'bot', agentId: 'original', patch: { name: 'renamed' } });
+    expect(input).toEqual({ slug: 'bot', agentId: 'original', patch: { name: 'renamed' } });
+    await command.execute(input);
+    expect(service.updateById).toHaveBeenCalledWith('original', { name: 'renamed' });
+    expect(service.update).not.toHaveBeenCalled();
+    expect(() => command.parse({ slug: 'bot', patch: {} })).toThrow(ValidationAppException);
   });
   it('AC-9: capabilities update executes against the frozen id without looking up slug', async () => {
     const { registry, service } = build();

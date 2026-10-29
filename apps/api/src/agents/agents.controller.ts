@@ -159,7 +159,8 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'agent.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Principal() principal: KodaPrincipal) {
-    const outcome = await this.routeGate.run<AgentResponseDto>({ key: 'agent.update', variant: AGENT_ROUTE_VARIANTS.update, projectId: null, input: { slug, patch: updateDto } });
+    const target = await this.agentsService.findBySlug(slug);
+    const outcome = await this.routeGate.run<AgentResponseDto>({ key: 'agent.update', variant: AGENT_ROUTE_VARIANTS.update, projectId: null, input: { slug, agentId: target.id, patch: updateDto } });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
   }

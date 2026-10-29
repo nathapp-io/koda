@@ -20,10 +20,10 @@ export class AgentRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.commands.register(routeCommand<{ slug: string; patch: UpdateAgentDto }, AgentResponseDto>({
+    this.commands.register(routeCommand<{ slug: string; agentId: string; patch: UpdateAgentDto }, AgentResponseDto>({
       key: 'agent.update', variant: AGENT_ROUTE_VARIANTS.update,
-      parse: (input) => { const parsed = parseRouteInput(input, ['slug']); return { ...parsed, patch: parseBody(UpdateAgentDto, (input as Record<string, unknown>)['patch'] ?? {}) }; },
-      run: (_principal, input) => this.service.update(input.slug, input.patch),
+      parse: (input) => { const parsed = parseRouteInput(input, ['slug', 'agentId']); return { ...parsed, patch: parseBody(UpdateAgentDto, (input as Record<string, unknown>)['patch'] ?? {}) }; },
+      run: (_principal, input) => this.service.updateById(input.agentId, input.patch),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ slug: string; agentId: string; capabilities: UpdateCapabilitiesDto }, AgentResponseDto>({

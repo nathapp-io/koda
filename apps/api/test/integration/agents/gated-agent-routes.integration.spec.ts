@@ -55,6 +55,19 @@ describeIntegration('gated global agent update routes', () => {
     expect(await approve(summary.id)).toMatchObject({ status: 'executed' });
     expect((await db.agent.findUniqueOrThrow({ where: { id: target.id } })).name).toBe('renamed');
   });
+  it('approval fails after deletion and slug recreation without modifying the replacement', async () => {
+    const target = await newTarget();
+    await seedWaitPolicy(db, 'agent.update', null);
+    const summary = pending(await request(server()).patch(`/api/agents/${target.slug}`).set(auth(actor.apiKey))
+      .send({ name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 }));
+    await request(server()).delete(`/api/agents/${target.slug}`).set(rootAuth()).expect(200);
+    const replacement = data<{ agent: { id: string } }>(await request(server()).post('/api/agents').set(rootAuth())
+      .send({ name: 'Replacement', slug: target.slug, maxConcurrentTickets: 5 }).expect(201));
+    expect(replacement.agent.id).not.toBe(target.id);
+    const before = await db.agent.findUniqueOrThrow({ where: { id: replacement.agent.id } });
+    expect(await approve(summary.id)).toMatchObject({ status: 'failed' });
+    expect(await db.agent.findUniqueOrThrow({ where: { id: replacement.agent.id } })).toEqual(before);
+  });
   it('AC-3: capabilities update waits globally', async () => {
     const target = await newTarget();
     await seedWaitPolicy(db, 'agent.capabilities.update', null);

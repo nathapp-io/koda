@@ -1,3 +1,5 @@
+import { AgentRouteCommands, AGENT_ROUTE_VARIANTS } from '../agents/agent-route.commands';
+import { AgentsService } from '../agents/agents.service';
 import { KbRouteCommands, KB_ROUTE_VARIANTS } from '../rag/kb-route.commands';
 import { ProjectRouteCommands, PROJECT_ROUTE_VARIANTS } from '../projects/project-route.commands';
 import type { ProjectsService } from '../projects/projects.service';
@@ -69,6 +71,33 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it('fails a global agent update after deletion/recreation and leaves the replacement untouched', async () => {
+    const frozen = { slug: 'bot', agentId: 'original', patch: { name: 'renamed', status: 'PAUSED', maxConcurrentTickets: 1 } };
+    const s = setup({ permissionKey: 'agent.update', projectId: null, variant: AGENT_ROUTE_VARIANTS.update,
+      input: frozen, inputHash: approvalInputHash(frozen) });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['agent.update']));
+    // The original has been deleted since opening the request. Its slug now belongs to this row.
+    const replacement = { id: 'replacement', slug: 'bot', name: 'Replacement', status: 'ACTIVE',
+      maxConcurrentTickets: 5, capabilities: [], createdAt: now, updatedAt: now };
+    const before = { ...replacement };
+    const repository = {
+      findByIdScalar: vi.fn(async () => null),
+      findBySlugScalar: vi.fn(async () => replacement),
+      update: vi.fn(async (_slug: string, patch: object) => Object.assign(replacement, patch)),
+      updateById: vi.fn(),
+    };
+    const audit = { audited: async (write: () => Promise<unknown>) => write() };
+    const agents = new AgentsService(repository as never, {} as never, s.tx as never, {} as never,
+      s.permissions as never, audit as never, s.afterCommit);
+    new AgentRouteCommands(s.registry, agents,
+      { forContext: async () => ({ actorType: 'agent', id: 'a1' }) } as never).onModuleInit();
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed' });
+    expect(repository.findByIdScalar).toHaveBeenCalledWith('original');
+    expect(repository.update).not.toHaveBeenCalled();
+    expect(repository.updateById).not.toHaveBeenCalled();
+    expect(replacement).toEqual(before);
+  });
   it.each([{ projectId: 'p1' }, { projectId: 'p1', slug: 'old-slug' }])(
     'executes ID-based project deletion without fencing an unused slug (%j)', async (frozen) => {
       const s = setup({ permissionKey: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,

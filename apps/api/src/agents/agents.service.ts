@@ -272,6 +272,24 @@ export class AgentsService {
     return AgentResponseDto.from(updated);
   }
 
+  /** Approval requests bind to an immutable id, never a potentially reused slug. */
+  async updateById(agentId: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
+    const existing = await this.agentRepo.findByIdScalar(agentId);
+    if (!existing) throw new NotFoundAppException({}, 'agents');
+
+    const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
+    if (updateData.name !== undefined) data.name = updateData.name;
+    if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
+    if (updateData.status !== undefined) data.status = updateData.status;
+
+    const updated = await this.audit.audited(
+      () => this.agentRepo.updateById(agentId, data),
+      (agent) => ({ key: 'agent.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: fieldsSummary(data) }),
+    );
+    await this.invalidateAfterCommit(updated.id);
+    return AgentResponseDto.from(updated);
+  }
+
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
     // Filter out duplicates
     const uniqueCapabilities = [...new Set(updateData.capabilities)];
