@@ -14,7 +14,6 @@ import { PermissionService } from '../permissions/permission.service';
 import type { PermissionDecision } from '../permissions/permissions.types';
 import type { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 import type { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
-import type { KbCreator } from './kb-creator';
 
 const mockProject = {
   id: 'proj-1',
@@ -28,7 +27,6 @@ const mockProject = {
 };
 
 const allow: PermissionDecision = { allowed: true, reason: 'granted' };
-const notOwner: PermissionDecision = { allowed: false, reason: 'not-owner' };
 
 const devUser: UserPrincipal = {
   actorType: 'user',
@@ -54,7 +52,6 @@ const agent: AgentPrincipal = {
   authorities: ['WORKER'],
 };
 
-const createdBy = (id: string, type: KbCreator['type'] = 'USER'): KbCreator => ({ type, id });
 
 describe('RagController', () => {
   let controller: RagController;
@@ -126,138 +123,18 @@ describe('RagController', () => {
   });
 
   describe('addDocument', () => {
-    it('returns indexed false and records nothing when the store indexes no row', async () => {
+    it('AC-11: gates in the resolved project with frozen document input', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue(null);
-
-      const result = await controller.addDocument('alpha', { source: 'manual', sourceId: 'empty', content: 'x' }, devUser);
-
-      expect((result as any).data).toEqual({ indexed: false, sourceId: 'empty' });
-      expect(audit.audited).not.toHaveBeenCalled();
-      expect(audit.record).not.toHaveBeenCalled();
+      const dto = { source: 'manual' as const, sourceId: 's1', content: 'hello' };
+      await controller.addDocument('alpha', dto, agent);
+      expect(gate.run).toHaveBeenCalledWith({ key: 'kb.document.add', variant: 'rest:kb-documents.add', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1', document: dto } });
     });
-
-    it('indexes only via ragService (single LanceDB write path — H7)', async () => {
+    it('maps a pending add to ApprovalPending without writing', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue('doc-record-1');
-
-      const result = await controller.addDocument(
-        'alpha',
-        {
-          source: 'doc',
-          sourceId: 'doc-1',
-          content: 'hello world',
-          metadata: {},
-        },
-        devUser,
-      );
-
-      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
-      expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
-      // H7: HybridRetriever must NOT receive a second, duplicate index write.
-      expect(audit.audited).toHaveBeenCalledWith(expect.any(Function), expect.any(Function));
-      expect(audit.audited.mock.calls[0]?.[1]('doc-record-1')).toEqual({
-        key: 'kb.document.add', resourceType: 'kb-document', resourceId: 'doc:doc-1', projectId: 'proj-1', summary: 'added doc document',
-      });
-      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-1', sourceId: 'doc-1' });
-    });
-
-    // US-007: the caller is the row's creator — trusted token data, never the body.
-    it('records the authenticated user as the row creator', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue('doc-record-2');
-
-      await controller.addDocument('alpha', { source: 'manual', sourceId: 'm-1', content: 'x' }, devUser);
-
-      expect(ragService.indexDocument).toHaveBeenCalledWith(
-        'proj-1',
-        expect.objectContaining({ createdBy: { type: 'USER', id: 'user-dev' } }),
-      );
-    });
-
-    it('records an agent principal as an AGENT creator', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue('doc-record-3');
-
-      await controller.addDocument('alpha', { source: 'manual', sourceId: 'm-2', content: 'x' }, agent);
-
-      expect(ragService.indexDocument).toHaveBeenCalledWith(
-        'proj-1',
-        expect.objectContaining({ createdBy: { type: 'AGENT', id: 'agent-1' } }),
-      );
-    });
-
-    it('replaces the caller\'s own row without asking for the any-row delete key', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([createdBy('user-dev')]);
-      ragService.indexDocument.mockResolvedValue('doc-record-4');
-
-      await controller.addDocument('alpha', { source: 'doc', sourceId: 'own', content: 'x' }, devUser);
-
-      expect(can).not.toHaveBeenCalled();
-      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
-    });
-
-    it('indexes a new pair without asking for the any-row delete key', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([]);
-      ragService.indexDocument.mockResolvedValue('doc-record-5');
-
-      await controller.addDocument('alpha', { source: 'doc', sourceId: 'fresh', content: 'x' }, devUser);
-
-      expect(ragService.findSourceCreators).toHaveBeenCalledWith('proj-1', 'doc', 'fresh');
-      expect(can).not.toHaveBeenCalled();
-    });
-
-    it('refuses to replace a row another user created, and writes nothing', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
-      can.mockResolvedValue(notOwner);
-
-      await expect(
-        controller.addDocument('alpha', { source: 'doc', sourceId: 'theirs', content: 'y' }, devUser),
-      ).rejects.toThrow(ForbiddenAppException);
-
-      // The check is the any-row key: no resource on purpose, so an `.own` grant answers not-owner.
-      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', { projectId: 'proj-1' });
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'approval1' } });
+      await expect(controller.addDocument('alpha', { source: 'manual', sourceId: 's1', content: 'hello' }, agent)).rejects.toBeInstanceOf(ApprovalPending);
       expect(ragService.indexDocument).not.toHaveBeenCalled();
     });
-
-    it('refuses to replace a row with no creator (a pre-existing row) for a caller holding only the own key', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([null]);
-      can.mockResolvedValue(notOwner);
-
-      await expect(
-        controller.addDocument('alpha', { source: 'doc', sourceId: 'legacy', content: 'y' }, devUser),
-      ).rejects.toThrow(ForbiddenAppException);
-
-      expect(ragService.indexDocument).not.toHaveBeenCalled();
-    });
-
-    it('replaces another user\'s row when the caller holds the any-row delete key', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
-      can.mockResolvedValue(allow);
-      ragService.indexDocument.mockResolvedValue('doc-record-6');
-
-      await controller.addDocument('alpha', { source: 'doc', sourceId: 'theirs', content: 'y' }, devUser);
-
-      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
-    });
-
-    it('answers 400 before writing when the sourceId is not filter-safe', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockRejectedValue(new ValidationAppException());
-
-      await expect(
-        controller.addDocument('alpha', { source: 'doc', sourceId: "x'y", content: 'y' }, devUser),
-      ).rejects.toThrow(ValidationAppException);
-
-      expect(ragService.indexDocument).not.toHaveBeenCalled();
-    });
-
     it('throws NotFoundAppException when project not found', async () => {
       mockFindProjectBySlug.mockResolvedValue(null);
 

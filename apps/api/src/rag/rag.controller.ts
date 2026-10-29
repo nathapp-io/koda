@@ -17,10 +17,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import { isRunnerPrincipal } from '../auth/principal/koda-principal.types';
 import { PermissionService } from '../permissions/permission.service';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
@@ -35,19 +34,6 @@ import { parseQuery } from '../common/dto/koda-page.query';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { KbCreator } from './kb-creator';
-
-/** The KB creator an authenticated principal writes: trusted token data, never the request body. */
-function kbCreator(principal: KodaPrincipal): KbCreator {
-  // A runner never authors a domain record; the auth guard does not let one reach this route either.
-  if (isRunnerPrincipal(principal)) throw new ForbiddenAppException({}, 'permissions');
-  return { type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id };
-}
-
-/** Whether a stored creator is the caller's own. A row with no creator (`null`) belongs to the system. */
-function isOwnRow(createdBy: KbCreator | null, caller: KbCreator): boolean {
-  return createdBy !== null && createdBy.type === caller.type && createdBy.id === caller.id;
-}
 
 /**
  * The project knowledge base (permissions P1 US-007).
@@ -84,27 +70,8 @@ export class RagController {
     return project;
   }
 
-  /**
-   * `kb.document.delete` with no resource: true only for a caller that may delete *any* row of the project.
-   * A `.own`-only holder answers `not-owner`, which is exactly the "someone else's row" refusal.
-   */
-  private async mayDeleteAnyRow(principal: KodaPrincipal, projectId: string): Promise<boolean> {
-    return (await this.permissions.can(principal, 'kb.document.delete', { projectId })).allowed;
-  }
-
-  private async assertMayDeleteRow(
-    principal: KodaPrincipal,
-    projectId: string,
-    createdBy: KbCreator | null,
-  ): Promise<void> {
-    const decision = await this.permissions.can(principal, 'kb.document.delete', {
-      projectId,
-      resource: { createdBy },
-    });
-    if (!decision.allowed) throw new ForbiddenAppException({}, 'permissions');
-  }
-
   @Post('documents')
+  @ApprovalGated()
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('kb.document.add')
   @ApiOperation({ summary: 'Add a document to the project knowledge base (kb.document.add)' })
@@ -118,40 +85,12 @@ export class RagController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
-    const creator = kbCreator(principal);
-
-    // Replace check: the write deletes the rows of this pair first. A row the caller did not create — including a
-    // system row with no creator — needs the any-row delete key, so a `.own` holder cannot overwrite it. Reads an
-    // unsafe source or sourceId throw ValidationAppException (400) before anything is written.
-    const existingCreators = await this.ragService.findSourceCreators(project.id, dto.source, dto.sourceId);
-    const replacesAnotherRow = existingCreators.some((createdBy) => !isOwnRow(createdBy, creator));
-    if (replacesAnotherRow && !(await this.mayDeleteAnyRow(principal, project.id))) {
-      throw new ForbiddenAppException({}, 'permissions');
-    }
-
-    // H7: single write path. Previously this ran Promise.all over
-    // RagService.indexDocument AND HybridRetrieverService.indexDocument, which
-    // double-indexed every document into the shared project table (duplicate
-    // search results, cross-service first-write race, deletes that never
-    // reached Hybrid's in-memory store). Index once via RagService
-    // (VectorStore.indexDocument); HybridRetriever reads the same row through
-    // the shared LanceTableManager.
-    const id = await this.ragService.indexDocument(project.id, {
-      source: dto.source,
-      sourceId: dto.sourceId,
-      content: dto.content,
-      metadata: dto.metadata ?? {},
-      createdBy: creator,
+    const outcome = await this.routeGate.run({
+      key: 'kb.document.add', variant: KB_ROUTE_VARIANTS.add, projectId: project.id,
+      input: { slug, projectId: project.id, document: dto },
     });
-    if (id === null) return JsonResponse.Ok({ indexed: false, sourceId: dto.sourceId });
-    await this.audit.audited(async () => undefined, () => ({
-      key: 'kb.document.add',
-      resourceType: 'kb-document',
-      resourceId: `${dto.source}:${dto.sourceId}`,
-      projectId: project.id,
-      summary: `added ${dto.source} document`,
-    }));
-    return JsonResponse.Ok({ indexed: true, id, sourceId: dto.sourceId });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get('documents')

@@ -198,6 +198,20 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Null disables indexing; provider failures retain content-only FTS via a zero vector. */
+  async embedForIndex(content: string): Promise<number[] | null> {
+    if (!this.embeddingService) {
+      this.logger.warn('EmbeddingService not available — skipping RAG indexing');
+      return null;
+    }
+    try {
+      return await this.embeddingService.embed(content);
+    } catch (err) {
+      this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
+      return Array(this.embeddingService.dimensions ?? 768).fill(0) as number[];
+    }
+  }
+
   /**
    * Indexes a document in the knowledge base for a project.
    *
@@ -207,24 +221,11 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
    * replaces the previous row (manager.addRecord) instead of duplicating it.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
-  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<string | null> {
+  async indexDocument(projectId: string, doc: IndexDocumentInput, preparedVector?: number[]): Promise<string | null> {
     await this.validateProjectId(projectId);
-
-    if (!this.embeddingService) {
-      this.logger.warn('EmbeddingService not available — skipping RAG indexing');
-      return null;
-    }
-
+    const vector = preparedVector ?? await this.embedForIndex(doc.content);
+    if (vector === null) return null;
     const tableName = `project_${projectId}`;
-    let vector: number[];
-    try {
-      vector = await this.embeddingService.embed(doc.content);
-    } catch (err) {
-      // Embedding service unreachable — store content-only with zero vector for FTS
-      this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
-      const dims = this.embeddingService?.dimensions ?? 768;
-      vector = Array(dims).fill(0) as number[];
-    }
 
     const { createdAt, rejectedOverride } = resolveCreatedAt(doc.metadata);
     if (rejectedOverride !== undefined) {
@@ -248,8 +249,8 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       vector,
       metadata: JSON.stringify(metadata),
       created_at: createdAt,
-      provider: this.embeddingService.providerName,
-      model: this.embeddingService.modelName,
+      provider: this.embeddingService?.providerName ?? '',
+      model: this.embeddingService?.modelName ?? '',
     };
 
     const table = await this.getOrCreateTable(projectId);

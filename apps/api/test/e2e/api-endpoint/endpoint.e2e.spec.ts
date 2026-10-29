@@ -2382,8 +2382,9 @@ describeIntegration('API Integration Tests', () => {
         })
         .expect(201);
 
-      const data = body<{ indexed: boolean }>(res);
-      expect(data.indexed).toBe(true);
+      // Human callers retain the immediate 201 result through the approval gate.
+      const data = body<{ indexed: boolean; sourceId: string }>(res);
+      expect(data).toMatchObject({ indexed: true, sourceId: 'doc-manual-001' });
       documentSourceId = 'doc-manual-001';
     });
 

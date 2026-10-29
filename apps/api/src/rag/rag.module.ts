@@ -1,6 +1,7 @@
 import { KbDeletionJournal } from './kb-deletion-journal';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { KbDocumentAddition } from './kb-document-addition.service';
 import { KbDocumentDeletion } from './kb-document-deletion.service';
 import { KbRouteCommands } from './kb-route.commands';
 import { Injectable, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
@@ -91,6 +92,7 @@ class EntityStoreWarmup implements OnModuleInit {
     },
     RagService,
     KbDocumentDeletion,
+    KbDocumentAddition,
     KbDeletionJournal,
     KbRouteCommands,
     VectorStore,

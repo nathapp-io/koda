@@ -42,7 +42,6 @@ POST /projects/:slug/fleet/schedules/:id/disable=gate-fleet
 POST /projects/:slug/fleet/schedules/:id/enable=gate-fleet
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
-POST /projects/:slug/kb/documents=gate-core-domains
 POST /projects/:slug/kb/import/graphify=gate-core-domains
 POST /projects/:slug/kb/optimize=gate-core-domains
 POST /projects/:slug/knowledge/repos/:repoId/reindex=gate-fleet

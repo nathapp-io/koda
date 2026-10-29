@@ -1,3 +1,4 @@
+import { KbDocumentAddition } from './kb-document-addition.service';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { KbDocumentDeletion } from './kb-document-deletion.service';
 import type { Mock } from 'vitest';
@@ -39,6 +40,7 @@ interface RagRepositoryStub {
 interface RagServiceStub {
   indexDocument: Mock;
   findSourceCreators: Mock;
+  embedForIndex: Mock;
 }
 
 interface HybridRetrieverStub {
@@ -89,7 +91,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
 
   beforeAll(async () => {
     ragRepository = { findProjectBySlug: vi.fn() };
-    ragService = { indexDocument: vi.fn(), findSourceCreators: vi.fn().mockResolvedValue([]) };
+    ragService = { indexDocument: vi.fn(), findSourceCreators: vi.fn().mockResolvedValue([]), embedForIndex: vi.fn().mockResolvedValue([1, 2]) };
     hybridRetriever = { search: vi.fn() };
     projectRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn() };
 
@@ -109,7 +111,12 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
         { provide: PermissionService, useValue: { can } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
-        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: { deleted: true } }) } },
+        { provide: ApprovalRouteGate, useFactory: (addition: KbDocumentAddition) => ({
+          run: async ({ input }: { input: { projectId: string; document: import('./dto/add-document.dto').AddDocumentDto } }) => ({
+            status: 'executed', result: await addition.add(currentPrincipal, input.projectId, input.document),
+          }),
+        }), inject: [KbDocumentAddition] },
+        KbDocumentAddition,
       ],
     }).compile();
 
@@ -177,7 +184,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
     expect(res.status).toBe(201);
     expect(ragService.indexDocument).toHaveBeenCalledWith(
       'proj-1',
-      expect.objectContaining({ sourceId: 'doc-1' }),
+      expect.objectContaining({ sourceId: 'doc-1' }), [1, 2],
     );
     expect(guardCanActivate).toHaveBeenCalledTimes(1);
   });
@@ -206,7 +213,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
     expect(res.status).toBe(201);
     expect(ragService.indexDocument).toHaveBeenCalledWith(
       'proj-1',
-      expect.objectContaining({ createdBy: { type: 'USER', id: 'user-dev' } }),
+      expect.objectContaining({ createdBy: { type: 'USER', id: 'user-dev' } }), [1, 2],
     );
   });
 

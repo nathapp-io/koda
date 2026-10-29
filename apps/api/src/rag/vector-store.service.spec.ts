@@ -79,6 +79,31 @@ const mockEmbeddingServiceForSearch = {
   model: 'nomic-embed-text',
 };
 
+describe('VectorStore prepared embedding', () => {
+  it('AC-9: stores the precomputed vector without embedding', async () => {
+    const embed = vi.fn().mockResolvedValue([9, 9]);
+    const store = new VectorStore(makeRagConfig({ inMemoryOnly: true }), { embed, providerName: 'fake', modelName: 'fake' } as unknown as import('./embedding.service').EmbeddingService);
+    const table = await store.getOrCreateTable('p1');
+    await store.indexDocument('p1', { source: 'manual', sourceId: 's1', content: 'hello', metadata: {} }, [1, 2]);
+    expect(embed).not.toHaveBeenCalled();
+    expect(await table.query().limit(10).toArray()).toEqual([expect.objectContaining({ vector: [1, 2] })]);
+    await store.onModuleDestroy();
+  });
+  it('unspecified vector retains zero-vector fallback on embedding failure', async () => {
+    const embed = vi.fn().mockRejectedValue(new Error('offline'));
+    const store = new VectorStore(makeRagConfig({ inMemoryOnly: true }), { embed, dimensions: 2, providerName: 'fake', modelName: 'fake' } as unknown as import('./embedding.service').EmbeddingService);
+    await store.indexDocument('p1', { source: 'manual', sourceId: 's1', content: 'hello', metadata: {} });
+    expect(embed).toHaveBeenCalledExactlyOnceWith('hello');
+    expect(await (await store.getOrCreateTable('p1')).query().limit(10).toArray()).toEqual([expect.objectContaining({ vector: [0, 0] })]);
+    await store.onModuleDestroy();
+  });
+  it('returns null without an embedding service', async () => {
+    const store = new VectorStore(makeRagConfig({ inMemoryOnly: true }));
+    await expect(store.embedForIndex('hello')).resolves.toBeNull();
+    await store.onModuleDestroy();
+  });
+});
+
 describe('VectorStore lifecycle', () => {
   it('closes LanceDB connection on module destroy', () => {
     const vectorStore = new VectorStore(makeRagConfig());

@@ -45,12 +45,13 @@ export class RagService {
     this.vectorStore.clearProjectCaches(projectId);
   }
 
-  /**
-   * Indexes a document in the knowledge base for a project.
-   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
-   */
-  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<string | null> {
-    return this.vectorStore.indexDocument(projectId, doc);
+  /** Compute the index vector before entering a deferred execution transaction. */
+  embedForIndex(content: string): Promise<number[] | null> {
+    return this.vectorStore.embedForIndex(content);
+  }
+
+  async indexDocument(projectId: string, doc: IndexDocumentInput, vector?: number[]): Promise<string | null> {
+    return this.vectorStore.indexDocument(projectId, doc, vector);
   }
 
   /**
