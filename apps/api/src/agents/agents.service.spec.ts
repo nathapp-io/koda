@@ -556,6 +556,7 @@ describe('AgentsService', () => {
       expect(error).toBeInstanceOf(NotFoundAppException);
       expect(error).toMatchObject({ prefix: 'projectAgents' });
       expect(mockAgentRepo.update).not.toHaveBeenCalled();
+      expect(mockAgentRepo.updateById).not.toHaveBeenCalled();
     });
   });
 

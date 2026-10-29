@@ -7,6 +7,8 @@ import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
+import { AgentsService } from '../../../src/agents/agents.service';
+import { lockProjectAgents } from '../../../src/common/utils/advisory-lock';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 interface Pending { id: string; permissionKey: string; projectId: string | null }
@@ -89,6 +91,37 @@ describeIntegration('gated project-agent updates', () => {
     expect(await db.approvalRequest.count()).toBe(0);
   });
 
+  it('serializes an approved write behind roster removal and refuses after removal commits', async () => {
+    const targetAgent = await target();
+    const service = app.get(AgentsService);
+    let acquired!: () => void;
+    let release!: () => void;
+    const lockHeld = new Promise<void>((resolve) => { acquired = resolve; });
+    const continueRemoval = new Promise<void>((resolve) => { release = resolve; });
+    const removal = db.$transaction(async (tx) => {
+      await lockProjectAgents(tx, world.projectId);
+      acquired();
+      await continueRemoval;
+      await tx.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: targetAgent.id, projectId: world.projectId } });
+    });
+    await lockHeld;
+    let updateSettled = false;
+    const update = service.updateRosteredAgent('web', targetAgent.slug, { status: 'PAUSED' }, world.projectId, targetAgent.id)
+      .finally(() => { updateSettled = true; });
+    let waiting = false;
+    for (let attempt = 0; attempt < 50 && !waiting; attempt += 1) {
+      const rows = await db.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM pg_stat_activity WHERE wait_event_type = 'Lock'`;
+      waiting = Number(rows[0]?.count ?? 0) > 0;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(waiting).toBe(true);
+    expect(updateSettled).toBe(false);
+    release();
+    await removal;
+    await expect(update).rejects.toMatchObject({ prefix: 'projectAgents' });
+    expect((await db.agent.findUniqueOrThrow({ where: { id: targetAgent.id } })).status).toBe('ACTIVE');
+  });
+
   it('AC-6: non-key-holder receives permissions 403 without a request', async () => {
     const targetAgent = await target();
     const denied = await seedFleetHttpAgent(server(), world.tokens.root);
@@ -96,7 +129,7 @@ describeIntegration('gated project-agent updates', () => {
     await app.get(PermissionCache).invalidate();
     await seedWaitPolicy(db, 'agent.update', null);
     const response = await patch(targetAgent.slug, denied.apiKey, { status: 'PAUSED' }).expect(403);
-    expect(response.body).toMatchObject({ ret: 40003 });
+    expect(response.body).toMatchObject({ ret: 40003, message: 'You do not have permissions to perform this action' });
     expect(await db.approvalRequest.count()).toBe(0);
   });
 });
