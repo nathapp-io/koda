@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T11:59:20.275Z",
+  "updatedAt": "2026-10-30T12:23:22.926Z",
   "userStories": [
     {
       "id": "US-001",
@@ -564,14 +564,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-consumer read migration introduces summary/detail joins, ordered detail limits and live refresh. Test actual page/banner API seams and keep unrelated workflow gates plus legacy live handlers intact."
+        "reasoning": "Cross-consumer read migration introduces summary/detail joins, ordered detail limits and live refresh. Test actual page/banner API seams and keep unrelated workflow gates plus legacy live handlers intact.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
@@ -643,7 +646,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0c1af92e634153ffe5abca7a1713a3428a295793"
     },
     {
       "id": "US-008",
