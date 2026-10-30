@@ -1,8 +1,10 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { isAgentPrincipal } from '../../../auth/principal/koda-principal.types';
 import { FleetJobState } from '../../../common/enums';
+import { ApprovalRequestQueries } from '../../../approvals/approval-request.queries';
+import { APPROVAL_REQUEST_STATUSES } from '../../../approvals/dto/list-approval-requests.query';
+import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
 import { AnalyticsService } from '../../analytics/analytics.service';
-import { APPROVAL_STATUSES, type ApprovalStatus } from '../../approvals/domain/approval.domain';
-import { ApprovalsService, type ApprovalRoute } from '../../approvals/approvals.service';
 import type { FleetJobFilters } from '../../jobs/domain/fleet-job.domain';
 import type { FleetJobDto } from '../../jobs/dto/fleet-job.dto';
 import { FleetJobsService } from '../../jobs/fleet-jobs.service';
@@ -54,7 +56,7 @@ interface FleetSpendInput {
 }
 
 interface ListApprovalsInput {
-  status: ApprovalStatus;
+  status: ApprovalRequestStatus;
   page: number;
 }
 
@@ -229,26 +231,31 @@ export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<Fleet
 }
 
 /**
- * `koda_list_approvals` (US-004): one page of the project's approvals through the project route, so another
- * project's approval can never appear. The route carries the project's id only (permissions P1 US-004).
+ * `koda_list_approvals` (US-004): one page of the project's approval requests, read from the approval engine for the
+ * thread's own actor. The engine's visibility already limits the rows to the actor's own requests and the ones it may
+ * decide, and the filter pins the read to the thread's project, so another project's request can never appear.
  */
-export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<ListApprovalsInput> {
+export function listApprovalsTool(queries: ApprovalRequestQueries): AssistantTool<ListApprovalsInput> {
   return {
     descriptor: KODA_LIST_APPROVALS,
-    key: 'fleet.approval.read',
+    key: 'project.read',
     parse(input: unknown): ListApprovalsInput {
       const raw = asRecord(input);
       return {
-        status: optionalEnum(raw.status, APPROVAL_STATUSES, 'status') ?? 'pending',
+        status: optionalEnum(raw.status, APPROVAL_REQUEST_STATUSES, 'status') ?? 'pending',
         page: optionalPage(raw.page, 'page'),
       };
     },
     async execute(ctx: ToolContext, input: ListApprovalsInput): Promise<string> {
-      const route: ApprovalRoute = { kind: 'project', projectId: ctx.projectId };
-      const page = await approvals.list(route, { status: input.status }, { current: input.page, size: PAGE_SIZE });
+      const principal = { type: isAgentPrincipal(ctx.actor) ? ('AGENT' as const) : ('USER' as const), id: ctx.actor.id };
+      const page = await queries.list(
+        principal,
+        { status: input.status, projectId: ctx.projectId },
+        { current: input.page, size: PAGE_SIZE },
+      );
       if (page.records.length === 0) return 'no approvals';
       const lines = page.records.map(
-        (approval) => `${approval.id} ${approval.type} ${approval.status} ${approval.jobId ?? '(none)'} ${approval.requestedAt}`,
+        (request) => `${request.id} ${request.permissionKey} ${request.status} ${request.createdAt.toISOString()}`,
       );
       if (page.hasNext) lines.push(moreLine(KODA_LIST_APPROVALS.name, input.page + 1));
       return lines.join('\n');
@@ -335,7 +342,7 @@ export class FleetTools implements OnModuleInit {
     private readonly registry: AssistantToolRegistry,
     private readonly jobs: FleetJobsService,
     private readonly analytics: AnalyticsService,
-    private readonly approvals: ApprovalsService,
+    private readonly queries: ApprovalRequestQueries,
     private readonly runners: RunnersService,
     private readonly logs: LogReadService,
   ) {}
@@ -345,7 +352,7 @@ export class FleetTools implements OnModuleInit {
       listJobsTool(this.jobs),
       getJobTool(this.jobs),
       fleetSpendTool(this.analytics),
-      listApprovalsTool(this.approvals),
+      listApprovalsTool(this.queries),
       runnerStatusTool(this.runners),
       jobLogExcerptTool(this.logs),
     );

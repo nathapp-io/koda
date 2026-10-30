@@ -1,6 +1,6 @@
 import type { KodaToolDescriptor } from '@nathapp/fleet-protocol';
 import type { ToolResult } from '../assistant-tool.types';
-import { kodaToolDescriptorsFor } from '../koda-tool-descriptors';
+import { KODA_LIST_APPROVALS, kodaToolDescriptorsFor } from '../koda-tool-descriptors';
 
 /**
  * US-006 (3-D16, 3-D17): the koda tool catalog as an MCP client sees it.
@@ -84,15 +84,15 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
  * description taken from `MCP_DESCRIPTIONS` when the map names the tool and with the WORKSPACE sentence rewritten
  * to the MCP one otherwise. The input schemas are the projection's, untouched, and a fresh descriptor is answered
  * every call, so the shared catalog is never mutated.
+ *
+ * Permissions P3 US-004: `koda_list_approvals` is left out. Over MCP that name is the approval engine's own tool
+ * (`ApprovalMcpTools`), which reads `ApprovalRequestQueries`, so the thread turns' assistant descriptor of the same
+ * name — and the `koda_list_fleet_approvals` alias that used to carry it — are not projected here.
  */
 export function mcpToolDescriptors(): readonly KodaToolDescriptor[] {
-  // Keep the legacy FleetApproval reader until fleet migration, without colliding with ApprovalRequest tools.
   return kodaToolDescriptorsFor('WORKSPACE')
-    .map((descriptor) => ({
-      ...descriptor,
-      name: descriptor.name === 'koda_list_approvals' ? 'koda_list_fleet_approvals' : descriptor.name,
-      description: mcpDescriptionOf(descriptor),
-    }));
+    .filter((descriptor) => descriptor.name !== KODA_LIST_APPROVALS.name)
+    .map((descriptor) => ({ ...descriptor, description: mcpDescriptionOf(descriptor) }));
 }
 
 /** 3-D16: one descriptor's MCP description — the fixed map's, else the catalog's sentence rewritten. */
@@ -106,9 +106,4 @@ export function toMcpToolResult(
   result: ToolResult,
 ): { content: Array<{ type: 'text'; text: string }>; isError: boolean } {
   return { content: [{ type: 'text', text: result.content }], isError: result.isError };
-}
-
-/** Map MCP aliases back to the unchanged assistant registry and executor names. */
-export function assistantToolName(mcpName: string): string {
-  return mcpName === 'koda_list_fleet_approvals' ? 'koda_list_approvals' : mcpName;
 }

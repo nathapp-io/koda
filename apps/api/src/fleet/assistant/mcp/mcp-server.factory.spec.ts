@@ -43,18 +43,24 @@ describe('kodaMcpToolRegistrations', () => {
     expect(answer).toEqual({ content: [{ type: 'text', text: 'ok' }], isError: false });
   });
 
-  it('keeps the legacy fleet inbox visible under an alias and dispatches to its existing executor', async () => {
+  it('US-004: the assistant approval tool is not registered over MCP and dispatches under its own name', async () => {
+    // The engine's ApprovalMcpTools owns `koda_list_approvals` over MCP, so neither the assistant name nor the
+    // retired `koda_list_fleet_approvals` alias is registered from the registry — even for an agent holding its key.
+    const registryGet = vi.fn((name: string) => (name === 'koda_get_ticket' ? { key: 'ticket.read' } as AssistantTool : undefined));
     const visible = await visibleMcpToolNames({
-      registry: { get: (name: string) => name === 'koda_list_approvals' ? { key: 'fleet.approval.read' } as AssistantTool : undefined },
+      registry: { get: registryGet },
       permissions: { projectIdsWithKey: vi.fn(async () => ({ all: false as const, projectIds: ['p1'] })) },
     }, principal);
-    expect([...visible]).toEqual(['koda_list_fleet_approvals']);
-    const [registration] = kodaMcpToolRegistrations({ executeFor }, principal, visible);
-    expect(registration.name).toBe('koda_list_fleet_approvals');
-    await registration.handler({ project: 'web' });
+    expect([...visible]).toEqual(['koda_get_ticket']);
+    expect(registryGet).not.toHaveBeenCalledWith('koda_list_approvals');
+
+    const [registration] = kodaMcpToolRegistrations({ executeFor }, principal, ALL_TOOLS)
+      .filter((entry) => entry.name === 'koda_get_ticket');
+    // Every registered name is dispatched unchanged: no alias map is applied on the way to the executor.
+    await registration?.handler({ project: 'web' });
     expect(executeFor).toHaveBeenCalledWith(
       { principal, origin: { kind: 'mcp' }, disabled: false },
-      { name: 'koda_list_approvals', input: { project: 'web' } },
+      { name: 'koda_get_ticket', input: { project: 'web' } },
     );
   });
 

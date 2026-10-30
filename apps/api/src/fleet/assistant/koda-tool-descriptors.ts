@@ -1,7 +1,7 @@
 import type { ChatThreadKind, KodaToolDescriptor } from '@nathapp/fleet-protocol';
 import { FleetJobState, MemoryKind, Priority, TicketStatus, TicketType } from '../../common/enums';
+import { APPROVAL_REQUEST_STATUSES } from '../../approvals/dto/list-approval-requests.query';
 import { MEMORY_STATUSES } from '../../memory/dto/list-memory.query';
-import { APPROVAL_STATUSES } from '../approvals/domain/approval.domain';
 import { LOG_STREAMS } from '../logs/domain/fleet-job-log.domain';
 import { LOG_LEVELS } from '../logs/log-entry';
 
@@ -103,17 +103,17 @@ export const KODA_FLEET_SPEND: KodaToolDescriptor = {
   },
 };
 
-/** `koda_list_approvals` (US-004): one page of the project's approvals, pending by default. */
+/** `koda_list_approvals` (US-004): one page of the project's approval requests, pending by default. */
 export const KODA_LIST_APPROVALS: KodaToolDescriptor = {
   name: 'koda_list_approvals',
   description:
-    "List this project's approvals, newest first. Answers at most 20 approvals per page and asks for the next " +
-    'page on its last line.',
+    "List this project's approval requests, newest first. Answers at most 20 approval requests per page and asks " +
+    'for the next page on its last line.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      status: { type: 'string', enum: [...APPROVAL_STATUSES], description: 'Approval status (default pending)' },
+      status: { type: 'string', enum: [...APPROVAL_REQUEST_STATUSES], description: 'Approval request status (default pending)' },
       page: { type: 'integer', minimum: 1, description: 'Page number, 1-based' },
     },
   },
