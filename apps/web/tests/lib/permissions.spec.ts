@@ -66,3 +66,37 @@ describe('US-006 AC-3: EMPTY_PERMISSIONS holds nothing', () => {
     expect(EMPTY_PERMISSIONS.hasOwn('ticket.read.own')).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P3b US-001 AC-11 — "may decide something", which has() cannot answer
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('P3b US-001 AC-11: mayDecide covers approval.decide and its narrowed keys', () => {
+  test('AC-11: a narrowed decide key makes mayDecide true', () => {
+    expect(permissionSet(['approval.decide@fleet.job.shell.escalate']).mayDecide()).toBe(true)
+  })
+
+  test('AC-11: the unscoped decide key makes mayDecide true', () => {
+    expect(permissionSet(['approval.decide']).mayDecide()).toBe(true)
+  })
+
+  test('AC-11 (edge): one narrowed key is enough among unrelated keys', () => {
+    expect(permissionSet(['ticket.read', 'approval.decide@label.*']).mayDecide()).toBe(true)
+  })
+
+  test('AC-11 (edge): no decide key means false, and a look-alike key does not count', () => {
+    expect(permissionSet(['approval.policy.manage', 'approval.request.cancel']).mayDecide()).toBe(false)
+    expect(permissionSet([]).mayDecide()).toBe(false)
+    expect(permissionSet(['approval.decides@x']).mayDecide()).toBe(false)
+    expect(permissionSet(['xapproval.decide@y']).mayDecide()).toBe(false)
+  })
+
+  test('AC-11 (edge): the empty set fails closed', () => {
+    expect(EMPTY_PERMISSIONS.mayDecide()).toBe(false)
+  })
+
+  test('AC-11 (edge): EMPTY_PERMISSIONS still holds nothing at all', () => {
+    expect(EMPTY_PERMISSIONS.has('approval.decide')).toBe(false)
+    expect(EMPTY_PERMISSIONS.hasOwn('approval.decide')).toBe(false)
+  })
+})

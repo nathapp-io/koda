@@ -2384,5 +2384,14 @@
       "errorMarkdown": "Every pattern must end in .md",
       "errorCount": "Enter between 1 and 50 patterns"
     }
+  },
+  "approvals": {
+    "keys": {
+      "fleet_job_shell_escalate": "Shell command in a fleet job",
+      "fleet_budget_override": "Fleet budget override"
+    },
+    "comment": {
+      "tooLong": "The comment is too long (2000 characters at most)"
+    }
   }
 }

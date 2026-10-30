@@ -19,9 +19,18 @@ export interface PermissionSet {
   has(key: string): boolean
   /** Holds the key for every row, or only for rows the caller created (`key.own`). */
   hasOwn(key: string): boolean
+  /**
+   * P3b US-001: "may decide an approval request of some kind" — `approval.decide`, or any narrowed
+   * `approval.decide@<pattern>` key. `has('approval.decide')` answers false for a narrowed key, so
+   * the nav, the palette and the badge ask this instead: they only need to know whether opening an
+   * inbox can show the caller anything to decide.
+   */
+  mayDecide(): boolean
 }
 
 const OWN_SUFFIX = '.own'
+const DECIDE_KEY = 'approval.decide'
+const DECIDE_PREFIX = `${DECIDE_KEY}@`
 
 /** The set of keys one `/me/permissions` answer listed. */
 export function permissionSet(keys: readonly string[]): PermissionSet {
@@ -29,6 +38,7 @@ export function permissionSet(keys: readonly string[]): PermissionSet {
   return {
     has: (key: string): boolean => held.has(key),
     hasOwn: (key: string): boolean => held.has(key) || held.has(`${key}${OWN_SUFFIX}`),
+    mayDecide: (): boolean => held.has(DECIDE_KEY) || keys.some((key) => key.startsWith(DECIDE_PREFIX)),
   }
 }
 
@@ -42,4 +52,5 @@ export function permissionSet(keys: readonly string[]): PermissionSet {
 export const EMPTY_PERMISSIONS: PermissionSet = Object.freeze({
   has: (): boolean => false,
   hasOwn: (): boolean => false,
+  mayDecide: (): boolean => false,
 })

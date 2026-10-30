@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import { createProjectEventHub } from '~/lib/project-event-hub'
-import type { EventSourceLike } from '~/lib/project-event-stream'
+import type { EventSourceLike, LiveApprovalRequestEvent } from '~/lib/project-event-stream'
 
 class FakeEventSource implements EventSourceLike {
   readyState = 0
@@ -103,5 +103,70 @@ describe('createProjectEventHub (D246)', () => {
     h.subscribe('/a', { onResync: () => undefined })
     h.subscribe('/b', { onResync: () => undefined })
     expect(sources.map((s) => s.url)).toEqual(['/a', '/b'])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P3b US-001 AC-15 — the engine's approval_request notice reaches subscribers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const approvalRequest = (over: Record<string, unknown> = {}) => ({
+  id: 'r1:pending', type: 'approval_request', projectId: 'p1', requestId: 'r1', status: 'pending', at: '2026-10-30T00:00:00.000Z', ...over,
+})
+
+describe('P3b US-001 AC-15: the hub forwards approval_request', () => {
+  test('AC-15: a subscriber with onApprovalRequest receives the event', () => {
+    const { h, sources } = hub()
+    const onApprovalRequest = jest.fn()
+    h.subscribe('/api/projects/p1/events', { onApprovalRequest, onResync: jest.fn() })
+
+    sources[0].emit('approval_request', approvalRequest())
+
+    expect(onApprovalRequest).toHaveBeenCalledTimes(1)
+    const received = onApprovalRequest.mock.calls[0][0] as LiveApprovalRequestEvent
+    expect(received.requestId).toBe('r1')
+    expect(received.type).toBe('approval_request')
+    expect(received.status).toBe('pending')
+    expect(received.projectId).toBe('p1')
+  })
+
+  test('AC-15 (edge): every subscriber on the URL gets it once, and only the handlers that asked', () => {
+    const { h, sources } = hub()
+    const first = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
+    const second = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
+    const untouched = { onFleetApproval: jest.fn(), onResync: jest.fn() }
+    h.subscribe('/u', first)
+    h.subscribe('/u', second)
+    h.subscribe('/u', untouched)
+
+    sources[0].emit('approval_request', approvalRequest())
+
+    expect(first.onApprovalRequest).toHaveBeenCalledTimes(1)
+    expect(second.onApprovalRequest).toHaveBeenCalledTimes(1)
+    expect(untouched.onFleetApproval).not.toHaveBeenCalled()
+  })
+
+  test('AC-15 (edge): fleet_approval still reaches its own handler beside approval_request', () => {
+    const { h, sources } = hub()
+    const subscriber = { onApprovalRequest: jest.fn(), onFleetApproval: jest.fn(), onResync: jest.fn() }
+    h.subscribe('/u', subscriber)
+
+    sources[0].emit('approval_request', approvalRequest())
+    sources[0].emit('fleet_approval', approval)
+
+    expect(subscriber.onApprovalRequest).toHaveBeenCalledTimes(1)
+    expect(subscriber.onFleetApproval).toHaveBeenCalledTimes(1)
+  })
+
+  test('AC-15 (edge): a malformed notice is dropped, and a redelivered id only fires once', () => {
+    const { h, sources } = hub()
+    const onApprovalRequest = jest.fn()
+    h.subscribe('/u', { onApprovalRequest, onResync: jest.fn() })
+
+    sources[0].emit('approval_request', { id: 'r1:pending', type: 'approval_request', status: 'pending' })
+    sources[0].emit('approval_request', approvalRequest())
+    sources[0].emit('approval_request', approvalRequest())
+
+    expect(onApprovalRequest).toHaveBeenCalledTimes(1)
   })
 })

@@ -2384,5 +2384,14 @@
       "errorMarkdown": "每条规则必须以 .md 结尾",
       "errorCount": "请输入 1 到 50 条规则"
     }
+  },
+  "approvals": {
+    "keys": {
+      "fleet_job_shell_escalate": "Fleet 任务中的 Shell 命令",
+      "fleet_budget_override": "Fleet 预算超额"
+    },
+    "comment": {
+      "tooLong": "备注过长（最多 2000 个字符）"
+    }
   }
 }

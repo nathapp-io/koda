@@ -48,6 +48,21 @@ export interface LiveFleetApprovalEvent {
   at: string
 }
 
+/**
+ * P3b US-001: content-free notice that an approval request of the engine changed. Only requests with
+ * a project are published (the bus routes on projectId), so every inbox that shows one subscribes to
+ * its project's stream; the global inbox has no event and reloads on its poll instead.
+ */
+export interface LiveApprovalRequestEvent {
+  id: string
+  type: 'approval_request'
+  projectId: string
+  requestId: string
+  /** Any non-empty string: the notice only triggers a refetch, so a new API status must not be dropped. */
+  status: string
+  at: string
+}
+
 /** S2a §2.3: content-free log growth of one stream of one attempt; the viewer fetches from its cursor. */
 export interface LiveFleetLogEvent {
   id: string
@@ -78,6 +93,8 @@ export interface ProjectEventHandlers {
   onResync: () => void
   /** S4a: only the user stream (/api/me/events) sends these. */
   onNotification?: (event: LiveNotificationEvent) => void
+  /** P3b US-001: engine approval requests; the stream listens only when a handler is given. */
+  onApprovalRequest?: (event: LiveApprovalRequestEvent) => void
 }
 
 export interface EventSourceLike {
@@ -172,6 +189,21 @@ export function parseNotificationEvent(raw: string): LiveNotificationEvent | nul
   }
 }
 
+/** P3b US-001: the `approval_request` notice, or null when it is not one (a new status is kept). */
+export function parseApprovalRequestEvent(raw: string): LiveApprovalRequestEvent | null {
+  try {
+    const value = JSON.parse(raw) as Partial<LiveApprovalRequestEvent> | null
+    if (!value || typeof value !== 'object') return null
+    if (value.type !== 'approval_request' || typeof value.id !== 'string' || value.id.length === 0) return null
+    if (typeof value.requestId !== 'string' || value.requestId.length === 0) return null
+    if (typeof value.status !== 'string' || value.status.length === 0) return null
+    return value as LiveApprovalRequestEvent
+  }
+  catch {
+    return null
+  }
+}
+
 export function createProjectEventStream(
   url: string,
   handlers: ProjectEventHandlers,
@@ -252,6 +284,13 @@ export function createProjectEventStream(
       es.addEventListener('notification', (ev) => {
         const event = parseNotificationEvent(ev.data)
         if (event && isNew(event.id)) onNotification(event)
+      })
+    }
+    const onApprovalRequest = handlers.onApprovalRequest
+    if (onApprovalRequest) {
+      es.addEventListener('approval_request', (ev) => {
+        const event = parseApprovalRequestEvent(ev.data)
+        if (event && isNew(event.id)) onApprovalRequest(event)
       })
     }
     es.onerror = () => {
