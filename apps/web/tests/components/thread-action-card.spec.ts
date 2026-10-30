@@ -43,14 +43,12 @@ function mount(
 ) {
   const decide = opts.decide ?? jest.fn(async () => ({}))
   const useApprovalRequests = jest.fn(() => ({ decide }))
-  const useFleetApprovals = jest.fn(() => ({ decide }))
   const toast = toastRecorder()
   const app = mountSfc(card, {
     components: uiStubs,
     props: { action: value, canDecide: opts.canDecide ?? true, now: opts.now ?? NOW },
     alias: {
       '~/composables/useApprovalRequests': { useApprovalRequests },
-      '~/composables/useFleetApprovals': { useFleetApprovals },
     },
     globals: { useI18n: () => enI18n(), useAppToast: () => toast },
   })
@@ -61,7 +59,7 @@ function mount(
   }
   const click = (id: string): void => { (byId(id)[0].props.onClick as () => void)() }
   const disabled = (id: string): unknown => byId(id)[0]?.props.disabled
-  return { app, decide, useApprovalRequests, useFleetApprovals, toast, byId, textOf, click, disabled, settle }
+  return { app, decide, useApprovalRequests, toast, byId, textOf, click, disabled, settle }
 }
 
 describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
@@ -98,14 +96,6 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
     m.app.unmount()
   })
 
-  test('mounting does not invoke fleet approvals (AC-9)', async () => {
-    const m = mount(action())
-    await m.settle()
-
-    expect(m.useFleetApprovals).not.toHaveBeenCalled()
-    m.app.unmount()
-  })
-
   test('Approve decides the action id, not its legacy approvalId (AC-4)', async () => {
     const m = mount(action())
     await m.settle()
@@ -115,7 +105,6 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
 
     expect(m.useApprovalRequests).toHaveBeenCalledTimes(1)
     expect(m.decide).toHaveBeenCalledWith('a1', 'approve')
-    expect(m.useFleetApprovals).not.toHaveBeenCalled()
     m.app.unmount()
   })
 
@@ -127,7 +116,6 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
     await m.settle()
 
     expect(m.decide).toHaveBeenCalledWith('a1', 'reject')
-    expect(m.useFleetApprovals).not.toHaveBeenCalled()
     m.app.unmount()
   })
 

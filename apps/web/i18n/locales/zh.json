@@ -90,7 +90,9 @@
     "sectionKnowledge": "知识",
     "sectionFleet": "机群",
     "threads": "线程",
-    "myThreads": "我的线程"
+    "myThreads": "我的线程",
+    "approvals": "审批",
+    "approvalPolicies": "审批策略"
   },
   "palette": {
     "trigger": "搜索或跳转…",
@@ -2306,6 +2308,7 @@
       "job_crashed": "{repo} 上的 fleet 任务崩溃",
       "job_pr_opened": "{repo} 上的 fleet 任务创建了 PR",
       "approval_requested": "需要审批：{repo} 上的 {kind}",
+      "approval_request": "需要审批：{key}",
       "action_requested": "确认助手操作：{tool}",
       "budget_warn": "预算 {scope} 已用 {spentUsd} / {amountUsd} USD",
       "budget_hard_stop": "预算 {scope} 在 {spentUsd} / {amountUsd} USD 处停止",
@@ -2383,6 +2386,205 @@
       "reset": "规则已恢复默认",
       "errorMarkdown": "每条规则必须以 .md 结尾",
       "errorCount": "请输入 1 到 50 条规则"
+    }
+  },
+  "approvals": {
+    "keys": {
+      "fleet_job_shell_escalate": "Fleet 任务中的 Shell 命令",
+      "fleet_budget_override": "Fleet 预算超额"
+    },
+    "comment": {
+      "tooLong": "备注过长（最多 2000 个字符）"
+    },
+    "panel": {
+      "input": "冻结的输入",
+      "decisions": "决策记录",
+      "comment": "评论",
+      "commentPlaceholder": "可选评论或原因",
+      "approve": "批准",
+      "reject": "拒绝",
+      "cancel": "取消请求"
+    },
+    "toast": {
+      "decisionFailed": "无法提交决策。",
+      "cancelFailed": "无法取消请求。"
+    },
+    "fleet": {
+      "bash": {
+        "openJob": "打开任务",
+        "command": "命令（密钥已由 nax 打码）",
+        "rawDetail": "nax 发送的原始内容",
+        "rawHint": "Runner 无法把 nax 的文本拆成命令。你正在针对下面的完整文本做决定。",
+        "unreadable": "无法读取此请求，只能拒绝。",
+        "masked": "已打码 {count} 个密钥值",
+        "truncated": "命令过长，无法完整显示，只能拒绝。",
+        "root": "运行目录",
+        "stage": "阶段",
+        "story": "故事",
+        "feature": "功能",
+        "reason": "nax 询问的原因",
+        "expiresIn": "若不回复，nax 将在 {time} 后拒绝。",
+        "timedOut": "此请求已超时，nax 已拒绝该命令。",
+        "readOnly": "你可以查看此请求，但只有项目开发者或管理员可以回答。",
+        "comment": "评论（可选）",
+        "allow": "允许一次",
+        "allow_for_job": "本任务内允许",
+        "deny": "拒绝"
+      },
+      "budget": {
+        "summary": "{scope} 的预算已触顶暂停。",
+        "window": "周期",
+        "spent": "已花费",
+        "asked": "申请额度",
+        "unreadable": "无法读取此暂停请求的冻结金额，以服务端判断为准。",
+        "requeueTitle": "重新排队暂停前被取消的任务",
+        "noCandidates": "没有可重新排队的已取消任务。",
+        "truncated": "已取消的任务多于列出数量，这里只能重新排队列出的任务。",
+        "amount": "新上限（USD）",
+        "amountHint": "必须高于已花费的 {spent}。",
+        "comment": "评论（可选）",
+        "raise": "提高并恢复",
+        "keep": "保持暂停",
+        "submitting": "保存中...",
+        "readOnly": "你可以查看此请求，但只有持有预算决策权限的人可以回答。",
+        "validation": {
+          "amountInvalid": "请输入大于 0 且最多 4 位小数的金额。",
+          "notAbove": "新上限必须高于 {spent}。"
+        }
+      },
+      "delivery": {
+        "delivered": "已送达 nax。",
+        "failed": "Runner 未能把答复送达 nax（{detail}）。",
+        "waiting": "Runner 尚未确认。"
+      },
+      "requeue": {
+        "title": "重新排队",
+        "ok": "已重新排队",
+        "none": "未选择任何任务重新排队。"
+      },
+      "requeueFailure": {
+        "gone": "未重新排队：任务已不存在。",
+        "activeJob": "未重新排队：该功能已有活动任务。",
+        "notCancelled": "未重新排队：任务已不再是已取消状态。",
+        "paused": "未重新排队：Fleet 预算仍在暂停它。",
+        "unknown": "未重新排队。"
+      },
+      "resolvedBy": {
+        "user": "由人工决定",
+        "timeout": "已超时",
+        "job_ended": "任务先已结束",
+        "superseded": "已被新的暂停取代",
+        "manual_resume": "已在预算页面恢复",
+        "window_reset": "预算周期已滚动",
+        "policy_deleted": "预算策略已删除"
+      }
+    },
+    "inbox": {
+      "title": "审批",
+      "subtitle": "等待决策的所有请求。",
+      "subtitleProject": "本项目等待决策的请求。",
+      "tabs": { "pending": "待处理", "all": "全部" },
+      "row": { "requester": "请求者", "project": "项目", "expiresIn": "剩余时间" },
+      "status": {
+        "pending": "待处理",
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "expired": "已过期",
+        "cancelled": "已取消",
+        "executed": "已执行",
+        "failed": "已失败"
+      },
+      "pager": { "prev": "上一页", "next": "下一页" },
+      "noProject": "无项目",
+      "linked": "不在当前页，由所打开的链接进入。",
+      "forbidden": "你没有查看这些审批的权限。",
+      "loadFailed": "无法加载审批。",
+      "stale": "刷新审批失败，显示上次加载的列表。",
+      "empty": { "pending": "暂无待处理的请求。", "all": "暂无审批。" }
+    },
+    "policies": {
+      "title": "审批策略",
+      "subtitle": "哪些操作需要等待决策，以及谁可以做出决策。",
+      "project": { "title": "项目审批策略", "inherited": "继承" },
+      "create": "新建策略",
+      "forbidden": "你没有管理审批策略的权限。",
+      "loadFailed": "无法加载审批策略。",
+      "incomplete": "无法完整读取策略列表，因此不显示覆盖数。",
+      "mode": {
+        "none": "关闭",
+        "self": "由请求者决定",
+        "agent": "由 Agent 批准",
+        "human": "由人工批准"
+      },
+      "scope": { "global": "全局", "project": "项目", "any": "不限" },
+      "risk": { "low": "低", "medium": "中", "high": "高", "critical": "严重" },
+      "principal": { "USER": "用户", "AGENT": "Agent", "ASSISTANT": "助手" },
+      "subject": {
+        "all": "所有人",
+        "type": "所有 {type}",
+        "role": "角色 {role}",
+        "principal": "{type} {principal}"
+      },
+      "keys": {
+        "title": "可审批的权限键",
+        "hint": "下限是该键的策略可以选择的最低模式；默认值是没有策略时引擎的行为。",
+        "key": "权限键",
+        "scope": "范围",
+        "risk": "风险",
+        "floor": "下限",
+        "default": "默认",
+        "overrides": "覆盖数",
+        "empty": "没有可以审批的权限键。"
+      },
+      "list": {
+        "title": "策略",
+        "pattern": "模式",
+        "subject": "适用对象",
+        "mode": "模式",
+        "timeout": "超时",
+        "onTimeout": "超时后",
+        "edit": "编辑",
+        "delete": "删除",
+        "deleteConfirm": "删除 {pattern} 的策略？",
+        "noTimeout": "无超时",
+        "timeoutSeconds": "{count} 秒",
+        "empty": "还没有覆盖默认值的策略。"
+      },
+      "dialog": {
+        "createTitle": "新建审批策略",
+        "editTitle": "编辑审批策略",
+        "description": "策略会让操作暂停，直到持有相应模式的人批准。",
+        "pattern": "权限模式",
+        "patternHint": "可以是精确的键（如 label.create），也可以是前缀（如 label.*），覆盖其下的所有键。",
+        "subject": "适用对象",
+        "subjectKind": { "all": "所有人", "type": "某一主体类型", "role": "某个角色" },
+        "principalType": "主体类型",
+        "role": "角色",
+        "chooseRole": "选择角色",
+        "mode": "模式",
+        "modeHint": "只提供不低于该模式下限的模式。",
+        "timeout": "超时秒数",
+        "timeoutHint": "留空表示不超时，范围为 60 到 2592000（30 天）。",
+        "onTimeout": "超时后",
+        "onTimeoutReject": "拒绝该操作",
+        "onTimeoutApprove": "批准该操作",
+        "approverMustHoldAction": "批准者必须同时持有该操作本身的权限",
+        "requireDistinctApprover": "必须由不同的主体批准",
+        "save": "保存",
+        "saving": "保存中..."
+      },
+      "validation": {
+        "pattern": "该模式没有覆盖任何可审批的权限键。",
+        "role": "请选择策略适用的角色。",
+        "timeout": "请输入 60 到 2592000 之间的整数秒数，或留空。",
+        "timeoutApprove": "超时自动批准要求模式的下限为关闭。",
+        "mode": "该模式低于模式所覆盖权限键的下限。"
+      },
+      "toast": {
+        "created": "审批策略已创建。",
+        "updated": "审批策略已保存。",
+        "deleted": "审批策略已删除。"
+      }
     }
   }
 }

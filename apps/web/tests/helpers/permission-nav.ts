@@ -65,12 +65,13 @@ export function fakeAsyncData<T>(
 export const ADMIN_NAV_KEYS = [
   'user.read',
   'role.read',
+  // P3b US-006: the global approval policy page (after Roles).
+  'approval.policy.manage',
   'audit.read',
   'fleet.dashboard.read',
   'fleet.runner.read',
   'fleet.repo.read',
   'fleet.budget.read',
-  'fleet.approval.read',
   'fleet.analytics.read',
   'skill.source.read',
 ] as const
@@ -111,12 +112,13 @@ export function adminNavFlags(keys: readonly string[]): Record<string, boolean> 
   const flags = {
     canReadUsers: held.has('user.read'),
     canReadRoles: held.has('role.read'),
+    // P3b US-006: the global approval policy page follows the key its routes need.
+    canManageApprovalPolicies: held.has('approval.policy.manage'),
     canReadAudit: held.has('audit.read'),
     canReadFleetDashboard: held.has('fleet.dashboard.read'),
     canReadFleetRunners: held.has('fleet.runner.read'),
     canReadFleetRepos: held.has('fleet.repo.read'),
     canReadFleetBudgets: held.has('fleet.budget.read'),
-    canReadFleetApprovals: held.has('fleet.approval.read'),
     canReadFleetAnalytics: held.has('fleet.analytics.read'),
     canReadSkills: held.has('skill.source.read'),
   }

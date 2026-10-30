@@ -17,7 +17,10 @@ export interface HomeTicket {
 
 export interface HomeApproval {
   id: string
-  type: string
+  /** The engine's permission key; the row's label when it carries no fleet type. */
+  permissionKey: string
+  /** The fleet approval type, or `null` for an ask that is not a fleet one. */
+  type: string | null
   projectId: string | null
   projectSlug: string | null
   jobId: string | null

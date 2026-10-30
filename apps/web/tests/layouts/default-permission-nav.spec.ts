@@ -24,12 +24,13 @@ const layoutTemplate = layoutSource.match(/<template>([\s\S]*)<\/template>/)?.[1
 const ADMIN_LINKS: ReadonlyArray<readonly [href: string, key: string]> = [
   ['/admin/users', 'user.read'],
   ['/admin/roles', 'role.read'],
+  // P3b US-006: the approval engine's global policy page.
+  ['/admin/approval-policies', 'approval.policy.manage'],
   ['/admin/audit', 'audit.read'],
   ['/admin/fleet', 'fleet.dashboard.read'],
   ['/admin/fleet/runners', 'fleet.runner.read'],
   ['/admin/fleet/repos', 'fleet.repo.read'],
   ['/admin/fleet/budgets', 'fleet.budget.read'],
-  ['/admin/fleet/approvals', 'fleet.approval.read'],
   ['/admin/fleet/analytics', 'fleet.analytics.read'],
   ['/admin/skills', 'skill.source.read'],
 ]
@@ -194,14 +195,13 @@ describe('US-006 AC-8: an ADMIN role with no keys renders no admin navigation', 
 describe('US-006 AC-9: the fleet and skills keys each render their link', () => {
   const fleetKeys = ALL_ADMIN_KEYS.filter((key) => key !== 'user.read' && key !== 'role.read')
 
-  test('AC-9: all seven fleet/skills links render without user.read', async () => {
+  test('AC-9: all six fleet/skills links render without user.read', async () => {
     const nav = primaryNav(await renderLayout({ keys: fleetKeys }))
 
     expect(hasLink(nav, '/admin/fleet')).toBe(true)
     expect(hasLink(nav, '/admin/fleet/runners')).toBe(true)
     expect(hasLink(nav, '/admin/fleet/repos')).toBe(true)
     expect(hasLink(nav, '/admin/fleet/budgets')).toBe(true)
-    expect(hasLink(nav, '/admin/fleet/approvals')).toBe(true)
     expect(hasLink(nav, '/admin/fleet/analytics')).toBe(true)
     expect(hasLink(nav, '/admin/skills')).toBe(true)
     expect(hasLink(nav, '/admin/users')).toBe(false)
@@ -306,5 +306,72 @@ describe('US-007 AC-8/AC-9: /admin/audit follows the global audit.read key', () 
 
     expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/audit"'))
     expect(nav.indexOf('href="/admin/audit"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-006 (P3b) — the approval engine's two global destinations
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('P3b US-006: /admin/approval-policies follows the global approval.policy.manage', () => {
+  test('that key alone renders the link and no other admin link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['approval.policy.manage'] }))
+
+    expect(hasLink(nav, '/admin/approval-policies')).toBe(true)
+    expect(nav).toContain('nav.sectionAdmin')
+    for (const [href] of ADMIN_LINKS) if (href !== '/admin/approval-policies') expect(hasLink(nav, href)).toBe(false)
+  })
+
+  test('the link is labelled with the nav.approvalPolicies key', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['approval.policy.manage'] }))
+
+    const link = /<a href="\/admin\/approval-policies"[^>]*>([\s\S]*?)<\/a>/.exec(nav)?.[0]
+    expect(link).toBeDefined()
+    expect(link).toContain('nav.approvalPolicies')
+  })
+
+  test('the source order survives: Roles, then the policy page, then Audit and the fleet links', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS }))
+
+    expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/approval-policies"'))
+    expect(nav.indexOf('href="/admin/approval-policies"')).toBeLessThan(nav.indexOf('href="/admin/audit"'))
+    expect(nav.indexOf('href="/admin/approval-policies"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+
+  test('without the key the link is absent however many other keys are held', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS.filter((key) => key !== 'approval.policy.manage') }))
+
+    expect(hasLink(nav, '/admin/approval-policies')).toBe(false)
+    expect(hasLink(nav, '/admin/roles')).toBe(true)
+  })
+
+  test('the inline /approvals link stays in the workspace block, after My threads', async () => {
+    const nav = primaryNav(await renderLayout({ keys: [...ALL_ADMIN_KEYS, 'approval.decide'] }))
+
+    expect(nav.indexOf('href="/threads"')).toBeLessThan(nav.indexOf('href="/approvals"'))
+    expect(nav.indexOf('href="/approvals"')).toBeLessThan(nav.indexOf('nav.sectionAdmin'))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-010 — the retired fleet inbox is no longer an admin destination
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-010: the /admin/fleet/approvals link is gone from the sidebar', () => {
+  test('fleet.approval.read alone renders no admin navigation at all', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['fleet.approval.read'] }))
+
+    // The engine inbox at /approvals replaced it (P3b US-006), so the old key gates nothing now.
+    expect(hasLink(nav, '/admin/fleet/approvals')).toBe(false)
+    expect(nav).not.toContain('nav.sectionAdmin')
+  })
+
+  test('holding every other admin key as well still renders no /admin/fleet/approvals link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: [...ALL_ADMIN_KEYS, 'fleet.approval.read'] }))
+
+    expect(hasLink(nav, '/admin/fleet/approvals')).toBe(false)
+    expect(hasLink(nav, '/admin/fleet/analytics')).toBe(true)
+    // The retired label goes with the link.
+    expect(nav).not.toContain('nav.fleetApprovals')
   })
 })

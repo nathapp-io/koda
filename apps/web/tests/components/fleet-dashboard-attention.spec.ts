@@ -75,11 +75,11 @@ describe('FleetDashboardAttentionList (spec §4.2, D418, D419)', () => {
       .toEqual(['Offline', 'Configuration problem (ask a fleet admin)'])
   })
 
-  it('links jobs to the job page, approvals to the inbox, runners to the admin Runners page (admin scope)', () => {
+  it('links jobs to the job page, approvals to the engine inbox, runners to the admin Runners page (admin scope)', () => {
     const approval = job({ key: 'job_waiting_approval:j3', kind: 'job_waiting_approval', subjectId: 'j3', pending: 1, oldestSec: 30 })
     const app = mount('AttentionList.vue', { items: [job({}), approval, runner], generatedAt: GEN, now: NOW, scope: 'global' })
     expect(byId(app, 'fleet-dashboard-attention-link').map((n) => n.props.to)).toEqual([
-      '/koda/fleet/jobs/j1', '/koda/fleet/approvals', '/admin/fleet/runners',
+      '/koda/fleet/jobs/j1', '/koda/approvals', '/admin/fleet/runners',
     ])
   })
 

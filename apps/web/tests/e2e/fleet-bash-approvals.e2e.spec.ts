@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, E2E_ADMIN } from './fixtures/api-client';
-import { bashAsk, jobApprovals } from './fixtures/fleet-approvals-api';
+import { approvalDetail, bashAsk, jobApprovals } from './fixtures/fleet-approvals-api';
 import { dispatchRun, repoIdOf } from './fixtures/fleet-budgets-api';
 import { waitForHydration, webLogin } from './fixtures/page-helpers';
 import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
@@ -10,9 +10,17 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * escalate job. (2) A human allows one from the inbox and the runner receives the answer; (3) an unanswered ask expires.
  * API polls stay at one request per 2 s: the global throttle is 100 requests a minute (only /fleet/runner/* is exempt).
  * Project `fleet-e2e` and repo acme/e2e-app come from prisma/seed-e2e.ts.
+ *
+ * Permissions P3b US-007/US-010 moved the surfaces these journeys drive onto the approval engine: the job page's
+ * Review callout and the job page's own rows read the engine, and the inbox they open is `/[project]/approvals`
+ * (`approval-request-*` testids). The fixture reads the same engine list (`GET /approvals?jobId=`) and detail, so an
+ * ask's id and status come from `ApprovalRequest` itself and its `jobId` from the detail's `details` — the fleet view
+ * that used to answer them is retired in 7c.
  */
 const SLUG = 'fleet-e2e';
 const POLL = { intervals: [2_000] };
+/** The engine settles an approved ask as `executed` (its `approved` step is skipped); either reads as settled. */
+const SETTLED = /^(approved|executed)$/;
 
 test.describe('Fleet bash approvals (scripted relay runner)', () => {
   let token = '';
@@ -50,10 +58,14 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     const { jobId, lease } = await startEscalateJob(feature, 600);
     const ask = bashAsk({ featureName: feature });
     await runner.report(lease, [{ type: 'approval_request', payload: ask }]);
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).filter((a) => a.status === 'pending').length, { timeout: 20_000, ...POLL }).toBe(1);
-    const [approval] = await jobApprovals(token, SLUG, jobId);
+    await expect.poll(async () => (await jobApprovals(token, jobId)).filter((a) => a.status === 'pending').length, { timeout: 20_000, ...POLL }).toBe(1);
+    const [approval] = await jobApprovals(token, jobId);
+    // The engine's list row carries no jobId (the fleet summary used to); the detail's `details` does, and that is
+    // what the panel's job link reads.
+    expect((await approvalDetail(token, approval.id)).details?.['jobId']).toBe(jobId);
 
-    // The jobs list marks the job; the job page calls it out and Review opens the inbox row.
+    // The jobs list marks the job; the job page calls it out, previews the command from the engine detail and
+    // Review opens the engine inbox row.
     await webLogin(page);
     await page.goto(`/${SLUG}/fleet`);
     await waitForHydration(page);
@@ -61,31 +73,41 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await page.goto(`/${SLUG}/fleet/jobs/${jobId}`);
     await waitForHydration(page);
     await expect(page.getByTestId('fleet-job-approval-callout')).toContainText('1');
+    await expect(page.getByTestId(`fleet-job-approval-${approval.id}`)).toContainText(ask.command);
     await page.getByTestId('fleet-job-approval-review').click();
-    await page.waitForURL(new RegExp(`/${SLUG}/fleet/approvals\\?id=${approval.id}$`));
+    await page.waitForURL(new RegExp(`/${SLUG}/approvals\\?id=${approval.id}$`));
     await waitForHydration(page);
 
-    // The row shows the masked command, the masked note and the countdown; Allow once decides it.
-    const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
-    await expect(row.getByTestId('fleet-approval-bash-command')).toHaveText(ask.command);
-    await expect(row.getByTestId('fleet-approval-bash-masked')).toBeVisible();
-    await expect(row.getByTestId('fleet-approval-countdown')).toBeVisible();
-    await row.getByTestId('fleet-approval-bash-allow').click();
-    await expect(row.getByTestId('fleet-approval-outcome-decision')).toContainText('Allowed once');
-    await expect(row.getByTestId('fleet-approval-outcome-delivery')).toHaveAttribute('data-delivery', 'waiting');
+    // The engine's bash panel shows the masked command, the masked note and the countdown; Allow once decides it.
+    const row = page.getByTestId(`approval-request-row-${approval.id}`);
+    const panel = row.getByTestId('approval-request-bash-panel');
+    await expect(panel.getByTestId('approval-request-bash-command')).toHaveText(ask.command);
+    await expect(panel.getByTestId('approval-request-bash-masked')).toBeVisible();
+    await expect(panel.getByTestId('approval-request-bash-countdown')).toBeVisible();
+    await panel.getByTestId('approval-request-bash-allow').click();
 
-    // The runner receives exactly the human's answer and acks it; the reloaded row reads delivered.
+    // The decide response carries no engine details, so the outcome shows the settled status and no buttons yet.
+    await expect(row.getByTestId('approval-request-outcome-status')).toBeVisible();
+    await expect(panel.getByTestId('approval-request-bash-allow')).toHaveCount(0);
+
+    // The runner receives exactly the human's answer and acks it; the row then reads delivered. The outcome
+    // rides the engine's details, which the fleet-side subscriber writes a beat after the decision, so the read
+    // is retried rather than assumed present on the first reload.
     const answer = await runner.takeCommand('APPROVAL_ANSWER', jobId, { result: 'ok' });
     expect(answer.payload).toEqual({ approvalId: approval.id, naxAskId: ask.naxAskId, choice: 'allow' });
-    await page.reload();
-    await waitForHydration(page);
-    await expect(row.getByTestId('fleet-approval-outcome-delivery')).toHaveAttribute('data-delivery', 'delivered', { timeout: 10_000 });
+    await expect.poll(async () => {
+      await page.reload();
+      await waitForHydration(page);
+      return row.getByTestId('approval-request-outcome-delivery').getAttribute('data-delivery').catch(() => null);
+    }, { timeout: 20_000, intervals: [2_000] }).toBe('delivered');
 
-    // The job completes; its page lists the ask as approved and the timeline shows it was requested.
+    // The job completes; its page lists the ask as settled and the timeline shows it was requested.
     await finish(lease, feature, 21);
     await page.goto(`/${SLUG}/fleet/jobs/${jobId}`);
     await waitForHydration(page);
-    await expect(page.getByTestId(`fleet-job-approval-${approval.id}`)).toHaveAttribute('data-status', 'approved');
+    const jobRow = page.getByTestId(`fleet-job-approval-${approval.id}`);
+    await expect(jobRow).toContainText(ask.command);
+    await expect(jobRow).toHaveAttribute('data-status', SETTLED);
     await expect(page.getByTestId('fleet-job-approval-callout')).toHaveCount(0);
     await expect(page.getByTestId('fleet-job-timeline')).toContainText(`Approval requested: ${ask.command}`);
   });
@@ -97,25 +119,25 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     // expiresAt = min(nax deadline, requestedAt + 60 s): the 35 s deadline wins, leaving time to load the page first.
     const ask = bashAsk({ featureName: feature, deadlineAt: new Date(Date.now() + 35_000).toISOString() });
     await runner.report(lease, [{ type: 'approval_request', payload: ask }]);
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).length, { timeout: 10_000, ...POLL }).toBe(1);
-    const [approval] = await jobApprovals(token, SLUG, jobId);
+    await expect.poll(async () => (await jobApprovals(token, jobId)).length, { timeout: 10_000, ...POLL }).toBe(1);
+    const [approval] = await jobApprovals(token, jobId);
 
     await webLogin(page);
-    await page.goto(`/${SLUG}/fleet/approvals?id=${approval.id}`);
+    await page.goto(`/${SLUG}/approvals?id=${approval.id}`);
     await waitForHydration(page);
-    const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
-    await expect(row.getByTestId('fleet-approval-bash-deny')).toBeVisible();
-    // At 0 the panel stops offering a decision (D292). The expiry sweep may already have replaced the panel with the
-    // outcome (its live notice re-fetches the row), so either end state is accepted here.
-    await expect(row.getByTestId('fleet-approval-bash-deny')).toHaveCount(0, { timeout: 45_000 });
-    await expect(row.getByTestId('fleet-approval-bash-countdown').or(row.getByTestId('fleet-approval-outcome-decision'))).toBeVisible();
+    const row = page.getByTestId(`approval-request-row-${approval.id}`);
+    await expect(row.getByTestId('approval-request-bash-deny')).toBeVisible();
+    // At 0 the panel stops offering a decision (D292). The engine may already have re-read the row as settled,
+    // so either end state is accepted here.
+    await expect(row.getByTestId('approval-request-bash-deny')).toHaveCount(0, { timeout: 45_000 });
+    await expect(row.getByTestId('approval-request-bash-countdown').or(row.getByTestId('approval-request-outcome-status'))).toBeVisible();
 
-    // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) marks it expired; the reloaded row reads Expired, Timed out.
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
+    // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) expires it; the reloaded row reads Expired.
+    await expect.poll(async () => (await jobApprovals(token, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
     await page.reload();
     await waitForHydration(page);
     await expect(row).toHaveAttribute('data-status', 'expired');
-    await expect(row.getByTestId('fleet-approval-outcome-decision')).toContainText('Timed out');
+    await expect(row.getByTestId('approval-request-outcome-status')).toContainText('Expired');
     expect((await runner.commandsFor(jobId)).filter((c) => c.type === 'APPROVAL_ANSWER')).toEqual([]);
 
     await finish(lease, feature, 22);

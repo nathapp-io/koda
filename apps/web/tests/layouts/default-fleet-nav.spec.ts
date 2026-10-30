@@ -79,9 +79,10 @@ describe('Fleet admin nav links', () => {
     expect(html.match(/<a href="\/admin\/fleet\/runners"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetRunners')
     expect(html.match(/<a href="\/admin\/fleet\/repos"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetRepos')
     expect(html.match(/<a href="\/admin\/fleet\/budgets"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetBudgets')
-    expect(html.match(/<a href="\/admin\/fleet\/approvals"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetApprovals')
     expect(html.match(/<a href="\/admin\/fleet\/analytics"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetAnalytics')
     expect(html.match(/<a href="\/admin\/fleet"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetOverview')
+    // US-010: the retired fleet inbox link is gone; /approvals in the workspace block replaced it.
+    expect(html).not.toContain('href="/admin/fleet/approvals"')
     // D425: the overview is the first admin fleet link.
     expect(html.indexOf('href="/admin/fleet"')).toBeLessThan(html.indexOf('href="/admin/fleet/runners"'))
   })

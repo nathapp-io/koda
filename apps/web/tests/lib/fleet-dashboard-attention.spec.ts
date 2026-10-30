@@ -135,10 +135,14 @@ describe('severityOf and attentionLink (D419)', () => {
     expect(severityOf(item({ severity: 'critical' }))).toBe('warning')
   })
 
-  test('job items open the job page, approval items the inbox, in both scopes', () => {
+  test('job items open the job page in both scopes', () => {
     expect(attentionLink(item({}), 'global')).toBe('/koda/fleet/jobs/j1')
     expect(attentionLink(item({}), 'project')).toBe('/koda/fleet/jobs/j1')
-    expect(attentionLink(item({ kind: 'job_waiting_approval' }), 'project')).toBe('/koda/fleet/approvals')
+  })
+
+  test('AC-12: a job waiting on approvals opens the project engine inbox', () => {
+    expect(attentionLink(item({ kind: 'job_waiting_approval' }), 'project')).toBe('/koda/approvals')
+    expect(attentionLink(item({ kind: 'job_waiting_approval' }), 'global')).toBe('/koda/approvals')
   })
 
   test('runner items open the admin Runners page only in the admin scope', () => {

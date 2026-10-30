@@ -13,7 +13,7 @@
       {{ lineText(line) }}
       <NuxtLink
         v-if="line.status === 'paused' && reviewIds.get(line.policy.id)"
-        :to="inboxPath({ kind: 'project', slug }, reviewIds.get(line.policy.id))"
+        :to="inboxHref(slug, reviewIds.get(line.policy.id))"
         class="ml-2 font-medium underline-offset-4 hover:underline"
         data-testid="fleet-budget-banner-review"
         :data-policy="line.policy.id"
@@ -38,9 +38,12 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useFleetApprovals } from '~/composables/useFleetApprovals'
+import { useApprovalInbox } from '~/composables/useApprovalInbox'
+import type { JobApprovalRow } from '~/composables/useApprovalInbox'
 import { useFleetBudgets } from '~/composables/useFleetBudgets'
-import { inboxPath, pendingByPolicy } from '~/lib/fleet-approvals'
+import { useProjectRef } from '~/composables/useProjectRef'
+import { BUDGET_APPROVAL_KEY, budgetAskOf } from '~/lib/approval-request-fleet'
+import { DETAIL_FETCH_LIMIT, inboxHref } from '~/lib/approval-requests'
 import { bannerLines, scopeName, scopeText, spendPercent } from '~/lib/fleet-budgets'
 import type { BannerLine } from '~/lib/fleet-budgets'
 import { formatUsd } from '~/lib/fleet-jobs'
@@ -55,18 +58,36 @@ const { policies, load } = useFleetBudgets({ kind: 'project', slug: props.slug }
 
 const view = computed(() => bannerLines(policies.value))
 
-const overrides = useFleetApprovals({ kind: 'project', slug: props.slug })
-/** D248: policy id -> its pending override; empty when the request fails. */
+/** P3b US-007: the engine lists on the project's **id**, while every project page routes on the slug. */
+const project = useProjectRef(props.slug)
+const inbox = useApprovalInbox()
+/** D248: policy id -> the engine request that would raise it; empty until a load succeeds. */
 const reviewIds = ref<ReadonlyMap<string, string>>(new Map())
+
+/** The policy each detailed stop names; a row whose detail failed or is past the limit contributes nothing. */
+function policyLinks(rows: readonly JobApprovalRow[]): ReadonlyMap<string, string> {
+  const links = new Map<string, string>()
+  for (const row of rows) {
+    const policyId = row.detail === null ? null : budgetAskOf(row.detail)?.policyId ?? null
+    if (policyId !== null) links.set(policyId, row.request.id)
+  }
+  return links
+}
 
 async function loadReviews(): Promise<void> {
   try {
-    // Sends status=pending&type=budget_override_required&size=100 (buildApprovalQuery).
-    if (await overrides.load({ tab: 'pending', type: 'budget_override_required' })) {
-      reviewIds.value = pendingByPolicy(overrides.approvals.value)
-    }
+    // Resolved once the page knows the id: the list filter is by projectId, not slug.
+    const projectId = project.id.value ?? await project.load()
+    if (projectId === null) return
+    // status=pending & permissionKey=fleet.budget.override & projectId -> one page of 100, the first
+    // DETAIL_FETCH_LIMIT rows detailed (`budgetAskOf(detail).policyId` is what names the policy).
+    reviewIds.value = policyLinks(await inbox.listDetailed(
+      { status: 'pending', permissionKey: BUDGET_APPROVAL_KEY, projectId },
+      DETAIL_FETCH_LIMIT,
+    ))
   } catch {
-    reviewIds.value = new Map()
+    // Cosmetic on a page about something else: keep the links already shown and retry at the next
+    // poll or approval_request notice — an empty map would flash the review links away.
   }
 }
 
@@ -84,6 +105,12 @@ onMounted(() => {
   polling.start()
 })
 onBeforeUnmount(polling.stop)
+// P3b US-007: the engine publishes nothing for a request without a project, so a project page's own
+// stream is what makes a new stop's review link appear before the next poll.
+useProjectEvents(props.slug, {
+  onApprovalRequest: () => { void polling.runNow() },
+  onResync: () => { void polling.runNow() },
+})
 defineExpose({ refresh })
 
 const nameFor = (line: BannerLine): string | null =>

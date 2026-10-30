@@ -79,6 +79,8 @@ onBeforeUnmount(() => liveReload.cancel())
 useProjectEvents(slug, {
   onFleetJob: () => liveReload.trigger(),
   onFleetApproval: () => liveReload.trigger(),
+  // P3b US-007: engine requests reload the page (and the banner's links) too; 7c drops onFleetApproval.
+  onApprovalRequest: () => liveReload.trigger(),
   onResync: () => liveReload.trigger(),
 })
 
@@ -95,7 +97,7 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
   <div class="space-y-6">
     <PageHeader :title="t('fleet.jobs.title')" :subtitle="t('fleet.jobs.subtitle')">
       <template #actions>
-        <Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo(`/${slug}/fleet/approvals`)">
+        <Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo(`/${slug}/approvals`)">
           {{ t('fleet.jobs.approvals') }}
         </Button>
         <Button variant="outline" data-testid="fleet-schedules-link" @click="navigateTo(`/${slug}/fleet/schedules`)">

@@ -1,7 +1,16 @@
-import { describe, expect, test } from '@jest/globals'
+import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import * as Vue from 'vue'
+import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
+import * as apiModule from '../../composables/useApi'
+import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
+import type { FleetJobDto } from '../../lib/fleet-types'
+import type { ProjectEventHandlers } from '../../lib/project-event-stream'
 
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
@@ -97,18 +106,27 @@ describe('job detail', () => {
     expect(detail).toContain("t('fleet.jobs.detail.coalesced', { count: job.coalescedCount })")
   })
 
-  test('S1.5 2b: callout, shell approvals line, approvals section, live reload on fleet_approval (D297)', () => {
-    expect(detail).toContain("import { useFleetApprovals } from '~/composables/useFleetApprovals'")
+  test('S1.5 2b / P3b US-007: callout, shell approvals line and approvals section read the engine', () => {
+    expect(detail).toContain("import { useApprovalInbox } from '~/composables/useApprovalInbox'")
+    expect(detail).toContain("import { inboxHref, sortPendingRequests } from '~/lib/approval-requests'")
+    expect(detail).toContain("import type { JobApprovalRow } from '~/composables/useApprovalInbox'")
+    expect(detail).not.toContain('useFleetApprovals')
     expect(detail).toContain("import { useApprovalCountdown } from '~/composables/useApprovalCountdown'")
+    expect(detail).toMatch(/const jobApprovals = ref<JobApprovalRow\[\]>\(\[\]\)/)
+    expect(detail).toContain('await inbox.listForJob(jobId)')
     expect(detail).toMatch(/<div v-if="job\.pendingApprovals > 0"[^>]*data-testid="fleet-job-approval-callout"/)
     expect(detail).toContain(':to="reviewHref"')
-    expect(detail).toContain("inboxPath({ kind: 'project', slug }, firstPending(jobApprovals.value)?.id)")
+    expect(detail).toContain('inboxHref(slug, soonestPending.value?.id)')
     expect(detail).toContain('bashSummary(t, job.bashMode, job.approvalTimeoutSec)')
     expect(detail).toMatch(/<FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" \/>/)
     expect(detail).toContain("job.value.bashMode !== 'raw' || jobApprovals.value.length > 0")
-    expect(liveHandlers(detail)).toContain('onFleetApproval: () => liveReload.trigger()')
     expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadApprovals\(\)/)
     expect(timeline).toContain("case 'approval':")
+  })
+
+  test('P3b US-007: live reloads follow both approval notices; onFleetApproval stays until 7c', () => {
+    expect(liveHandlers(detail)).toContain('onFleetApproval: () => liveReload.trigger()')
+    expect(liveHandlers(detail)).toContain('onApprovalRequest: () => liveReload.trigger()')
   })
 
   test('S2a §4.2: Logs link, expired bundle, timeline log rows, and a list reload for a new attempt (D357)', () => {
@@ -173,5 +191,254 @@ describe('config jobs (S3 §6)', () => {
   test('regenerate submits for the job repo and opens the new job', () => {
     expect(detail).toContain('configApi.submitRegenerate(current.repoId, body)')
     expect(detail).toContain('await navigateTo(`/${slug}/fleet/jobs/${created.job.id}`)')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P3b US-007 — the job page's approvals on the approval engine
+// ─────────────────────────────────────────────────────────────────────────────
+
+const g = globalThis as Record<string, unknown>
+
+const jobFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
+  id: 'j1',
+  projectId: 'p1',
+  repoId: 'r1',
+  ref: 'main',
+  command: 'RUN',
+  feature: 'login',
+  planFrom: null,
+  profiles: [],
+  maxCostUsd: '5.0000',
+  bashMode: 'approve',
+  approvalTimeoutSec: 600,
+  pendingApprovals: 0,
+  selectorLabels: [],
+  pinnedRunnerId: null,
+  runnerId: null,
+  leaseEpoch: 1,
+  state: 'RUNNING',
+  stateReason: null,
+  requestedById: 'u1',
+  queuedAt: '2026-10-01T00:00:00.000Z',
+  assignedAt: null,
+  startedAt: null,
+  finishedAt: null,
+  cancelRequestedAt: null,
+  naxRunId: null,
+  naxLogRunId: null,
+  naxCostRunId: null,
+  progress: null,
+  currentStoryId: null,
+  currentPhase: null,
+  costSpentUsd: '0.0000',
+  lastHeartbeatAt: null,
+  finishResult: null,
+  escalationReason: null,
+  exitCode: null,
+  resultBranch: null,
+  resultSha: null,
+  resultPrUrl: null,
+  wipPush: null,
+  stories: null,
+  storiesTruncated: false,
+  postRun: null,
+  scheduleId: null,
+  coalescedCount: 0,
+  tickets: null,
+  configEdit: null,
+  workflow: null,
+  ...over,
+} as FleetJobDto)
+
+const request = (id: string, over: Partial<ApprovalRequestSummary> = {}): ApprovalRequestSummary => ({
+  id,
+  permissionKey: 'fleet.job.shell.escalate',
+  projectId: 'p1',
+  actorType: 'AGENT',
+  actorId: 'runner-1',
+  onBehalfOfType: null,
+  onBehalfOfId: null,
+  origin: 'fleet',
+  redeem: false,
+  requiredMode: 'human',
+  status: 'pending',
+  satisfiedBy: null,
+  approverType: null,
+  approverId: null,
+  expiresAt: '2026-10-03T10:10:00.000Z',
+  decidedAt: null,
+  settledAt: null,
+  createdAt: '2026-10-03T10:00:00.000Z',
+  ...over,
+})
+
+const COMMAND = 'git push --force origin HEAD'
+
+const bashDetail = (summary: ApprovalRequestSummary): ApprovalRequestDetail => ({
+  ...summary,
+  input: {
+    payload: {
+      command: COMMAND, commandTruncated: false, maskedCount: 0, root: '/w', stage: 'execution',
+      storyId: null, featureName: 'login', reason: 'r', options: ['allow', 'deny'],
+    },
+  },
+  result: null,
+  details: { jobId: 'j1' },
+  decisions: [],
+})
+
+const approvalsPage = (records: ApprovalRequestSummary[]) => ({
+  total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, records,
+})
+
+const inert = (name: string) => defineComponent({ name, setup: () => () => null })
+
+interface EnginePageOver {
+  job?: FleetJobDto
+  records: ApprovalRequestSummary[]
+  /** Request ids whose detail read fails. */
+  failing?: readonly string[]
+}
+
+/**
+ * Mounts the real job page. `useFleetJobs` and the presentation components are doubled, but the page
+ * runs the real `useApprovalInbox`, so the engine request and the rows it renders are the ones under test.
+ */
+function mountEnginePage(over: EnginePageOver) {
+  const job = over.job ?? jobFixture()
+  const get = jest.fn(async (path: string) => {
+    if (path === '/approvals') return approvalsPage(over.records)
+    const id = path.slice('/approvals/'.length)
+    if (over.failing?.includes(id) === true) throw new Error('down')
+    const summary = over.records.find((record) => record.id === id)
+    return summary === undefined ? bashDetail(request(id)) : bashDetail(summary)
+  })
+  g.useApi = () => ({ $api: { get } })
+  let live: ProjectEventHandlers | null = null
+  const app = mountSfc(webFile('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue'), {
+    components: {
+      ...uiStubs,
+      FleetBudgetBanner: defineComponent({
+        name: 'StubFleetBudgetBanner',
+        props: { slug: String, repoName: Function },
+        setup: () => () => h('x-stub-stub', { 'data-stub': 'fleet-budget-banner' }),
+      }),
+    },
+    alias: {
+      '~/composables/useApi': apiModule,
+      '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(new Date('2026-10-03T10:05:00.000Z')) }) },
+      '~/components/fleet/FleetJobProgress.vue': { __esModule: true, default: inert('StubJobProgress') },
+      '~/components/fleet/FleetJobStateBadge.vue': { __esModule: true, default: inert('StubStateBadge') },
+      '~/components/fleet/FleetJobTimeline.vue': { __esModule: true, default: inert('StubJobTimeline') },
+      '~/components/fleet/FleetJobWorkflow.vue': { __esModule: true, default: inert('StubJobWorkflow') },
+      '~/components/fleet/FleetPlacementResult.vue': { __esModule: true, default: inert('StubPlacementResult') },
+      '~/components/fleet/JobAnalytics.vue': { __esModule: true, default: inert('StubJobAnalytics') },
+      '~/components/fleet/story-graph/FleetJobPipeline.vue': { __esModule: true, default: inert('StubJobPipeline') },
+      '~/components/fleet/config/ConfigJobPanel.vue': { __esModule: true, default: inert('StubConfigJobPanel') },
+      '~/components/fleet/config/ConfigPrDialog.vue': { __esModule: true, default: inert('StubConfigPrDialog') },
+    },
+    globals: {
+      ref, computed, watch, nextTick,
+      onMounted: Vue.onMounted,
+      onBeforeUnmount: Vue.onBeforeUnmount,
+      definePageMeta: () => undefined,
+      useRoute: () => ({ params: { project: 'koda', id: job.id } }),
+      useI18n: () => enI18n(),
+      useAppToast: () => toastRecorder(),
+      useApi: () => ({ $api: { get } }),
+      useAuth: () => ({ user: ref({ id: 'u2' }) }),
+      useProjectPermissions: () => projectPermissionsStub([]),
+      navigateTo: jest.fn(async () => undefined),
+      useFleetJobs: () => ({
+        get: jest.fn(async () => job),
+        events: jest.fn(async () => ({ records: [], total: 0, current: 1, size: 50, hasNext: false, hasPrev: false })),
+        cancel: jest.fn(), requeue: jest.fn(), downloadBundle: jest.fn(),
+      }),
+      useFleetDispatchOptions: () => ({
+        load: jest.fn(async () => undefined),
+        repoName: (id: string) => id,
+        runnerName: (id: string | null) => id,
+      }),
+      useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
+      useFleetRepoConfig: () => ({ submitRegenerate: jest.fn() }),
+      useFleetJobLogs: () => ({ list: jest.fn(async () => ({ attempts: [] })) }),
+      useProjectEvents: (_slug: string, handlers: ProjectEventHandlers) => { live = handlers },
+    },
+  })
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 8; i += 1) {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      await nextTick()
+    }
+  }
+  return { app, get, settle, live: () => live, byId: (id: string) => app.find(`[data-testid="${id}"]`) }
+}
+
+afterEach(() => { delete g.useApi; jest.useRealTimers() })
+
+describe('job page approvals on the engine (P3b US-007)', () => {
+  test('AC-1: the page asks the engine for this job\'s requests in one page of 100', async () => {
+    const m = mountEnginePage({ records: [request('r1')] })
+    await m.settle()
+
+    expect(m.get).toHaveBeenCalledWith('/approvals', { query: { jobId: 'j1', size: '100' } })
+    m.app.unmount()
+  })
+
+  test('AC-4: an approval_request live event reloads the approvals after the 300 ms debounce', async () => {
+    const m = mountEnginePage({ records: [request('r1')] })
+    await m.settle()
+    const lists = () => m.get.mock.calls.filter(([path]) => path === '/approvals').length
+    expect(lists()).toBe(1)
+    expect(m.live()?.onApprovalRequest).toBeDefined()
+
+    jest.useFakeTimers()
+    m.live()?.onApprovalRequest?.({
+      id: 'e1', type: 'approval_request', projectId: 'p1', requestId: 'r1', status: 'pending', at: '2026-10-03T10:00:00.000Z',
+    })
+    jest.advanceTimersByTime(299)
+    expect(lists()).toBe(1)
+    jest.advanceTimersByTime(1)
+    jest.useRealTimers()
+    await m.settle()
+
+    expect(lists()).toBe(2)
+    m.app.unmount()
+  })
+
+  test('AC-7: the review callout opens the pending request that expires soonest', async () => {
+    const m = mountEnginePage({
+      job: jobFixture({ pendingApprovals: 2 }),
+      records: [
+        request('later', { expiresAt: '2026-10-03T11:00:00.000Z' }),
+        request('sooner', { expiresAt: '2026-10-03T10:20:00.000Z' }),
+      ],
+    })
+    await m.settle()
+
+    expect(m.byId('fleet-job-approval-review')[0].props.to).toBe('/koda/approvals?id=sooner')
+    // The section is bound the engine's rows, not the fleet DTO.
+    expect(m.byId('fleet-job-approval-sooner')).toHaveLength(1)
+    expect(m.byId('fleet-job-approval-later')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('AC-13: a failed detail read leaves that row on its raw key, the others keep their previews', async () => {
+    const m = mountEnginePage({
+      records: [
+        request('a1', { expiresAt: '2026-10-03T10:20:00.000Z' }),
+        request('a2', { expiresAt: '2026-10-03T10:30:00.000Z' }),
+      ],
+      failing: ['a2'],
+    })
+    await m.settle()
+
+    const loaded = m.byId('fleet-job-approval-a1')[0]
+    const failed = m.byId('fleet-job-approval-a2')[0]
+    expect(m.app.textOf(loaded)).toContain(COMMAND)
+    expect(m.app.textOf(failed)).toContain('fleet.job.shell.escalate')
+    expect(m.app.textOf(failed)).not.toContain(COMMAND)
+    m.app.unmount()
   })
 })

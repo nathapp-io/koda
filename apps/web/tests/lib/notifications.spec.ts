@@ -22,6 +22,8 @@ describe('notificationText (S4a §5: web renders from kind + params)', () => {
     ['job_escalated', { repo: 'acme/app', feature: 'f', state: 'ESCALATED' }, 'Fleet job on acme/app escalated'],
     ['job_pr_opened', { repo: 'acme/app', feature: 'f', prUrl: 'https://x' }, 'Fleet job on acme/app opened a PR'],
     ['approval_requested', { repo: 'acme/app', kind: 'bash' }, 'Approval needed: bash on acme/app'],
+    // P3b US-005: the engine's own approval notice words the request's permission key.
+    ['approval_request', { key: 'label.create' }, 'Approval needed: label.create'],
     ['budget_hard_stop', { scope: 'acme/app', spentUsd: '12.00', amountUsd: '10.00' }, 'Budget acme/app stopped at 12.00 of 10.00 USD'],
     ['runner_offline', { runner: 'wk-mac' }, 'Runner wk-mac is offline'],
     ['credential_expiring', { runner: 'wk-mac', provider: 'openai-codex', expiresAt: '2026-10-11' }, 'openai-codex credential on wk-mac expires 2026-10-11'],

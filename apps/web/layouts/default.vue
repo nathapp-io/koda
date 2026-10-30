@@ -60,18 +60,22 @@ const canReadFleetDashboard = computed(() => globalPermissions.value.has('fleet.
 const canReadFleetRunners = computed(() => globalPermissions.value.has('fleet.runner.read'))
 const canReadFleetRepos = computed(() => globalPermissions.value.has('fleet.repo.read'))
 const canReadFleetBudgets = computed(() => globalPermissions.value.has('fleet.budget.read'))
-const canReadFleetApprovals = computed(() => globalPermissions.value.has('fleet.approval.read'))
 const canReadFleetAnalytics = computed(() => globalPermissions.value.has('fleet.analytics.read'))
 const canReadSkills = computed(() => globalPermissions.value.has('skill.source.read'))
+// P3b US-006: the approval engine's inbox is a top-level destination for the caller who holds any
+// decide key — `mayDecide()`, because a narrowed `approval.decide@<pattern>` counts and `has()` cannot
+// see it. The global policy page follows the key its routes need.
+const canDecideApprovals = computed(() => globalPermissions.value.mayDecide())
+const canManageApprovalPolicies = computed(() => globalPermissions.value.has('approval.policy.manage'))
 const showAdminNav = computed(() =>
   canReadUsers.value
   || canReadRoles.value
+  || canManageApprovalPolicies.value
   || canReadAudit.value
   || canReadFleetDashboard.value
   || canReadFleetRunners.value
   || canReadFleetRepos.value
   || canReadFleetBudgets.value
-  || canReadFleetApprovals.value
   || canReadFleetAnalytics.value
   || canReadSkills.value,
 )
@@ -221,12 +225,16 @@ const backTo = computed(() => {
 
         <NuxtLink to="/threads" :class="navLinkClass" :active-class="activeClass"><MessagesSquare class="h-4 w-4 shrink-0" />{{ t('nav.myThreads') }}</NuxtLink>
 
+        <NuxtLink v-if="canDecideApprovals" to="/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.approvals') }}</NuxtLink>
+
         <NuxtLink to="/admin/slos" :class="navLinkClass" :active-class="activeClass"><Activity class="h-4 w-4 shrink-0" />{{ t('nav.slos') }}</NuxtLink>
 
         <p v-if="showAdminNav" :class="sectionLabelClass">{{ t('nav.sectionAdmin') }}</p>
         <NuxtLink v-if="canReadUsers" to="/admin/users" :class="navLinkClass" :active-class="activeClass"><Users class="h-4 w-4 shrink-0" />{{ t('nav.users') }}</NuxtLink>
 
         <NuxtLink v-if="canReadRoles" to="/admin/roles" :class="navLinkClass" :active-class="activeClass"><ShieldCheck class="h-4 w-4 shrink-0" />{{ t('nav.roles') }}</NuxtLink>
+
+        <NuxtLink v-if="canManageApprovalPolicies" to="/admin/approval-policies" :class="navLinkClass" :active-class="activeClass"><ScrollText class="h-4 w-4 shrink-0" />{{ t('nav.approvalPolicies') }}</NuxtLink>
 
         <NuxtLink v-if="canReadAudit" to="/admin/audit" :class="navLinkClass" :active-class="activeClass"><ScrollText class="h-4 w-4 shrink-0" />{{ t('nav.audit') }}</NuxtLink>
 
@@ -237,8 +245,6 @@ const backTo = computed(() => {
         <NuxtLink v-if="canReadFleetRepos" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
 
         <NuxtLink v-if="canReadFleetBudgets" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
-
-        <NuxtLink v-if="canReadFleetApprovals" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
 
         <NuxtLink v-if="canReadFleetAnalytics" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
 
@@ -282,6 +288,8 @@ const backTo = computed(() => {
               <MessagesSquare class="h-4 w-4 shrink-0" />
               {{ t('nav.threads') }}
             </NuxtLink>
+            <!-- P3b US-006: the engine links read this project's own keys, so the slug is the key. -->
+            <ApprovalsProjectApprovalNavLinks :key="projectSlug" :slug="projectSlug" />
             <p :class="sectionLabelClass">{{ t('nav.sectionKnowledge') }}</p>
             <NuxtLink
               :to="`/${projectSlug}/kb`"

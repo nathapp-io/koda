@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { AlertTriangle, ClipboardList, ShieldCheck } from 'lucide-vue-next'
+import { inboxHref, requestKeyLabel } from '~/lib/approval-requests'
 import { formatUsd } from '~/lib/fleet-jobs'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, priorityDotClass, statusDotClass } from '~/lib/ticket-chips'
 import type { HomeNeedsYou } from '~/lib/home-types'
@@ -7,10 +8,11 @@ import type { HomeNeedsYou } from '~/lib/home-types'
 /**
  * "Needs you" — the three attention lists of the home dashboard (MASTER-PLAN §6 slice 2).
  * Rows link into the owning project; counts shown are exact totals, lists are capped by the API.
+ * An approval row opens the approval engine's inbox (P3b US-005), not the retired fleet inbox.
  */
 const props = defineProps<{ needsYou: HomeNeedsYou; now: Date }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const chipClass = TICKET_CHIP_CLASS
 
@@ -19,7 +21,12 @@ const anythingTodo = computed(
 )
 
 function approvalTarget(a: HomeNeedsYou['approvals'][number]): string {
-  return a.projectSlug ? `/${a.projectSlug}/fleet/approvals` : '/admin/fleet/approvals'
+  return inboxHref(a.projectSlug, a.id)
+}
+
+/** A fleet ask keeps its fleet type label; any other engine key reads as its own label (or the key). */
+function approvalLabel(a: HomeNeedsYou['approvals'][number]): string {
+  return a.type === null ? requestKeyLabel(t, te, a.permissionKey) : t(`fleet.approvals.type.${a.type}`)
 }
 </script>
 
@@ -65,7 +72,7 @@ function approvalTarget(a: HomeNeedsYou['approvals'][number]): string {
         <ul v-else class="divide-y divide-border">
           <li v-for="approval in needsYou.approvals" :key="approval.id">
             <NuxtLink :to="approvalTarget(approval)" class="flex items-center gap-2 px-6 py-2.5 text-sm hover:bg-accent/40">
-              <span class="rounded-md border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium">{{ t(`fleet.approvals.type.${approval.type}`) }}</span>
+              <span class="rounded-md border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium">{{ approvalLabel(approval) }}</span>
               <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{{ approval.projectSlug ?? t('fleet.approvals.noProject') }}</span>
               <FleetAge class="shrink-0 text-xs text-muted-foreground" :iso="approval.requestedAt" :now="now" mode="ago" />
             </NuxtLink>

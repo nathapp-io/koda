@@ -6,7 +6,7 @@ import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { JobViewer } from '~/lib/fleet-jobs'
-import type { DispatchResultDto, FleetApprovalDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
+import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
@@ -14,8 +14,9 @@ import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
 import FleetJobWorkflow from '~/components/fleet/FleetJobWorkflow.vue'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
-import { useFleetApprovals } from '~/composables/useFleetApprovals'
-import { firstPending, inboxPath } from '~/lib/fleet-approvals'
+import { useApprovalInbox } from '~/composables/useApprovalInbox'
+import type { JobApprovalRow } from '~/composables/useApprovalInbox'
+import { inboxHref, sortPendingRequests } from '~/lib/approval-requests'
 import { bashSummary } from '~/lib/fleet-bash-mode'
 import { codeLabel } from '~/lib/fleet-i18n'
 import ConfigJobPanel from '~/components/fleet/config/ConfigJobPanel.vue'
@@ -49,10 +50,10 @@ const logList = ref<FleetJobLogListDto | null>(null)
 /** D357: a bundle download answered 410. */
 const bundleGone = ref(false)
 
-const approvalsApi = useFleetApprovals({ kind: 'project', slug })
+const inbox = useApprovalInbox()
 const { now } = useApprovalCountdown()
-/** D297: this job's approvals (bash asks), newest first. */
-const jobApprovals = ref<FleetApprovalDto[]>([])
+/** D297 / P3b US-007: this job's requests on the approval engine, pending first by soonest expiry. */
+const jobApprovals = ref<JobApprovalRow[]>([])
 
 const job = ref<FleetJobDto | null>(null)
 const pending = ref(true)
@@ -96,11 +97,18 @@ const wipPush = computed(() => wipPushStatus(job.value?.wipPush))
 const budgetPolicyId = computed(() => budgetStopPolicyId(job.value?.stateReason))
 const cancelPending = computed(() => job.value !== null && job.value.cancelRequestedAt !== null && !isTerminalJobState(job.value.state))
 const showApprovals = computed(() => job.value !== null && (job.value.bashMode !== 'raw' || jobApprovals.value.length > 0))
-/** D297: Review opens the ask nax denies first; the inbox itself before the list has loaded. */
-const reviewHref = computed(() => inboxPath({ kind: 'project', slug }, firstPending(jobApprovals.value)?.id))
+/**
+ * D297 / P3b US-007: the pending request that expires soonest — the one nax denies first, and the one the
+ * callout opens. Empty until the list loads, which leaves Review on the inbox itself.
+ */
+const soonestPending = computed(() => {
+  const open = jobApprovals.value.map((row) => row.request).filter((request) => request.status === 'pending')
+  return sortPendingRequests(open)[0] ?? null
+})
+const reviewHref = computed(() => inboxHref(slug, soonestPending.value?.id))
 
 async function loadApprovals(): Promise<void> {
-  jobApprovals.value = await approvalsApi.listForJob(jobId)
+  jobApprovals.value = await inbox.listForJob(jobId)
 }
 
 async function loadLogList(): Promise<void> {
@@ -188,6 +196,8 @@ useProjectEvents(slug, {
     if (event.jobId === jobId) liveReload.trigger()
   },
   onFleetApproval: () => liveReload.trigger(),
+  // P3b US-007: a request of this project decided elsewhere changes the rows; 7c drops onFleetApproval.
+  onApprovalRequest: () => liveReload.trigger(),
   // A new attempt's first bytes add its "Full log" row; growth of a known stream changes nothing here.
   onFleetLog: (event) => {
     if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()

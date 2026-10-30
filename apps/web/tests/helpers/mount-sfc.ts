@@ -127,8 +127,6 @@ const NUXT_AUTO_IMPORTS = [
   'useNuxtData',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
-  // The inbox's assistant-action panel (US-004) reads its exact preview through this composable.
-  'useActionPreview',
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
@@ -293,11 +291,6 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetBudgetTable: 'BudgetTable.vue',
   FleetScheduleTable: 'ScheduleTable.vue',
   FleetScheduleHistory: 'ScheduleHistory.vue',
-  FleetApprovalBudgetPanel: 'ApprovalBudgetPanel.vue',
-  FleetApprovalOutcome: 'ApprovalOutcome.vue',
-  FleetApprovalInbox: 'ApprovalInbox.vue',
-  FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
-  FleetApprovalActionPanel: 'ApprovalActionPanel.vue',
   FleetJobApprovals: 'JobApprovals.vue',
   FleetJobWorkflow: 'FleetJobWorkflow.vue',
   FleetAnalyticsPanel: 'analytics/Panel.vue',
@@ -412,6 +405,17 @@ const walk = (selector: string, from: FakeNode = root, into: FakeNode[] = []): F
   }
 }
 
+/**
+ * Mounts a bare setup function in a real component instance, so a composable under test gets its
+ * `onMounted` / `onBeforeUnmount` hooks (a composable called outside a component registers none).
+ * Renders nothing; the caller keeps whatever the setup produced.
+ */
+export function mountSetup(setup: () => unknown): { unmount: () => void } {
+  const app = renderer.createApp({ setup() { setup(); return () => null } })
+  app.mount(node('#root'))
+  return { unmount: () => app.unmount() }
+}
+
 /** Lucide icons are ESM-only; a stub renders an empty span so the tree stays walkable. */
 function vueIconStubs(): Record<string, unknown> {
   return new Proxy({}, { get: () => ({ name: 'Icon', template: '<i class="icon" />' }) })
@@ -424,8 +428,6 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
-  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
-  | 'FleetApprovalActionPanel'
   | 'FleetJobApprovals' | 'FleetJobWorkflow'
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
   | 'FleetAnalyticsSummaryTiles' | 'FleetAnalyticsRangePicker' | 'FleetAnalyticsStoryTable' | 'FleetAnalyticsJobTable'

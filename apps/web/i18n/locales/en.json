@@ -90,7 +90,9 @@
     "sectionKnowledge": "Knowledge",
     "sectionFleet": "Fleet",
     "threads": "Threads",
-    "myThreads": "My threads"
+    "myThreads": "My threads",
+    "approvals": "Approvals",
+    "approvalPolicies": "Approval policies"
   },
   "palette": {
     "trigger": "Search or jump to…",
@@ -2306,6 +2308,7 @@
       "job_crashed": "Fleet job on {repo} crashed",
       "job_pr_opened": "Fleet job on {repo} opened a PR",
       "approval_requested": "Approval needed: {kind} on {repo}",
+      "approval_request": "Approval needed: {key}",
       "action_requested": "Confirm an assistant action: {tool}",
       "budget_warn": "Budget {scope} reached {spentUsd} of {amountUsd} USD",
       "budget_hard_stop": "Budget {scope} stopped at {spentUsd} of {amountUsd} USD",
@@ -2383,6 +2386,205 @@
       "reset": "Patterns reset to default",
       "errorMarkdown": "Every pattern must end in .md",
       "errorCount": "Enter between 1 and 50 patterns"
+    }
+  },
+  "approvals": {
+    "keys": {
+      "fleet_job_shell_escalate": "Shell command in a fleet job",
+      "fleet_budget_override": "Fleet budget override"
+    },
+    "comment": {
+      "tooLong": "The comment is too long (2000 characters at most)"
+    },
+    "panel": {
+      "input": "Frozen input",
+      "decisions": "Decision history",
+      "comment": "Comment",
+      "commentPlaceholder": "Optional comment or reason",
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel request"
+    },
+    "toast": {
+      "decisionFailed": "Could not submit the decision.",
+      "cancelFailed": "Could not cancel the request."
+    },
+    "fleet": {
+      "bash": {
+        "openJob": "Open the job",
+        "command": "Command (secrets masked by nax)",
+        "rawDetail": "What nax sent",
+        "rawHint": "The runner could not split nax's text into a command. You are deciding on the full text below.",
+        "unreadable": "This ask could not be read. It can only be denied.",
+        "masked": "{count} secret value(s) masked",
+        "truncated": "The command is too long to show in full. It can only be denied.",
+        "root": "Runs in",
+        "stage": "Stage",
+        "story": "Story",
+        "feature": "Feature",
+        "reason": "Why nax asks",
+        "expiresIn": "nax denies it in {time} unless answered.",
+        "timedOut": "This ask timed out and nax has denied the command.",
+        "readOnly": "You can read this ask. Only a project developer or admin can answer it.",
+        "comment": "Comment (optional)",
+        "allow": "Allow once",
+        "allow_for_job": "Allow for this job",
+        "deny": "Deny"
+      },
+      "budget": {
+        "summary": "The budget for {scope} stopped at its limit.",
+        "window": "Window",
+        "spent": "Spent",
+        "asked": "Asked limit",
+        "unreadable": "This stop's frozen amount could not be read. Only the server decides what it means.",
+        "requeueTitle": "Re-queue jobs the pause cancelled before they started",
+        "noCandidates": "No cancelled jobs to re-queue.",
+        "truncated": "More cancelled jobs exist than are listed. Only the listed ones can be re-queued here.",
+        "amount": "New limit (USD)",
+        "amountHint": "Must be above the {spent} already spent.",
+        "comment": "Comment (optional)",
+        "raise": "Raise and resume",
+        "keep": "Keep paused",
+        "submitting": "Saving...",
+        "readOnly": "You can read this request. Only someone holding the budget decide key can answer it.",
+        "validation": {
+          "amountInvalid": "Enter an amount above 0 with at most 4 decimals.",
+          "notAbove": "The new limit must be above {spent}."
+        }
+      },
+      "delivery": {
+        "delivered": "Delivered to nax.",
+        "failed": "The runner did not deliver the answer to nax ({detail}).",
+        "waiting": "Not confirmed by the runner yet."
+      },
+      "requeue": {
+        "title": "Re-queue",
+        "ok": "Re-queued",
+        "none": "No jobs were selected for re-queue."
+      },
+      "requeueFailure": {
+        "gone": "Not re-queued: the job no longer exists.",
+        "activeJob": "Not re-queued: another job for this feature is active.",
+        "notCancelled": "Not re-queued: the job is no longer cancelled.",
+        "paused": "Not re-queued: a fleet budget still pauses it.",
+        "unknown": "Not re-queued."
+      },
+      "resolvedBy": {
+        "user": "Decided by a human",
+        "timeout": "Timed out",
+        "job_ended": "The job ended first",
+        "superseded": "Replaced by a newer stop",
+        "manual_resume": "Resumed from the budgets page",
+        "window_reset": "The budget window rolled over",
+        "policy_deleted": "The budget policy was deleted"
+      }
+    },
+    "inbox": {
+      "title": "Approvals",
+      "subtitle": "Every request waiting on a decision.",
+      "subtitleProject": "Requests this project is waiting on.",
+      "tabs": { "pending": "Pending", "all": "All" },
+      "row": { "requester": "Requester", "project": "Project", "expiresIn": "Time left" },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "expired": "Expired",
+        "cancelled": "Cancelled",
+        "executed": "Executed",
+        "failed": "Failed"
+      },
+      "pager": { "prev": "Previous", "next": "Next" },
+      "noProject": "No project",
+      "linked": "Not on this page. Opened from the link you followed.",
+      "forbidden": "You do not have permission to see these approvals.",
+      "loadFailed": "Could not load approvals.",
+      "stale": "Could not refresh approvals. Showing the last loaded list.",
+      "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." }
+    },
+    "policies": {
+      "title": "Approval policies",
+      "subtitle": "Which actions wait for a decision, and who may give it.",
+      "project": { "title": "Project approval policies", "inherited": "Inherited" },
+      "create": "New policy",
+      "forbidden": "You do not have permission to manage approval policies.",
+      "loadFailed": "Could not load approval policies.",
+      "incomplete": "The policy list could not be read to the end, so the override counts are not shown.",
+      "mode": {
+        "none": "Off",
+        "self": "The requester decides",
+        "agent": "An agent approves",
+        "human": "A human approves"
+      },
+      "scope": { "global": "Global", "project": "Project", "any": "Any" },
+      "risk": { "low": "Low", "medium": "Medium", "high": "High", "critical": "Critical" },
+      "principal": { "USER": "User", "AGENT": "Agent", "ASSISTANT": "Assistant" },
+      "subject": {
+        "all": "Everyone",
+        "type": "Every {type}",
+        "role": "Role {role}",
+        "principal": "{type} {principal}"
+      },
+      "keys": {
+        "title": "Approvable keys",
+        "hint": "The floor is the weakest mode a policy for the key may choose. The default is what the engine does with no policy at all.",
+        "key": "Key",
+        "scope": "Scope",
+        "risk": "Risk",
+        "floor": "Floor",
+        "default": "Default",
+        "overrides": "Overrides",
+        "empty": "No permission key can be held for approval."
+      },
+      "list": {
+        "title": "Policies",
+        "pattern": "Pattern",
+        "subject": "Applies to",
+        "mode": "Mode",
+        "timeout": "Timeout",
+        "onTimeout": "On timeout",
+        "edit": "Edit",
+        "delete": "Delete",
+        "deleteConfirm": "Delete the policy for {pattern}?",
+        "noTimeout": "No timeout",
+        "timeoutSeconds": "{count} s",
+        "empty": "No policy overrides the defaults yet."
+      },
+      "dialog": {
+        "createTitle": "New approval policy",
+        "editTitle": "Edit approval policy",
+        "description": "A policy holds an action until someone with the required mode approves it.",
+        "pattern": "Permission pattern",
+        "patternHint": "An exact key such as label.create, or a prefix such as label.* covering every key under it.",
+        "subject": "Applies to",
+        "subjectKind": { "all": "Everyone", "type": "A principal type", "role": "A role" },
+        "principalType": "Principal type",
+        "role": "Role",
+        "chooseRole": "Choose a role",
+        "mode": "Mode",
+        "modeHint": "Only the modes at or above the pattern's floor are offered.",
+        "timeout": "Timeout in seconds",
+        "timeoutHint": "Leave it blank for no timeout. Between 60 and 2592000 (30 days).",
+        "onTimeout": "When the timeout runs out",
+        "onTimeoutReject": "Reject the action",
+        "onTimeoutApprove": "Approve the action",
+        "approverMustHoldAction": "The approver must also hold the action's own permission",
+        "requireDistinctApprover": "A different principal must approve it",
+        "save": "Save",
+        "saving": "Saving..."
+      },
+      "validation": {
+        "pattern": "This pattern covers no approvable permission key.",
+        "role": "Choose the role the policy applies to.",
+        "timeout": "Enter a whole number of seconds from 60 to 2592000, or leave it blank.",
+        "timeoutApprove": "Approve on timeout needs a pattern whose floor is off.",
+        "mode": "This mode is below the floor of the keys the pattern covers."
+      },
+      "toast": {
+        "created": "Approval policy created.",
+        "updated": "Approval policy saved.",
+        "deleted": "Approval policy deleted."
+      }
     }
   }
 }

@@ -1,13 +1,16 @@
 import { describe, test, expect } from '@jest/globals'
 import {
-  approvalSummary, assistantPayload,
-  keyboardDecision, badgeTarget, badgeText, bashChoices, bashPayload, budgetPayload, buildApprovalQuery,
-  buildRaiseSchema, canDecide, commandPreview, commentTooLong, countdownText, deliveryView, firstPending,
-  inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, secondsLeft,
-  sortPending, threadApiPath, toActionBody, toBashBody, toKeepPausedBody, toRaiseBody,
+  badgeText, bashChoices, bashPayload, budgetPayload, commandPreview, countdownText, deliveryView,
+  raiseAmountError, requeueFailure, secondsLeft,
 } from '../../lib/fleet-approvals'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
-import { enI18n } from '../helpers/fleet-harness'
+
+/**
+ * The fleet approval helpers the fleet surfaces still read: the job page, the header badge, the notification
+ * bell, the thread action card and the engine's fleet panels. US-010 deleted the fleet inbox and the helpers only
+ * it used (query building, sorting, the viewer keys, the raise/keep-paused/bash/action bodies, thread paths, keyboard
+ * decisions, summary lines, the raise schema and its comment limit); the cases for those went with them.
+ */
 
 const budget = { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: '2026-10-01T00:00:00.000Z', spentUsd: '0.6000', amountUsd: '0.5000' }
 
@@ -15,37 +18,6 @@ const approval = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprov
   id, type: 'budget_override_required', status: 'pending', projectId: 'p1', jobId: null, policyId: 'pol1',
   payload: { ...budget }, outcome: null, requestedAt: '2026-10-03T10:00:00.000Z', expiresAt: null, decision: null,
   decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...over,
-})
-
-/** S5b 2a-D5: what `ApprovalCloser.openAssistant` stores on an `assistant_action` approval. */
-const actionFields = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/threads/t1', requestedById: 'u1', ...over,
-})
-const actionRow = (over: Partial<FleetApprovalDto> = {}, payload: Record<string, unknown> = {}): FleetApprovalDto =>
-  approval('ap1', { type: 'assistant_action', policyId: null, jobId: 'j1', payload: actionFields(payload), ...over })
-
-describe('buildApprovalQuery', () => {
-  test('pending asks for one page of 100 pending rows', () => {
-    expect(buildApprovalQuery({ tab: 'pending' })).toEqual({ status: 'pending', size: '100' })
-  })
-  test('all pages by 20 and sends current only past page 1', () => {
-    expect(buildApprovalQuery({ tab: 'all', page: 1 })).toEqual({ size: '20' })
-    expect(buildApprovalQuery({ tab: 'all', page: 3, type: 'nax_bash_escalate' })).toEqual({ size: '20', current: '3', type: 'nax_bash_escalate' })
-  })
-  test('pending ignores the page', () => {
-    expect(buildApprovalQuery({ tab: 'pending', page: 4 })).toEqual({ status: 'pending', size: '100' })
-  })
-})
-
-describe('sortPending', () => {
-  test('soonest expiry first, then rows without one in their given order', () => {
-    const rows = [
-      approval('b1'), approval('x2', { expiresAt: '2026-10-03T10:09:00.000Z' }),
-      approval('b2'), approval('x1', { expiresAt: '2026-10-03T10:05:00.000Z' }),
-    ]
-    expect(sortPending(rows).map((r) => r.id)).toEqual(['x1', 'x2', 'b1', 'b2'])
-    expect(rows.map((r) => r.id)).toEqual(['b1', 'x2', 'b2', 'x1'])
-  })
 })
 
 describe('budgetPayload', () => {
@@ -63,159 +35,16 @@ describe('budgetPayload', () => {
   })
 })
 
-describe('canDecide (D244, Review Focus 5; Permissions P1 US-009)', () => {
-  // The budget/bash rules do not read the viewer's user id, so a signed-out struct is enough here.
-  const admin = { kind: 'admin', userId: null, canDecideBudget: true, canDecideBash: true } as const
-  const manager = { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: null } as const
-  const member = { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: null } as const
-  const developer = { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: null } as const
-  test('a pending budget override follows the budget key', () => {
-    expect(canDecide(approval('a'), admin)).toBe(true)
-    expect(canDecide(approval('a'), manager)).toBe(true)
-    expect(canDecide(approval('a'), member)).toBe(false)
-    expect(canDecide(approval('a'), developer)).toBe(false)
-  })
-  test('never once decided; a pending bash ask follows the bash key', () => {
-    expect(canDecide(approval('a', { status: 'approved' }), admin)).toBe(false)
-    const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
-    expect(canDecide(bash, admin)).toBe(true)
-    expect(canDecide(bash, developer)).toBe(true)
-    expect(canDecide(bash, member)).toBe(false)
-    expect(canDecide({ ...bash, status: 'expired' }, admin)).toBe(false)
-  })
-})
-
-describe('canDecide for assistant_action (2aw-D6)', () => {
-  test('AC-1: the requester decides even holding no decision key', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' })).toBe(true)
-  })
-  test('AC-2: a project viewer holding both keys who is not the requester cannot', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toBe(false)
-  })
-  test('AC-3: a global admin viewer holding both keys who is not the requester cannot', () => {
-    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toBe(false)
-  })
-  test('AC-4: an admin viewer who is the requester can', () => {
-    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: 'u1' })).toBe(true)
-  })
-  test('AC-5: nobody signed in never decides, on either viewer kind', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: null })).toBe(false)
-    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: null })).toBe(false)
-  })
-  test('AC-6: an action that is no longer pending is not decided again, not even by its requester', () => {
-    expect(canDecide(actionRow({ status: 'approved' }), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' })).toBe(false)
-  })
-  test('a payload that does not parse is decided by nobody', () => {
-    expect(canDecide(actionRow({}, { threadPath: 7 }), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' })).toBe(false)
-  })
-})
-
-describe('canDecide reads permission keys, not role names (US-009)', () => {
-  test('a pending budget override follows canDecideBudget, whoever the viewer is', () => {
-    expect(canDecide(approval('a'), { kind: 'project', canDecideBudget: true, canDecideBash: false, userId: 'u2' })).toBe(true)
-    expect(canDecide(approval('a'), { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u1' })).toBe(false)
-  })
-  test('a pending bash ask follows canDecideBash, whoever the viewer is', () => {
-    const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
-    expect(canDecide(bash, { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u2' })).toBe(true)
-    expect(canDecide(bash, { kind: 'project', canDecideBudget: true, canDecideBash: false, userId: 'u1' })).toBe(false)
-  })
-  test('an admin-kind viewer decides nothing without the keys', () => {
-    expect(canDecide(approval('a'), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: null })).toBe(false)
-    expect(canDecide(approval('a', { type: 'nax_bash_escalate', policyId: null }), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: null })).toBe(false)
-  })
-})
-
-describe('assistantPayload (2aw-D7)', () => {
-  test('AC-8: the five strings of a proposed action', () => {
-    expect(assistantPayload(actionRow())).toEqual({
-      actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/threads/t1', requestedById: 'u1',
-    })
-  })
-  test('AC-9: a payload without threadPath does not parse', () => {
-    expect(assistantPayload(actionRow({}, { threadPath: undefined }))).toBeNull()
-  })
-  test('another type, and any non-string field, does not parse', () => {
-    expect(assistantPayload(approval('a'))).toBeNull()
-    expect(assistantPayload(actionRow({}, { requestedById: 7 }))).toBeNull()
-    expect(assistantPayload(actionRow({}, { threadId: null }))).toBeNull()
-  })
-})
-
-describe('toActionBody (2aw-D7)', () => {
-  test('AC-10: a blank comment is dropped', () => {
-    expect(toActionBody('approve', '  ')).toEqual({ decision: 'approve' })
-  })
-  test('AC-11: a comment is trimmed', () => {
-    expect(toActionBody('reject', ' no ')).toEqual({ decision: 'reject', comment: 'no' })
-  })
-})
-
-describe('threadApiPath (2aw-D10)', () => {
-  test('AC-13: a workspace thread path is already an API path', () => {
-    expect(threadApiPath('/threads/t1')).toBe('/threads/t1')
-  })
-  test('AC-14: a project thread path gains the projects prefix', () => {
-    expect(threadApiPath('/acme/threads/t1')).toBe('/projects/acme/threads/t1')
-  })
-  test('AC-15: any other shape does not parse', () => {
-    expect(threadApiPath('/acme/tickets/t1')).toBeNull()
-  })
-  test.each(['', '/threads', '/threads/', '/acme/threads', '/threads/t1/t2', '/acme/threads/t1/x', 'threads/t1', '/acme//threads/t1'])('%s does not parse', (path) => {
-    expect(threadApiPath(path)).toBeNull()
-  })
-})
-
-describe('keyboardDecision for assistant_action (2aw-D6)', () => {
-  test('AC-7: the requester only ever rejects from the keyboard', () => {
-    expect(keyboardDecision(actionRow(), { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' }))
-      .toEqual({ approve: null, deny: { decision: 'reject' } })
-    // The same for an admin requester: the A key must never approve an action.
-    expect(keyboardDecision(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' }))
-      .toEqual({ approve: null, deny: { decision: 'reject' } })
-  })
-  test('a viewer who cannot decide gets no keyboard decisions', () => {
-    expect(keyboardDecision(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toEqual({ approve: null, deny: null })
-  })
-})
-
-describe('approvalSummary for assistant_action (2aw-D8)', () => {
-  const { t } = enI18n()
-  test('AC-12: the tool is named, not the budget label', () => {
-    expect(approvalSummary(t, actionRow(), () => null)).toBe('The assistant asks to run koda_add_comment')
-    expect(approvalSummary(t, actionRow(), () => null)).not.toBe('Budget override')
-  })
-  test('a payload that does not parse falls back to the type label', () => {
-    expect(approvalSummary(t, actionRow({}, { tool: 7 }), () => null)).toBe('Assistant action')
-  })
-})
-
-describe('raise form', () => {
+describe('raiseAmountError (D243)', () => {
   test('the amount must parse and be above the spend', () => {
     expect(raiseAmountError('', '0.6000')).toBe('amountInvalid')
     expect(raiseAmountError('1.23456', '0.6000')).toBe('amountInvalid')
     expect(raiseAmountError('0.6', '0.6000')).toBe('notAbove')
     expect(raiseAmountError(' 2 ', '0.6000')).toBeNull()
   })
-  test('raise always sends the selected ids, even none (D243)', () => {
-    expect(toRaiseBody({ amount: '2', selected: [], comment: '  ' })).toEqual({ decision: 'raise_budget_and_resume', amountUsd: 2, requeueJobIds: [] })
-    expect(toRaiseBody({ amount: '2.5', selected: ['j1'], comment: ' ok ' }))
-      .toEqual({ decision: 'raise_budget_and_resume', amountUsd: 2.5, requeueJobIds: ['j1'], comment: 'ok' })
-  })
-  test('raise refuses an amount that was not validated', () => {
-    expect(() => toRaiseBody({ amount: 'x', selected: [], comment: '' })).toThrow('not validated')
-  })
-  test('keep paused carries only the decision and a non-blank comment', () => {
-    expect(toKeepPausedBody('')).toEqual({ decision: 'keep_paused' })
-    expect(toKeepPausedBody(' wait ')).toEqual({ decision: 'keep_paused', comment: 'wait' })
-  })
-  test('a comment over 1000 characters is too long', () => {
-    expect(commentTooLong('a'.repeat(1000))).toBe(false)
-    expect(commentTooLong(` ${'a'.repeat(1001)} `)).toBe(true)
-  })
 })
 
-describe('re-queue results (D245, Review Focus 4)', () => {
+describe('requeueFailure (D245, Review Focus 4)', () => {
   const err = (code: string, args: Record<string, unknown> = {}) => JSON.stringify({ code, args })
   test('maps stored error codes to reasons', () => {
     expect(requeueFailure(err('fleet.jobs'))).toBe('gone')
@@ -227,85 +56,13 @@ describe('re-queue results (D245, Review Focus 4)', () => {
     expect(requeueFailure(undefined)).toBe('unknown')
     expect(requeueFailure('null')).toBe('unknown')
   })
-  test('a user raise lists its results, skipping malformed entries', () => {
-    const a = approval('a', {
-      status: 'approved', decision: 'raise_budget_and_resume', resolvedBy: 'user',
-      outcome: { resumedAmountUsd: '2.0000', requeueResults: [{ jobId: 'j1', ok: true }, { jobId: 'j2', ok: false, error: err('fleet.jobState') }, { ok: true }, 'junk'] },
-    })
-    expect(requeueResults(a)).toEqual([{ jobId: 'j1', ok: true, reason: null }, { jobId: 'j2', ok: false, reason: 'notCancelled' }])
-    expect(resumedAmount(a)).toBe('2.0000')
-  })
-  test('a manual resume has no re-queue record to show', () => {
-    const a = approval('a', { status: 'approved', decision: 'raise_budget_and_resume', resolvedBy: 'manual_resume', outcome: { resumedAmountUsd: '3.0000', requeueResults: [] } })
-    expect(requeueResults(a)).toBeNull()
-    expect(resumedAmount(a)).toBe('3.0000')
-  })
-  test('keep paused and missing outcomes have none', () => {
-    expect(requeueResults(approval('a', { status: 'rejected', decision: 'keep_paused', resolvedBy: 'user' }))).toBeNull()
-    expect(requeueResults(approval('a', { decision: 'raise_budget_and_resume', resolvedBy: 'user', outcome: null }))).toBeNull()
-    expect(resumedAmount(approval('a'))).toBeNull()
-  })
-  test('a numeric resumed amount is shown as a string', () => {
-    expect(resumedAmount(approval('a', { outcome: { resumedAmountUsd: 2 } }))).toBe('2')
-  })
 })
 
-describe('pendingByPolicy (D248)', () => {
-  test('maps policy id to the pending budget approval', () => {
-    const rows = [approval('a1'), approval('a2', { policyId: 'pol2', status: 'approved' }), approval('a3', { policyId: null }), approval('a4', { type: 'nax_bash_escalate', policyId: 'pol3' })]
-    expect([...pendingByPolicy(rows)]).toEqual([['pol1', 'a1']])
-  })
-})
-
-describe('paths and badge (D241, D247)', () => {
-  test('inbox paths', () => {
-    expect(inboxPath({ kind: 'project', slug: 'koda' })).toBe('/koda/fleet/approvals')
-    expect(inboxPath({ kind: 'project', slug: 'koda' }, 'a b')).toBe('/koda/fleet/approvals?id=a%20b')
-    expect(inboxPath({ kind: 'admin' }, 'x')).toBe('/admin/fleet/approvals?id=x')
-  })
-  const counts = { total: 3, unscoped: 1, projects: [{ projectId: 'p2', slug: 'beta', pending: 2 }] }
-  test('in a project the badge goes to that inbox', () => {
-    expect(badgeTarget(counts, { slug: 'koda', globalAdmin: true })).toBe('/koda/fleet/approvals')
-  })
-  test('outside a project: admin inbox for a global admin, else the first project with pending', () => {
-    expect(badgeTarget(counts, { slug: null, globalAdmin: true })).toBe('/admin/fleet/approvals')
-    expect(badgeTarget(counts, { slug: null, globalAdmin: false })).toBe('/beta/fleet/approvals')
-    expect(badgeTarget({ total: 0, unscoped: 0, projects: [] }, { slug: null, globalAdmin: false })).toBeNull()
-  })
+describe('badgeText (D247)', () => {
   test('the count caps at 99+', () => {
     expect(badgeText(7)).toBe('7')
     expect(badgeText(99)).toBe('99')
     expect(badgeText(100)).toBe('99+')
-  })
-})
-
-describe('approvalSummary', () => {
-  const { t } = enI18n()
-  test('a budget override names the scope and the stop', () => {
-    expect(approvalSummary(t, approval('a'), () => 'koda')).toBe('Budget for project koda stopped at $0.60 of $0.50')
-  })
-  test('a bash ask names its command and stage; malformed payloads fall back to fixed text (D296)', () => {
-    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: bashFields() }), () => null))
-      .toBe('Run git push --force origin HEAD (execution)')
-    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: {} }), () => null)).toBe('A job asks to run a shell command')
-    expect(approvalSummary(t, approval('a', { payload: {} }), () => null)).toBe('Budget override')
-  })
-})
-
-describe('buildRaiseSchema (D243)', () => {
-  const { t } = enI18n()
-  const schema = buildRaiseSchema(t, '0.6000')
-  const errors = (amount: string, comment = '') => {
-    const result = schema.safeParse({ amount, comment })
-    return result.success ? {} : result.error.flatten().fieldErrors
-  }
-  test('a valid amount above the spend and a short comment pass', () => {
-    expect(errors('2', 'ok')).toEqual({})
-  })
-  test('each field reports its own translated message', () => {
-    expect(errors('abc').amount).toEqual(['Enter an amount above 0 with at most 4 decimals.'])
-    expect(errors('0.6').amount).toEqual(['The new limit must be above $0.60.'])
-    expect(errors('2', 'x'.repeat(1001)).comment).toEqual(['Keep the comment to 1000 characters.'])
   })
 })
 
@@ -365,13 +122,6 @@ describe('bashChoices (D291, Review Focus 1)', () => {
   })
 })
 
-describe('toBashBody (D293)', () => {
-  test('decision and trimmed comment only, never budget fields', () => {
-    expect(toBashBody('allow', '  ok  ')).toEqual({ decision: 'allow', comment: 'ok' })
-    expect(toBashBody('deny', '   ')).toEqual({ decision: 'deny' })
-  })
-})
-
 describe('countdown (D292)', () => {
   const now = new Date('2026-10-03T10:00:00.000Z')
   test('whole seconds left, rounded up, floored at 0', () => {
@@ -426,55 +176,5 @@ describe('commandPreview (D296)', () => {
   })
   test('an unparsed ask previews its raw text', () => {
     expect(commandPreview(p({ command: '', rawDetail: 'request: ls\nruns in: /w' }))).toBe('request: ls...')
-  })
-})
-
-describe('firstPending (D297)', () => {
-  test('the pending ask that expires first', () => {
-    const rows = [
-      bashRow({ id: 'late', expiresAt: '2026-10-03T10:20:00.000Z' }),
-      bashRow({ id: 'done', status: 'approved', expiresAt: '2026-10-03T10:01:00.000Z' }),
-      bashRow({ id: 'soon', expiresAt: '2026-10-03T10:05:00.000Z' }),
-    ]
-    expect(firstPending(rows)?.id).toBe('soon')
-    expect(firstPending([])).toBeNull()
-  })
-})
-
-describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
-  const worker = { kind: 'project' as const, canDecideBudget: false, canDecideBash: true, userId: null }
-  // A complete valid bash payload — keyboardDecision validates through bashPayload like the panel.
-  const bashAsk = (options: string[], over: Record<string, unknown> = {}) => ({
-    type: 'nax_bash_escalate', status: 'pending',
-    payload: {
-      command: 'rm -rf node_modules', commandTruncated: false, maskedCount: 0, root: '/', stage: 'exec',
-      featureName: 'f', reason: 'asked by nax', storyId: null, rawDetail: null, options,
-    },
-    ...over,
-  })
-
-  test('A allows a bash ask nax offered; D always denies', () => {
-    const d = keyboardDecision(bashAsk(['allow', 'deny']) as never, worker)
-    expect(d.approve).toEqual({ decision: 'allow' })
-    expect(d.deny).toEqual({ decision: 'deny' })
-  })
-
-  test('a cut (deny-only) ask has no keyboard approve', () => {
-    const d = keyboardDecision(bashAsk(['allow', 'deny'], { payload: { ...bashAsk(['allow', 'deny']).payload, commandTruncated: true } }) as never, worker)
-    expect(d.approve).toBeNull()
-    expect(d.deny).toEqual({ decision: 'deny' })
-  })
-
-  test('a budget ask denies to keep_paused for a budget decider; approve needs a typed amount so it is null', () => {
-    const manager = { kind: 'project' as const, canDecideBudget: true, canDecideBash: true, userId: null }
-    const d = keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, manager)
-    expect(d.approve).toBeNull()
-    expect(d.deny).toEqual({ decision: 'keep_paused' })
-  })
-
-  test('a viewer without rights gets no keyboard decisions at all (bash needs its key, budget its own)', () => {
-    const viewer = { kind: 'project' as const, canDecideBudget: false, canDecideBash: false, userId: null }
-    expect(keyboardDecision(bashAsk(['allow', 'deny']) as never, viewer)).toEqual({ approve: null, deny: null })
-    expect(keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, worker)).toEqual({ approve: null, deny: null })
   })
 })
