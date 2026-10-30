@@ -411,11 +411,15 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
   const pageOf = (records: ApprovalRequestSummary[]) =>
     ({ total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, records })
 
-  function mountInbox(request: ApprovalRequestDetail, over: { get?: jest.Mock; post?: jest.Mock } = {}) {
+  function mountInbox(
+    request: ApprovalRequestDetail,
+    over: { get?: jest.Mock; post?: jest.Mock; base?: Record<string, unknown> } = {},
+  ) {
     const api = {
       get: over.get ?? jest.fn(async (path: string) => (path === '/approvals' ? pageOf([request]) : request)),
       post: over.post ?? jest.fn(async () => request),
     }
+    let pollTask: () => Promise<void> = async () => undefined
     const app = mountSfc(inboxFile, {
       components: {
         ...uiStubs,
@@ -425,7 +429,7 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
       alias: {
         '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(NOW) }) },
       },
-      props: { base: { kind: 'project', slug: 'sandbox', projectId: 'p1' } },
+      props: { base: over.base ?? { kind: 'project', slug: 'sandbox', projectId: 'p1' } },
       globals: {
         ref, computed: Vue.computed, watch: Vue.watch, nextTick: Vue.nextTick,
         onMounted: Vue.onMounted, onBeforeUnmount: Vue.onBeforeUnmount,
@@ -435,7 +439,10 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
         useApi: () => ({ $api: api }),
         useRoute: () => ({ query: {} }),
         useRouter: () => ({ replace: jest.fn() }),
-        useVisiblePolling: (task: () => Promise<void>) => ({ start: () => undefined, stop: () => undefined, runNow: task, isActive: () => true }),
+        useVisiblePolling: (task: () => Promise<void>) => {
+          pollTask = task
+          return { start: () => undefined, stop: () => undefined, runNow: task, isActive: () => true }
+        },
         useProjectEvents: (_slug: string, _handlers: ProjectEventHandlers) => undefined,
       },
     })
@@ -445,7 +452,7 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
         await Vue.nextTick()
       }
     }
-    return { app, api, settle }
+    return { app, api, settle, poll: () => pollTask() }
   }
 
   async function openRow(m: ReturnType<typeof mountInbox>): Promise<void> {
@@ -518,6 +525,94 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     expect(row?.props['data-ok']).toBe('false')
     expect(m.app.textOf(row as never)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
     expect(m.app.find('[data-testid="approval-request-budget-raise"]')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  /**
+   * AC-15 assumes the outcome is eventually on screen. The decide answer carries no `details`, and the
+   * read that adds them is a second request that can fail on its own — leaving the panel on a settled
+   * budget stop with no re-queue results. Nothing about the list announces that miss: the settled
+   * request drops off the Pending page, and on All it already carries the settled status. So the miss
+   * is remembered and re-read, whatever the list says.
+   */
+  const settledOutcome = () => budgetRequest({
+    status: 'executed',
+    details: {
+      kind: 'budget', policyId: 'pol1', resolvedBy: 'user',
+      outcome: { resumedAmountUsd: '50.0000', requeueResults: [{ jobId: 'j2', ok: false, error: '{"code":"fleet.jobState"}' }] },
+    },
+  })
+  /** The write's own answer: the request, settled, but without the engine's `details` block. */
+  const decidedAnswer = () => budgetRequest({ status: 'executed', details: null })
+
+  async function raiseAndSettle(m: ReturnType<typeof mountInbox>): Promise<void> {
+    await openRow(m)
+    ;(m.app.find('[data-testid="approval-request-budget-amount"]')[0]?.props['onUpdate:modelValue'] as (v: string) => void)('50')
+    await Vue.nextTick()
+    ;(m.app.find('[data-testid="approval-request-budget-raise"]')[0]?.props.onClick as () => void)()
+    await m.settle()
+  }
+
+  test('AC-15 (edge): a failed enrichment read is retried on the next poll, so the outcome still arrives', async () => {
+    const pending = budgetRequest()
+    let listReads = 0
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      // Pending tab: a settled request is no longer on the page, so the list never mentions it again.
+      if (path === '/approvals') {
+        listReads += 1
+        return pageOf(listReads === 1 ? [pending] : [])
+      }
+      detailReads += 1
+      if (detailReads === 1) return pending
+      if (detailReads === 2) throw new Error('read-down')
+      return settledOutcome()
+    })
+    const m = mountInbox(pending, { get, post: jest.fn(async () => decidedAnswer()) })
+    await raiseAndSettle(m)
+    expect(m.api.post).toHaveBeenCalledTimes(1)
+    // The write landed, the enrichment did not: the panel has no re-queue results to show.
+    expect(m.app.find('[data-testid="approval-request-requeue-j2"]')).toHaveLength(0)
+
+    await m.poll()
+    await m.settle()
+
+    expect(detailReads).toBe(3)
+    const row = m.app.find('[data-testid="approval-request-requeue-j2"]')[0]
+    expect(row?.props['data-ok']).toBe('false')
+    expect(m.app.textOf(row as never)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
+    m.app.unmount()
+  })
+
+  test('AC-15 (edge): the retry does not depend on the row still being listed or its status moving', async () => {
+    const pending = budgetRequest()
+    let listReads = 0
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      // All tab: after the decision the row is still listed, with the settled status the write already
+      // gave the open detail — so a status comparison alone would never re-read it.
+      if (path === '/approvals') {
+        listReads += 1
+        return pageOf(listReads === 1 ? [pending] : [budgetRequest({ status: 'executed' })])
+      }
+      detailReads += 1
+      if (detailReads === 1) return pending
+      if (detailReads === 2) throw new Error('read-down')
+      return settledOutcome()
+    })
+    const m = mountInbox(pending, { get, post: jest.fn(async () => decidedAnswer()), base: { kind: 'all' } })
+    await m.settle()
+    ;(m.app.find('[data-testid="approvals-inbox-tab-all"]')[0]?.props.onClick as () => void)()
+    await m.settle()
+    // The All tab is the one that keeps listing a settled row, and it labels the status it carries.
+    expect(m.app.find('[data-testid="approval-request-status"]')).toHaveLength(1)
+    await raiseAndSettle(m)
+    expect(m.app.find('[data-testid="approval-request-requeue-j2"]')).toHaveLength(0)
+
+    await m.poll()
+    await m.settle()
+    expect(detailReads).toBe(3)
+    expect(m.app.find('[data-testid="approval-request-requeue-j2"]')[0]?.props['data-ok']).toBe('false')
     m.app.unmount()
   })
 })

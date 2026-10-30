@@ -163,6 +163,14 @@ const openId = ref<string | null>(queryId())
 /** GET /approvals/:id of the open row: what US-003's panel renders. */
 const detail = ref<ApprovalRequestDetail | null>(null)
 const detailLoading = ref(false)
+/**
+ * The id whose detail is still a write's own answer rather than the engine's enriched read: a decide
+ * or cancel answer carries no `details` block, so a settled bash delivery state or budget re-queue
+ * result only arrives on the read that follows it. When that read fails the panel is left without
+ * its outcome, and the list will not announce the change again — a settled request drops off Pending,
+ * and on All it keeps the status it already had — so the miss is remembered and retried on its own.
+ */
+const detailNeedsEnrichment = ref<string | null>(null)
 
 const projectId = props.base.kind === 'project' ? props.base.projectId : undefined
 /** Only the project inbox knows the slug a bash ask needs to link its job (US-004). */
@@ -214,16 +222,24 @@ async function loadDetail(id: string): Promise<void> {
   detailLoading.value = true
   try {
     const fetched = await get(id)
-    if (openId.value === id) detail.value = fetched
+    if (openId.value !== id) return
+    detail.value = fetched
+    detailNeedsEnrichment.value = null
   } catch (err: unknown) {
     if (openId.value !== id) return
     toast.error(extractApiError(err))
-    openId.value = null
-    detail.value = null
-    writeQuery(null)
+    closeRow()
   } finally {
     detailLoading.value = false
   }
+}
+
+/** Nothing is open: no detail, no query entry, and no enrichment left to chase. */
+function closeRow(): void {
+  openId.value = null
+  detail.value = null
+  detailNeedsEnrichment.value = null
+  writeQuery(null)
 }
 
 function isConflict(error: unknown): boolean {
@@ -243,10 +259,15 @@ function isConflict(error: unknown): boolean {
 async function refreshedDetail(id: string, fallback: ApprovalRequestDetail | null): Promise<void> {
   try {
     const fetched = await get(id)
-    if (openId.value === id) detail.value = fetched
+    if (openId.value !== id) return
+    detail.value = fetched
+    detailNeedsEnrichment.value = null
   } catch {
-    // Intentional: the write landed; only the enriched block is missing, and a later reload retries it.
-    if (openId.value === id && fallback !== null) detail.value = fallback
+    // Intentional: the write landed; only the enriched block is missing. The write's own answer stays
+    // on screen and the miss is remembered, so a later reload re-reads it (see reconcileOpenRow).
+    if (openId.value !== id) return
+    if (fallback !== null) detail.value = fallback
+    detailNeedsEnrichment.value = id
   }
 }
 
@@ -255,17 +276,27 @@ async function refreshedDetail(id: string, fallback: ApprovalRequestDetail | nul
  * approver, a timeout, the job ending first. Its detail is then stale (decide controls on a settled
  * request), so it is re-read when the listed status moves. A failed re-read keeps what is shown: a
  * background refresh must never blank the panel.
+ *
+ * The listed status is not enough on its own for a request this caller just decided: the write's own
+ * answer already carries the settled status, so a missing enrichment (above) is re-read here too,
+ * whether or not the list still holds the row at all.
  */
 async function reconcileOpenRow(): Promise<void> {
   const id = openId.value
   if (id === null || detailLoading.value) return
+  const shown = detail.value
+  if (shown?.id !== id) return
   const listed = requests.value.find((row) => row.id === id)
-  if (listed === undefined || detail.value?.id !== id || detail.value.status === listed.status) return
+  const needsEnrichment = detailNeedsEnrichment.value === id
+  const statusMoved = listed !== undefined && shown.status !== listed.status
+  if (!needsEnrichment && !statusMoved) return
   try {
     const fetched = await get(id)
-    if (openId.value === id) detail.value = fetched
+    if (openId.value !== id) return
+    detail.value = fetched
+    detailNeedsEnrichment.value = null
   } catch {
-    // Intentional: the list stays authoritative for the countdown; the next event re-reads the detail.
+    // Intentional: the list stays authoritative for the countdown; the next poll or event re-reads it.
   }
 }
 
@@ -328,13 +359,12 @@ async function reload(): Promise<void> {
 
 async function toggle(id: string): Promise<void> {
   if (openId.value === id) {
-    openId.value = null
-    detail.value = null
-    writeQuery(null)
+    closeRow()
     return
   }
   openId.value = id
   detail.value = null
+  detailNeedsEnrichment.value = null
   writeQuery(id)
   await loadDetail(id)
 }
@@ -365,6 +395,7 @@ watch(queryId, (id) => {
   if (id === openId.value) return
   openId.value = id
   detail.value = null
+  detailNeedsEnrichment.value = null
   if (id !== null) void loadDetail(id)
 })
 
