@@ -14,6 +14,7 @@ import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -116,10 +117,24 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     await evaluator.evaluate(p.id);
 
     // Permissions P3 US-007: the ask is an `ApprovalRequest`, and the announcement is keyed by its id.
+    const secondAdmin = await prisma.user.create({ data: { email: 'budget-admin2@koda.test', passwordHash: 'x' } });
+    await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
+    await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
     const [row] = await events('fleet_approval_requested');
     const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: row.eventId } });
     expect(ask).toMatchObject({ permissionKey: 'fleet.budget.override', status: 'pending', projectId: world.projectId });
     expect(row.projectId).toBe(world.projectId);
+
+    await deliver('approval_request_changed');
+    const engineNotes = await prisma.notification.findMany({
+      where: { sourceType: 'approval_request', sourceId: ask.id, kind: 'approval_request' },
+    });
+    expect(engineNotes).toHaveLength(2);
+    expect(engineNotes.map((note) => note.userId).sort()).toEqual([world.ids.root, secondAdmin.id].sort());
+    expect(engineNotes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ link: `/approvals?id=${ask.id}`, params: { key: 'fleet.budget.override' } }),
+      expect.objectContaining({ link: `/approvals?id=${ask.id}`, params: { key: 'fleet.budget.override' } }),
+    ]));
 
     await deliver('fleet_approval_requested');
     const pendingNote = (await notes(world.ids.root)).find((x) => x.kind === 'approval_requested');

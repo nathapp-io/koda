@@ -558,6 +558,20 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     const secondAdmin = await prisma.user.create({ data: { email: 'relay-admin2@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
     await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+
+    // Persisted role bindings exercise project-scoped candidate and action-key resolution.
+    const recipients = await Promise.all(['both', 'approver-only', 'foreign-project'].map((name) =>
+      prisma.user.create({ data: { email: `relay-${name}@koda.test`, passwordHash: 'x' } })));
+    const [both, approverOnly, foreignProject] = recipients;
+    const actionRole = await prisma.role.create({
+      data: { key: 'relay-shell-asker', name: 'Relay shell asker', scope: 'PROJECT', permissions: ['fleet.job.shell.escalate'] },
+    });
+    for (const recipient of recipients) await grantBaseline(prisma, { type: 'USER', id: recipient.id });
+    await grantRole(prisma, { type: 'USER', id: both.id }, 'reviewer', world.projectId);
+    await grantRole(prisma, { type: 'USER', id: both.id }, actionRole.key, world.projectId);
+    await grantRole(prisma, { type: 'USER', id: approverOnly.id }, 'reviewer', world.projectId);
+    await grantRole(prisma, { type: 'USER', id: foreignProject.id }, 'reviewer', world.opsProjectId);
+    await grantRole(prisma, { type: 'USER', id: foreignProject.id }, actionRole.key, world.opsProjectId);
     await prisma.outboxEvent.updateMany({ where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() } });
 
     const { jobId, leaseEpoch } = await startRunning('notify');
@@ -587,7 +601,15 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
       // During this migration both paths remain live; retain the fleet notification regression too.
       expect(await prisma.notification.count({ where: { userId: adminId, sourceId: link!.requestId, kind: 'approval_requested' } })).toBe(1);
     }
-    // Fleet asks notify deciders, not the requester, who holds only the scoped developer grant.
+    // AC-3: a persisted project Approver plus an action grant receives the engine notification.
+    expect(await prisma.notification.findMany({ where: { userId: both.id, sourceId: link!.requestId, kind: 'approval_request' } })).toEqual([
+      expect.objectContaining({ link: `/approvals?id=${link!.requestId}`, params: { key: 'fleet.job.shell.escalate' } }),
+    ]);
+    // AC-4: an Approver without the action key is not eligible.
+    expect(await prisma.notification.count({ where: { userId: approverOnly.id, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
+    // AC-6: both keys bound only in project B cannot decide or receive a project A ask.
+    expect(await prisma.notification.count({ where: { userId: foreignProject.id, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
+    // AC-5: fleet asks notify deciders, not the requester, who holds only the scoped developer grant.
     expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
