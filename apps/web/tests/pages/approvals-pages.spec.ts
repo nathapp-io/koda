@@ -113,6 +113,7 @@ function mountPage(file: string, options: { api: { get: jest.Mock; post: jest.Mo
     onBeforeUnmount: Vue.onBeforeUnmount,
     definePageMeta: () => undefined,
     useI18n: () => enI18n(),
+    useAuth: () => ({ user: ref(null) }),
     useAppToast: () => toast,
     useApi: () => ({ $api: options.api }),
     useRoute: () => ({ params: options.params ?? {}, query: {} }),
@@ -129,8 +130,9 @@ function mountPage(file: string, options: { api: { get: jest.Mock; post: jest.Mo
   }
   // The real inbox: the pages are tested as they render, not against a stub that mirrors their props.
   const inbox = loadSfc(inboxFile, globals, alias)
+  const panel = loadSfc(webFile('components', 'approvals', 'ApprovalRequestPanel.vue'), globals, alias)
   const app = mountSfc(file, {
-    components: { ...uiStubs, ApprovalsApprovalRequestInbox: inbox },
+    components: { ...uiStubs, ApprovalsApprovalRequestInbox: inbox, ApprovalRequestPanel: panel },
     globals,
     alias,
   })
