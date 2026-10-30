@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T19:43:23.925Z",
+  "updatedAt": "2026-10-30T19:45:34.544Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1074,14 +1074,17 @@
         "US-010",
         "US-011"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Straightforward public command removal plus deterministic client regeneration after upstream contract changes."
+        "reasoning": "Straightforward public command removal plus deterministic client regeneration after upstream contract changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/fleet.ts",
@@ -1119,7 +1122,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "380f7961f444a84941b7a4710e03dc5ef8d554f4"
     },
     {
       "id": "US-013",
