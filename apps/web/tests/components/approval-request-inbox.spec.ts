@@ -255,7 +255,7 @@ describe('ApprovalRequestInbox — opening a row', () => {
   })
 
   test('AC-8, AC-13, AC-14: refused decide toasts and refreshes the open detail', async () => {
-    const detail = detailOf(row('r1'))
+    const detail = detailOf(row('r1', { permissionKey: 'label.create' }))
     const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
     const post = jest.fn(async () => { throw new ApiError(403, 'forbidden') })
     const m = mountInbox({ get, post })
@@ -272,7 +272,7 @@ describe('ApprovalRequestInbox — opening a row', () => {
   })
 
   test('AC-7: a decide conflict reloads the list', async () => {
-    const detail = detailOf(row('r1'))
+    const detail = detailOf(row('r1', { permissionKey: 'label.create' }))
     const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
     const post = jest.fn(async () => { throw new ApiError(409, 'conflict') })
     const m = mountInbox({ get, post })

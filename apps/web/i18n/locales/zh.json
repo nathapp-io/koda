@@ -2406,6 +2406,76 @@
       "decisionFailed": "无法提交决策。",
       "cancelFailed": "无法取消请求。"
     },
+    "fleet": {
+      "bash": {
+        "openJob": "打开任务",
+        "command": "命令（密钥已由 nax 打码）",
+        "rawDetail": "nax 发送的原始内容",
+        "rawHint": "Runner 无法把 nax 的文本拆成命令。你正在针对下面的完整文本做决定。",
+        "unreadable": "无法读取此请求，只能拒绝。",
+        "masked": "已打码 {count} 个密钥值",
+        "truncated": "命令过长，无法完整显示，只能拒绝。",
+        "root": "运行目录",
+        "stage": "阶段",
+        "story": "故事",
+        "feature": "功能",
+        "reason": "nax 询问的原因",
+        "expiresIn": "若不回复，nax 将在 {time} 后拒绝。",
+        "timedOut": "此请求已超时，nax 已拒绝该命令。",
+        "readOnly": "你可以查看此请求，但只有项目开发者或管理员可以回答。",
+        "comment": "评论（可选）",
+        "allow": "允许一次",
+        "allow_for_job": "本任务内允许",
+        "deny": "拒绝"
+      },
+      "budget": {
+        "summary": "{scope} 的预算已触顶暂停。",
+        "window": "周期",
+        "spent": "已花费",
+        "asked": "申请额度",
+        "unreadable": "无法读取此暂停请求的冻结金额，以服务端判断为准。",
+        "requeueTitle": "重新排队暂停前被取消的任务",
+        "noCandidates": "没有可重新排队的已取消任务。",
+        "truncated": "已取消的任务多于列出数量，这里只能重新排队列出的任务。",
+        "amount": "新上限（USD）",
+        "amountHint": "必须高于已花费的 {spent}。",
+        "comment": "评论（可选）",
+        "raise": "提高并恢复",
+        "keep": "保持暂停",
+        "submitting": "保存中...",
+        "readOnly": "你可以查看此请求，但只有持有预算决策权限的人可以回答。",
+        "validation": {
+          "amountInvalid": "请输入大于 0 且最多 4 位小数的金额。",
+          "notAbove": "新上限必须高于 {spent}。"
+        }
+      },
+      "delivery": {
+        "delivered": "已送达 nax。",
+        "failed": "Runner 未能把答复送达 nax（{detail}）。",
+        "waiting": "Runner 尚未确认。"
+      },
+      "requeue": {
+        "title": "重新排队",
+        "ok": "已重新排队",
+        "none": "未选择任何任务重新排队。"
+      },
+      "requeueFailure": {
+        "gone": "未重新排队：任务已不存在。",
+        "activeJob": "未重新排队：该功能已有活动任务。",
+        "notCancelled": "未重新排队：任务已不再是已取消状态。",
+        "paused": "未重新排队：Fleet 预算仍在暂停它。",
+        "unknown": "未重新排队。"
+      },
+      "resolvedBy": {
+        "user": "由人工决定",
+        "timeout": "已超时",
+        "job_ended": "任务先已结束",
+        "superseded": "已被新的暂停取代",
+        "manual_resume": "已在预算页面恢复",
+        "window_reset": "预算周期已滚动",
+        "policy_deleted": "预算策略已删除"
+      }
+    },
     "inbox": {
       "title": "审批",
       "subtitle": "等待决策的所有请求。",

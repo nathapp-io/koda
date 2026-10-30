@@ -70,6 +70,7 @@
               :request="detail"
               :user-id="userId"
               :busy="mutationBusy"
+              :project-slug="projectSlug"
               @decide="decide(row.id, $event)"
               @cancel="cancel(row.id)"
             />
@@ -157,6 +158,8 @@ const detail = ref<ApprovalRequestDetail | null>(null)
 const detailLoading = ref(false)
 
 const projectId = props.base.kind === 'project' ? props.base.projectId : undefined
+/** Only the project inbox knows the slug a bash ask needs to link its job (US-004). */
+const projectSlug = props.base.kind === 'project' ? props.base.slug : null
 
 /**
  * The open row when the loaded page does not hold it — a link into `/approvals?id=…` may name a request

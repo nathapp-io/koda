@@ -2406,6 +2406,76 @@
       "decisionFailed": "Could not submit the decision.",
       "cancelFailed": "Could not cancel the request."
     },
+    "fleet": {
+      "bash": {
+        "openJob": "Open the job",
+        "command": "Command (secrets masked by nax)",
+        "rawDetail": "What nax sent",
+        "rawHint": "The runner could not split nax's text into a command. You are deciding on the full text below.",
+        "unreadable": "This ask could not be read. It can only be denied.",
+        "masked": "{count} secret value(s) masked",
+        "truncated": "The command is too long to show in full. It can only be denied.",
+        "root": "Runs in",
+        "stage": "Stage",
+        "story": "Story",
+        "feature": "Feature",
+        "reason": "Why nax asks",
+        "expiresIn": "nax denies it in {time} unless answered.",
+        "timedOut": "This ask timed out and nax has denied the command.",
+        "readOnly": "You can read this ask. Only a project developer or admin can answer it.",
+        "comment": "Comment (optional)",
+        "allow": "Allow once",
+        "allow_for_job": "Allow for this job",
+        "deny": "Deny"
+      },
+      "budget": {
+        "summary": "The budget for {scope} stopped at its limit.",
+        "window": "Window",
+        "spent": "Spent",
+        "asked": "Asked limit",
+        "unreadable": "This stop's frozen amount could not be read. Only the server decides what it means.",
+        "requeueTitle": "Re-queue jobs the pause cancelled before they started",
+        "noCandidates": "No cancelled jobs to re-queue.",
+        "truncated": "More cancelled jobs exist than are listed. Only the listed ones can be re-queued here.",
+        "amount": "New limit (USD)",
+        "amountHint": "Must be above the {spent} already spent.",
+        "comment": "Comment (optional)",
+        "raise": "Raise and resume",
+        "keep": "Keep paused",
+        "submitting": "Saving...",
+        "readOnly": "You can read this request. Only someone holding the budget decide key can answer it.",
+        "validation": {
+          "amountInvalid": "Enter an amount above 0 with at most 4 decimals.",
+          "notAbove": "The new limit must be above {spent}."
+        }
+      },
+      "delivery": {
+        "delivered": "Delivered to nax.",
+        "failed": "The runner did not deliver the answer to nax ({detail}).",
+        "waiting": "Not confirmed by the runner yet."
+      },
+      "requeue": {
+        "title": "Re-queue",
+        "ok": "Re-queued",
+        "none": "No jobs were selected for re-queue."
+      },
+      "requeueFailure": {
+        "gone": "Not re-queued: the job no longer exists.",
+        "activeJob": "Not re-queued: another job for this feature is active.",
+        "notCancelled": "Not re-queued: the job is no longer cancelled.",
+        "paused": "Not re-queued: a fleet budget still pauses it.",
+        "unknown": "Not re-queued."
+      },
+      "resolvedBy": {
+        "user": "Decided by a human",
+        "timeout": "Timed out",
+        "job_ended": "The job ended first",
+        "superseded": "Replaced by a newer stop",
+        "manual_resume": "Resumed from the budgets page",
+        "window_reset": "The budget window rolled over",
+        "policy_deleted": "The budget policy was deleted"
+      }
+    },
     "inbox": {
       "title": "Approvals",
       "subtitle": "Every request waiting on a decision.",
