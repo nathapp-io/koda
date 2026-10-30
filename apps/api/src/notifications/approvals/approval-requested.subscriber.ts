@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ASK_KEYS_BY_COMPONENT } from '../../approvals/approval-ask.service';
 import { decideEligibility } from '../../approvals/approval-eligibility';
 import { APPROVAL_REQUEST_CHANGED, parseApprovalRequestChangedPayload } from '../../approvals/approval-request-events';
 import { ApprovalRequestQueries } from '../../approvals/approval-request.queries';
@@ -34,9 +33,6 @@ export class ApprovalRequestedSubscriber implements OnModuleInit {
       this.logger.warn(`${APPROVAL_REQUEST_CHANGED}: malformed payload skipped`);
       return;
     }
-    // The two fleet asks are notified by the fleet's own subscriber (`fleet_approval_requested`,
-    // every global admin) until P3 web ships the `/approvals` page this one's link points at.
-    if (Object.values(ASK_KEYS_BY_COMPONENT).includes(p.permissionKey)) return;
     if (p.status !== 'pending') return;
     const request = await this.queries.findById(p.requestId);
     if (!request || request.status !== 'pending') return;

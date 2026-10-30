@@ -580,15 +580,15 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
       .toEqual([{ status: 'published' }, { status: 'published' }]);
 
     for (const adminId of [world.ids.root, secondAdmin.id]) {
-      // One row per admin for this ask, whichever subscriber wrote it: the fleet's.
-      expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId } })).toEqual([
-        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', link: '/admin/fleet/approvals' }),
+      // The approval engine notifies each eligible admin once; US-002 removes the separate fleet adapter.
+      expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId, kind: 'approval_request' } })).toEqual([
+        expect.objectContaining({ sourceType: 'approval_request', link: `/approvals?id=${link!.requestId}`, params: { key: 'fleet.job.shell.escalate' } }),
       ]);
+      // During this migration both paths remain live; retain the fleet notification regression too.
+      expect(await prisma.notification.count({ where: { userId: adminId, sourceId: link!.requestId, kind: 'approval_requested' } })).toBe(1);
     }
-    // No engine approval notification for a fleet ask (it would be `sourceType: 'approval_request'`), and the job's
-    // requester is not an approver.
-    expect(await prisma.notification.count({ where: { sourceType: 'approval_request', sourceId: link!.requestId } })).toBe(0);
-    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId } })).toBe(0);
+    // Fleet asks notify deciders, not the requester, who holds only the scoped developer grant.
+    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
   });
