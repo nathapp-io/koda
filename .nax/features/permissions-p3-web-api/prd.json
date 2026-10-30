@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web-api",
   "branchName": "feat/permissions-p3-web-api",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T06:38:25.101Z",
+  "updatedAt": "2026-10-30T06:48:34.704Z",
   "userStories": [
     {
       "id": "US-001",
@@ -115,14 +115,17 @@
         "openapi"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces a command/query extension across engine and fleet modules while preserving visibility pre-checks, variant routing and mutation authorization; security-sensitive read separation requires strict TDD."
+        "reasoning": "Introduces a command/query extension across engine and fleet modules while preserving visibility pre-checks, variant routing and mutation authorization; security-sensitive read separation requires strict TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-command.registry.ts",
@@ -173,7 +176,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cfe2d9871a85bc7f824c2611530dc4fef3c03da5"
     },
     {
       "id": "US-003",
