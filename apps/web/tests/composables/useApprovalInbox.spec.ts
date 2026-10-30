@@ -227,6 +227,20 @@ describe('useApprovalInbox: counts', () => {
 })
 
 describe('useApprovalInbox: listForJob', () => {
+  test('AC-2: a settled row listed before a pending one comes back after it', async () => {
+    const records = [
+      summary({ id: 'settled', status: 'executed', expiresAt: null, createdAt: '2026-10-30T10:00:00.000Z' }),
+      summary({ id: 'open', status: 'pending', expiresAt: '2026-11-01T00:00:00.000Z' }),
+    ]
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? page(records) : detail({ id: path.split('/').pop() ?? '' })))
+    install({ get })
+    const { useApprovalInbox } = await fresh()
+
+    const rows = await useApprovalInbox().listForJob('j1')
+
+    expect(rows.map((row) => row.request.id)).toEqual(['open', 'settled'])
+  })
+
   test('reads one job\'s requests in one page of 100, pending first by soonest expiry', async () => {
     const records = [
       summary({ id: 'settled', status: 'executed', expiresAt: null, createdAt: '2026-10-30T10:00:00.000Z' }),

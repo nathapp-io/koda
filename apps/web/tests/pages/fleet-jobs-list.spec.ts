@@ -56,9 +56,13 @@ describe('fleet jobs list', () => {
     expect(list.indexOf('fleet-schedules-link')).toBeLessThan(list.indexOf('fleet-budgets-link'))
   })
 
-  test('every member gets an Approvals button first (S1.5 1b D239)', () => {
-    expect(list).toMatch(/<Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo\(`\/\$\{slug\}\/fleet\/approvals`\)">/)
+  test('every member gets an Approvals button first, pointing at the engine inbox (S1.5 1b D239, P3b US-007)', () => {
+    expect(list).toMatch(/<Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo\(`\/\$\{slug\}\/approvals`\)">/)
     expect(list.indexOf('fleet-approvals-link')).toBeLessThan(list.indexOf('fleet-schedules-link'))
+  })
+
+  test('the list reloads on an approval_request event as well as fleet_approval (P3b US-007)', () => {
+    expect(liveHandlers(list)).toContain('onApprovalRequest: () => liveReload.trigger()')
   })
 
   test('slice 4: the state filter is a single-select chip row that drives the same filters.state', () => {

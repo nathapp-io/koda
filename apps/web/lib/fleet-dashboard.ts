@@ -201,7 +201,8 @@ export function severityOf(item: AttentionItem): Severity {
 export function attentionLink(item: AttentionItem, scope: ScopeKind): string | null {
   if (item.subjectType === 'runner') return scope === 'global' ? '/admin/fleet/runners' : null
   if (item.projectSlug === null) return null
-  if (item.kind === 'job_waiting_approval') return `/${item.projectSlug}/fleet/approvals`
+  // P3b US-007: a job waiting on approvals opens the project's engine inbox, not the fleet one.
+  if (item.kind === 'job_waiting_approval') return `/${item.projectSlug}/approvals`
   return jobPath(item.projectSlug, item.subjectId)
 }
 

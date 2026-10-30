@@ -93,8 +93,8 @@ function mountPage(job: FleetJobDto) {
     components: { ...uiStubs, FleetBudgetBanner: stubBanner },
     alias: {
       '~/composables/useApi': apiModule,
-      '~/composables/useFleetApprovals': {
-        useFleetApprovals: () => ({ listForJob: jest.fn(async () => []) }),
+      '~/composables/useApprovalInbox': {
+        useApprovalInbox: () => ({ listForJob: jest.fn(async () => []) }),
       },
       '~/composables/useApprovalCountdown': {
         useApprovalCountdown: () => ({ now: ref(new Date('2026-10-03T00:00:00.000Z')) }),

@@ -355,7 +355,7 @@ function mountJobDetail(over: JobDetailOver): Mounted {
     components: { ...uiStubs, FleetBudgetBanner: BannerStub },
     alias: {
       '~/composables/useApi': apiModule,
-      '~/composables/useFleetApprovals': { useFleetApprovals: () => ({ listForJob: jest.fn(async () => []) }) },
+      '~/composables/useApprovalInbox': { useApprovalInbox: () => ({ listForJob: jest.fn(async () => []) }) },
       '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(new Date('2026-10-03T00:00:00.000Z')) }) },
       '~/components/fleet/FleetJobProgress.vue': { __esModule: true, default: inert('StubJobProgress') },
       '~/components/fleet/FleetJobStateBadge.vue': { __esModule: true, default: inert('StubStateBadge') },
