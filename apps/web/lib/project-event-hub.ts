@@ -26,7 +26,6 @@ export function createProjectEventHub(deps: ProjectEventStreamDeps): ProjectEven
   const fanOut = (url: string): ProjectEventHandlers => ({
     onEvent: (event) => { for (const e of current(url)) e.handlers.onEvent?.(event) },
     onFleetJob: (event) => { for (const e of current(url)) e.handlers.onFleetJob?.(event) },
-    onFleetApproval: (event) => { for (const e of current(url)) e.handlers.onFleetApproval?.(event) },
     onFleetLog: (event) => { for (const e of current(url)) e.handlers.onFleetLog?.(event) },
     onNotification: (event) => { for (const e of current(url)) e.handlers.onNotification?.(event) },
     onApprovalRequest: (event) => { for (const e of current(url)) e.handlers.onApprovalRequest?.(event) },

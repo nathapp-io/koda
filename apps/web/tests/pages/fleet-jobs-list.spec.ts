@@ -61,8 +61,9 @@ describe('fleet jobs list', () => {
     expect(list.indexOf('fleet-approvals-link')).toBeLessThan(list.indexOf('fleet-schedules-link'))
   })
 
-  test('the list reloads on an approval_request event as well as fleet_approval (P3b US-007)', () => {
+  test('the list reloads on an approval_request event; the fleet_approval handler is gone (P3b US-007, 7c US-007)', () => {
     expect(liveHandlers(list)).toContain('onApprovalRequest: () => liveReload.trigger()')
+    expect(liveHandlers(list)).not.toContain('onFleetApproval')
   })
 
   test('slice 4: the state filter is a single-select chip row that drives the same filters.state', () => {
@@ -81,10 +82,10 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/<TableRow v-for="job in sortedJobs"/)
   })
 
-  test('a job with pending approvals is marked next to its state, and the list reloads on fleet_approval (spec §5)', () => {
+  test('a job with pending approvals is marked next to its state, and the list reloads on approval_request (spec §5)', () => {
     expect(list).toMatch(/<FleetJobStateBadge :state="job\.state" \/>\s*<Badge v-if="job\.pendingApprovals > 0"[^>]*:data-testid="`fleet-job-needs-approval-\$\{job\.id\}`"/)
     expect(list).toContain("t('fleet.jobs.needsApproval', { count: job.pendingApprovals })")
-    expect(liveHandlers(list)).toContain('onFleetApproval: () => liveReload.trigger()')
+    expect(liveHandlers(list)).toContain('onApprovalRequest: () => liveReload.trigger()')
   })
 
   test('S3 §6: the command column shows translated kinds and config jobs show a readable feature', () => {
@@ -103,16 +104,15 @@ describe('fleet jobs list', () => {
  * P3b US-007: the browser journeys the fleet approvals run drive the approval engine's inbox, because the two
  * links they click (the jobs list's banner review link and the job page's Review callout) now open
  * `/<slug>/approvals`. The specs pin the engine route and row testids here, so a future edit cannot quietly point
- * one of them back at the fleet inbox the redirect retires.
+ * one of them back at the fleet inbox US-007 deleted.
  */
 describe('the approval journeys drive the engine inbox (P3b US-007)', () => {
   const journeys: Array<[string, string]> = [
     ['bash journey', read('tests', 'e2e', 'fleet-bash-approvals.e2e.spec.ts')],
     ['budget journey', read('tests', 'e2e', 'fleet-approvals.e2e.spec.ts')],
   ]
-  /** The retired fleet inbox route and the fleet row testids, none of which the engine inbox renders. */
+  /** The fleet inbox row testids, none of which the engine inbox renders. */
   const RETIRED = [
-    '/${SLUG}/fleet/approvals',
     'fleet-approval-row-',
     'fleet-approval-bash-',
     'fleet-approval-budget-panel',

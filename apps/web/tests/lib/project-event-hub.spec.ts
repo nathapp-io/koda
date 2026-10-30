@@ -16,6 +16,9 @@ class FakeEventSource implements EventSourceLike {
   emit(type: string, data: unknown): void {
     for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) })
   }
+  listenerTypes(): string[] {
+    return Object.keys(this.listeners).sort()
+  }
 }
 
 function hub() {
@@ -34,32 +37,31 @@ function hub() {
 }
 
 const job = { id: 'e1', type: 'fleet_job', projectId: 'p1', jobId: 'j1', state: 'RUNNING', at: 'x' }
-const approval = { id: 'e2', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'pending', at: 'x' }
 
 describe('createProjectEventHub (D246)', () => {
   test('two subscribers to one URL share one EventSource and each gets the events it handles', () => {
     const { h, sources } = hub()
     const page = { onFleetJob: jest.fn(), onResync: jest.fn() }
-    const badge = { onFleetApproval: jest.fn(), onResync: jest.fn() }
+    const badge = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
     h.subscribe('/api/projects/p1/events', page)
     h.subscribe('/api/projects/p1/events', badge)
     expect(sources).toHaveLength(1)
 
     sources[0].emit('fleet_job', job)
-    sources[0].emit('fleet_approval', approval)
+    sources[0].emit('approval_request', approvalRequest())
     expect(page.onFleetJob).toHaveBeenCalledTimes(1)
-    expect(badge.onFleetApproval).toHaveBeenCalledTimes(1)
+    expect(badge.onApprovalRequest).toHaveBeenCalledTimes(1)
   })
 
   test('fleet_log reaches only the subscribers that handle it (S2a §4.2)', () => {
     const { h, sources } = hub()
     const viewer = { onFleetLog: jest.fn(), onResync: jest.fn() }
-    const badge = { onFleetApproval: jest.fn(), onResync: jest.fn() }
+    const badge = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
     h.subscribe('/u', viewer)
     h.subscribe('/u', badge)
     sources[0].emit('fleet_log', { id: 'e3', type: 'fleet_log', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, stream: 'stdout', size: 5, complete: false, at: 'x' })
     expect(viewer.onFleetLog).toHaveBeenCalledTimes(1)
-    expect(badge.onFleetApproval).not.toHaveBeenCalled()
+    expect(badge.onApprovalRequest).not.toHaveBeenCalled()
   })
 
   test('a resync reaches every subscriber', () => {
@@ -107,6 +109,22 @@ describe('createProjectEventHub (D246)', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// US-007 AC-1 — the retired fleet_approval notice is no longer listened for
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-007 AC-1: the shared stream no longer listens for fleet_approval', () => {
+  test('AC-1: a subscriber with only onApprovalRequest and onResync adds no fleet_approval listener', () => {
+    const { h, sources } = hub()
+    h.subscribe('/api/projects/p1/events', { onApprovalRequest: jest.fn(), onResync: jest.fn() })
+
+    // The stream opened and does listen for the engine notice the subscriber asked for...
+    expect(sources[0].listenerTypes()).toContain('approval_request')
+    // ...and for nothing the retired fleet approval adapter used to carry.
+    expect(sources[0].listenerTypes()).not.toContain('fleet_approval')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // P3b US-001 AC-15 — the engine's approval_request notice reaches subscribers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -134,7 +152,7 @@ describe('P3b US-001 AC-15: the hub forwards approval_request', () => {
     const { h, sources } = hub()
     const first = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
     const second = { onApprovalRequest: jest.fn(), onResync: jest.fn() }
-    const untouched = { onFleetApproval: jest.fn(), onResync: jest.fn() }
+    const untouched = { onFleetJob: jest.fn(), onResync: jest.fn() }
     h.subscribe('/u', first)
     h.subscribe('/u', second)
     h.subscribe('/u', untouched)
@@ -143,19 +161,7 @@ describe('P3b US-001 AC-15: the hub forwards approval_request', () => {
 
     expect(first.onApprovalRequest).toHaveBeenCalledTimes(1)
     expect(second.onApprovalRequest).toHaveBeenCalledTimes(1)
-    expect(untouched.onFleetApproval).not.toHaveBeenCalled()
-  })
-
-  test('AC-15 (edge): fleet_approval still reaches its own handler beside approval_request', () => {
-    const { h, sources } = hub()
-    const subscriber = { onApprovalRequest: jest.fn(), onFleetApproval: jest.fn(), onResync: jest.fn() }
-    h.subscribe('/u', subscriber)
-
-    sources[0].emit('approval_request', approvalRequest())
-    sources[0].emit('fleet_approval', approval)
-
-    expect(subscriber.onApprovalRequest).toHaveBeenCalledTimes(1)
-    expect(subscriber.onFleetApproval).toHaveBeenCalledTimes(1)
+    expect(untouched.onFleetJob).not.toHaveBeenCalled()
   })
 
   test('AC-15 (edge): a malformed notice is dropped, and a redelivered id only fires once', () => {
