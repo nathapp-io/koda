@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-routes",
   "branchName": "feat/permissions-p3-approval-gate-secret-routes",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T03:57:50.750Z",
+  "updatedAt": "2026-10-30T04:13:51.521Z",
   "userStories": [
     {
       "id": "US-001",
@@ -351,14 +351,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Combines credential-bearing approval routes with SSRF/DNS validation outside transactions and ownership rechecks before writes, requiring strict security isolation."
+        "reasoning": "Combines credential-bearing approval routes with SSRF/DNS validation outside transactions and ownership rechecks before writes, requiring strict security isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/webhook/webhook.controller.ts",
@@ -416,7 +419,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ac587bd8552abdff0599b016f8a8a3f454a2481a"
     },
     {
       "id": "US-005",
