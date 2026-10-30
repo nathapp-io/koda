@@ -1,0 +1,878 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-web",
+  "branchName": "feat/permissions-p3-web",
+  "createdAt": "2026-10-30T00:00:00Z",
+  "updatedAt": "2026-10-30T09:51:42.845Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Engine client and live handler",
+      "description": "**Goal** — Establish the engine request client, pure helpers, project-id resolver, permission predicate and project live event.\n\n**Motivation** — An agent write that a policy holds for a human (any of the 126 gated routes) shows up in no web inbox.\n\n**Approach** — **The list API does not return fleet detail fields; details load for the open row.**\n- `ApprovalRequestSummaryDto` has no `input`, `jobId` or `details`. The inbox shows each row from summary fields:\n  - the key label;\n  - the requester;\n  - the project;\n  - the countdown.\n- It fetches `GET /approvals/:id` only for the row it opens.\n- The two surfaces that need a field from `input` fetch the detail per row through `useApprovalInbox().listDetailed(filters, limit)`:\n  - the job page, for its command previews;\n  - the budget banner, for its `policyId`.\n- `listDetailed` details only the first `limit` rows in the order it is given (`DETAIL_FETCH_LIMIT = 20`). A row past the limit, or one whose detail fetch fails, has `detail: null` and shows the key label.\n\n**Who sees which controls comes from the row, not from the caller's keys.**\n- `.nax/rules/web.md` says to gate a control on the key its route requires. Here that key is `approval.decide`, and the API checks it per request: pattern, `approverMustHoldAction`, self mode. The browser cannot repeat that check.\n- `GET /approvals` already returns only the requests the caller may see. That is their own requests plus everything their decide scopes cover, narrowed patterns included.\n- So `viewerActions(request, userId)` decides from the row alone.\n- The caller is the **requester** when `actorType === 'USER'` and `actorId === userId`:\n  - a pending own request shows Cancel;\n  - it shows the decide controls only when `requiredMode === 'self'`.\n- Every other pending request shows the decide controls and no Cancel. A settled request shows neither.\n- A refused decide surfaces through `extractApiError`, as `web.md` requires.\n\n**`PermissionSet.mayDecide()`.** The nav and the palette need to know \"may decide something\". That is either `approval.decide` or any narrowed `approval.decide@<pattern>` key, which `has()` cannot answer. `permissionSet` gains `mayDecide()`; `EMPTY_PERMISSIONS.mayDecide()` answers `false`.\n\n**Key labels.** `requestKeyLabel(t, te, key)` answers `approvals.keys.<key with '.' replaced by '_'>` when that i18n key exists, else the raw key. Only the two fleet keys get labels in this feature.\n\n**Visibility also includes `onBehalfOf` rows.** `GET /approvals` also returns requests raised on the caller's behalf. `viewerActions` gives those the decide controls; the API may refuse, and the refusal toasts.\n\n**`listForJob(jobId)`** returns `JobApprovalRow[]`. It lists with `{ jobId, size: '100' }` and orders the rows: pending first by soonest `expiresAt`, then the rest newest first. It then details the first `DETAIL_FETCH_LIMIT` rows through `listDetailed`.\n\nCreate lib/approval-requests.ts, composables/useApprovalInbox.ts and composables/useProjectRef.ts. buildRequestQuery returns pending status and size 100, or All size 20 with current only after page 1, plus supplied projectId. sortPendingRequests orders expiresAt ascending. The client uses useApi.$api for GET /approvals, GET /approvals/counts, GET /approvals/:id, POST /approvals/:id/decisions and POST /approvals/:id/cancel. Keep list pagination metadata. Both successful mutations increase approvalRequestsVersion. useProjectRef(slug).load() resolves GET /projects/:slug to its id; callers handle presentation errors. Add LiveApprovalRequestEvent, parseApprovalRequestEvent and optional onApprovalRequest to the stream; attach its listener only when the handler is given, and forward it through the hub alongside existing fleet handlers. Do not remove fleet_approval. Add approvals.keys labels for fleet_job_shell_escalate and fleet_budget_override, approvals.comment.tooLong and whole-approvals English/Chinese parity tests. buildCommentSchema(t) enforces MAX_REQUEST_COMMENT=2000; body inclusion trims and omits blank comments.\n\n**Scope** — In: engine foundation, permissions predicate, stream/hub, key labels/comment schema and foundation tests. Out: inbox UI (US-002), submission panel (US-003), fleet adapters/panels (US-004), toasts/badge/nav (US-005–006), consumer rewrites (US-007), policy UI (US-008–009), deletion (US-010).\n\n**Interface** — `ApprovalRequestSummary`, `ApprovalRequestDetail`, `ApprovalRequestCounts`, `RequestStatus`; `buildRequestQuery`, `sortPendingRequests`, `viewerActions`, `inboxHref`, `requestKeyLabel`, `buildCommentSchema`, `MAX_REQUEST_COMMENT`, `DETAIL_FETCH_LIMIT`; `useApprovalInbox`, `approvalRequestsVersion`; `useProjectRef`; `LiveApprovalRequestEvent`, `parseApprovalRequestEvent`, `ProjectEventHandlers.onApprovalRequest`. `useApprovalInbox` provides `list`, `listForJob`, `listDetailed`, `get`, `counts`, `decide` and `cancel`, and the `approvalRequestsVersion` ref. `mayDecide(): boolean`; `onApprovalRequest?: (event: LiveApprovalRequestEvent) => void`; `JobApprovalRow = { request: ApprovalRequestSummary; detail: ApprovalRequestDetail | null }`. Summary fields are id, permissionKey, projectId, actorType, actorId, onBehalfOfType, onBehalfOfId, origin, redeem, requiredMode, status, satisfiedBy, approverType, approverId, expiresAt, decidedAt, settledAt and createdAt. Detail adds input, result, details and decisions[]. Counts answer `{ total, unscoped, projects: [{ projectId, slug, pending }] }`. List query supports status, projectId, permissionKey, jobId, mine, current and size; response is `{ total, current, size, hasNext, hasPrev, records }`. Seven statuses: pending, approved, rejected, expired, cancelled, executed, failed. Live payload: `{ id, type, projectId, requestId, status, at }`, type approval_request.",
+      "acceptanceCriteria": [
+        "[unit] buildRequestQuery({ tab: 'pending' }) returns exactly { status: 'pending', size: '100' }.",
+        "[unit] buildRequestQuery({ tab: 'all', page: 3, projectId: 'p1' }) returns exactly { size: '20', current: '3', projectId: 'p1' }.",
+        "[unit] sortPendingRequests given summaries expiring at 2026-11-02T00:00:00Z and 2026-11-01T00:00:00Z returns the 2026-11-01 one first.",
+        "[unit] viewerActions for a pending request with actorType: 'USER', actorId: 'u1' and requiredMode: 'human', viewed by 'u1', returns { decide: false, cancel: true }.",
+        "[unit] viewerActions for a pending request with actorType: 'USER', actorId: 'u1' and requiredMode: 'self', viewed by 'u1', returns { decide: true, cancel: true }.",
+        "[unit] viewerActions for a pending request with actorType: 'AGENT', viewed by 'u1', returns { decide: true, cancel: false }.",
+        "[unit] viewerActions for an executed request returns { decide: false, cancel: false }.",
+        "[unit] inboxHref('sandbox', 'r1') returns /sandbox/approvals?id=r1.",
+        "[unit] requestKeyLabel(t, te, 'label.create'), with a te that knows no approvals.keys.label_create, returns label.create.",
+        "[unit] buildCommentSchema(t) rejects a 2001-character comment with the approvals.comment.tooLong message.",
+        "[unit] permissionSet(['approval.decide@fleet.job.shell.escalate']).mayDecide() returns true.",
+        "[unit] useApprovalInbox().decide('r1', { decision: 'approve', comment: 'ok' }) posts to /approvals/r1/decisions with that body.",
+        "[unit] useApprovalInbox().listDetailed({ status: 'pending' }, 2) over a list of three records returns the third row with detail: null.",
+        "[unit] useProjectRef('sandbox').load(), with GET /projects/sandbox answering { id: 'p1' }, sets id to 'p1'.",
+        "[unit] A project event hub subscriber with onApprovalRequest receives an approval_request SSE message { id, type: 'approval_request', projectId, requestId: 'r1', status: 'pending', at } as a LiveApprovalRequestEvent with requestId: 'r1'."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "security",
+        "client",
+        "live-events"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New shared engine client/types and live integration also introduce permission and row-action predicates. Security override requires strict TDD; cover pure helpers, exact API calls and stream-to-hub fan-out."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/composables/useFleetApprovals.ts",
+        "apps/web/lib/project-event-stream.ts",
+        "apps/web/lib/project-event-hub.ts",
+        "apps/web/lib/permissions.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/composables/useApprovalInbox.ts",
+        "apps/web/composables/useProjectRef.ts",
+        "apps/web/tests/lib/approval-requests.spec.ts",
+        "apps/web/tests/composables/useApprovalInbox.spec.ts",
+        "apps/web/tests/i18n/approvals-locale-parity.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "EMPTY_PERMISSIONS.mayDecide() returns false.",
+        "permissionSet(['approval.decide']).mayDecide() returns true.",
+        "permissionSet(['approval.policy.manage', 'fleet.approval.read']).mayDecide() returns false.",
+        "When cancel('r1') succeeds, approvalRequestsVersion increases by 1.",
+        "When a decide or cancel request fails, approvalRequestsVersion remains unchanged.",
+        "When no onApprovalRequest handler is supplied, the stream attaches no approval_request listener."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/permissions.ts",
+          "reason": "`PermissionSet` gains `mayDecide()`; `permissionSet` implements it and `EMPTY_PERMISSIONS` answers `false`."
+        },
+        {
+          "path": "apps/web/lib/project-event-stream.ts",
+          "reason": "adds `LiveApprovalRequestEvent`, `parseApprovalRequestEvent` and the optional `onApprovalRequest` handler, listened to only when given."
+        },
+        {
+          "path": "apps/web/lib/project-event-hub.ts",
+          "reason": "the hub's fan-out forwards `onApprovalRequest` to every subscriber of the URL."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.keys` with labels for `fleet_job_shell_escalate` and `fleet_budget_override`, and `approvals.comment.tooLong`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.keys` and `approvals.comment.tooLong` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Unified inbox list",
+      "description": "**Goal** — Add global and project engine inbox pages with summary rows, pagination, query-selected details and resilient refresh.\n\n**Motivation** — Those adapters cover only the two fleet keys (`fleet.job.shell.escalate` and `fleet.budget.override`).\n\n**Approach** — **The list API does not return fleet detail fields; details load for the open row.**\n- `ApprovalRequestSummaryDto` has no `input`, `jobId` or `details`. The inbox shows each row from summary fields:\n  - the key label;\n  - the requester;\n  - the project;\n  - the countdown.\n- It fetches `GET /approvals/:id` only for the row it opens.\n\n**Project names in the global inbox.** `/approvals` resolves a row's slug from `useFleetRepos().loadProjects()` (`GET /projects`), the list the old admin inbox used. A row whose project is not in that list shows its `projectId`. A row with `projectId: null` shows `approvals.inbox.noProject`.\n\n**Requester names.** A user requester shows the name that a lookup resolves, else their id:\n- `useProjectMemberNames(slug)` on `/[project]/approvals`;\n- `useAdminUsers()` on `/approvals`. It needs `user.read`, so a caller without it sees ids.\n\nAn agent requester shows its id.\n\n**Project inbox.** `/[project]/approvals` resolves the project id from `GET /projects/:slug` (`useProjectRef(slug)`) and lists with `projectId=<id>`. `/approvals` lists everything the caller can see, with no project filter.\n\n**Row status labels.** Rows on the All tab show their status through `approvals.inbox.status.<status>` (US-002), for all seven engine statuses. The fleet `fleet.approvals.status` keys are not reused.\n\n**`ApprovalRequestInbox` props.** `base: { kind: 'all' } | { kind: 'project'; slug: string; projectId: string }`. The project page renders it once `useProjectRef` has the id.\n\n**Composable imports.** Components import the new composables explicitly from `~/composables/...`, so the spec harness doubles them through module aliases (`tests/helpers/mount-sfc.ts` has a closed auto-import list).\n\n**Live updates and polling.**\n- The project inbox, the job page, the budget banner and the badge (on a project page) reload on the project stream's `approval_request` event.\n- The engine publishes no event for a request without a project, so the global inbox reloads on a timer. Every list here polls through the existing visible-tab poller, as the old inbox and badge did.\n\nCreate components/approvals/ApprovalRequestInbox.vue, pages/approvals.vue and pages/[project]/approvals.vue using the US-001 client. Pending sends status=pending,size=100 and sorts soonest expiry first; All sends size=20, omits status and supports current-page navigation. Each row displays the translated/fallback permission key, requester, project and countdown. Opening fetches detail and updates ?id while preserving unrelated query entries; support entry via ?id. Provide the open-detail rendering location for US-003's panel wiring, not an old fleet panel. Use useVisiblePolling, useApprovalCountdown and a 300 ms createDebouncer for project live reloads. A 403 list shows approvals.inbox.forbidden. An initial other error toasts extractApiError and shows approvals.inbox.loadFailed; a later error preserves rows and shows approvals.inbox.stale. Detail error toasts extractApiError, closes the row and clears id. Project resolution error toasts extractApiError and never lists approvals. Cosmetic lookup errors fall back to ids. Add approvals.inbox in both locales: title, tabs, row labels, seven status labels, pager, noProject, forbidden, loadFailed, stale and empty. Mount real pages with $api doubles for endpoint/query seams; register real approvals children via mountSfc components.\n\n**Scope** — In: new pages/list, lookup fallbacks, selection/query, polling/live and list failures. Out: real decision panel/submission (US-003), fleet panels/outcomes (US-004), badge/nav (US-006), redirect/deletion of old pages (US-010). The old inbox's keyboard shortcuts (j/k, Enter, A/D, Esc), a key filter, agent names and names beyond useAdminUsers' first page are not carried over.\n\n**Interface** — `ApprovalRequestInbox` receives `base: { kind: 'all' } | { kind: 'project'; slug: string; projectId: string }`; use `buildRequestQuery`, `sortPendingRequests`, `requestKeyLabel`, `useApprovalInbox`, `useProjectRef` and `ProjectEventHandlers.onApprovalRequest` from US-001.",
+      "acceptanceCriteria": [
+        "[unit] Mounting pages/approvals.vue makes the inbox request GET /approvals with query { status: 'pending', size: '100' }.",
+        "[unit] Mounting pages/[project]/approvals.vue for slug sandbox, with GET /projects/sandbox answering { id: 'p1' }, makes the inbox request GET /approvals with projectId: 'p1'.",
+        "[unit] Selecting the All tab requests GET /approvals with size: '20' and no status.",
+        "[unit] A listed fleet.budget.override request's row shows the approvals.keys.fleet_budget_override label.",
+        "[unit] On /approvals, a row of a user requester u1 shows the name Ann when useAdminUsers lists { id: 'u1', name: 'Ann' }.",
+        "[unit] On /approvals, a row with projectId: 'p1' shows slug sandbox when GET /projects lists { id: 'p1', slug: 'sandbox' }.",
+        "[unit] Opening a row requests GET /approvals/<id>.",
+        "[unit] Opening a row replaces the route query with id=<id>.",
+        "[unit] On the All tab, with a list answer hasNext: true, clicking Next requests GET /approvals with current: '2'.",
+        "[unit] A failed GET /approvals/<id> removes id from the route query.",
+        "[unit] On /[project]/approvals, an approval_request live event triggers one list reload after the 300 ms debounce.",
+        "[unit] A 403 list answer shows approvals.inbox.forbidden.",
+        "[unit] A list that fails with 500 before any load shows approvals.inbox.loadFailed.",
+        "[unit] A list that fails with 500 after a successful load keeps the loaded rows and shows approvals.inbox.stale.",
+        "[unit] A failed GET /projects/sandbox on /[project]/approvals makes no GET /approvals request."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "inbox",
+        "live-events"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two routes share pagination, detail selection and polling/live state, and the global user-name lookup is permission-key-gated on user.read; strict security TDD applies despite API-owned approval visibility."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/ApprovalInbox.vue",
+        "apps/web/pages/admin/fleet/approvals.vue",
+        "apps/web/pages/[project]/fleet/approvals.vue",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/composables/useApprovalInbox.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/approvals/ApprovalRequestInbox.vue",
+        "apps/web/pages/approvals.vue",
+        "apps/web/pages/[project]/approvals.vue",
+        "apps/web/tests/components/approval-request-inbox.spec.ts",
+        "apps/web/tests/pages/approvals-pages.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a global row has an unknown projectId, the row displays that projectId.",
+        "When projectId is null, the row displays approvals.inbox.noProject.",
+        "When user.read is absent, global requester rows display ids without requesting admin users.",
+        "When entering with ?id=r1, the inbox requests GET /approvals/r1.",
+        "When a row opens or closes, unrelated route query parameters remain unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.inbox` (title, tabs, row labels, status labels for the seven statuses, pager, noProject, forbidden, loadFailed, stale, empty)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.inbox` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Decide panel, decisions and cancel",
+      "description": "**Goal** — Connect open engine request details to a generic decision panel, decision history and requester cancellation.\n\n**Motivation** — A human can decide it only through `POST /approvals/:id/decisions`.\n\n**Approach** — **Who sees which controls comes from the row, not from the caller's keys.**\n- `.nax/rules/web.md` says to gate a control on the key its route requires. Here that key is `approval.decide`, and the API checks it per request: pattern, `approverMustHoldAction`, self mode. The browser cannot repeat that check.\n- `GET /approvals` already returns only the requests the caller may see. That is their own requests plus everything their decide scopes cover, narrowed patterns included.\n- So `viewerActions(request, userId)` decides from the row alone.\n- The caller is the **requester** when `actorType === 'USER'` and `actorId === userId`:\n  - a pending own request shows Cancel;\n  - it shows the decide controls only when `requiredMode === 'self'`.\n- Every other pending request shows the decide controls and no Cancel. A settled request shows neither.\n- A refused decide surfaces through `extractApiError`, as `web.md` requires.\n\n**Visibility also includes `onBehalfOf` rows.** `GET /approvals` also returns requests raised on the caller's behalf. `viewerActions` gives those the decide controls; the API may refuse, and the refusal toasts.\n\nEvery body may carry a trimmed, non-blank `comment` of at most `MAX_REQUEST_COMMENT = 2000` characters, the engine DTO's limit.\n\nEvery panel validates its comment with the zod schema `buildCommentSchema(t)` from `lib/approval-requests.ts`, as `web.md` asks for schema-backed forms.\n\nCreates `components/approvals/ApprovalRequestPanel.vue`: the frozen input, the decisions, Approve, Reject with a comment, and Cancel, each per `viewerActions`.\n\n`ApprovalRequestInbox.vue` (created by US-002) is changed here to render the panel for the open row, and to run decide and cancel with their failure handling.\n\nShow frozen input as indented JSON text through interpolation and decision deciderId/decision/comment as text. Generic keys post approve/reject with optional trimmed nonblank comment; reject with blank comment omits it. Both actions use buildCommentSchema(t), and overlong input posts nothing. Cancel is offered only when viewerActions.cancel is true. Apply busy state without inferring action permissions from old fleet keys. Use useApprovalInbox.decide/cancel in inbox handlers; successful mutations rely on the client's single approvalRequestsVersion bump. Every refused decide or cancel toasts extractApiError and re-fetches detail; a 409 also reloads the list. Add approvals.panel labels and toasts in both locales. Explicitly import new composables, and test the real inbox with the real panel registered via mountSfc components.\n\n**Scope** — In: generic panel, decision history, row-driven controls, decide/cancel wiring and error recovery. Out: specialized fleet panels/outcomes (US-004), toasts/badge (US-005–006), deleting old panels (US-010). Thread links and Cancel for onBehalfOf rows are deferred; so are hiding controls under requireDistinctApprover and dropping list loads started before a successful decide. ThreadActionCard and useApprovalRequests remain unchanged.\n\n**Interface** — `ApprovalRequestPanel` consumes `ApprovalRequestDetail` and `viewerActions(request, userId)`. Generic bodies: `{ decision: 'approve' | 'reject' }` plus optional comment; POST `/approvals/:id/decisions` and POST `/approvals/:id/cancel`; `buildCommentSchema(t)`; `MAX_REQUEST_COMMENT = 2000`; `approvalRequestsVersion`.",
+      "acceptanceCriteria": [
+        "[unit] Opening a label.create request in ApprovalRequestInbox renders ApprovalRequestPanel with that request's detail.",
+        "[unit] The panel shows the request's input as indented JSON text through interpolation.",
+        "[unit] The panel lists each decision's deciderId, decision and comment.",
+        "[unit] Approve with comment ok posts { decision: 'approve', comment: 'ok' } to /approvals/<id>/decisions.",
+        "[unit] Reject with a blank comment posts { decision: 'reject' }, with no comment field.",
+        "[unit] A comment of 2001 characters posts nothing.",
+        "[unit] A decide answered with 409 requests the list again.",
+        "[unit] A decide answered with 403 requests GET /approvals/<id> again.",
+        "[unit] A pending request whose viewerActions is { decide: false, cancel: true } renders no Approve button.",
+        "[unit] Clicking Cancel on that request posts to /approvals/<id>/cancel.",
+        "[unit] A settled request renders no Approve, Reject or Cancel button.",
+        "[unit] A successful decide increases approvalRequestsVersion by 1.",
+        "[unit] When a decide or cancel is refused, the inbox toasts extractApiError(error).",
+        "[unit] When a decide or cancel is refused, the inbox requests GET /approvals/<id> again.",
+        "[unit] When cancel is answered with 409, the inbox requests the list again."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "security",
+        "decisions"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One new panel and its existing inbox reuse US-001 client/viewer helpers and standard form/error patterns; medium scope is sufficient, while access-sensitive decide/cancel controls require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/web/components/approvals/ApprovalRequestInbox.vue",
+        "apps/web/components/fleet/ApprovalInbox.vue",
+        "apps/web/components/fleet/ApprovalActionPanel.vue",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/composables/useApprovalInbox.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/approvals/ApprovalRequestPanel.vue",
+        "apps/web/tests/components/approval-request-panel.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a generic decision submits a comment with surrounding whitespace, the posted comment is trimmed.",
+        "When frozen input contains HTML markup, the panel displays the markup literally.",
+        "When a pending onBehalfOf request belongs to another actor, the panel offers decide controls but no Cancel."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.panel` (input, decisions, approve, reject, cancel, comment, toasts)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.panel` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Fleet panels and settled outcomes",
+      "description": "**Goal** — Add engine-specific bash and budget decision panels and settled delivery/requeue outcomes.\n\n**Motivation** — Those adapters cover only the two fleet keys (`fleet.job.shell.escalate` and `fleet.budget.override`).\n\n**Approach** — **Engine decision bodies for the fleet keys.** Bodies follow each command's `parseDecision` (`apps/api/src/fleet/approvals/commands/`):\n\n| Choice | Body |\n|:--|:--|\n| bash Allow | `{ decision: 'approve', params: { choice: 'allow' } }` |\n| bash Allow for this job | `{ decision: 'approve', params: { choice: 'allow_for_job' } }` |\n| bash Deny | `{ decision: 'reject', params: { choice: 'deny' } }` |\n| budget Raise | `{ decision: 'approve', params: { amountUsd: <number>, requeueJobIds: [<ids>] } }` (`requeueJobIds` always sent, `[]` when none is ticked) |\n| budget Keep paused | `{ decision: 'reject' }` |\n| any other key | `{ decision: 'approve' \\| 'reject' }` |\n\nEvery body may carry a trimmed, non-blank `comment` of at most `MAX_REQUEST_COMMENT = 2000` characters, the engine DTO's limit.\n\nEvery panel validates its comment with the zod schema `buildCommentSchema(t)` from `lib/approval-requests.ts`, as `web.md` asks for schema-backed forms. The budget panel validates with `buildBudgetRaiseSchema(t, spentUsd)` from `lib/approval-request-fleet.ts`: the amount through `raiseAmountError`, the comment through the same 2000-character rule.\n\n**Fleet payloads parse with the existing pure helpers.** Validation is not duplicated:\n- a bash request's `input.payload` goes through `bashPayload({ type: 'nax_bash_escalate', payload })`;\n- a budget request's `input` goes through `budgetPayload({ type: 'budget_override_required', payload: input })`.\n- The bash delivery state goes through `deliveryView({ type: 'nax_bash_escalate', resolvedBy: details.resolvedBy, outcome: details.outcome })`.\n- These helpers stay in `lib/fleet-approvals.ts` after US-010.\n\nCreates `lib/approval-request-fleet.ts`, `components/approvals/ApprovalRequestBashPanel.vue`, `components/approvals/ApprovalRequestBudgetPanel.vue` and `components/approvals/ApprovalRequestOutcome.vue`.\n\n`ApprovalRequestPanel.vue` (created by US-003) is changed here to pick the bash or budget panel with `requestPanelKind`, and to show the outcome of a settled request.\n\nSpecialized pending controls still follow viewerActions and busy state; generic keys keep US-003 behavior. Bash renders its command and available safe payload fields as text, uses bashChoices so malformed/truncated asks are deny-only, displays countdown and links to details.jobId only when project slug is known. Budget shows frozen scope through scopeText with raw scopeId, window, spend and amount; defaults every requeue candidate selected, supports unchecking and shows truncation. Raise must exceed frozen spentUsd; Keep paused needs no raise amount but still validates comment. Adapt delivery through deliveryView and requeue errors through requeueFailure. Render settled outcomes without mutation controls. Add approvals.fleet labels for panels, truncated candidates, delivery and requeue results in both locales. Tests mount the real ApprovalRequestPanel with actual specialized children through components and assert exact engine post bodies.\n\n**Scope** — In: fleet engine parsing/body/schema helpers, specialized panel selection, bash/budget forms and outcomes. Out: generic submission orchestration (US-003), job/banner cutover (US-007), removing old panels/helpers (US-010). Budget scope names, settled-bash delivery refetching and the raised resumedAmountUsd line are deferred.\n\n**Interface** — `requestPanelKind`, `bashAskOf`, `budgetAskOf`, `requeueCandidatesOf`, `bashRequestBody`, `budgetRaiseBody`, `budgetKeepBody`, `buildBudgetRaiseSchema`, `requestDelivery`, `requestRequeueResults`. Bash details: `{ kind: 'bash', jobId, resolvedBy, outcome }`; bash frozen input: `{ jobId, leaseEpoch, naxAskId, payload }`. Budget details: `{ kind: 'budget', policyId, resolvedBy, outcome, requeueCandidates?: [{ jobId, projectId, feature, queuedAt }], requeueCandidatesTruncated? }`; candidates exist only while pending. Budget input: `{ policyId, scopeType, scopeId, windowKind, windowStart, spentUsd, amountUsd, requestedAt }`. Budget outcome: resumedAmountUsd and `requeueResults: [{ jobId, ok, error? }]`; only the requeue results are displayed.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalRequestPanel renders ApprovalRequestBashPanel for an open pending fleet.job.shell.escalate request.",
+        "[unit] ApprovalRequestPanel renders ApprovalRequestBudgetPanel for an open pending fleet.budget.override request.",
+        "[unit] The bash panel shows the command of the request's input.payload.",
+        "[unit] The bash panel links the job at /<slug>/fleet/jobs/<details.jobId> when the request's project slug is known.",
+        "[unit] A bash payload whose options are ['deny'] offers only the Deny button.",
+        "[unit] Allow posts { decision: 'approve', params: { choice: 'allow' } }.",
+        "[unit] Allow for this job posts { decision: 'approve', params: { choice: 'allow_for_job' } }.",
+        "[unit] Deny posts { decision: 'reject', params: { choice: 'deny' } }.",
+        "[unit] The budget panel ticks every details.requeueCandidates row by default.",
+        "[unit] Raise with amount 50 and one of two candidates unticked posts { decision: 'approve', params: { amountUsd: 50, requeueJobIds: [<the ticked id>] } }.",
+        "[unit] Raise with an amount not above the frozen spentUsd posts nothing.",
+        "[unit] Keep paused posts { decision: 'reject' }.",
+        "[unit] A budget detail with requeueCandidatesTruncated: true shows approvals.fleet.budget.truncated.",
+        "[unit] The outcome of a settled bash request whose details.resolvedBy is user and details.outcome.delivery is { result: 'ok' } shows approvals.fleet.delivery.delivered.",
+        "[unit] The outcome of an executed budget request shows a requeueResults entry { jobId: 'j2', ok: false, error: '{\"code\":\"fleet.jobState\"}' } with the notCancelled reason label."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "fleet",
+        "security",
+        "forms"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shell escalation and budget override approval controls are security-sensitive. Strict TDD covers exact params bodies, safe payload parsing, validation, row-action gates and parent-child panel dispatch."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/ApprovalBashPanel.vue",
+        "apps/web/components/fleet/ApprovalBudgetPanel.vue",
+        "apps/web/components/fleet/ApprovalOutcome.vue",
+        "apps/web/components/approvals/ApprovalRequestPanel.vue",
+        "apps/web/lib/fleet-approvals.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/approval-request-fleet.ts",
+        "apps/web/components/approvals/ApprovalRequestBashPanel.vue",
+        "apps/web/components/approvals/ApprovalRequestBudgetPanel.vue",
+        "apps/web/components/approvals/ApprovalRequestOutcome.vue",
+        "apps/web/tests/lib/approval-request-fleet.spec.ts",
+        "apps/web/tests/components/approval-request-fleet-panels.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When all budget candidates are unticked, Raise posts params.requeueJobIds as an empty array.",
+        "When a bash payload is malformed or commandTruncated is true, the panel offers only Deny.",
+        "When any specialized panel has a comment longer than 2000 characters, its decision action posts nothing.",
+        "When viewerActions.decide is false, specialized pending panels render no decision buttons.",
+        "When a bash command contains HTML, the panel displays it literally without creating HTML elements."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.fleet` (bash and budget panel labels, truncated, delivery, requeue results)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.fleet` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Engine approval toasts and home needs-you card",
+      "description": "**Goal** — Source approval toasts/browser notices from the engine and link home approval rows into unified inboxes.\n\n**Motivation** — An agent write that a policy holds for a human (any of the 126 gated routes) shows up in no web inbox.\n\n**Approach** — **The badge counts what the list lists.** `GET /approvals/counts` counts visible pending requests, the caller's own included, so the badge can count an own request the caller cannot decide. That is accepted: the badge, the Pending tab and the home card agree on one number (7a's rule).\n\n**Key labels.** `requestKeyLabel(t, te, key)` answers `approvals.keys.<key with '.' replaced by '_'>` when that i18n key exists, else the raw key. Only the two fleet keys get labels in this feature.\n\nCreates `composables/useApprovalRequestNotifications.ts`, which replaces what `useApprovalNotifications` does, over `GET /approvals?status=pending`.\n\n`HomeNeedsYou` links rows to the engine inbox and labels rows with no fleet type by key.\n\n`HomeApproval` gains `permissionKey`.\n\nAdds `notifications.kinds.approval_request`.\n\nThe new notification composable accepts the engine count snapshot and uses the US-001 client. refresh() skips GET /approvals when total is zero; otherwise starts with status=pending,size=100. Replace legacy per-scope permission re-reads with the engine list and viewerActions. Only unseen, unexpired requests whose viewerActions.decide is true raise a toast; its action uses inboxHref(null,id). Preserve per-user dedupe, explicit dismissal, optional browser notification support and koda-approval-notifications-<userId> preference. A repeated refresh must not re-toast the same request. decided(id) dismisses its toast; a successful refresh dismisses toasted ids no longer listed. Any list/refresh error, including refusal, keeps the previous state silently for retry, rather than copying the old dismiss-on-refusal flow. Keep SSR/browser API guards and user isolation. Expose refresh, decided, toggleBrowserNotifications, enabled and supported for badge wiring in US-006.\n\nHomeApproval gains permissionKey:string and type:string|null while retaining existing fields. Rewrite HomeNeedsYou.approvalTarget to inboxHref(projectSlug,id); type:null rows show requestKeyLabel(t,te,permissionKey), while fleet-type rows retain their labels. Update home fixtures/path assertions. Add notifications.kinds.approval_request in English as Approval needed: {key}, and a Chinese counterpart. The existing notificationText/bell pipeline should render params.key through this key; retain legacy fleet notification kinds and links.\n\n**Scope** — In: new toast composable, home links/labels/type, notification locale key and tests. Out: badge/count polling/nav integration (US-006), deleting old composable (US-010), switching fleet notification producers or removing fleet_approval_requested (7c). Dismissing toasts when the pending list is refused is deferred; they stay until a successful refresh.\n\n**Interface** — `useApprovalRequestNotifications`; `refresh()`, `decided('r1')`, `toggleBrowserNotifications()` and browser state; `HomeApproval` gains `permissionKey: string`, and `type` is `string | null`. `approvalTarget` answers `inboxHref(projectSlug, id)`, and a row with `type: null` shows `requestKeyLabel(t, te, permissionKey)`. Engine notification kind `approval_request` has `params: { key }` and link `/approvals?id=<requestId>`.",
+      "acceptanceCriteria": [
+        "[unit] refresh() with counts total: 0 makes no GET /approvals request.",
+        "[unit] refresh() with counts total: 2 requests GET /approvals with { status: 'pending', size: '100' }.",
+        "[unit] A listed request whose viewerActions allows deciding, not seen before, raises one toast whose action leads to inboxHref(null, id).",
+        "[unit] A second refresh() listing the same request raises no second toast.",
+        "[unit] A listed request whose viewerActions is { decide: false, cancel: true } raises no toast.",
+        "[unit] A listed request whose expiresAt is in the past raises no toast.",
+        "[unit] decided('r1') dismisses the toast of r1.",
+        "[unit] A refresh() whose list no longer holds a toasted request dismisses its toast.",
+        "[unit] toggleBrowserNotifications() with the browser permission granted stores the preference under koda-approval-notifications-<userId>.",
+        "[unit] The notification bell renders a notification of kind approval_request with params: { key: 'label.create' } as the notifications.kinds.approval_request text.",
+        "[unit] HomeNeedsYou links an approval row with projectSlug: 'sandbox' and id r1 to /sandbox/approvals?id=r1.",
+        "[unit] HomeNeedsYou links an approval row with projectSlug: null and id r1 to /approvals?id=r1.",
+        "[unit] HomeNeedsYou, with a te double that answers false, shows an approval row with type: null and permissionKey: 'label.create' as label.create.",
+        "[unit] When a pending-list refresh fails, active approval toasts remain unchanged without an error toast until a later successful refresh.",
+        "[unit] HomeNeedsYou still displays the fleet.approvals.type.nax_bash_escalate label for an approval row whose type is nax_bash_escalate after adding the type:null key-label fallback."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "notifications",
+        "home"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Coordinates per-user toast/browser state and engine scanning while viewerActions gates which requests expose review actions; the access-sensitive action filter requires strict security TDD in addition to lifecycle and home/bell regression checks."
+      },
+      "contextFiles": [
+        "apps/web/composables/useApprovalNotifications.ts",
+        "apps/web/components/home/HomeNeedsYou.vue",
+        "apps/web/lib/home-types.ts",
+        "apps/web/lib/notifications.ts",
+        "apps/web/composables/useApprovalInbox.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useApprovalRequestNotifications.ts",
+        "apps/web/tests/composables/useApprovalRequestNotifications.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the signed-in user changes, the next user's refresh does not reuse the previous user's seen-request suppression.",
+        "When browser notification APIs are unavailable, the composable still renders in-app toasts."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/home/HomeNeedsYou.vue",
+          "reason": "`approvalTarget` answers `inboxHref(projectSlug, id)`, and a row with `type: null` shows `requestKeyLabel(t, te, permissionKey)`."
+        },
+        {
+          "path": "apps/web/lib/home-types.ts",
+          "reason": "`HomeApproval` gains `permissionKey: string`, and `type` becomes `string | null`."
+        },
+        {
+          "path": "apps/web/tests/components/home-needs-you.spec.ts",
+          "reason": "its assertions that approval rows link to the fleet inbox paths are replaced by the engine inbox paths with `?id=`, and its approval fixtures gain `permissionKey`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `notifications.kinds.approval_request` (\"Approval needed: {key}\")."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `notifications.kinds.approval_request` in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Engine counts badge, navigation and command palette",
+      "description": "**Goal** — Rewrite the existing header badge onto engine counts and add permission-gated inbox/policy destinations.\n\n**Motivation** — The redesign doc (§6 \"P3 pages\") asks for three pages.\n\n**Approach** — Three existing components are rewritten in place instead, so the specs and the layout that refer to them by name keep working: `components/fleet/ApprovalBadge.vue` (US-006), and `components/fleet/JobApprovals.vue` and `components/fleet/BudgetBanner.vue` (US-007).\n\n**The badge counts what the list lists.** `GET /approvals/counts` counts visible pending requests, the caller's own included, so the badge can count an own request the caller cannot decide. That is accepted: the badge, the Pending tab and the home card agree on one number (7a's rule).\n\n**`PermissionSet.mayDecide()`.** The nav and the palette need to know \"may decide something\". That is either `approval.decide` or any narrowed `approval.decide@<pattern>` key, which `has()` cannot answer. `permissionSet` gains `mayDecide()`; `EMPTY_PERMISSIONS.mayDecide()` answers `false`.\n\n**Project nav links live in a slug-keyed child component.**\n- `useProjectPermissions(slug)` takes a fixed slug, so `layouts/default.vue` cannot read project keys for a route that changes.\n- US-006 adds `components/approvals/ProjectApprovalNavLinks.vue` (prop `slug`). It reads `useProjectPermissions(slug)` and renders the two project links.\n- The layout mounts it in the project block with `:key=\"projectSlug\"`, as it mounts the badge.\n- The layout's script gains no new auto-import, because the three layout specs that evaluate it list their auto-imports by hand.\n\n**Badge numbers and targets.**\n- The badge shows `counts.total` on every page, the one number the home card and the Pending tab of `/approvals` show.\n- Its link target:\n  - on a project page, `/<slug>/approvals`;\n  - off one, `/approvals` when the global set `mayDecide()`;\n  - otherwise `/<slug>/approvals` of the first `counts.projects` row;\n  - no link when the counts are empty.\n- A 403 from `GET /approvals/counts` (a caller with no decide key anywhere) stops the badge's polling. The badge then renders nothing.\n- After a successful decide or cancel, `approvalRequestsVersion` is bumped. The badge reloads on the bump.\n\n**Auto-import names.** Nuxt prefixes components by directory, so `components/approvals/ProjectApprovalNavLinks.vue` is `ApprovalsProjectApprovalNavLinks` in templates. Layout specs that do not register it render it as an unresolved element, which does not fail them.\n\n**Composable imports.** Components import the new composables explicitly from `~/composables/...`, so the spec harness doubles them through module aliases (`tests/helpers/mount-sfc.ts` has a closed auto-import list).\n\nRewrite ApprovalBadge.vue to use useApprovalInbox().counts and useApprovalRequestNotifications. Every successful counts load triggers one notifications.refresh(); project approval_request events and approvalRequestsVersion changes reload through the 300 ms debounce. Keep existing polling/lifecycle conventions and badgeText/BADGE_CAP, displaying 99+ above 99. Non-403 errors preserve last count/notification state silently and retry on the next poll/event; 403 stops polling and hides the whole badge. Retain slug:string|null and FleetApprovalBadge.\n\nProjectApprovalNavLinks renders /[project]/approvals on project mayDecide() and /[project]/approval-policies on approval.policy.read. Add inline layout /approvals after My threads on global mayDecide(), and /admin/approval-policies after Roles on global approval.policy.manage. Include canManageApprovalPolicies in showAdminNav and the permission-nav helper's flags/ADMIN_NAV_KEYS. Mount the child keyed by projectSlug without adding layout script auto-imports; retain existing source-order pins. Add command id approvals to the palette on global mayDecide(), navigating to /approvals. Add nav.approvals/nav.approvalPolicies in both locales. Rewrite badge doubles to useApprovalInbox/useApprovalRequestNotifications/onApprovalRequest. Delete obsolete US-009 AC-8/AC-9/AC-10/AC-11, fix-round-1 and US-011 approval blocks in fleet-schedule-approval-gates.spec.ts while keeping schedule blocks. Update default-permission-nav flag/source pins and add child/palette/layout tests, including a real layout-to-child slug seam.\n\n**Scope** — In: badge/count lifecycle, notifications integration, project/global navigation, palette and owning tests/locales. Out: panels (US-003–004), job/banner consumer rewrites (US-007), policy CRUD (US-008–009), removal of old admin fleet link (US-010), new breadcrumbs.\n\n**Interface** — `ApprovalBadge` prop stays `slug: string | null`; component name `FleetApprovalBadge` remains unchanged. `ProjectApprovalNavLinks` prop `slug`; template name `ApprovalsProjectApprovalNavLinks`. Counts: `{ total, unscoped, projects: [{ projectId, slug, pending }] }`; `useApprovalInbox`, `approvalRequestsVersion`, `useApprovalRequestNotifications`, `ProjectEventHandlers.onApprovalRequest`.",
+      "acceptanceCriteria": [
+        "[unit] The mounted badge, with GET /approvals/counts answering total: 120, shows 99+.",
+        "[unit] The badge renders nothing when total is 0.",
+        "[unit] On a project page with slug sandbox, the badge links to /sandbox/approvals.",
+        "[unit] Off a project page, the badge links to /approvals when the global set mayDecide().",
+        "[unit] An approval_request live event triggers one counts reload after the 300 ms debounce.",
+        "[unit] Every successful counts load is followed by one useApprovalRequestNotifications().refresh() call.",
+        "[unit] The layout renders a /approvals nav link when the global set mayDecide().",
+        "[unit] ProjectApprovalNavLinks with slug sandbox renders a /sandbox/approvals link when the project set mayDecide().",
+        "[unit] ProjectApprovalNavLinks with slug sandbox renders a /sandbox/approval-policies link when the project set holds approval.policy.read.",
+        "[unit] The layout renders an /admin/approval-policies link for a caller whose only global key is approval.policy.manage.",
+        "[unit] The command palette lists an approvals command that navigates to /approvals when the global set mayDecide().",
+        "[unit] Off a project page, for a caller whose global set does not mayDecide(), the badge links to /<slug>/approvals of the first projects row of the counts.",
+        "[unit] A 403 counts answer stops the badge's polling.",
+        "[unit] A bump of approvalRequestsVersion triggers one counts reload.",
+        "[unit] The layout, on a project route with slug sandbox, mounts ApprovalsProjectApprovalNavLinks with slug: 'sandbox'."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "security",
+        "navigation",
+        "badge"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Changes global/project permission gates and forbidden badge behavior across header, layout and palette. Security override applies; mounted API/event and narrowed-key navigation seams must be verified under strict TDD."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/ApprovalBadge.vue",
+        "apps/web/layouts/default.vue",
+        "apps/web/components/CommandPalette.vue",
+        "apps/web/tests/helpers/permission-nav.ts",
+        "apps/web/composables/useApprovalRequestNotifications.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/approvals/ProjectApprovalNavLinks.vue",
+        "apps/web/tests/components/project-approval-nav-links.spec.ts",
+        "apps/web/tests/components/command-palette-approvals.spec.ts",
+        "apps/web/tests/layouts/default-approvals-nav.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the global set holds only approval.decide@label.*, both layout and palette offer /approvals.",
+        "When no applicable permission is held, its approvals or policy navigation link is absent.",
+        "When the layout route changes from sandbox to koda, project approval links target koda rather than sandbox."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/ApprovalBadge.vue",
+          "reason": "rewritten onto `useApprovalInbox().counts`, `useApprovalRequestNotifications`, `approvalRequestsVersion` and the `approval_request` live event; prop and component name unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-badge.spec.ts",
+          "reason": "its doubles of `useFleetApprovalCounts`, `useApprovalNotifications` and `onFleetApproval` are replaced. The new doubles are `useApprovalInbox`, `useApprovalRequestNotifications` and `onApprovalRequest`, and the target assertions move to the engine inbox paths."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts",
+          "reason": "the US-009 AC-8, AC-9, AC-10, AC-11, fix-round-1 and US-011 blocks are deleted. They mount the old badge over the fleet approval counts and the old `useApprovalNotifications`. The new badge and notification specs replace them; the schedule gate blocks stay."
+        },
+        {
+          "path": "apps/web/layouts/default.vue",
+          "reason": "adds the global engine inbox link (global `mayDecide()`, after My threads) and the admin approval policies link (`approval.policy.manage`, after Roles, counted in `showAdminNav`) inline. It mounts `ProjectApprovalNavLinks` in the project block, keyed by slug, and adds no new auto-import to its script."
+        },
+        {
+          "path": "apps/web/components/CommandPalette.vue",
+          "reason": "offers an `approvals` command to the engine inbox when the global set `mayDecide()`."
+        },
+        {
+          "path": "apps/web/tests/helpers/permission-nav.ts",
+          "reason": "`adminNavFlags` gains `canManageApprovalPolicies` (`approval.policy.manage`), and `ADMIN_NAV_KEYS` gains `approval.policy.manage`."
+        },
+        {
+          "path": "apps/web/tests/layouts/default-permission-nav.spec.ts",
+          "reason": "the admin-section flag list it compares includes `canManageApprovalPolicies`, and the source-order pin includes the two new inline links."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `nav.approvals` and `nav.approvalPolicies`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `nav.approvals` and `nav.approvalPolicies` in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Job approvals, budget banner and fleet links on the engine",
+      "description": "**Goal** — Move job approval rows, budget review links and fleet navigation destinations onto engine requests.\n\n**Motivation** — 7c deletes the fleet adapters once nothing in the web calls them.\n\n**Approach** — Three existing components are rewritten in place instead, so the specs and the layout that refer to them by name keep working: `components/fleet/ApprovalBadge.vue` (US-006), and `components/fleet/JobApprovals.vue` and `components/fleet/BudgetBanner.vue` (US-007).\n\n**`listForJob(jobId)`** returns `JobApprovalRow[]`. It lists with `{ jobId, size: '100' }` and orders the rows: pending first by soonest `expiresAt`, then the rest newest first. It then details the first `DETAIL_FETCH_LIMIT` rows through `listDetailed`.\n\n**Live updates and polling.**\n- The project inbox, the job page, the budget banner and the badge (on a project page) reload on the project stream's `approval_request` event.\n- The fleet index and the job page add `onApprovalRequest` beside their existing `onFleetApproval` handler. 7c removes `onFleetApproval`.\n- The engine publishes no event for a request without a project, so the global inbox reloads on a timer. Every list here polls through the existing visible-tab poller, as the old inbox and badge did.\n\n`components/fleet/JobApprovals.vue`:\n- Baseline: props `{ slug, approvals: FleetApprovalDto[], now }`.\n- Target (US-007): props `{ slug, approvals: JobApprovalRow[], now }`, where `JobApprovalRow = { request: ApprovalRequestSummary; detail: ApprovalRequestDetail | null }`.\n\n`components/fleet/BudgetBanner.vue`:\n- Baseline: reads `useFleetApprovals` with `type=budget_override_required`.\n- Target (US-007): it resolves the project id with `useProjectRef(slug)`. It then reads `useApprovalInbox().listDetailed` with `status=pending`, `permissionKey=fleet.budget.override` and `projectId`.\n\n`lib/fleet-dashboard.ts`: `attentionLink(item, scope)` for `job_waiting_approval`:\n- Baseline: `/<slug>/fleet/approvals`.\n- Target (US-007): `/<slug>/approvals`.\n\nUse useApprovalInbox.listForJob(jobId) in the job page and bind JobApprovalRow[] to JobApprovals. The review callout uses inboxHref(slug,id) of the pending request with the soonest expiresAt. A detailed bash row uses bashAskOf(detail) and commandPreview; null detail shows raw permissionKey, even where a translated key exists. Link every row to inboxHref(slug,id), adapt engine statuses and createdAt rather than old fleet fields, and preserve unrelated job functionality.\n\nBudgetBanner first resolves project id, then calls listDetailed with status=pending, permissionKey=fleet.budget.override, projectId and size=100. Map budgetAskOf(detail).policyId to request ids; only the first DETAIL_FETCH_LIMIT=20 rows receive detail requests, preserving ordering. Failed details remain null and do not prevent other rows/links. On other banner errors retain the previous state silently and retry on next poll/event, not the baseline empty-map behavior. Add approval_request reloads to the banner, job and fleet index; retain job/index onFleetApproval. Point the index Approvals button and dashboard waiting-approval links at project /approvals. Import new composables explicitly.\n\nUpdate existing component/job/page tests: fleet-job-approvals fixtures become JobApprovalRow; fleet-budget-banner doubles become useApprovalInbox and assert engine queries; fleet-job-detail source pins become useApprovalInbox/inboxHref/new row binding while onFleetApproval stays; workflow and budget-gate doubles become useApprovalInbox; dashboard attention path lists and fleet-jobs-list Approvals button pins move to engine paths without changing order pins. No new files are required.\n\n**Scope** — In: existing job/banner/index/dashboard consumers and regression tests. Out: specialized panels/outcomes (US-004), badge/nav rewrite (US-006), deletion of legacy APIs/helpers (US-010), removing onFleetApproval (7c).\n\n**Interface** — `JobApprovalRow = { request: ApprovalRequestSummary; detail: ApprovalRequestDetail | null }`; `useApprovalInbox().listForJob(jobId)`; `useApprovalInbox().listDetailed(filters, limit)`; `DETAIL_FETCH_LIMIT = 20`; `bashAskOf`, `budgetAskOf`; `inboxHref(slug, id)`.",
+      "acceptanceCriteria": [
+        "[unit] The job page for job j1 requests GET /approvals with { jobId: 'j1', size: '100' }.",
+        "[unit] listForJob given a settled row then a pending row returns the pending row first.",
+        "[unit] JobApprovals shows a row whose detail holds a bash payload with that payload's commandPreview.",
+        "[unit] The job page reloads its approvals after an approval_request live event.",
+        "[unit] JobApprovals links a row to /<slug>/approvals?id=<id>.",
+        "[unit] JobApprovals shows a row whose detail is null with its raw permissionKey.",
+        "[unit] The job page's review callout links to /<slug>/approvals?id=<id> of the pending request with the soonest expiresAt.",
+        "[unit] The budget banner on slug sandbox (project id p1) requests GET /approvals with { status: 'pending', permissionKey: 'fleet.budget.override', projectId: 'p1', size: '100' }.",
+        "[unit] The banner links a paused policy whose id equals a listed request's budgetAskOf(detail).policyId to /sandbox/approvals?id=<that request id>.",
+        "[unit] A failed banner request raises no toast.",
+        "[unit] The fleet index Approvals button navigates to /<slug>/approvals.",
+        "[unit] attentionLink for an item of kind job_waiting_approval in project koda returns /koda/approvals.",
+        "[unit] When one job approval detail fetch fails, that row shows its raw permissionKey while successfully detailed rows retain their previews.",
+        "[unit] When a banner approvals refresh fails after a successful load, its previous review-link mapping remains visible.",
+        "[unit] When one budget request detail fetch fails, successfully detailed requests still supply their paused-policy review links."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "fleet",
+        "migration"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-consumer read migration introduces summary/detail joins, ordered detail limits and live refresh. Test actual page/banner API seams and keep unrelated workflow gates plus legacy live handlers intact."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/components/fleet/JobApprovals.vue",
+        "apps/web/components/fleet/BudgetBanner.vue",
+        "apps/web/lib/fleet-dashboard.ts",
+        "apps/web/lib/approval-request-fleet.ts"
+      ],
+      "suggestedCriteria": [
+        "When the budget banner receives an approval_request event, it reloads the engine pending-budget list.",
+        "When listForJob has multiple settled rows, those rows appear by createdAt descending after pending rows.",
+        "When a job request lies beyond DETAIL_FETCH_LIMIT, its row remains visible without a detail preview."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "loads approvals with `useApprovalInbox().listForJob(jobId)`, links the callout to `inboxHref(slug, id)` of the soonest-expiring pending request, and adds an `onApprovalRequest` reload beside its `onFleetApproval` one."
+        },
+        {
+          "path": "apps/web/components/fleet/JobApprovals.vue",
+          "reason": "props become `JobApprovalRow[]`; a row's preview reads `bashAskOf(detail)` and links to `inboxHref(slug, id)`."
+        },
+        {
+          "path": "apps/web/components/fleet/BudgetBanner.vue",
+          "reason": "maps `budgetAskOf(detail).policyId` to request ids from `listDetailed` over the project's pending `fleet.budget.override` requests, with the project id from `useProjectRef`."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/index.vue",
+          "reason": "the Approvals button goes to the project engine inbox, and the page adds an `onApprovalRequest` reload beside its `onFleetApproval` one."
+        },
+        {
+          "path": "apps/web/lib/fleet-dashboard.ts",
+          "reason": "`attentionLink` sends `job_waiting_approval` to the project engine inbox."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-job-approvals.spec.ts",
+          "reason": "fixtures become `JobApprovalRow`s, and the link assertions move to the engine inbox path with `?id=`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-budget-banner.spec.ts",
+          "reason": "the `useFleetApprovals` double becomes a `useApprovalInbox` double, with the engine query asserted."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "its source-string pins move off the old code: the `useFleetApprovals` import, `inboxPath(... firstPending ...)` and `:approvals=\"jobApprovals\"`. They now pin the `useApprovalInbox` import, the `inboxHref` callout and the `JobApprovalRow` binding, and the `jobApprovals.value.length > 0` pin follows the renamed rows. The `onFleetApproval` handler pin stays."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail-workflow.spec.ts",
+          "reason": "its `useFleetApprovals` double becomes a `useApprovalInbox` double returning `[]` from `listForJob`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-budget-gates.spec.ts",
+          "reason": "its `useFleetApprovals` double becomes a `useApprovalInbox` double."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-dashboard-attention.spec.ts",
+          "reason": "the `job_waiting_approval` href assertion moves to the project engine inbox."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-dashboard-attention.spec.ts",
+          "reason": "the attention link list it pins replaces the fleet approvals path with the project engine inbox path."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+          "reason": "the Approvals button source pin navigates to the project engine inbox; its order pin stays."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Global approval policy page and shared policy UI",
+      "description": "**Goal** — Build reusable policy administration components and the global approval policy page.\n\n**Motivation** — The redesign doc (§6 \"P3 pages\") asks for three pages.\n\n**Approach** — **Policy pages share one dialog, one list and one composable.** All three are parameterised by `PolicyBase = { kind: 'global' } | { kind: 'project'; slug: string }`, so US-009 adds only a page.\n- `useApprovalPolicies(base).list()` reads every page with `size: '100'` until `hasNext` is false, so `overrideCount` counts every policy.\n- The dialog creates subjects of kind `all`, `type` and `role`. The `role` kind is offered only when the caller can read roles: `role.read` on the global page (`GET /roles`), project `member.read` on the project page (`GET /projects/:slug/roles`). Creating a `principal` subject is out of scope; existing ones still list.\n- The dialog's mode options are `modeOptions(patternFloor(pattern, keys))`. A pattern that covers no approvable key (`patternFloor` answers `null`) shows `approvals.policies.validation.pattern`, and Save stays disabled.\n- Editing changes only:\n  - `mode`;\n  - `timeoutSec` (a blank timeout sends `null`);\n  - `onTimeout`;\n  - `approverMustHoldAction`;\n  - `requireDistinctApprover`.\n\n  The pattern and the subject are part of the policy's selector, and `PATCH` does not accept them.\n\nThe API's policy validation (`apps/api/src/approvals/approval-policy.validation.ts`):\n- `timeoutSec` must be an integer from 60 to 2592000;\n- `onTimeout: 'approve'` needs floor `none`;\n- the mode may not sit below the strictest floor of the keys the pattern covers. A `prefix.*` pattern covers the keys under `prefix.`, and a pattern that covers none is refused.\n\nCreate lib/approval-policies.ts, composables/useApprovalPolicies.ts, components/approvals/ApprovalPolicyDialog.vue, ApprovalPolicyList.vue, ApprovableKeysTable.vue and pages/admin/approval-policies.vue. The shared components/composable must already support project endpoint/role selection for US-009. Global reads/writes require approval.policy.manage; absent permission renders approvals.policies.forbidden and requests nothing. Keys table shows key, scope, risk, floor, default and overrideCount over every policy page. Use exact/prefix.* matching, rank none<self<agent<human, strictest matching floor and schema-backed forms; API validation remains authoritative.\n\nCreate subjects all/type/role, offering role only with the appropriate read permission and successful useRoles/useProjectRoles loading. A failed role load simply removes that kind. Existing principal-subject policies remain displayable/editable/deletable, but no principal-create UI. Blank create timeout is omitted; blank edit timeout sends null. Patch only the five listed mutable fields, not requiredApprovals even though the API DTO accepts it, and never pattern/subject. Delete requires confirmation. Refusals 400/403/409 toast extractApiError and preserve the open dialog and input. Load 403 shows approvals.policies.forbidden. Add approvals.policies in both locales, including page, keys table, list, dialog, subject, validation and forbidden messages. Tests use real page/dialog/list with $api doubles to verify global calls and exact bodies, plus pure matching/schema cases and pagination.\n\n**Scope** — In: all shared global/project policy machinery, global page/CRUD and owning locale/tests. Out: project page/inherited-page integration (US-009), navigation links (US-006), API changes, principal subject creation, role subject when role reading fails.\n\n**Interface** — `PolicyBase = { kind: 'global' } | { kind: 'project'; slug: string }`; `patternFloor`, `modeOptions`, `overrideCount`, `buildPolicySchema`; `useApprovalPolicies`; `ApprovalPolicyDialog`, `ApprovalPolicyList`, `ApprovableKeysTable`. Global routes: GET/POST `/approval-policies`, PATCH/DELETE `/approval-policies/:id`, GET `/approval-policies/keys` answering `{ keys }`. Project equivalents: GET/POST `/projects/:slug/approval-policies`, PATCH/DELETE `/projects/:slug/approval-policies/:id`, GET `/projects/:slug/approval-policies/keys`. Policy fields: id, selector, projectId, permissionPattern, principalType, roleId, principalId, mode, timeoutSec, onTimeout, requiredApprovals, approverMustHoldAction, requireDistinctApprover, updatedByType, updatedById, createdAt, updatedAt. `ApprovableKeyDto`: `key`, `scope`, `risk`, `floor`, `default`. Modes rank `none < self < agent < human`. The default example create body is exactly `{ permissionPattern: 'label.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human', onTimeout: 'reject' }`; untouched optional controls must not add unexpected default fields.",
+      "acceptanceCriteria": [
+        "[unit] patternFloor('fleet.*', keys) returns the strictest floor among the keys under the prefix 'fleet.'.",
+        "[unit] patternFloor('nothing.here', keys) returns null.",
+        "[unit] modeOptions('agent') returns ['agent', 'human'].",
+        "[unit] overrideCount('label.create', policies) counts policies whose pattern is label.create or label.*, and not one whose pattern is ticket.*.",
+        "[unit] buildPolicySchema(t, 'none') rejects a timeoutSec of 30 with the approvals.policies.validation.timeout message.",
+        "[unit] buildPolicySchema(t, 'human') rejects onTimeout: 'approve' with the approvals.policies.validation.timeoutApprove message.",
+        "[unit] useApprovalPolicies({ kind: 'global' }).list(), whose first GET /approval-policies answer has hasNext: true, requests the list again with current: '2'.",
+        "[unit] With global approval.policy.manage, mounting /admin/approval-policies requests GET /approval-policies/keys.",
+        "[unit] Without approval.policy.manage, the page shows approvals.policies.forbidden and requests nothing.",
+        "[unit] ApprovableKeysTable shows each key's overrideCount.",
+        "[unit] Creating with pattern label.create, subject type AGENT, mode human and an empty timeout posts { permissionPattern: 'label.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human', onTimeout: 'reject' } to /approval-policies.",
+        "[unit] Without global role.read, the dialog does not offer the role subject kind.",
+        "[unit] Editing a policy with a blank timeout sends PATCH /approval-policies/<id> with timeoutSec: null.",
+        "[unit] Confirming Delete sends DELETE /approval-policies/<id>.",
+        "[unit] A create answered with 400 toasts extractApiError and keeps the dialog open."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "security",
+        "approval-policies",
+        "admin",
+        "forms"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Policy CRUD and role/read management gates are access-control-critical. Strict TDD covers floor/timeout schemas, permission refusals, pagination and exact create/patch contracts for shared scoped machinery."
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/roles.vue",
+        "apps/web/composables/useRoles.ts",
+        "apps/web/components/RoleEditorDialog.vue",
+        "apps/api/src/approvals/dto/approval-policy.dto.ts",
+        "apps/api/src/approvals/approval-policy.validation.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/approval-policies.ts",
+        "apps/web/composables/useApprovalPolicies.ts",
+        "apps/web/components/approvals/ApprovalPolicyDialog.vue",
+        "apps/web/components/approvals/ApprovalPolicyList.vue",
+        "apps/web/components/approvals/ApprovableKeysTable.vue",
+        "apps/web/pages/admin/approval-policies.vue",
+        "apps/web/tests/lib/approval-policies.spec.ts",
+        "apps/web/tests/pages/admin-approval-policies.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a pattern matches no approvable key, the dialog shows approvals.policies.validation.pattern and disables Save.",
+        "When editing a policy, the patch contains no permissionPattern, appliesTo or requiredApprovals field.",
+        "When timeoutSec is 2592001 or non-integer, buildPolicySchema rejects it with approvals.policies.validation.timeout.",
+        "When a prefix pattern covers different floors, modeOptions omits every mode below the strictest floor.",
+        "When an authorized manager views an existing principal-subject policy, its Edit and Delete actions remain available."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.policies` (page, keys table, list, dialog, subject, validation, forbidden)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.policies` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Project approval policy page",
+      "description": "**Goal** — Expose project policy administration through the shared UI with global policies visibly inherited and read-only.\n\n**Motivation** — The redesign doc (§6 \"P3 pages\") asks for three pages.\n\n**Approach** — **Policy pages share one dialog, one list and one composable.** All three are parameterised by `PolicyBase = { kind: 'global' } | { kind: 'project'; slug: string }`, so US-009 adds only a page.\n- `useApprovalPolicies(base).list()` reads every page with `size: '100'` until `hasNext` is false, so `overrideCount` counts every policy.\n- The dialog creates subjects of kind `all`, `type` and `role`. The `role` kind is offered only when the caller can read roles: `role.read` on the global page (`GET /roles`), project `member.read` on the project page (`GET /projects/:slug/roles`). Creating a `principal` subject is out of scope; existing ones still list.\n- The dialog's mode options are `modeOptions(patternFloor(pattern, keys))`. A pattern that covers no approvable key (`patternFloor` answers `null`) shows `approvals.policies.validation.pattern`, and Save stays disabled.\n- Editing changes only:\n  - `mode`;\n  - `timeoutSec` (a blank timeout sends `null`);\n  - `onTimeout`;\n  - `approverMustHoldAction`;\n  - `requireDistinctApprover`.\n\n  The pattern and the subject are part of the policy's selector, and `PATCH` does not accept them.\n\nCreates `pages/[project]/approval-policies.vue` over the US-008 components with `PolicyBase` `{ kind: 'project', slug }`.\n\nGlobal policies show as inherited and read-only.\n\nAdds `approvals.policies.project`.\n\nUse project permission keys, not role names. Without approval.policy.read render approvals.policies.forbidden and request nothing; a 403 from an attempted policy-page load also shows forbidden. approval.policy.manage gates Create/Edit/Delete. Rows with projectId:null show approvals.policies.project.inherited and never show Edit/Delete, even for a project manager. Keys-table override counts include both global and project policies from the fully paged list. Create/PATCH/DELETE use only the project's approval-policies routes. Role picker uses useProjectRoles(slug) behind member.read, with no global role.read requirement; on role-read failure omit role kind. Keep shared dialog validation/refusal behavior and do not duplicate shared components. Add project title and inherited keys in both locales. Mount the real page and shared dialog/list/composable with a $api double for the create-to-project-route seam.\n\n**Scope** — In: thin project page, project permission gates, inherited read-only display, project integration tests and locales. Out: shared machinery/global page (US-008), navigation (US-006), API policy changes and principal-subject creation.\n\n**Interface** — `PolicyBase = { kind: 'global' } | { kind: 'project'; slug: string }`; `useApprovalPolicies({ kind: 'project', slug })`; `ApprovalPolicyDialog`, `ApprovalPolicyList`, `ApprovableKeysTable`; GET/POST `/projects/:slug/approval-policies`, PATCH/DELETE `/projects/:slug/approval-policies/:id`, GET `/projects/:slug/approval-policies/keys`. Project reads require `approval.policy.read`, writes require `approval.policy.manage`, and GET `/projects/:slug/roles` requires `member.read`.",
+      "acceptanceCriteria": [
+        "[unit] With project approval.policy.read, mounting /sandbox/approval-policies requests GET /projects/sandbox/approval-policies/keys.",
+        "[unit] Without project approval.policy.read, the page shows approvals.policies.forbidden and requests nothing.",
+        "[unit] A listed policy with projectId: null shows approvals.policies.project.inherited and no Edit button.",
+        "[unit] Without project approval.policy.manage, the page renders no Create button.",
+        "[unit] Creating a policy posts to /projects/sandbox/approval-policies.",
+        "[unit] Editing a project policy sends PATCH /projects/sandbox/approval-policies/<id>.",
+        "[unit] Confirming Delete on a project policy sends DELETE /projects/sandbox/approval-policies/<id>.",
+        "[unit] With project member.read, the dialog's role picker lists useProjectRoles('sandbox').roles.",
+        "[unit] The keys table's override count for label.create counts a global label.* policy and a project label.create policy.",
+        "[unit] When a project policy-page load returns 403, the page shows approvals.policies.forbidden."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "security",
+        "approval-policies",
+        "project"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A thin page reuses upstream components but introduces project read/manage gates and inherited-policy restrictions. Security override applies; test real scoped endpoint/role seams and forbidden behavior."
+      },
+      "contextFiles": [
+        "apps/web/components/approvals/ApprovalPolicyDialog.vue",
+        "apps/web/components/approvals/ApprovalPolicyList.vue",
+        "apps/web/composables/useApprovalPolicies.ts",
+        "apps/web/composables/useProjectRoles.ts",
+        "apps/web/pages/[project]/settings.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/approval-policies.vue",
+        "apps/web/tests/pages/project-approval-policies.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a project manager views an inherited global policy, the row has no Delete button.",
+        "When a project reader lacks approval.policy.manage, project policy rows have neither Edit nor Delete controls.",
+        "When the project role list fails, the dialog omits role while keeping all and type available.",
+        "When a project policy edit is refused, the dialog preserves values and toasts extractApiError(error)."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "adds `approvals.policies.project` (title, inherited)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "adds `approvals.policies.project` in Chinese, key for key."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Redirect legacy fleet inboxes and remove obsolete web code",
+      "description": "**Goal** — Complete the web migration with temporary legacy URL redirects and removal of unused fleet inbox code.\n\n**Motivation** — 7c deletes the fleet adapters once nothing in the web calls them.\n\n**Approach** — **Redirects keep the query and use 302.** `/admin/fleet/approvals` and `/[project]/fleet/approvals` become redirect pages, the `pages/projects.vue` pattern, keeping `?id=`. A temporary redirect is used because the fleet notifications still link to `/admin/fleet/approvals` until 7c, and a cached 301 would outlive that.\n\nTurns `pages/admin/fleet/approvals.vue` and `pages/[project]/fleet/approvals.vue` into 302 redirects that keep `?id`.\n\nDeletes:\n- `components/fleet/ApprovalInbox.vue`, `ApprovalBashPanel.vue`, `ApprovalBudgetPanel.vue`, `ApprovalActionPanel.vue` and `ApprovalOutcome.vue`;\n- `composables/useFleetApprovals.ts`, `composables/useApprovalNotifications.ts` and `composables/useActionPreview.ts`;\n- the fleet-only exports of `lib/fleet-approvals.ts`;\n- the admin nav link to `/admin/fleet/approvals`.\n\nDeletes the test files of the deleted code: tests/pages/fleet-approvals-pages.spec.ts, tests/components/fleet-approval-{inbox,action-panel,bash-panel,budget-panel,outcome}.spec.ts, tests/composables/useFleetApprovals.spec.ts and tests/composables/useActionPreview.spec.ts.\n\nRewrites the two fleet approval E2E journeys onto `/[project]/approvals`.\n\nVerification: `bun run type-check`, `bun run lint` and `bun run test` in `apps/web`. A removed export that is still imported fails the type check.\n\nThe `lib/fleet-approvals.ts` exports to delete:\n- `INBOX_PENDING_SIZE`, `INBOX_PAGE_SIZE`;\n- `ApprovalBase`, `ApprovalViewer`, `INBOX_TABS`, `InboxTab`, `ApprovalListFilters`;\n- `buildApprovalQuery`, `sortPending`;\n- `AssistantApprovalPayload`, `assistantPayload`;\n- `canDecide`, `toRaiseBody`, `toKeepPausedBody`, `toBashBody`, `toActionBody`;\n- `threadApiPath`, `keyboardDecision`, `firstPending`;\n- `requeueResults`, `resumedAmount`, `pendingByPolicy`;\n- `inboxPath`, `badgeTarget`, `approvalSummary`;\n- `MAX_COMMENT`, `commentTooLong`, `buildRaiseSchema` (only the deleted panels use them);\n- the imports these deletions leave unused.\n\nRetain bashPayload, bashChoices, commandPreview, budgetPayload, raiseAmountError, secondsLeft, countdownText, deliveryView, requeueFailure, badgeText, BADGE_CAP and their necessary supporting types/constants. Keep FleetApprovalDto because retained helpers still name it. Keep fleet_approval/onFleetApproval, fleet API routes/keys/notifications and CLI; 7c retires those. ThreadActionCard.vue and useApprovalRequests.ts remain unchanged.\n\nRemove canReadFleetApprovals from layout showAdminNav and fleet.approval.read/canReadFleetApprovals from the permission-nav helper. Update default-permission-nav to assert old admin link absence for fleet.approval.read. Drop deleted-helper cases from tests/lib/fleet-approvals.spec.ts while preserving kept-helper cases. In mount-sfc remove the five deleted component map/union entries and useActionPreview from NUXT_AUTO_IMPORTS. Remove remaining canDecide/ApprovalViewer US-009 AC-2/AC-7 and two-pages AC-6 approval blocks from fleet-schedule-approval-gates.spec.ts; keep schedule cases. Remove obsolete useFleetApprovals doubles and not-called assertions from thread-action-card.spec.ts without changing the card.\n\nRewrite tests/e2e/fleet-approvals.e2e.spec.ts and fleet-bash-approvals.e2e.spec.ts for project engine inbox and new decision panels. Change tests/e2e/fixtures/fleet-approvals-api.ts to engine lists, projectId/permissionKey/jobId filters and detail fetching where policyId/jobId used to come from summaries. Add tests/pages/fleet-approvals-redirects.spec.ts. Redirects preserve the full query including id and explicitly use 302 rather than the reference page's 301. Run the specified web quality gates plus relevant Playwright journeys using waitForHydration, not networkidle. This story changes runtime compatibility/removal behavior and is not a test-only story.\n\n**Scope** — In: redirect pages, precise obsolete web implementation/export/spec deletion, test-helper/nav updates and E2E migration. Out: engine functionality from preceding stories, API adapter/event/DTO/notification retirement (7c), FleetApprovalDto deletion, thread-card changes and new breadcrumbs.\n\n**Interface** — `/admin/fleet/approvals` redirects to `/approvals`; `/[project]/fleet/approvals` redirects to `/<slug>/approvals`; preserve route.query and use `navigateTo(..., { redirectCode: 302 })` with the pages/projects.vue redirect-page structure.",
+      "acceptanceCriteria": [
+        "[unit] Loading /admin/fleet/approvals?id=r1 navigates to /approvals?id=r1 with redirect code 302.",
+        "[unit] Loading /admin/fleet/approvals with no query navigates to /approvals.",
+        "[unit] Loading /sandbox/fleet/approvals?id=r1 navigates to /sandbox/approvals?id=r1 with redirect code 302."
+      ],
+      "tags": [
+        "permissions-p3-web",
+        "web",
+        "approvals",
+        "migration",
+        "compatibility",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Terminal migration removes a broad import/test graph and obsolete permission-gated navigation while preserving legacy URL compatibility. Security override applies to access-control/nav cleanup; verify redirects, full web gates and updated engine E2E journeys."
+      },
+      "contextFiles": [
+        "apps/web/pages/projects.vue",
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/tests/e2e/fleet-approvals.e2e.spec.ts",
+        "apps/web/tests/e2e/fixtures/fleet-approvals-api.ts",
+        "apps/web/layouts/default.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-approvals-redirects.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a legacy inbox URL has additional query parameters, its redirect preserves them along with id.",
+        "When a caller holds only fleet.approval.read, the layout renders no /admin/fleet/approvals link.",
+        "When a bash or budget request is decided through the project engine inbox in E2E, it settles through the engine decision endpoint."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/admin/fleet/approvals.vue",
+          "reason": "becomes a 302 redirect to the global engine inbox, keeping `?id`."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/approvals.vue",
+          "reason": "becomes a 302 redirect to the project engine inbox, keeping `?id`."
+        },
+        {
+          "path": "apps/web/layouts/default.vue",
+          "reason": "removes the admin fleet approvals link and `canReadFleetApprovals` from `showAdminNav`."
+        },
+        {
+          "path": "apps/web/lib/fleet-approvals.ts",
+          "reason": "deletes the fleet-only exports the story lists; the shared helpers stay."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-approvals.spec.ts",
+          "reason": "drops the cases of the deleted exports; the cases of the kept helpers stay."
+        },
+        {
+          "path": "apps/web/tests/helpers/permission-nav.ts",
+          "reason": "`ADMIN_NAV_KEYS` and `adminNavFlags` drop the `fleet.approval.read` key and the `canReadFleetApprovals` flag."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "drops the five deleted components from its fleet component map and the `FleetComponentName` union, and `useActionPreview` from `NUXT_AUTO_IMPORTS`."
+        },
+        {
+          "path": "apps/web/tests/layouts/default-permission-nav.spec.ts",
+          "reason": "drops its admin fleet approvals link cases and asserts the link is gone for a caller holding `fleet.approval.read`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts",
+          "reason": "drops the remaining approval blocks: the `canDecide`/`ApprovalViewer` imports and cases (US-009 AC-2, AC-7) and the two-pages block (US-009 AC-6). The schedule gate blocks stay."
+        },
+        {
+          "path": "apps/web/tests/components/thread-action-card.spec.ts",
+          "reason": "drops the `useFleetApprovals` double and its `not.toHaveBeenCalled` assertions; the card never used it."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-approvals.e2e.spec.ts",
+          "reason": "the journey opens the project engine inbox and decides through the engine panels."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-bash-approvals.e2e.spec.ts",
+          "reason": "the bash journey opens the project engine inbox at the ask and answers through `ApprovalRequestBashPanel`."
+        },
+        {
+          "path": "apps/web/tests/e2e/fixtures/fleet-approvals-api.ts",
+          "reason": "reads requests through the engine list route instead of the fleet adapter."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "DISCOVERY AND ARCHITECTURE\nThe codebase-memory MCP server is not exposed in this session; repository exploration therefore used direct Read, Grep and Glob. Source inspection confirms Nuxt 4 SSR and Vue, not the detected Next.js label: apps/web/package.json:6-19 defines Nuxt/Jest/Playwright scripts and :32-44 lists Nuxt, Vue, vee-validate and zod. The API uses NestJS/Fastify rather than the supplied Express label. This feature is web-only; API DTOs are read-only contract references. Follow .nax/mono/apps/web/context.md and .nax/rules/web.md. In particular, use composables/useApi rather than raw fetch, use extractApiError and useAppToast, use schema-backed forms, use semantic tokens and update both web locales (.nax/rules/web.md:17-46). Render untrusted commands, frozen input, comments, ids and outcome text through interpolation, never v-html. Permission checks remain API-owned. Read docs/ux/redesign/MASTER-PLAN.md:28-40 before navigation changes; its Status table and Decisions log must be updated with the implementation PR under repository guidance, not as a separate implementation story. Preserve the binding ten-story dependency graph and apps/web workdirs.\n\nFOUNDATION AND CONTRACTS\napps/web/composables/useFleetApprovals.ts:7-11 builds fleet adapter routes; :17-20 defines mutationEpoch and approvalsVersion; :26-36 loads fleet rows; :41-47 posts the incompatible old /decide body; :51-54 lists job approvals; :63-74 fetches /fleet/approval-counts. Create a separate engine client over /approvals, /approvals/counts, /approvals/:id, /approvals/:id/decisions and /approvals/:id/cancel. apps/web/composables/useApi.ts:44-65 unwraps the API envelope, :74-100 presents errors, :121-127 extracts transport status and :164-199 chooses browser/internal SSR base URLs and forwards cookies. Paths passed to $api are relative to its API base. ApiError.code can be envelope ret 40003/40009 rather than HTTP 403/409; apps/web/pages/admin/roles.vue:22-26 and components/fleet/ApprovalInbox.vue:183 show existing mappings. Recognize both error representations when handling forbidden/conflict responses.\n\nEngine summaries deliberately exclude input, jobId and details. apps/api/src/approvals/dto/approval-request.dto.ts:26-39 explicitly projects summary fields; :60-69 adds details/input/result/decisions only to detail responses. apps/api/src/approvals/dto/list-approval-requests.query.ts:7 lists the seven statuses pending, approved, rejected, expired, cancelled, executed and failed. Define independent web types rather than casting FleetApprovalDto. listDetailed must preserve row order, fetch only the first limit rows, default to DETAIL_FETCH_LIMIT=20, and retain null details for failures or over-limit rows. listForJob lists jobId,size=100, sorts pending by soonest expiry before settled rows newest-first, then applies the detail cap. Resolve project ids via GET /projects/:slug before project inbox/banner queries. Bump approvalRequestsVersion after successful decide and cancel only. Do not carry over the old mutationEpoch suppression requirement, which the spec explicitly defers.\n\nPERMISSIONS AND LIVE EVENTS\napps/web/lib/permissions.ts:18-23 currently exposes has/hasOwn, :28-34 implements the set and :42-45 freezes EMPTY_PERMISSIONS. Add mayDecide for approval.decide or a key beginning approval.decide@; do not change has/hasOwn semantics. PermissionSet literals in test doubles may need updating. apps/web/composables/usePermissions.ts:12-15 explains why raw keys, rather than function-bearing PermissionSet objects, are serialized; :55-68 fails closed during loading/errors; :80-82 accepts a fixed slug. Hence project approval nav links must be a slug-keyed child, not a new fixed-slug permission subscription inside the persistent layout. apps/web/lib/project-event-stream.ts:42-51 models fleet_approval, :75-84 declares optional handlers, :137-150 parses fleet approval notices and :177 onward manages EventSource/reconnect/dedupe. Add approval_request independently without removing fleet_approval. apps/web/lib/project-event-hub.ts:15-18 shares a stream per URL and :26-33 fans events to subscribers; extend the parser, listener and hub together. Existing tests/lib/permissions.spec.ts and project-event-stream*.spec.ts/project-event-hub.spec.ts are regression anchors.\n\nINBOX AND DECISION FLOW\napps/web/components/fleet/ApprovalInbox.vue:1-106 provides legacy tabs/list/panels/pagination; :133-145 defines polling/base and :158-205 tracks query-selected detail/countdown/errors. Reuse useful lifecycle conventions, not fleet type filtering, old keyboard shortcuts, assistant previews or fleet permission viewer logic. apps/web/pages/admin/fleet/approvals.vue:25-47 performs project/user cosmetic lookups; pages/[project]/fleet/approvals.vue:11-38 performs member lookups. Global inbox rows resolve projects through useFleetRepos.loadProjects, display unknown project ids directly and use approvals.inbox.noProject for null. User names come from useAdminUsers only when user.read permits it, otherwise ids; project users use useProjectMemberNames. Agents always display ids. Detail selection writes ?id while preserving unrelated query entries. On detail error, toast, close and clear id. Project resolution failure toasts and performs no approval list call. The pending tab is size 100; All is paged size 20 with no status. Use the new approvals.inbox.status namespace for all seven engine statuses.\n\nThe engine list already enforces visibility, including own requests, narrowed decide scopes and onBehalfOf visibility. viewerActions must be row-driven: a pending own USER request can cancel and can decide only in self mode; every other visible pending request can attempt decide, and settled requests expose neither action. Do not reproduce approverMustHoldAction, pattern matching, self/distinct approver constraints in the browser. Refusals toast extractApiError; every decide/cancel refusal re-fetches detail and conflict additionally reloads list. Frozen input is indented JSON text through interpolation. Generic decisions are approve/reject with a trimmed nonblank comment capped at 2000, not the legacy 1000. Project approval_request events debounce reloads by 300 ms; global/unscoped requests have no engine event, so visible polling remains necessary.\n\nFLEET DETAIL ADAPTERS\napps/web/lib/fleet-approvals.ts:73-86 validates budget payloads, :115-134 validates bash payloads, :160-168 restricts bash choices, :187-191 validates raised amount, :242-257 computes countdowns, :266-275 maps runner delivery, :280-286 makes command previews and :297-316 maps requeue failures. Retain these helpers and supporting types/constants. The old MAX_COMMENT is 1000 at :15, and builders at :201-212 produce old fleet decisions; the engine must use new 2000-character comment schemas and nested params bodies. components/fleet/ApprovalBashPanel.vue:55-87 and ApprovalBudgetPanel.vue:61-107 demonstrate legacy form conventions and selected-candidate defaults. New bash parsing feeds input.payload into bashPayload. New budget parsing feeds input into budgetPayload but must retain input.policyId separately, because budgetPayload does not return policyId. Specialized panels remain gated by viewerActions. Outcomes read details.resolvedBy/outcome, not obsolete top-level properties. No settled bash delivery polling or resumedAmountUsd display is added.\n\nNOTIFICATIONS, HOME AND NAVIGATION\napps/web/composables/useApprovalNotifications.ts:12-26 owns per-user seen/preference/active state, :110-129 scans paged legacy scopes and :149-232 re-reads permissions before scanning separate inboxes. Replace that scope algorithm with one engine pending scan plus viewerActions; retain per-user dedupe, expiry checks, explicit dismissal and browser guards/preferences. Unlike the baseline dismissScopeOnRefusal, errors now retain active toasts silently until successful refresh. apps/web/lib/notifications.ts:9-11 already renders known kinds through locale keys and params; the new approval_request kind needs locale entries and a bell rendering assertion, not a new rendering architecture. apps/web/components/home/HomeNeedsYou.vue:21-23 currently links to fleet inboxes without id; :67-70 shows fleet type labels. Switch approvalTarget to inboxHref(projectSlug,id) and only use requestKeyLabel for type:null. apps/web/lib/home-types.ts:18-26 gains permissionKey and nullable type; update home fixtures alongside it.\n\napps/web/components/fleet/ApprovalBadge.vue:34-60 consumes the old client/notifications and :70-94 polls and follows old live notices. Rewrite in place, retaining FleetApprovalBadge and slug:string|null. Engine counts include own requests even when not decidable; badge, global Pending list and home totals intentionally agree on visibility, not decide eligibility. A 403 hides the badge and stops its polling; other errors retain the snapshot silently. Successful counts load invokes notification refresh. apps/web/layouts/default.vue:54-78 defines admin permission flags/showAdminNav; :222-230 pins My threads/Roles link positions; :241 is the old admin fleet link; :248-365 is the project block; :397 mounts the slug-keyed badge. Add inline /approvals after My threads and /admin/approval-policies after Roles, include the policy flag in showAdminNav, mount ApprovalsProjectApprovalNavLinks keyed by projectSlug and add no layout script auto-import. Keep source-order and existing SLO/KB/Timeline/Settings pins. apps/web/components/CommandPalette.vue:16-21 and :31-46 demonstrates keyed command gates. Update tests/helpers/permission-nav.ts and default-permission-nav.spec.ts with the new flag/keys; remove the obsolete approval-specific schedule-gate test blocks only in the phases assigned by the spec, never the schedule cases.\n\nJOB, BANNER AND FLEET CONSUMERS\napps/web/pages/[project]/fleet/jobs/[id]/index.vue:17-18 imports legacy approval APIs/helpers; :52-55 stores FleetApprovalDto[]; :98-104 computes firstPending review href and lists approvals; :186-190 subscribes to fleet_approval; :360 renders FleetJobApprovals. Replace approval state with JobApprovalRow[] and listForJob, keeping unrelated job/log/workflow permissions untouched. Add onApprovalRequest beside onFleetApproval; 7c owns removal of the latter. components/fleet/JobApprovals.vue:28-48 reads the old payload/status/requestedAt shape. Use request summary plus optional detail; when detail is null, show raw permissionKey, because US-007 AC-6 is authoritative over generic prose suggesting a translated fallback. components/fleet/BudgetBanner.vue:58-70 currently filters the old type and clears reviewIds on failure; new behavior resolves project id, filters status/permissionKey/projectId, maps detailed policyId and retains old review mapping silently on errors. pages/[project]/fleet/index.vue:98 and lib/fleet-dashboard.ts:204 link to fleet approvals; move these to project /approvals. Corresponding job/banner/workflow/budget-gates/dashboard/index specs contain mocks and source pins that must be updated without removing unrelated assertions.\n\nPOLICY PAGES\napps/web/pages/admin/roles.vue:15-26 and :28-64 provide permission/read/delete/toast patterns; composables/useRoles.ts:48-83 implements CRUD; useProjectRoles.ts:9-12 and :26-68 implements fixed-slug role loading. Read-only API contract references: apps/api/src/approvals/dto/approval-policy.dto.ts:10-49 create, :52-86 patch and :89-113 policy/key responses; approval-policy.validation.ts:18-20 timeout bounds, :31-38 exact/prefix.* matching and :41-63 floor/timeout validation. Modes rank none<self<agent<human. Pattern must cover at least one approvable key and cannot choose below its strictest floor; approve-on-timeout requires floor none; timeout is an integer 60..2592000. Implement only presentation validation, leaving API enforcement authoritative. Although the API patch DTO accepts requiredApprovals, this UI edits only mode, timeoutSec, onTimeout, approverMustHoldAction and requireDistinctApprover. Pattern and subject are immutable selectors; blank create timeout is omitted, blank edit timeout is null.\n\nUS-008 must build PolicyBase-parameterized composable/dialog/list/keys table for both global and project routes so US-009 is a thin page. Policy list loads every size=100 page before computing override counts; project counts include inherited global rows, but inherited rows have no edit/delete controls. Global load/write requires approval.policy.manage; project load requires approval.policy.read and writes approval.policy.manage. Global role subjects need role.read; project role subjects need member.read; in either case a failed role read simply removes role from the create choices. Principal subjects cannot be created but existing ones remain listable/editable/deletable. Refused dialog mutations toast and retain input/open state; page load 403 shows forbidden.\n\nMIGRATION, TEST SEAMS AND CLEANUP\nBuild new code beside old code, rewrite named consumers, then run US-010 only after all nine prerequisites. apps/web/tests/helpers/mount-sfc.ts:24-44 distinguishes fleetComponents from explicit components, :122-147 has a closed auto-import list, and :296-300/:427-428 registers the five obsolete approval components. Import new composables explicitly. Register real components/approvals children through the components option in parent/page tests so tests exercise actual integration rather than unresolved child placeholders. Remove the obsolete fleet component map/union entries and useActionPreview auto-import only during cleanup. apps/web/pages/projects.vue:1-4 is the redirect-page pattern but uses 301; approval compatibility pages must explicitly use 302 and preserve query, including id. Old fleet notification links remain valid until 7c. Do not remove FleetApprovalDto, fleet_approval support, legacy notification kinds/links, API adapters or CLI. ThreadActionCard and useApprovalRequests stay unchanged; apps/web/composables/useApprovalRequests.ts:4-14 already posts engine decisions. tests/components/thread-action-card.spec.ts:46-64/:105/:118/:130 has obsolete negative fleet-client doubles/assertions to remove without changing card behavior.\n\nE2E fixture tests/e2e/fixtures/fleet-approvals-api.ts:26-30 and :71-74 still fetches legacy adapter lists. Replace those with engine filters, resolve project ids and fetch details where fixtures need policyId/jobId. Rewrite both fleet-approvals and fleet-bash-approvals journeys for project engine inboxes and new panels. Use waitForHydration, never networkidle, because authenticated pages hold live streams open. Retain legacy notification path-safety assertions and old fleet breadcrumb pins where unchanged; breadcrumbs are deferred and redirects remain valid. Run bun run type-check, bun run lint and bun run test from apps/web after cleanup, plus the two Playwright journeys with host prerequisites. Generated acceptance belongs under apps/web/.nax/features/permissions-p3-web and runs with bun test, not Jest; never edit or copy it. No runtime tests or quality gates were run while drafting this PRD. Each story owns the specified English/Chinese keys; US-001 adds whole-approvals namespace parity and the notification parity suite must remain aligned. All numbered spec criteria are retained in order. Extra acceptance assertions enumerate normative Failure Handling rows and the explicit negative-path/backward-compatibility requirements of this refine audit; optional hardening remains suggestedCriteria. Security-sensitive permission/policy/decision work uses three-session-tdd. Major risks are treating summaries as details, retaining fleet consumers after removal, repeating backend authorization, using legacy comment limits/bodies, breaking closed test auto-imports and layout pins, clearing last-good cosmetic state on errors, and retiring compatibility events/routes ahead of 7c.\n\nREFINE AUDIT: SPEC CRITERION INVENTORY\nRe-read the on-disk spec acceptance section at .nax/features/permissions-p3-web/spec.md:592-743 and compared every assertion and qualifier against the PRD. All 124 original criteria remain in their original story and original local order. Enumeration below maps each original spec AC to the same local acceptanceCriteria index in this PRD; additions are appended, not substituted. US-001: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-002: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-003: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12. US-004: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-005: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13. US-006: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-007: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12. US-008: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-009: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9. US-010: 1->1, 2->2, 3->3. Qualifiers are retained, including the two ordered expiry values, viewer user id/mode, hasNext paging preconditions, 300 ms debounce, successful-load stale-state precondition, blank-comment omission, known-project-slug job linking, one unticked candidate, resolvedBy/outcome delivery shape, raw permissionKey for missing detail, soonest-expiring callout, first counts project, and exact global/project permissions and request bodies. No deprecated grep/file/verbatim tags occur. Assertions are observable through helper results, request doubles, mounted text/controls, route state, timers or version refs.\n\nREFINE AUDIT: NEGATIVE PATHS, REGRESSIONS AND FIT\nEvery story has a negative-path AC: US-001 rejects an overlong comment; US-002 covers list/detail/project errors; US-003 covers invalid comments and mutation refusals; US-004 refuses a non-raised budget and maps failed requeues; US-005 suppresses ineligible/expired requests and retains toasts on failed refresh; US-006 stops/hides on 403 and retains counts on transient failure; US-007 isolates detail failures and silent banner failures; US-008 covers invalid schema values, absent permissions, role read failure and dialog refusals; US-009 covers absent read/manage keys and 403 loads; US-010 now explicitly verifies redirects for authenticated users without the obsolete fleet.approval.read key. Additional regressions protect pre-existing permissionSet has/hasOwn own-key semantics and the existing HomeNeedsYou fleet type label after adding the null-type fallback. Existing engine-path, row-preview, badge-cap and legacy-redirect ACs protect the other migrated surfaces or prove old adapter behavior is replaced. Expanded the non-original refusal assertions so both decide/cancel re-fetch detail and create/edit 400/403/409 refusals all toast, without altering any original spec AC. The US-007 raw permissionKey AC takes precedence over generic key-label prose; descriptions preserve this distinction. Redirects do not enforce obsolete permission gates; destination authorization remains API-owned.\n\nAll 50 contextFiles entries match the five source files explicitly recommended for their story in spec.md:373-441. Future context paths are outputs of transitive binding dependencies, never outputs of the current story. All proposed helpers and new files are declared by the spec; no new runtime dependency was introduced. The ten story ids, every binding dependency and every apps/web workdir remain unchanged. Cross-checked API policy DTO/validator, permissions helper, shared event hub, fleet payload helpers, home rows, badge, banner and job rows against source again during this audit. US-003 is reduced to medium complexity because it adds one panel and modifies one inbox using upstream helpers; its security strategy stays strict. US-002 and US-005 use strict security TDD because their user.read gate and viewerActions-based action filtering fall under the stated security override; other routing remains the lightest justified by the actual stateful/cross-module scope. All 20 items before Stories in the spec's feature-level Out of Scope section remain verbatim in the top-level array, including its explicitly US-number-qualified items; there is no separate story-local Out of scope block under an acceptance section to hoist or relocate. Scope bullets still separate later-story work from current behavior and retain nearby deferrals. No application code was changed by this audit.",
+  "outOfScope": [
+    "API changes of any kind. The API already serves every route this feature calls (7a).",
+    "Deleting the `/fleet/approvals` API routes, `FleetApprovalDto`, the `fleet_approval` live event, the `fleet.approval.*` keys, webhooks or notifications, and the CLI `koda fleet approval`. That is 7c.",
+    "Switching the fleet bash and budget notifications to the engine notification kind, and deleting `fleet_approval_requested`. That is 7c. Their link `/admin/fleet/approvals` keeps working through the US-010 redirect.",
+    "Deleting the web type `FleetApprovalDto` from `lib/fleet-types.ts`. The kept helpers in `lib/fleet-approvals.ts` still name it in their parameter types; 7c deletes it with the API DTO.",
+    "Labels for permission keys other than `fleet.job.shell.escalate` and `fleet.budget.override`. Other keys show raw.",
+    "Breadcrumbs for `/approvals`, `/[project]/approvals` and the policy pages. The layout's `fleetLeaf` covers only `/:project/fleet/*`.",
+    "US-002 only: the old inbox's keyboard shortcuts (j/k, Enter, A/D, Esc) are not carried over.",
+    "US-002 only: a filter by key on the inbox. A key picker is a later feature.",
+    "US-002 only: agent requester names. An agent shows its id.",
+    "US-003 only: a link from an assistant (thread-origin) request to its thread, and Cancel for a request raised on the caller's behalf (`onBehalfOf`). Both open the generic panel, and the thread card keeps deciding and cancelling them.",
+    "US-003 only: hiding the decide controls from a requester under a policy with `requireDistinctApprover`. The API refuses, and the refusal toasts.",
+    "US-004 only: budget scope names. The panel shows the scope through `scopeText` with the raw scope id, not the repo, runner or project name.",
+    "US-004 only: re-fetching a decided bash request while its runner delivery is pending. The outcome shows the delivery state as of the last fetch.",
+    "US-002 only: names of requesters beyond the first page of `useAdminUsers()`. They show their id.",
+    "US-003 only: dropping a list load that started before a successful decide. The next poll or live event corrects the list.",
+    "US-004 only: the raised amount line of a settled budget request. The re-queue results show; `details.outcome.resumedAmountUsd` is not displayed.",
+    "US-005 only: dismissing toasts when the pending list is refused. The toasts stay until the next successful refresh.",
+    "US-008 only: the role subject when the role list read fails. The `role` kind is simply not offered.",
+    "US-008 only: creating a policy whose subject is a single principal (`appliesTo.kind: 'principal'`). Existing ones list and can be edited or deleted.",
+    "`components/fleet/threads/ThreadActionCard.vue` and `composables/useApprovalRequests.ts` stay as they are."
+  ],
+  "routingProfile": "native-codex-ds"
+}
