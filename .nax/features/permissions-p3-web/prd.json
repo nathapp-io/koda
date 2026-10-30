@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T10:11:16.249Z",
+  "updatedAt": "2026-10-30T10:32:50.988Z",
   "userStories": [
     {
       "id": "US-001",
@@ -130,14 +130,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two routes share pagination, detail selection and polling/live state, and the global user-name lookup is permission-key-gated on user.read; strict security TDD applies despite API-owned approval visibility."
+        "reasoning": "Two routes share pagination, detail selection and polling/live state, and the global user-name lookup is permission-key-gated on user.read; strict security TDD applies despite API-owned approval visibility.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/fleet/ApprovalInbox.vue",
@@ -174,7 +177,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f2c3116699c4d260e4d264d43c68082aab6aba9d"
     },
     {
       "id": "US-003",
