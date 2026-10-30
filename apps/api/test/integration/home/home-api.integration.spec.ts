@@ -1,4 +1,5 @@
 import { canRunDbTests } from '../../helpers/test-environment';
+import { randomUUID } from 'node:crypto';
 /**
  * UX redesign slice 2 — GET /home (PG): cross-project scoping, needs-you contents, agent 403.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/home/home-api.integration.spec.ts
@@ -11,6 +12,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 import { HOME_LIMITS } from '../../../src/home/home.types';
 
@@ -42,6 +44,18 @@ describeIntegration('home dashboard API (PG)', () => {
   /** The two engine requests the needs-you section lists (permissions P3 US-011). */
   let bashAsk: { requestId: string };
   let budgetAsk: { requestId: string };
+  let budgetAskWithoutDelegate: { requestId: string };
+  let opsBashAsk: { requestId: string };
+
+  const seedAgentCreate = (projectId: string) => prisma.approvalRequest.create({
+    data: {
+      permissionKey: 'agent.create', projectId, actorType: 'AGENT', actorId: 'agent-create-actor', origin: 'rest',
+      correlationId: randomUUID(), input: {}, inputHash: randomUUID(), requiredMode: 'human',
+      onTimeout: 'reject', approverMustHoldAction: true, requireDistinctApprover: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+    select: { id: true },
+  });
 
   const auth = (who: keyof FleetHttpWorld['tokens']) => ({ Authorization: `Bearer ${world.tokens[who]}` });
   const home = async (who: keyof FleetHttpWorld['tokens']) =>
@@ -102,6 +116,17 @@ describeIntegration('home dashboard API (PG)', () => {
       },
       link: { budgetPolicyId: 'policy-home' },
     });
+    budgetAskWithoutDelegate = await seedFleetAsk(prisma, {
+      kind: 'budget', projectId: webId, createdAt: new Date(now.getTime() - 900_000),
+      input: { policyId: 'policy-home-web', scopeType: 'project', scopeId: webId, windowKind: 'day',
+        windowStart: now.toISOString(), spentUsd: '1', amountUsd: '2', requestedAt: now.toISOString() },
+      link: { budgetPolicyId: 'policy-home-web' },
+    });
+    opsBashAsk = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: opsId, createdAt: new Date(now.getTime() - 600_000),
+      input: { jobId: 'ops-job', leaseEpoch: 1, naxAskId: 'ask-home-ops', payload: {} },
+      link: { jobId: 'ops-job', leaseEpoch: 1, naxAskId: 'ask-home-ops' },
+    });
 
     // Activity across the three timeline tables, plus one event in ops.
     await prisma.ticketEvent.create({ data: { projectId: webId, action: 'STATUS_CHANGE', actorId: world.ids.dev, actorType: 'user', source: 'api' } });
@@ -135,13 +160,23 @@ describeIntegration('home dashboard API (PG)', () => {
     ]);
   });
 
+  it('AC-2: an Approver for web sees web asks and excludes project ops', async () => {
+    await grantRole(prisma, { type: 'USER', id: world.ids.viewer }, 'approver', webId);
+    await app.get(PermissionCache).invalidate();
+    const v = await home('viewer');
+    expect(v.needsYou.approvals.map((a) => a.projectId)).toEqual([webId, webId]);
+    expect(v.needsYou.approvals.some((a) => a.id === opsBashAsk.requestId)).toBe(false);
+  });
+
   it('scopes a member to their projects: web only, with web-only needs-you', async () => {
     const v = await home('dev');
     expect(v.projects.map((p) => [p.slug, p.openTickets, p.attentionJobs])).toEqual([['web', 2, 2]]);
     expect(v.needsYou.tickets.map((t) => t.status).sort()).toEqual(['CREATED', 'IN_PROGRESS']);
     expect(v.needsYou.ticketsTotal).toBe(2);
-    expect(v.needsYou.approvals).toHaveLength(1); // the bash ask; the unscoped budget ask is not theirs
+    expect(v.needsYou.approvals).toHaveLength(1); // only the bash ask; asks without onBehalfOf are not theirs
     expect(v.needsYou.approvalsTotal).toBe(1);
+    expect(v.needsYou.approvals.some((a) => a.id === budgetAskWithoutDelegate.requestId)).toBe(false);
+    expect(v.needsYou.approvals.some((a) => a.id === opsBashAsk.requestId)).toBe(false);
     expect(v.needsYou.jobs.map((j) => [j.reason, j.state]).sort()).toEqual([['blocked', 'QUEUED'], ['failed', 'FAILED']]);
     expect(v.needsYou.jobsTotal).toBe(2); // ops failure and the 8-day-old failure are out of scope
     expect(v.activity.every((e) => e.projectSlug === 'web')).toBe(true);
@@ -161,28 +196,41 @@ describeIntegration('home dashboard API (PG)', () => {
     expect(v.needsYou.jobs.find((j) => j.reason === 'blocked')?.pendingApprovals).toBe(1);
   });
 
+  it('AC-1: global admin home labels non-fleet and fleet requests and matches approvals list IDs', async () => {
+    const agentRequest = await seedAgentCreate(webId);
+    const v = await home('root');
+    const agentRow = v.needsYou.approvals.find((a) => a.id === agentRequest.id);
+    const bashRow = v.needsYou.approvals.find((a) => a.id === bashAsk.requestId);
+    expect(agentRow).toMatchObject({ type: null, permissionKey: 'agent.create' });
+    expect(bashRow).toMatchObject({ type: 'nax_bash_escalate', permissionKey: 'fleet.job.shell.escalate', jobId: expect.any(String) });
+    const listed = data<{ records: Array<{ id: string }> }>(await request(server).get('/api/approvals?status=pending').set(auth('root')).expect(200));
+    expect(new Set(v.needsYou.approvals.map((a) => a.id))).toEqual(new Set(listed.records.map((r) => r.id)));
+    await prisma.approvalRequest.delete({ where: { id: agentRequest.id } });
+  });
+
   it('gives a global admin every live project plus unscoped approvals', async () => {
     const v = await home('root');
     expect(v.projects.map((p) => p.slug).sort()).toEqual(['ops', 'web']);
     const ops = v.projects.find((p) => p.slug === 'ops');
     // The counts are project-wide: ops holds the one open ticket assigned to dev (a project dev cannot see).
     expect(ops).toMatchObject({ openTickets: 1, attentionJobs: 1 });
-    expect(v.needsYou.approvalsTotal).toBe(2); // bash ask + unscoped budget ask
+    expect(v.needsYou.approvalsTotal).toBe(4); // visible bash and budget asks across both projects plus unscoped budget
     expect(v.needsYou.approvals.find((a) => a.projectSlug === null)).toMatchObject({
       type: 'budget_override_required', permissionKey: 'fleet.budget.override', projectId: null,
     });
     expect(v.needsYou.jobsTotal).toBe(3);
+    expect(v.needsYou.jobs.find((j) => j.id === v.needsYou.approvals.find((a) => a.id === bashAsk.requestId)?.jobId))
+      .toMatchObject({ reason: 'blocked', pendingApprovals: expect.any(Number) });
+    expect(v.needsYou.jobs.find((j) => j.id === v.needsYou.approvals.find((a) => a.id === bashAsk.requestId)?.jobId)?.pendingApprovals).toBeGreaterThanOrEqual(1);
     expect(v.activity.some((e) => e.projectSlug === 'ops')).toBe(true);
   });
 
   it('US-011 AC-10: the admin approvals count includes the pending budget ask that has no project', async () => {
     const v = await home('root');
 
-    expect(v.needsYou.approvalsTotal).toBe(2);
-    // Newest request first: the budget ask (no project, no job) then the job's bash ask.
-    expect(v.needsYou.approvals.map((a) => [a.id, a.projectSlug])).toEqual([
-      [budgetAsk.requestId, null],
-      [bashAsk.requestId, 'web'],
+    expect(v.needsYou.approvalsTotal).toBe(4);
+    expect(v.needsYou.approvals.map((a) => a.id)).toEqual([
+      opsBashAsk.requestId, budgetAskWithoutDelegate.requestId, budgetAsk.requestId, bashAsk.requestId,
     ]);
     expect(v.needsYou.approvals.map((a) => a.requestedAt)).toEqual(
       [...v.needsYou.approvals].map((a) => a.requestedAt).sort((a, b) => b.localeCompare(a)),
