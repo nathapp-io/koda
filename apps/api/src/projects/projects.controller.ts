@@ -1,4 +1,5 @@
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../approvals/route/approval-redeem-header.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { parseBody } from '../approvals/route/parse-body';
@@ -21,7 +22,7 @@ import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
-import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -119,7 +120,7 @@ export class ProjectsController {
   @Patch(':slug')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('project.update')
-  @ApprovalGated()
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Update a project' })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -131,23 +132,17 @@ export class ProjectsController {
     @Param('slug') slug: string,
     @Body() updateProjectDto: UpdateProjectDto,
     @CurrentProject() project: ProjectContext,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     const { slug: parsedSlug } = parseRouteInput({ slug }, ['slug']);
     const patch = parseBody(UpdateProjectDto, updateProjectDto ?? {});
-    // Only token-only changes retain the pre-gate behavior until gate-secret ships.
-    // Reject mixed patches: ordinary settings must not bypass approval, and plaintext
-    // authentication material must never enter ApprovalRequest.input.
-    if (patch.ciWebhookToken !== undefined) {
-      if (Object.entries(patch).some(([key, value]) => key !== 'ciWebhookToken' && value !== undefined)) {
-        throw new ValidationAppException({}, 'approvals.invalidInput');
-      }
-      return JsonResponse.Ok(await this.projectsService.update(parsedSlug, patch));
-    }
+    const secret = patch.ciWebhookToken !== undefined;
     const outcome = await this.routeGate.run<ProjectResponseDto>({
       key: 'project.update',
-      variant: PROJECT_ROUTE_VARIANTS.update,
+      variant: secret ? PROJECT_ROUTE_VARIANTS.updateCiToken : PROJECT_ROUTE_VARIANTS.update,
       projectId: project.project.id,
       input: { slug: parsedSlug, patch },
+      ...(secret ? { redeem } : {}),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

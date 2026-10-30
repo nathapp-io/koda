@@ -258,28 +258,22 @@ describe('ProjectsController', () => {
   });
 
   describe('update', () => {
-    it.each(['a'.repeat(32), null])('keeps token-only patches out of approvals (%s)', async (ciWebhookToken) => {
-      projectsService.update.mockResolvedValue(mockProject as any);
-      const patch = { ciWebhookToken };
-      await controller.update('alpha', patch as any, { project: { id: 'proj-1', slug: 'alpha' } });
-      expect(routeGate.run).not.toHaveBeenCalled();
-      expect(projectsService.update).toHaveBeenCalledExactlyOnceWith('alpha', patch);
+    it('AC-9: routes token-bearing mixed patches through the redeem variant', async () => {
+      const patch = { ciWebhookToken: 't'.repeat(32), name: 'Name' };
+      await controller.update('alpha', patch as any, { project: { id: 'proj-1', slug: 'alpha' } }, 'r1');
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.update', variant: 'rest:projects.update-ci-token', projectId: 'proj-1',
+        input: { slug: 'alpha', patch }, redeem: 'r1',
+      });
+      expect(projectsService.update).not.toHaveBeenCalled();
     });
-
-    it.each([
-      { name: 'Updated' }, { slug: 'renamed' }, { key: 'NEW' },
-      { description: 'changed' }, { brief: null },
-      { gitRemoteUrl: 'https://github.com/example/repo' },
-      { autoIndexOnClose: false }, { autoAssign: 'AUTO' }, { graphifyEnabled: true },
-    ].flatMap((ordinary) => [null, 'a'.repeat(32)].map((ciWebhookToken) => ({ ...ordinary, ciWebhookToken }))))(
-      'B3: rejects mixed secret and ordinary patches before any mutation: %j', async (patch) => {
-        await expect(controller.update('alpha', patch as any, {
-          project: { id: 'proj-1', slug: 'alpha' },
-        })).rejects.toMatchObject({ status: 400, response: { prefix: 'approvals.invalidInput' } });
-        expect(routeGate.run).not.toHaveBeenCalled();
-        expect(projectsService.update).not.toHaveBeenCalled();
-      },
-    );
+    it('AC-10: ignores a redemption header for the ordinary patch variant', async () => {
+      await controller.update('alpha', { name: 'Name' } as any, { project: { id: 'proj-1', slug: 'alpha' } }, 'r1');
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.update', variant: 'rest:projects.update', projectId: 'proj-1',
+        input: { slug: 'alpha', patch: { name: 'Name' } },
+      });
+    });
     it('updates a project', async () => {
       projectsService.update.mockResolvedValue({ ...mockProject, name: 'Updated' } as any);
 
