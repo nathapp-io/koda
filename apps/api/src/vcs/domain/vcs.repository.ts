@@ -146,6 +146,16 @@ export interface IVcsRepository {
   findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
   createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;
+  /**
+   * `gate-secret` (US-003): update the connection `connectionId` only, scoped to its project, so a
+   * connection deleted and recreated after the caller read it is never the row this write changes.
+   * Null answers "that row is gone" — the caller refuses with 404 instead of writing a replacement.
+   */
+  updateVcsConnectionById(
+    connectionId: string,
+    projectId: string,
+    data: UpdateVcsConnectionData,
+  ): Promise<VcsConnectionDomain | null>;
   updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void>;
   deleteVcsConnection(projectId: string): Promise<void>;
 

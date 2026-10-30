@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { bookkeeping } from '../action-context/audit-coverage';
+import { isRecordNotFound } from '../common/utils/prisma-errors';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
 import type { Ticket, VcsSyncLog, VcsConnection } from '../generated/prisma/client';
@@ -137,6 +138,29 @@ export class PrismaVcsRepository implements IVcsRepository {
     data: UpdateVcsConnectionData,
   ): Promise<VcsConnectionDomain> {
     return this.toConnectionDomain(await this.db.vcsConnection.update({ where: { projectId }, data }));
+  }
+
+  /**
+   * `gate-secret` (US-003, F1): the write is conditional on the connection the caller read, so the
+   * check and the write are one statement. A connection deleted and recreated in between makes this
+   * target a row that no longer exists: Prisma answers P2025, which is null here, and the service
+   * refuses with 404 `vcs` instead of updating the replacement through its project id.
+   */
+  async updateVcsConnectionById(
+    connectionId: string,
+    projectId: string,
+    data: UpdateVcsConnectionData,
+  ): Promise<VcsConnectionDomain | null> {
+    try {
+      const row = await this.db.vcsConnection.update({
+        where: { id: connectionId, projectId },
+        data,
+      });
+      return this.toConnectionDomain(row);
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   /** M10: the poll cursor, the newest issue update seen (never "now"). */

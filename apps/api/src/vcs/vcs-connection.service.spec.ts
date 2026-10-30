@@ -67,6 +67,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
     findPollingConnections: vi.fn().mockResolvedValue([]),
     createVcsConnection: vi.fn().mockResolvedValue(makeConnection()),
     updateVcsConnection: vi.fn().mockResolvedValue(makeConnection()),
+    updateVcsConnectionById: vi.fn().mockResolvedValue(makeConnection()),
     updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
     deleteVcsConnection: vi.fn().mockResolvedValue(undefined),
     createVcsSyncLog: vi.fn().mockResolvedValue({} as never),
@@ -492,7 +493,17 @@ describe('VcsConnectionService', () => {
       await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c1')).resolves.toBeDefined();
       await expect(service.update('p1', ENCRYPTION_KEY, dto)).resolves.toBeDefined();
 
-      expect(mockRepo.updateVcsConnection).toHaveBeenCalledTimes(2);
+      expect(mockRepo.updateVcsConnectionById).toHaveBeenCalledExactlyOnceWith('c1', 'p1', expect.objectContaining({ syncMode: 'polling' }));
+      expect(mockRepo.updateVcsConnection).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-10: a pinned write that finds the connection replaced answers 404 vcs', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+      mockRepo.updateVcsConnectionById.mockResolvedValue(null);
+
+      await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c1')).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c1')).rejects.toThrow(NotFoundAppException);
+      expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
     });
 
     it('AC-11: rotate refuses a connection id that is not the project current connection', async () => {
@@ -509,7 +520,18 @@ describe('VcsConnectionService', () => {
       const rotated = await service.rotateWebhookSecret('p1', 'c1');
 
       expect(rotated.webhookSecret).toHaveLength(32);
-      expect(mockRepo.updateVcsConnection).toHaveBeenCalledWith('p1', { webhookSecret: rotated.webhookSecret });
+      expect(mockRepo.updateVcsConnectionById)
+        .toHaveBeenCalledExactlyOnceWith('c1', 'p1', { webhookSecret: rotated.webhookSecret });
+      expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: a pinned rotation that finds the connection replaced answers 404 vcs', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+      mockRepo.updateVcsConnectionById.mockResolvedValue(null);
+
+      await expect(service.rotateWebhookSecret('p1', 'c1')).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(service.rotateWebhookSecret('p1', 'c1')).rejects.toThrow(NotFoundAppException);
+      expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
     });
   });
 

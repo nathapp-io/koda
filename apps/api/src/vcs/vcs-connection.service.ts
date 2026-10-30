@@ -211,7 +211,16 @@ export class VcsConnectionService {
 
     const { encryptedToken: token, ...updateFields } = updateData;
     const updated = await this.audit.audited(
-      () => this.vcsRepo.updateVcsConnection(projectId, updateData),
+      // `gate-secret` (US-003, F1): a pinned call writes the connection it read, in the same statement
+      // that proves it is still the project's row. A replacement answered null, and the audited
+      // callback throws so neither the audit entry nor the write survives the refusal.
+      async () => {
+        const row = connectionId === undefined
+          ? await this.vcsRepo.updateVcsConnection(projectId, updateData)
+          : await this.vcsRepo.updateVcsConnectionById(connectionId, projectId, updateData);
+        if (row === null) throw new NotFoundAppException({}, 'vcs');
+        return row;
+      },
       (result) => ({
         key: 'vcs.connection.update',
         resourceType: 'vcs-connection',
@@ -295,7 +304,15 @@ export class VcsConnectionService {
 
     const webhookSecret = generateWebhookSecret();
     await this.audit.audited(
-      () => this.vcsRepo.updateVcsConnection(projectId, { webhookSecret }),
+      // F1: the pinned rotation writes the connection it read, atomically — a replacement answers null
+      // and the throw takes the (unwritten) audit entry with it.
+      async () => {
+        const updated = connectionId === undefined
+          ? await this.vcsRepo.updateVcsConnection(projectId, { webhookSecret })
+          : await this.vcsRepo.updateVcsConnectionById(connectionId, projectId, { webhookSecret });
+        if (updated === null) throw new NotFoundAppException({}, 'vcs');
+        return updated;
+      },
       (updated) => ({
         key: 'vcs.webhook-secret.rotate',
         resourceType: 'vcs-connection',

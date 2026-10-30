@@ -1,4 +1,5 @@
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { Prisma } from '../generated/prisma/client';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
 describe('PrismaVcsRepository', () => {
@@ -24,6 +25,7 @@ describe('PrismaVcsRepository', () => {
       ticketLink: { findMany: mockFindMany, update: mockUpdate, upsert: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
       comment: { create: mockCommentCreate },
       ticketActivity: { create: mockActivityCreate },
+      vcsConnection: { update: vi.fn() },
       $queryRaw: mockQueryRaw,
     },
   };
@@ -269,5 +271,53 @@ describe('PrismaVcsRepository', () => {
     expect(transitioned).toBe(true);
     expect(mockCommentCreate).toHaveBeenCalled();
     expect(mockActivityCreate).toHaveBeenCalled();
+  });
+
+  describe('updateVcsConnectionById (US-003 F1)', () => {
+    const pinnedUpdate = mockPrisma.client.vcsConnection.update;
+    const row = {
+      id: 'c1', projectId: 'p1', provider: 'github', repoOwner: 'o', repoName: 'r', encryptedToken: 'e',
+      syncMode: 'polling', allowedAuthors: '[]', pollingIntervalMs: 600000, webhookSecret: null,
+      isActive: true, lastSyncedAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+
+    beforeEach(() => {
+      pinnedUpdate.mockReset();
+    });
+
+    it('pins the write to the connection id and the project, not the project alone', async () => {
+      pinnedUpdate.mockResolvedValue(row);
+
+      const written = await repo.updateVcsConnectionById('c1', 'p1', { syncMode: 'polling' });
+
+      expect(pinnedUpdate).toHaveBeenCalledExactlyOnceWith({
+        where: { id: 'c1', projectId: 'p1' },
+        data: { syncMode: 'polling' },
+      });
+      expect(written?.id).toBe('c1');
+    });
+
+    it('answers null when the pinned row is gone, so the caller can refuse with 404', async () => {
+      pinnedUpdate.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025', clientVersion: 'test',
+      }));
+
+      await expect(repo.updateVcsConnectionById('gone', 'p1', { syncMode: 'polling' })).resolves.toBeNull();
+    });
+
+    it('rethrows any other write failure', async () => {
+      pinnedUpdate.mockRejectedValue(new Error('connection reset'));
+
+      await expect(repo.updateVcsConnectionById('c1', 'p1', { syncMode: 'polling' }))
+        .rejects.toThrow('connection reset');
+    });
+
+    it('leaves the legacy project-scoped write unchanged', async () => {
+      pinnedUpdate.mockResolvedValue(row);
+
+      await repo.updateVcsConnection('p1', { syncMode: 'polling' });
+
+      expect(pinnedUpdate).toHaveBeenCalledExactlyOnceWith({ where: { projectId: 'p1' }, data: { syncMode: 'polling' } });
+    });
   });
 });
