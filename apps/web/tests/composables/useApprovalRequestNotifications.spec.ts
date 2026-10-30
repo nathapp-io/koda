@@ -478,19 +478,24 @@ describe('useApprovalRequestNotifications: the SSR and account guards', () => {
     m.host.unmount()
   })
 
-  test('AC-5: a signed-out zero-count refresh dismisses nothing', async () => {
+  test('AC-5: a signed-out zero-count refresh does not dismiss an existing toast', async () => {
+    const user = ref<{ id: string } | null>({ id: 'u1' })
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
     const get = jest.fn(async () => page([summary()]))
-    const m = await mountNotifications({
-      get,
-      counts: ref<ApprovalRequestCounts | null>(countsOf(0)),
-      user: ref<{ id: string } | null>(null),
-    })
+    const m = await mountNotifications({ get, counts, user })
 
     await m.api.refresh()
-
-    expect(get).not.toHaveBeenCalled()
+    expect(m.toasts.calls).toHaveLength(1)
     expect(m.toasts.dismiss).not.toHaveBeenCalled()
-    expect(m.toasts.calls).toEqual([])
+
+    user.value = null
+    counts.value = countsOf(0)
+    const refresh = m.api.refresh()
+
+    // Check synchronously before the user's identity watcher runs its separate account-change cleanup.
+    expect(m.toasts.dismiss).not.toHaveBeenCalled()
+    expect(get).toHaveBeenCalledTimes(1)
+    await refresh
     m.host.unmount()
   })
 
