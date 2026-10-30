@@ -123,7 +123,8 @@ export interface RequeueOfferView {
   truncated: boolean
 }
 
-const NOT_OFFERED: RequeueOfferView = { candidates: [], truncated: false }
+/** A fresh "nothing offered" answer, so a caller can never mutate a shared value. */
+const notOffered = (): RequeueOfferView => ({ candidates: [], truncated: false })
 
 /**
  * The cancelled jobs a pending budget stop offers to re-queue. The engine sends them only while the
@@ -133,7 +134,7 @@ export function requeueCandidatesOf(
   request: Pick<ApprovalRequestDetail, 'permissionKey' | 'details'>,
 ): RequeueOfferView {
   const details = detailsOf(request)
-  if (requestPanelKind(request) !== 'budget' || details === null) return NOT_OFFERED
+  if (requestPanelKind(request) !== 'budget' || details === null) return notOffered()
   const raw = Array.isArray(details.requeueCandidates) ? details.requeueCandidates : []
   return {
     candidates: raw.flatMap((entry: unknown): RequeueCandidateView[] => {
