@@ -28,6 +28,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+import { checkBashDecision } from '../../../src/fleet/approvals/bash-decision';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -106,7 +107,7 @@ describeIntegration('fleet approvals decide through the engine route (PG, US-008
       },
       link: { jobId: running.id, leaseEpoch: 1, naxAskId },
     });
-    return { job: running, requestId };
+    return { job: running, requestId, naxAskId };
   };
 
   /**
@@ -349,26 +350,37 @@ describeIntegration('fleet approvals decide through the engine route (PG, US-008
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
   });
 
-  it('AC-3: approving a bash ask with params { choice: allow_for_job } writes one APPROVAL_ANSWER for the job', async () => {
-    // `allow_for_job` is the fleet's name for nax's `allow-remember` option; the command's params contract
-    // (and every decision row the migrator writes) names the fleet choice, so the engine must not leak
-    // the option name into `params.choice`.
-    const { requestId, job: running } = await bashAsk({ options: ['allow', 'allow-remember', 'deny'] });
+  /**
+   * AC-3, as clarified in fix round 2. The criterion reads "… writes one APPROVAL_ANSWER command for the job with
+   * choice `allow_for_job`". `allow_for_job` is the *fleet's* name for the decision, and it is kept where the fleet
+   * reads the decision back: the decision's params. The command is the nax wire payload, whose `choice` is an
+   * `ApprovalOption` — `'allow' | 'allow-remember' | 'deny'` (`packages/fleet-protocol/src/index.ts`), the three
+   * options nax offers — so it carries the option that fleet name maps to, `allow-remember`. The mapping is
+   * `checkBashDecision`'s (`src/fleet/approvals/bash-decision.ts`, pinned in its own spec); this case asserts the
+   * mapping and the command agree, so writing the fleet name into the payload (the literal wording) fails here.
+   */
+  it('AC-3: approving a bash ask with params { choice: allow_for_job } writes one APPROVAL_ANSWER carrying the protocol option allow-remember', async () => {
+    const asked = { command: 'bun run test', commandTruncated: false, options: ['allow', 'allow-remember', 'deny'] };
+    const { requestId, job: running, naxAskId } = await bashAsk({ options: asked.options });
 
     const decided = data<Approval>(
       await decide(requestId, world.tokens.dev, { decision: 'approve', params: { choice: 'allow_for_job' } }).expect(200),
     );
 
     expect(decided).toEqual(expect.objectContaining({ status: 'executed' }));
-    // The persisted params are the command's own parsed decision: the fleet's choice name plus the nax
-    // option it maps to, so `allow_for_job` survives a round trip.
+    // The persisted params are the command's own parsed decision: the fleet's choice name plus the nax option it maps
+    // to, so `allow_for_job` survives a round trip and is what a decider reads back.
     const decidedView = data<Approval>(await view(requestId, world.tokens.dev).expect(200));
-    expect(decidedView.decisions).toEqual([expect.objectContaining({ decision: 'approve', params: { choice: 'allow_for_job', option: 'allow-remember' } })]);
-    // The answer to the runner names nax's own option for that choice — the protocol's `ApprovalOption` has no
-    // `allow_for_job` member — and there is exactly one of them.
+    expect(decidedView.decisions).toEqual([
+      expect.objectContaining({ decision: 'approve', params: { choice: 'allow_for_job', option: 'allow-remember' } }),
+    ]);
+
+    // The answer to the runner is nax's, so its `choice` is that mapping's answer for the fleet choice — asserted
+    // through the production mapping, so the case fails if the command and the mapping ever disagree.
+    expect(checkBashDecision(asked, 'allow_for_job')).toEqual({ ok: true, choice: 'allow-remember', status: 'approved' });
     const commands = await prisma.fleetCommand.findMany({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } });
     expect(commands).toHaveLength(1);
-    expect(commands[0].payload).toEqual(expect.objectContaining({ approvalId: requestId, choice: 'allow-remember' }));
+    expect(commands[0].payload).toEqual({ approvalId: requestId, naxAskId, choice: 'allow-remember' });
   });
 });
 
