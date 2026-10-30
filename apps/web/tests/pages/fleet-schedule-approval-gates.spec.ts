@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
-import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { canChangeSchedule, canDeleteSchedule } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
-import { canDecide } from '~/lib/fleet-approvals'
-import type { ApprovalViewer } from '~/lib/fleet-approvals'
-import { useGlobalPermissions, useProjectPermissions } from '~/composables/usePermissions'
-import type { FleetApprovalDto, ScheduleDto } from '~/lib/fleet-types'
+import { useProjectPermissions } from '~/composables/usePermissions'
+import type { ScheduleDto } from '~/lib/fleet-types'
 import * as apiModule from '../../composables/useApi'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
@@ -14,17 +12,20 @@ import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import { fakeAsyncData, resetAsyncCalls } from '../helpers/permission-nav'
 
 /**
- * Permissions P1 US-009: the fleet schedule and approval gates.
+ * Permissions P1 US-009: the fleet schedule gates.
  *
- * Every gate AC mounts the REAL page (or the real table/badge) with the REAL `useProjectPermissions`
- * / `useGlobalPermissions` composable; the only thing a test supplies is `$api.get('/me/permissions')`,
- * which answers the key list for the scope being asked for. A control that still read a role name or
- * a `canManage` boolean therefore fails here, and the whole permission path (fetch, fail-closed
- * default, key lookup) runs instead of being mocked away.
+ * Every gate AC mounts the REAL page (or the real table) with the REAL `useProjectPermissions`
+ * composable; the only thing a test supplies is `$api.get('/me/permissions')`, which answers the key
+ * list for the scope being asked for. A control that still read a role name or a `canManage` boolean
+ * therefore fails here, and the whole permission path (fetch, fail-closed default, key lookup) runs
+ * instead of being mocked away.
+ *
+ * US-010 retired the fleet inbox, so this spec covers the schedule gates only: the approval viewer
+ * those pages built and the `canDecide` helper they read are gone with the pages.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-1, AC-2, AC-7 — the pure helpers
+// AC-1 — the pure helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A `ScheduleViewer` holding no key; a test names only the ones it needs. */
@@ -38,27 +39,7 @@ const scheduleViewer = (over: Partial<ScheduleViewer> = {}): ScheduleViewer => (
   ...over,
 })
 
-/** An `ApprovalViewer` holding no decision key. */
-const approvalViewer = (over: Partial<ApprovalViewer> = {}): ApprovalViewer =>
-  ({ kind: 'project', userId: 'u1', canDecideBudget: false, canDecideBash: false, ...over }) as ApprovalViewer
-
 const schedule = (createdById: string): Pick<ScheduleDto, 'createdById'> => ({ createdById })
-
-const approval = (over: Partial<FleetApprovalDto> = {}): Pick<FleetApprovalDto, 'type' | 'status' | 'payload'> => ({
-  type: 'budget_override_required',
-  status: 'pending',
-  payload: {},
-  ...over,
-} as Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>)
-
-const bashAsk = (over: Partial<FleetApprovalDto> = {}): Pick<FleetApprovalDto, 'type' | 'status' | 'payload'> =>
-  approval({ type: 'nax_bash_escalate', ...over })
-
-const actionAsk = (requestedById: string): Pick<FleetApprovalDto, 'type' | 'status' | 'payload'> =>
-  approval({
-    type: 'assistant_action',
-    payload: { actionId: 'a1', tool: 'ticket.update', threadId: 't1', threadPath: '/koda/threads/t1', requestedById },
-  })
 
 describe('US-009 AC-1: canChangeSchedule follows update any/own', () => {
   test('AC-1: canUpdateAny changes a schedule somebody else created', () => {
@@ -94,42 +75,6 @@ describe('US-009 AC-1: canChangeSchedule follows update any/own', () => {
   })
 })
 
-describe('US-009 AC-2: canDecide follows the budget and bash keys', () => {
-  test('AC-2: a pending budget override follows canDecideBudget', () => {
-    expect(canDecide(approval(), approvalViewer({ canDecideBudget: true }))).toBe(true)
-    expect(canDecide(approval(), approvalViewer({ canDecideBudget: false }))).toBe(false)
-  })
-
-  test('AC-2: a pending bash ask follows canDecideBash', () => {
-    expect(canDecide(bashAsk(), approvalViewer({ canDecideBash: true }))).toBe(true)
-    expect(canDecide(bashAsk(), approvalViewer({ canDecideBash: false }))).toBe(false)
-  })
-
-  test('AC-2 (control): the other key does not open either kind', () => {
-    expect(canDecide(approval(), approvalViewer({ canDecideBash: true }))).toBe(false)
-    expect(canDecide(bashAsk(), approvalViewer({ canDecideBudget: true }))).toBe(false)
-  })
-
-  test('AC-2: an assistant_action stays the requester\'s alone, whatever keys the viewer holds', () => {
-    const bothKeys = approvalViewer({ canDecideBudget: true, canDecideBash: true })
-    expect(canDecide(actionAsk('u1'), { ...bothKeys, userId: 'u1' } as ApprovalViewer)).toBe(true)
-    expect(canDecide(actionAsk('u1'), { ...bothKeys, userId: 'u2' } as ApprovalViewer)).toBe(false)
-    expect(canDecide(actionAsk('u1'), { ...bothKeys, userId: null } as ApprovalViewer)).toBe(false)
-  })
-})
-
-describe('US-009 AC-7: an admin-kind viewer decides only what its keys allow', () => {
-  test('AC-7: a pending budget override is not decidable for canDecideBudget:false, even on the admin inbox', () => {
-    const admin = approvalViewer({ kind: 'admin', userId: null, canDecideBudget: false, canDecideBash: false })
-    expect(canDecide(approval(), admin)).toBe(false)
-  })
-
-  test('AC-7 (control): the same admin viewer decides it once the budget key is held', () => {
-    const admin = approvalViewer({ kind: 'admin', userId: null, canDecideBudget: true })
-    expect(canDecide(approval(), admin)).toBe(true)
-    expect(canDecide(bashAsk(), admin)).toBe(false)
-  })
-})
 // ─────────────────────────────────────────────────────────────────────────────
 // shared mount harness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,116 +385,5 @@ describe('US-009 AC-4: the schedule detail page gates change and delete separate
       expect(byTestId(app, id)).toBeUndefined()
     }
     app.unmount()
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AC-6 — pages/[project]/fleet/approvals.vue and pages/admin/fleet/approvals.vue
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Captures the `viewer` prop the approvals page hands the inbox. The page renders before the keys
- * arrive (fail-closed), so the recorder writes on every render and a test reads the last entry.
- */
-function viewerRecorder(seen: Array<Record<string, unknown>>) {
-  return defineComponent({
-    name: 'StubFleetApprovalInbox',
-    inheritAttrs: false,
-    props: ['base', 'viewer', 'scopeLabel', 'nameOf', 'jobLink', 'projectName'],
-    setup(props: Record<string, unknown>, { attrs }: { attrs: Record<string, unknown> }) {
-      return () => {
-        seen.push({ ...props, ...attrs })
-        return h('x-stub-stub', { 'data-stub': 'approval-inbox' })
-      }
-    },
-  })
-}
-
-/** The viewer the approvals page handed the inbox once the keys had arrived. */
-const lastViewer = (seen: Array<Record<string, unknown>>): unknown => seen[seen.length - 1]?.viewer
-
-function mountProjectApprovals(project: readonly string[]): Array<Record<string, unknown>> {
-  const seen: Array<Record<string, unknown>> = []
-  const get = permissionsApi({ project })
-  installPermissionsRuntime(get)
-  track(mountSfc(webFile('pages', '[project]', 'fleet', 'approvals.vue'), {
-    components: { ...uiStubs, FleetApprovalInbox: viewerRecorder(seen) },
-    alias: { '~/composables/useApi': apiModule },
-    globals: {
-      ref, computed, watch, nextTick, onMounted, onBeforeUnmount,
-      definePageMeta: () => undefined,
-      useRoute: () => ({ params: { project: 'koda' } }),
-      useI18n: () => pageI18n(),
-      useAppToast: () => toastRecorder(),
-      useApi: () => ({ $api: { get } }),
-      useAsyncData: fakeAsyncData,
-      useProjectPermissions,
-      useAuth: () => ({ user: ref({ id: 'u1' }) }),
-      navigateTo: jest.fn(async () => undefined),
-      useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
-      useFleetDispatchOptions: () => ({
-        repos: ref([]), runners: ref([]), repoName: (id: string) => id, runnerName: (id: string | null) => id,
-        load: jest.fn(async () => undefined),
-      }),
-    },
-  }))
-  return seen
-}
-
-function mountAdminApprovals(global: readonly string[]): Array<Record<string, unknown>> {
-  const seen: Array<Record<string, unknown>> = []
-  const get = permissionsApi({ global })
-  installPermissionsRuntime(get)
-  track(mountSfc(webFile('pages', 'admin', 'fleet', 'approvals.vue'), {
-    components: { ...uiStubs, FleetApprovalInbox: viewerRecorder(seen) },
-    alias: { '~/composables/useApi': apiModule },
-    globals: {
-      ref, computed, watch, nextTick, onMounted, onBeforeUnmount,
-      definePageMeta: () => undefined,
-      useI18n: () => pageI18n(),
-      useAppToast: () => toastRecorder(),
-      useApi: () => ({ $api: { get } }),
-      useAsyncData: fakeAsyncData,
-      useGlobalPermissions,
-      useAuth: () => ({ user: ref({ id: 'u1' }) }),
-      navigateTo: jest.fn(async () => undefined),
-      useFleetRepos: () => ({ projects: ref([{ id: 'p1', slug: 'koda', name: 'Koda' }]), loadProjects: jest.fn(async () => undefined) }),
-      useFleetRunners: () => ({ runners: ref([]), load: jest.fn(async () => undefined) }),
-      useAdminUsers: () => ({ users: ref([]), load: jest.fn(async () => undefined) }),
-    },
-  }))
-  return seen
-}
-
-describe('US-009 AC-6: both approvals pages build their viewer from the decision keys', () => {
-  test('AC-6: the project page answers canDecideBudget/canDecideBash from the project set', async () => {
-    const seen = mountProjectApprovals(['fleet.approval.decide.bash'])
-    await settle()
-
-    expect(lastViewer(seen)).toEqual({ kind: 'project', userId: 'u1', canDecideBudget: false, canDecideBash: true })
-  })
-
-  test('AC-6: the project page follows the budget key too, and holds neither without them', async () => {
-    const both = mountProjectApprovals(['fleet.approval.decide.budget', 'fleet.approval.decide.bash'])
-    await settle()
-    expect(lastViewer(both)).toMatchObject({ kind: 'project', canDecideBudget: true, canDecideBash: true })
-
-    const none = mountProjectApprovals([])
-    await settle()
-    expect(lastViewer(none)).toEqual({ kind: 'project', userId: 'u1', canDecideBudget: false, canDecideBash: false })
-  })
-
-  test('AC-6: the admin page answers the same two flags from the global set', async () => {
-    const seen = mountAdminApprovals(['fleet.approval.decide.budget'])
-    await settle()
-
-    expect(lastViewer(seen)).toEqual({ kind: 'admin', userId: 'u1', canDecideBudget: true, canDecideBash: false })
-  })
-
-  test('AC-6 (control): a global admin holding neither key decides nothing, whatever the account role', async () => {
-    const seen = mountAdminApprovals(['user.read'])
-    await settle()
-
-    expect(lastViewer(seen)).toEqual({ kind: 'admin', userId: 'u1', canDecideBudget: false, canDecideBash: false })
   })
 })

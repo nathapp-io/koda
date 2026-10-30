@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, E2E_ADMIN } from './fixtures/api-client';
-import { createProjectPolicy, jobState, pendingBudgetApprovals } from './fixtures/fleet-approvals-api';
+import { approvalDetail, createProjectPolicy, jobState, pendingBudgetApprovals, projectIdOf } from './fixtures/fleet-approvals-api';
 import { deleteOwnPolicies, dispatchRun, monthSpendUsd, repoIdOf } from './fixtures/fleet-budgets-api';
 import { waitForHydration, webLogin } from './fixtures/page-helpers';
 import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
@@ -13,10 +13,10 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * fleet suite: the policy and the raised limit are therefore stated as headroom above the window's
  * existing spend, which is exactly D254's $0.50 / $2 on a clean window (see monthSpendUsd).
  *
- * Permissions P3b US-007 moved the banner's Review link onto the approval engine: it opens
- * `/[project]/approvals?id=…` (`approval-request-*` testids) instead of the fleet inbox. The fixtures still read the
- * fleet view for the ask's id and status, which is the same `ApprovalRequest` row (`toFleetApproval` answers
- * `request.id`).
+ * Permissions P3b US-007/US-010: the banner's Review link and the inbox itself are the approval engine's
+ * (`/[project]/approvals?id=…`, `approval-request-*` testids). The fixture reads the same engine list and detail, so
+ * the ask's id comes from `GET /approvals` and its `policyId` from the detail's `details` — the fleet view that used
+ * to answer both is retired in 7c.
  */
 const SLUG = 'fleet-e2e';
 
@@ -25,6 +25,7 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 test.describe('Fleet approvals (scripted runner)', () => {
   let token = '';
+  let projectId = '';
   let runner: ScriptedRunner;
   const suffix = Date.now().toString().slice(-6);
 
@@ -33,6 +34,8 @@ test.describe('Fleet approvals (scripted runner)', () => {
     token = session.token;
     runner = await ScriptedRunner.enroll(token, `e2e-approval-runner-${suffix}`);
     await deleteOwnPolicies(token, SLUG);
+    // Read once: every engine list below filters on the id, and a lookup per poll would spend the throttle.
+    projectId = await projectIdOf(token, SLUG);
   });
 
   // Deleting the policy also closes any approval left pending (policy_deleted), so later specs start clean.
@@ -49,7 +52,7 @@ test.describe('Fleet approvals (scripted runner)', () => {
     // numbers are exactly plan D254's), so earlier fleet specs' spend in the same calendar window
     // does not make the fresh policy born over-limit.
     const priorSpend = await monthSpendUsd(token, SLUG);
-    await createProjectPolicy(token, SLUG, round2(priorSpend + 0.5));
+    const policyId = await createProjectPolicy(token, SLUG, round2(priorSpend + 0.5));
     const repoId = await repoIdOf(token, SLUG, 'acme/e2e-app');
     await runner.heartbeat();
     const jobA = await dispatchRun(token, SLUG, { repoId, feature: `appr-a-${suffix}`, maxCostUsd: 3, pinnedRunnerId: runner.id });
@@ -62,9 +65,12 @@ test.describe('Fleet approvals (scripted runner)', () => {
       { type: 'state', payload: { to: 'RUNNING' } },
       { type: 'snapshot', payload: { costSpentUsd: '0.6000', heartbeatAt: new Date().toISOString() } },
     ]);
-    await expect.poll(async () => (await pendingBudgetApprovals(token, SLUG)).length, { timeout: 20_000 }).toBe(1);
+    await expect.poll(async () => (await pendingBudgetApprovals(token, projectId)).length, { timeout: 20_000 }).toBe(1);
     await expect.poll(() => jobState(token, SLUG, jobB), { timeout: 20_000 }).toBe('CANCELLED');
-    const [approval] = await pendingBudgetApprovals(token, SLUG);
+    const [approval] = await pendingBudgetApprovals(token, projectId);
+    // The list row is the engine's summary and carries no policy; the detail's `details` names the policy the
+    // hard stop belongs to (the fleet summary used to answer this on every row).
+    expect((await approvalDetail(token, approval.id)).details?.['policyId']).toBe(policyId);
 
     // 3. The banner on the jobs list leads to the engine inbox row; the header badge counts it.
     await webLogin(page);

@@ -72,7 +72,6 @@ export const ADMIN_NAV_KEYS = [
   'fleet.runner.read',
   'fleet.repo.read',
   'fleet.budget.read',
-  'fleet.approval.read',
   'fleet.analytics.read',
   'skill.source.read',
 ] as const
@@ -120,7 +119,6 @@ export function adminNavFlags(keys: readonly string[]): Record<string, boolean> 
     canReadFleetRunners: held.has('fleet.runner.read'),
     canReadFleetRepos: held.has('fleet.repo.read'),
     canReadFleetBudgets: held.has('fleet.budget.read'),
-    canReadFleetApprovals: held.has('fleet.approval.read'),
     canReadFleetAnalytics: held.has('fleet.analytics.read'),
     canReadSkills: held.has('skill.source.read'),
   }

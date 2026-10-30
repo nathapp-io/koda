@@ -1,20 +1,32 @@
 /**
- * Fleet S1.5 slice 1b: the API calls the approvals e2e makes outside the browser. Responses use the { ret, data } envelope.
+ * The API calls the approval E2E journeys make outside the browser. Responses use the { ret, data } envelope.
+ *
+ * P3b US-007 moved every web surface these journeys drive onto the approval engine, and US-010 removed the fleet
+ * inbox: the calls here read `GET /approvals` (the engine list, filtered by `projectId` / `permissionKey` / `jobId`)
+ * and `GET /approvals/<id>` (its detail), never the fleet approval view 7c retires. The engine's list row is
+ * `ApprovalRequestSummaryDto`, so the fields the fleet summary used to carry (a budget `policyId`, a bash `jobId`)
+ * now come from the detail's `details`.
  */
 import { randomBytes } from 'node:crypto';
 import { call } from './fleet-budgets-api';
 
+/** `ApprovalRequestSummaryDto`: what `GET /approvals` lists. */
 export interface ApprovalRow {
   id: string;
-  type: string;
+  permissionKey: string;
   status: string;
-  policyId: string | null;
+  projectId: string | null;
 }
 
-export interface BashApprovalRow extends ApprovalRow {
-  jobId: string | null;
-  expiresAt: string | null;
+/** `ApprovalRequestDto`: the summary plus the command's own `details`, `input`, `result` and `decisions`. */
+export interface ApprovalDetailRow extends ApprovalRow {
+  details: Record<string, unknown> | null;
+  input: unknown;
+  result: unknown;
 }
+
+/** The permission key a budget hard stop raises (`apps/api` `FleetBudgetOverrideCommand`). */
+export const BUDGET_APPROVAL_KEY = 'fleet.budget.override';
 
 export async function createProjectPolicy(token: string, slug: string, amountUsd: number): Promise<string> {
   const created = await call<{ id: string }>('POST', `/projects/${slug}/fleet/budgets`, token, {
@@ -23,9 +35,20 @@ export async function createProjectPolicy(token: string, slug: string, amountUsd
   return created.id;
 }
 
-export async function pendingBudgetApprovals(token: string, slug: string): Promise<ApprovalRow[]> {
+/** The project's id, which is what `GET /approvals?projectId=` filters on (the engine knows ids, not slugs). */
+export async function projectIdOf(token: string, slug: string): Promise<string> {
+  const project = await call<{ id: string }>('GET', `/projects/${slug}`, token);
+  return project.id;
+}
+
+/** One request in full: the fleet-only fields (`jobId`, `policyId`) live on `details`, not on the list row. */
+export const approvalDetail = (token: string, id: string): Promise<ApprovalDetailRow> =>
+  call<ApprovalDetailRow>('GET', `/approvals/${id}`, token);
+
+/** The pending budget hard stops of one project, read through the engine's list. */
+export async function pendingBudgetApprovals(token: string, projectId: string): Promise<ApprovalRow[]> {
   const page = await call<{ records: ApprovalRow[] }>(
-    'GET', `/projects/${slug}/fleet/approvals?status=pending&type=budget_override_required&size=100`, token,
+    'GET', `/approvals?status=pending&permissionKey=${BUDGET_APPROVAL_KEY}&projectId=${projectId}&size=100`, token,
   );
   return page.records;
 }
@@ -68,8 +91,8 @@ export function bashAsk(over: Partial<BashAskFields> = {}): BashAskFields {
   };
 }
 
-/** Every approval of one job (2a `jobId` filter). */
-export async function jobApprovals(token: string, slug: string, jobId: string): Promise<BashApprovalRow[]> {
-  const page = await call<{ records: BashApprovalRow[] }>('GET', `/projects/${slug}/fleet/approvals?jobId=${jobId}&size=100`, token);
+/** Every approval of one job, through the engine's `jobId` filter (it joins the fleet ask). */
+export async function jobApprovals(token: string, jobId: string): Promise<ApprovalRow[]> {
+  const page = await call<{ records: ApprovalRow[] }>('GET', `/approvals?jobId=${jobId}&size=100`, token);
   return page.records;
 }

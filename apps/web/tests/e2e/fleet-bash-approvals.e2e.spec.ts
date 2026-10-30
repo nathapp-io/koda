@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, E2E_ADMIN } from './fixtures/api-client';
-import { bashAsk, jobApprovals } from './fixtures/fleet-approvals-api';
+import { approvalDetail, bashAsk, jobApprovals } from './fixtures/fleet-approvals-api';
 import { dispatchRun, repoIdOf } from './fixtures/fleet-budgets-api';
 import { waitForHydration, webLogin } from './fixtures/page-helpers';
 import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
@@ -11,11 +11,11 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * API polls stay at one request per 2 s: the global throttle is 100 requests a minute (only /fleet/runner/* is exempt).
  * Project `fleet-e2e` and repo acme/e2e-app come from prisma/seed-e2e.ts.
  *
- * Permissions P3b US-007 moved the surfaces these journeys drive onto the approval engine: the job page's Review
- * callout and the job page's own rows read `GET /approvals?jobId=`, and the inbox they open is `/[project]/approvals`
- * (`approval-request-*` testids). The fixtures still read the fleet view for the ask's id and status, which is the same
- * `ApprovalRequest` row (`toFleetApproval` answers `request.id`), so a settled ask is asserted through the engine's
- * status on the page.
+ * Permissions P3b US-007/US-010 moved the surfaces these journeys drive onto the approval engine: the job page's
+ * Review callout and the job page's own rows read the engine, and the inbox they open is `/[project]/approvals`
+ * (`approval-request-*` testids). The fixture reads the same engine list (`GET /approvals?jobId=`) and detail, so an
+ * ask's id and status come from `ApprovalRequest` itself and its `jobId` from the detail's `details` — the fleet view
+ * that used to answer them is retired in 7c.
  */
 const SLUG = 'fleet-e2e';
 const POLL = { intervals: [2_000] };
@@ -58,8 +58,11 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     const { jobId, lease } = await startEscalateJob(feature, 600);
     const ask = bashAsk({ featureName: feature });
     await runner.report(lease, [{ type: 'approval_request', payload: ask }]);
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).filter((a) => a.status === 'pending').length, { timeout: 20_000, ...POLL }).toBe(1);
-    const [approval] = await jobApprovals(token, SLUG, jobId);
+    await expect.poll(async () => (await jobApprovals(token, jobId)).filter((a) => a.status === 'pending').length, { timeout: 20_000, ...POLL }).toBe(1);
+    const [approval] = await jobApprovals(token, jobId);
+    // The engine's list row carries no jobId (the fleet summary used to); the detail's `details` does, and that is
+    // what the panel's job link reads.
+    expect((await approvalDetail(token, approval.id)).details?.['jobId']).toBe(jobId);
 
     // The jobs list marks the job; the job page calls it out, previews the command from the engine detail and
     // Review opens the engine inbox row.
@@ -116,8 +119,8 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     // expiresAt = min(nax deadline, requestedAt + 60 s): the 35 s deadline wins, leaving time to load the page first.
     const ask = bashAsk({ featureName: feature, deadlineAt: new Date(Date.now() + 35_000).toISOString() });
     await runner.report(lease, [{ type: 'approval_request', payload: ask }]);
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).length, { timeout: 10_000, ...POLL }).toBe(1);
-    const [approval] = await jobApprovals(token, SLUG, jobId);
+    await expect.poll(async () => (await jobApprovals(token, jobId)).length, { timeout: 10_000, ...POLL }).toBe(1);
+    const [approval] = await jobApprovals(token, jobId);
 
     await webLogin(page);
     await page.goto(`/${SLUG}/approvals?id=${approval.id}`);
@@ -130,7 +133,7 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await expect(row.getByTestId('approval-request-bash-countdown').or(row.getByTestId('approval-request-outcome-status'))).toBeVisible();
 
     // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) expires it; the reloaded row reads Expired.
-    await expect.poll(async () => (await jobApprovals(token, SLUG, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
+    await expect.poll(async () => (await jobApprovals(token, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
     await page.reload();
     await waitForHydration(page);
     await expect(row).toHaveAttribute('data-status', 'expired');

@@ -60,7 +60,6 @@ const canReadFleetDashboard = computed(() => globalPermissions.value.has('fleet.
 const canReadFleetRunners = computed(() => globalPermissions.value.has('fleet.runner.read'))
 const canReadFleetRepos = computed(() => globalPermissions.value.has('fleet.repo.read'))
 const canReadFleetBudgets = computed(() => globalPermissions.value.has('fleet.budget.read'))
-const canReadFleetApprovals = computed(() => globalPermissions.value.has('fleet.approval.read'))
 const canReadFleetAnalytics = computed(() => globalPermissions.value.has('fleet.analytics.read'))
 const canReadSkills = computed(() => globalPermissions.value.has('skill.source.read'))
 // P3b US-006: the approval engine's inbox is a top-level destination for the caller who holds any
@@ -77,7 +76,6 @@ const showAdminNav = computed(() =>
   || canReadFleetRunners.value
   || canReadFleetRepos.value
   || canReadFleetBudgets.value
-  || canReadFleetApprovals.value
   || canReadFleetAnalytics.value
   || canReadSkills.value,
 )
@@ -247,8 +245,6 @@ const backTo = computed(() => {
         <NuxtLink v-if="canReadFleetRepos" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
 
         <NuxtLink v-if="canReadFleetBudgets" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
-
-        <NuxtLink v-if="canReadFleetApprovals" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
 
         <NuxtLink v-if="canReadFleetAnalytics" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
 

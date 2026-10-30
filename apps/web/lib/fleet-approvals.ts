@@ -1,57 +1,15 @@
-import * as z from 'zod'
-import { isAboveSpend, parseAmount, scopeText } from '~/lib/fleet-budgets'
-import type { TranslateNamed } from '~/lib/fleet-budgets'
-import { formatUsd } from '~/lib/fleet-jobs'
-import { BUDGET_SCOPE_TYPES, BUDGET_WINDOW_KINDS } from '~/lib/fleet-types'
-import type {
-  ApprovalCountsDto, ApprovalType, BudgetScopeType, BudgetWindowKind, DecideApprovalBody, FleetApprovalDto,
-} from '~/lib/fleet-types'
-
-/** D240: the Pending tab is one page of this many; All pages by INBOX_PAGE_SIZE. */
-export const INBOX_PENDING_SIZE = 100
-export const INBOX_PAGE_SIZE = 20
-export const BADGE_CAP = 99
-/** apps/api decide-approval.dto `comment` MaxLength. */
-export const MAX_COMMENT = 1000
-
-export type ApprovalBase = { kind: 'admin' } | { kind: 'project'; slug: string }
 /**
- * Permissions P1 US-009: what the signed-in caller may decide, read from permission keys rather than a role
- * name. `fleet.approval.decide.budget` answers a budget override, `fleet.approval.decide.bash` a bash ask —
- * the project's keys on a project page, the global keys on the admin page. S5b 2a-D6: `userId` is the signed-in
- * user, and an `assistant_action` is decided by its requester alone (2a-R2), whatever the keys — so it is read
- * on both viewer kinds.
+ * The fleet half of the approval surface. US-010 retired the fleet inbox (its components, composables and page code
+ * are gone) but the fleet shells — the job page, the header badge, the notification bell, the thread action card and
+ * the engine's fleet panels (`lib/approval-request-fleet.ts`) — still read the same payloads, countdowns, delivery
+ * acks and re-queue failures through the helpers below.
  */
-export type ApprovalViewer =
-  | { kind: 'admin'; userId: string | null; canDecideBudget: boolean; canDecideBash: boolean }
-  | { kind: 'project'; userId: string | null; canDecideBudget: boolean; canDecideBash: boolean }
+import { isAboveSpend, parseAmount } from '~/lib/fleet-budgets'
+import { BUDGET_SCOPE_TYPES, BUDGET_WINDOW_KINDS } from '~/lib/fleet-types'
+import type { BudgetScopeType, BudgetWindowKind, FleetApprovalDto } from '~/lib/fleet-types'
 
-export const INBOX_TABS = ['pending', 'all'] as const
-export type InboxTab = (typeof INBOX_TABS)[number]
-
-export interface ApprovalListFilters {
-  tab: InboxTab
-  type?: ApprovalType
-  page?: number
-}
-
-/** Only set filters reach the query; `current` only past page 1 on the All tab (D240). */
-export function buildApprovalQuery(f: ApprovalListFilters): Record<string, string> {
-  return {
-    ...(f.tab === 'pending' ? { status: 'pending' } : {}),
-    ...(f.type ? { type: f.type } : {}),
-    size: String(f.tab === 'pending' ? INBOX_PENDING_SIZE : INBOX_PAGE_SIZE),
-    ...(f.tab === 'all' && f.page !== undefined && f.page > 1 ? { current: String(f.page) } : {}),
-  }
-}
-
-/** D240: soonest `expiresAt` first (ISO instants compare as strings), then rows without one in their given order. */
-export function sortPending(rows: readonly FleetApprovalDto[]): FleetApprovalDto[] {
-  const expiring = rows
-    .filter((r) => r.expiresAt !== null)
-    .sort((a, b) => (a.expiresAt ?? '').localeCompare(b.expiresAt ?? '') || a.id.localeCompare(b.id))
-  return [...expiring, ...rows.filter((r) => r.expiresAt === null)]
-}
+/** Above this the header badge reads `99+`. */
+export const BADGE_CAP = 99
 
 /** Spec §1.2 budget payload at the time of the stop. */
 export interface BudgetApprovalPayload {
@@ -85,8 +43,8 @@ export function budgetPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bu
 }
 
 /** The choices nax offers on a bash ask (2a `ApprovalOption`). */
-export const APPROVAL_OPTIONS = ['allow', 'allow-remember', 'deny'] as const
-export type ApprovalOption = (typeof APPROVAL_OPTIONS)[number]
+const APPROVAL_OPTIONS = ['allow', 'allow-remember', 'deny'] as const
+type ApprovalOption = (typeof APPROVAL_OPTIONS)[number]
 
 /** Spec §1.2 bash payload; `rawDetail` is null when the runner parsed nax's text. */
 export interface BashApprovalPayload {
@@ -126,27 +84,6 @@ export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bash
 
 export type BashDecision = 'allow' | 'allow_for_job' | 'deny'
 
-/**
- * S5b 2a-D7: what an `assistant_action` approval carries. The preview and the input stay on the action: this is
- * everything the inbox, the thread card and the notification need to name it and find its thread.
- */
-export interface AssistantApprovalPayload {
-  actionId: string
-  tool: string
-  threadId: string
-  threadPath: string
-  requestedById: string
-}
-
-/** The action payload, or null for another type or a payload that does not have the five strings (2aw-D7). */
-export function assistantPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): AssistantApprovalPayload | null {
-  if (a.type !== 'assistant_action') return null
-  const p = a.payload
-  if (!isString(p.actionId) || !isString(p.tool) || !isString(p.threadId)) return null
-  if (!isString(p.threadPath) || !isString(p.requestedById)) return null
-  return { actionId: p.actionId, tool: p.tool, threadId: p.threadId, threadPath: p.threadPath, requestedById: p.requestedById }
-}
-
 /** D291 (2a `checkBashDecision`): a cut or unreadable ask is deny-only; otherwise only what nax offered, then deny. */
 export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
   if (p === null || p.commandTruncated) return ['deny']
@@ -157,20 +94,6 @@ export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
   ]
 }
 
-/**
- * Spec §1.7 (D244, 2a-R2, Permissions P1 US-009): a pending budget override follows `fleet.approval.decide.budget`
- * and a bash ask `fleet.approval.decide.bash`, on either viewer kind. An `assistant_action` is decided by its
- * requester alone — no key, no project membership shortcut, and a viewer who is not signed in decides nothing.
- */
-export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>, viewer: ApprovalViewer): boolean {
-  if (a.status !== 'pending') return false
-  if (a.type === 'assistant_action') {
-    const action = assistantPayload(a)
-    return viewer.userId !== null && action !== null && action.requestedById === viewer.userId
-  }
-  return a.type === 'budget_override_required' ? viewer.canDecideBudget : viewer.canDecideBash
-}
-
 export type RaiseError = 'amountInvalid' | 'notAbove' | null
 
 /** D243: the new limit must parse and sit above the spend recorded at the stop (the server re-checks the live spend). */
@@ -178,64 +101,6 @@ export function raiseAmountError(input: string, spentUsd: string): RaiseError {
   const trimmed = input.trim()
   if (parseAmount(trimmed) === null) return 'amountInvalid'
   return isAboveSpend(trimmed, spentUsd) ? null : 'notAbove'
-}
-
-export const commentTooLong = (comment: string): boolean => comment.trim().length > MAX_COMMENT
-
-const commentField = (comment: string): { comment?: string } => {
-  const trimmed = comment.trim()
-  return trimmed === '' ? {} : { comment: trimmed }
-}
-
-/** D243: `requeueJobIds` always sent, `[]` when nothing is ticked (D231: omitted would also mean none). */
-export function toRaiseBody(input: { amount: string; selected: readonly string[]; comment: string }): DecideApprovalBody {
-  const amountUsd = parseAmount(input.amount.trim())
-  if (amountUsd === null) throw new Error('fleet-approvals: amount was not validated')
-  return { decision: 'raise_budget_and_resume', amountUsd, requeueJobIds: [...input.selected], ...commentField(input.comment) }
-}
-
-export const toKeepPausedBody = (comment: string): DecideApprovalBody => ({ decision: 'keep_paused', ...commentField(comment) })
-
-/** D293: a bash decide never carries budget fields (2a D287 answers 400). */
-export const toBashBody = (decision: BashDecision, comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
-
-/** S5b 2a-D7: an action decide carries only the decision and a non-blank comment (2a's `DecideApprovalDto`). */
-export const toActionBody = (decision: 'approve' | 'reject', comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
-
-const THREAD_PATH = /^\/(?:([^/]+)\/)?threads\/([^/]+)$/
-
-/**
- * S5b 2a-D10: the API path of a thread, from the `threadPath` an action carries. A workspace action holds
- * `/threads/<id>` (already the API's own path); a project action holds `/<slug>/threads/<id>`. Any other shape
- * answers null, so a caller never builds a request out of a string it did not understand.
- */
-export function threadApiPath(threadPath: string): string | null {
-  const match = THREAD_PATH.exec(threadPath)
-  if (match === null) return null
-  const [, slug, id] = match
-  return slug === undefined ? `/threads/${id}` : `/projects/${slug}/threads/${id}`
-}
-
-/**
- * Slice 4: what the inbox's A / D keys mean for one expanded approval; null = the key does nothing.
- * Bash: A picks the plain 'allow' (nax must have offered it; a cut ask is deny-only), D denies.
- * Budget: A needs a raised amount only a human types, so it is null; D keeps the policy paused.
- * Action (S5b 2a-D6): A is null because the preview may not be on screen — only D rejects.
- */
-export function keyboardDecision(
-  a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>,
-  viewer: ApprovalViewer,
-): { approve: DecideApprovalBody | null; deny: DecideApprovalBody | null } {
-  if (!canDecide(a, viewer)) return { approve: null, deny: null }
-  if (a.type === 'assistant_action') return { approve: null, deny: toActionBody('reject', '') }
-  if (a.type === 'nax_bash_escalate') {
-    // bashPayload validates the shape: a malformed ask reads deny-only, exactly like the panel.
-    return {
-      approve: bashChoices(bashPayload(a)).includes('allow') ? toBashBody('allow', '') : null,
-      deny: toBashBody('deny', ''),
-    }
-  }
-  return { approve: null, deny: toKeepPausedBody('') }
 }
 
 /** D292: whole seconds before nax denies the ask, 0 once passed; null without a readable expiry. */
@@ -282,10 +147,6 @@ export function commandPreview(p: BashApprovalPayload): string {
   return text.includes('\n') ? `${first}...` : first
 }
 
-/** D297: the job's pending ask that nax denies first (the job-page callout opens it). */
-export const firstPending = (rows: readonly FleetApprovalDto[]): FleetApprovalDto | null =>
-  sortPending(rows.filter((r) => r.status === 'pending'))[0] ?? null
-
 export const REQUEUE_FAILURES = ['gone', 'activeJob', 'notCancelled', 'paused', 'unknown'] as const
 export type RequeueFailure = (typeof REQUEUE_FAILURES)[number]
 
@@ -312,92 +173,4 @@ export function requeueFailure(error: unknown): RequeueFailure {
   }
 }
 
-export interface RequeueResultView {
-  jobId: string
-  ok: boolean
-  reason: RequeueFailure | null
-}
-
-/**
- * D245: the re-queue record of a raise decided in the inbox. Null for anything else, including a manual resume, whose
- * stored `[]` means "not offered", not "none selected" (#193 deferred item 2). Malformed entries are skipped.
- * Known gap: between the decide's first commit and its final `setOutcome` (or if the API dies there) a raise is
- * stored with `requeueResults: []`, which reads as "none selected". Rare and self-healing once the decide finishes.
- */
-export function requeueResults(a: Pick<FleetApprovalDto, 'decision' | 'resolvedBy' | 'outcome'>): RequeueResultView[] | null {
-  if (a.decision !== 'raise_budget_and_resume' || a.resolvedBy !== 'user') return null
-  const raw = a.outcome?.requeueResults
-  if (!Array.isArray(raw)) return null
-  return raw.flatMap((entry: unknown): RequeueResultView[] => {
-    if (entry === null || typeof entry !== 'object') return []
-    const row = entry as { jobId?: unknown; ok?: unknown; error?: unknown }
-    if (!isString(row.jobId) || typeof row.ok !== 'boolean') return []
-    return [{ jobId: row.jobId, ok: row.ok, reason: row.ok ? null : requeueFailure(row.error) }]
-  })
-}
-
-export function resumedAmount(a: Pick<FleetApprovalDto, 'outcome'>): string | null {
-  const value = a.outcome?.resumedAmountUsd
-  if (isString(value)) return value
-  return typeof value === 'number' ? String(value) : null
-}
-
-/** D248: policy id -> its pending budget approval id. */
-export function pendingByPolicy(rows: readonly FleetApprovalDto[]): ReadonlyMap<string, string> {
-  return new Map(
-    rows
-      .filter((r) => r.status === 'pending' && r.type === 'budget_override_required' && r.policyId !== null)
-      .map((r): [string, string] => [r.policyId as string, r.id]),
-  )
-}
-
-export function inboxPath(base: ApprovalBase, id?: string): string {
-  const root = base.kind === 'admin' ? '/admin/fleet/approvals' : `/${base.slug}/fleet/approvals`
-  return id === undefined ? root : `${root}?id=${encodeURIComponent(id)}`
-}
-
-/** D247: where the header badge leads. */
-export function badgeTarget(counts: ApprovalCountsDto, ctx: { slug: string | null; globalAdmin: boolean }): string | null {
-  if (ctx.slug) return inboxPath({ kind: 'project', slug: ctx.slug })
-  if (ctx.globalAdmin) return inboxPath({ kind: 'admin' })
-  const first = counts.projects[0]
-  return first ? inboxPath({ kind: 'project', slug: first.slug }) : null
-}
-
 export const badgeText = (total: number): string => (total > BADGE_CAP ? `${BADGE_CAP}+` : String(total))
-
-/** One-line row summary. `scopeLabel` names a budget scope (pages know their repo, runner and project names). */
-export function approvalSummary(
-  t: TranslateNamed,
-  a: FleetApprovalDto,
-  scopeLabel: (p: BudgetApprovalPayload) => string | null,
-): string {
-  const budget = budgetPayload(a)
-  if (budget) {
-    return t('fleet.approvals.summary.budget', {
-      scope: scopeText(t, budget, scopeLabel(budget)),
-      spent: formatUsd(budget.spentUsd),
-      amount: formatUsd(budget.amountUsd),
-    })
-  }
-  const bash = bashPayload(a)
-  if (bash) return t('fleet.approvals.summary.bashCommand', { command: commandPreview(bash), stage: bash.stage })
-  // S5b 2a-D8: the action's own label, and the type label when its payload does not parse.
-  const action = assistantPayload(a)
-  if (action) return t('fleet.approvals.summary.assistant', { tool: action.tool })
-  if (a.type === 'nax_bash_escalate') return t('fleet.approvals.summary.bash')
-  return a.type === 'assistant_action' ? t('fleet.approvals.type.assistant_action') : t('fleet.approvals.type.budget_override_required')
-}
-
-/** D243: the raise form's schema; messages are translated, `spent` is the spend recorded at the stop. */
-export function buildRaiseSchema(t: TranslateNamed, spentUsd: string) {
-  return z.object({
-    amount: z.string().superRefine((value, ctx) => {
-      const error = raiseAmountError(value, spentUsd)
-      if (error !== null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t(`fleet.approvals.validation.${error}`, { spent: formatUsd(spentUsd) }) })
-      }
-    }),
-    comment: z.string().refine((value) => !commentTooLong(value), t('fleet.approvals.validation.commentTooLong')),
-  })
-}
