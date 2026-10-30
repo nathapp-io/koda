@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T19:34:30.342Z",
+  "updatedAt": "2026-10-30T19:39:56.489Z",
   "userStories": [
     {
       "id": "US-001",
@@ -894,14 +894,17 @@
         "US-008",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Upstream stories already remove callers, leaving adapter deletion, standard module wiring and spec export; deletion of permission-gated HTTP commands retains the security strategy override."
+        "reasoning": "Upstream stories already remove callers, leaving adapter deletion, standard module wiring and spec export; deletion of permission-gated HTTP commands retains the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/approvals/approvals.module.ts",
@@ -988,7 +991,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e6d8b9eb7a188ceb676c611d08466f73fe916daa"
     },
     {
       "id": "US-011",
