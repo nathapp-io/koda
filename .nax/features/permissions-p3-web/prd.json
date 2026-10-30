@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T11:37:38.333Z",
+  "updatedAt": "2026-10-30T11:59:20.275Z",
   "userStories": [
     {
       "id": "US-001",
@@ -458,14 +458,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Changes global/project permission gates and forbidden badge behavior across header, layout and palette. Security override applies; mounted API/event and narrowed-key navigation seams must be verified under strict TDD."
+        "reasoning": "Changes global/project permission gates and forbidden badge behavior across header, layout and palette. Security override applies; mounted API/event and narrowed-key navigation seams must be verified under strict TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/fleet/ApprovalBadge.vue",
@@ -527,7 +530,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3d8526babbd2fd212da46dab4a0b983afa2eba2d"
     },
     {
       "id": "US-007",
