@@ -198,14 +198,17 @@ describeIntegration('home dashboard API (PG)', () => {
 
   it('AC-1: global admin home labels non-fleet and fleet requests and matches approvals list IDs', async () => {
     const agentRequest = await seedAgentCreate(webId);
-    const v = await home('root');
-    const agentRow = v.needsYou.approvals.find((a) => a.id === agentRequest.id);
-    const bashRow = v.needsYou.approvals.find((a) => a.id === bashAsk.requestId);
-    expect(agentRow).toMatchObject({ type: null, permissionKey: 'agent.create' });
-    expect(bashRow).toMatchObject({ type: 'nax_bash_escalate', permissionKey: 'fleet.job.shell.escalate', jobId: expect.any(String) });
-    const listed = data<{ records: Array<{ id: string }> }>(await request(server).get('/api/approvals?status=pending').set(auth('root')).expect(200));
-    expect(new Set(v.needsYou.approvals.map((a) => a.id))).toEqual(new Set(listed.records.map((r) => r.id)));
-    await prisma.approvalRequest.delete({ where: { id: agentRequest.id } });
+    try {
+      const v = await home('root');
+      const agentRow = v.needsYou.approvals.find((a) => a.id === agentRequest.id);
+      const bashRow = v.needsYou.approvals.find((a) => a.id === bashAsk.requestId);
+      expect(agentRow).toMatchObject({ type: null, permissionKey: 'agent.create' });
+      expect(bashRow).toMatchObject({ type: 'nax_bash_escalate', permissionKey: 'fleet.job.shell.escalate', jobId: expect.any(String) });
+      const listed = data<{ records: Array<{ id: string }> }>(await request(server).get('/api/approvals?status=pending').set(auth('root')).expect(200));
+      expect(new Set(v.needsYou.approvals.map((a) => a.id))).toEqual(new Set(listed.records.map((r) => r.id)));
+    } finally {
+      await prisma.approvalRequest.delete({ where: { id: agentRequest.id } });
+    }
   });
 
   it('gives a global admin every live project plus unscoped approvals', async () => {
