@@ -2306,6 +2306,7 @@
       "job_crashed": "{repo} 上的 fleet 任务崩溃",
       "job_pr_opened": "{repo} 上的 fleet 任务创建了 PR",
       "approval_requested": "需要审批：{repo} 上的 {kind}",
+      "approval_request": "需要审批：{key}",
       "action_requested": "确认助手操作：{tool}",
       "budget_warn": "预算 {scope} 已用 {spentUsd} / {amountUsd} USD",
       "budget_hard_stop": "预算 {scope} 在 {spentUsd} / {amountUsd} USD 处停止",

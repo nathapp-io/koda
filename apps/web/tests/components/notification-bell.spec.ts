@@ -178,4 +178,24 @@ describe('NotificationBell (S4a §5)', () => {
     expect(m.byId('notification-bell')[0].props['data-count']).toBe(0)
     m.app.unmount()
   })
+
+  // P3b US-005 AC-10: the engine's approval notice is worded from its permission key.
+  test('an approval_request notice renders the engine key through notifications.kinds.approval_request', async () => {
+    const approval: NotificationDto = {
+      ...row('5'),
+      kind: 'approval_request',
+      params: { key: 'label.create' },
+      // The API's English fallback, which must NOT be what the bell shows.
+      title: 'An approval is waiting',
+      link: '/approvals?id=r5',
+    }
+    const m = mount({ count: 1, latest: [approval] })
+    await m.settle()
+    ;(m.byId('notification-bell')[0].props.onClick as () => void)()
+    await m.settle()
+    const items = m.byId('notification-item')
+    expect(items).toHaveLength(1)
+    expect(m.app.textOf(items[0])).toBe('Approval needed: label.create')
+    m.app.unmount()
+  })
 })

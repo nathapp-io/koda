@@ -2306,6 +2306,7 @@
       "job_crashed": "Fleet job on {repo} crashed",
       "job_pr_opened": "Fleet job on {repo} opened a PR",
       "approval_requested": "Approval needed: {kind} on {repo}",
+      "approval_request": "Approval needed: {key}",
       "action_requested": "Confirm an assistant action: {tool}",
       "budget_warn": "Budget {scope} reached {spentUsd} of {amountUsd} USD",
       "budget_hard_stop": "Budget {scope} stopped at {spentUsd} of {amountUsd} USD",

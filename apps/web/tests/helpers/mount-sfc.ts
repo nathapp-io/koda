@@ -412,6 +412,17 @@ const walk = (selector: string, from: FakeNode = root, into: FakeNode[] = []): F
   }
 }
 
+/**
+ * Mounts a bare setup function in a real component instance, so a composable under test gets its
+ * `onMounted` / `onBeforeUnmount` hooks (a composable called outside a component registers none).
+ * Renders nothing; the caller keeps whatever the setup produced.
+ */
+export function mountSetup(setup: () => unknown): { unmount: () => void } {
+  const app = renderer.createApp({ setup() { setup(); return () => null } })
+  app.mount(node('#root'))
+  return { unmount: () => app.unmount() }
+}
+
 /** Lucide icons are ESM-only; a stub renders an empty span so the tree stays walkable. */
 function vueIconStubs(): Record<string, unknown> {
   return new Proxy({}, { get: () => ({ name: 'Icon', template: '<i class="icon" />' }) })
