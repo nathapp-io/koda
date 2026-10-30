@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../common/enums';
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FleetApprovalAskStore } from '../approvals/fleet-approval-ask.store';
@@ -13,9 +13,9 @@ import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-
 import { FenceService } from './fence.service';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
 
-/** An ack either changed the job (live event plus the approval events of any exit from RUNNING) or did nothing (plan D263). */
-interface Applied { live: LiveFleetJobEvent | null; approvalLive: LiveFleetApprovalEvent[] }
-const NO_CHANGE: Applied = { live: null, approvalLive: [] };
+/** An ack either changed the job (a job live event) or did nothing (plan D263). */
+interface Applied { live: LiveFleetJobEvent | null }
+const NO_CHANGE: Applied = { live: null };
 
 /** Command acks (spec §3.2, plan D8) and the boot-id reconcile (spec §5.3, C3). */
 @Injectable()
@@ -34,20 +34,18 @@ export class CommandAckProcessor {
   ) {}
 
   /** One transaction per ack, and a failing ack is logged and skipped, so one bad ack never blocks the rest. */
-  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<{ live: LiveFleetJobEvent[]; approvalLive: LiveFleetApprovalEvent[] }> {
+  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<{ live: LiveFleetJobEvent[] }> {
     const live: LiveFleetJobEvent[] = [];
-    const approvalLive: LiveFleetApprovalEvent[] = [];
     for (const ack of acks) {
       try {
         const applied = await this.txManager.run(() => this.processOne(runnerId, bootId, ack, now));
         if (applied.live) live.push(applied.live);
-        approvalLive.push(...applied.approvalLive);
       } catch (error) {
         // Left unacked: the runner re-acks it next sync (review M2).
         this.logger.error(`Ack ${ack.commandId} from runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
       }
     }
-    return { live, approvalLive };
+    return { live };
   }
 
   private async processOne(runnerId: string, bootId: string, ack: CommandAck, now: Date): Promise<Applied> {
@@ -96,18 +94,18 @@ export class CommandAckProcessor {
       }
       const r = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor, reason: `readopt rejected: ${detail}` });
       await this.recordTransition(job, r.job);
-      return { live: r.live, approvalLive: r.approvalLive };
+      return { live: r.live };
     }
     if (ack.result === 'ok') return NO_CHANGE;
     if (command.type === FleetCommandType.ASSIGN && canTransition(job.state, FleetJobState.FAILED, 'runner')) {
       const r = await this.transitions.apply({ job, to: FleetJobState.FAILED, by: 'runner', now, actor, reason: `assign rejected: ${detail}` });
       await this.recordTransition(job, r.job);
-      return { live: r.live, approvalLive: r.approvalLive };
+      return { live: r.live };
     }
     if (command.type === FleetCommandType.CANCEL && canTransition(job.state, FleetJobState.CANCELLED, 'runner')) {
       const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'runner', now, actor, reason: 'cancel: runner does not hold job' });
       await this.recordTransition(job, r.job);
-      return { live: r.live, approvalLive: r.approvalLive };
+      return { live: r.live };
     }
     return NO_CHANGE;
   }

@@ -5,7 +5,6 @@ import { runAsSystemWriter } from '../../action-context/action-context';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { ApprovalCloser } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** One tick attempts at most this many asks; each close gets its own short transaction. */
@@ -40,7 +39,6 @@ export class PolicyAskCloseSweeper implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly store: FleetApprovalAskStore,
     private readonly closer: ApprovalCloser,
-    private readonly live: ApprovalLivePublisher,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
     private readonly audit: AuditRecorder,
@@ -87,7 +85,6 @@ export class PolicyAskCloseSweeper implements OnModuleInit, OnModuleDestroy {
         });
         if (change.approval !== null) {
           result.closed += 1;
-          if (change.live.length > 0) this.live.publish(change.live); // only after the audited close commits
         }
       } catch (error) {
         result.failed += 1;

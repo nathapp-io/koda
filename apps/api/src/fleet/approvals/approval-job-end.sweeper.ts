@@ -6,7 +6,6 @@ import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { ApprovalCloser } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** A tick schedules at most this many individual asks; each close gets its own short transaction. */
@@ -38,7 +37,6 @@ export class ApprovalJobEndSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly store: FleetApprovalAskStore,
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'findById'>,
     private readonly closer: ApprovalCloser,
-    private readonly live: ApprovalLivePublisher,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
     private readonly audit: AuditRecorder,
@@ -83,7 +81,7 @@ export class ApprovalJobEndSweeper implements OnModuleInit, OnModuleDestroy {
         const change = await this.txManager.run(async () => {
           const job = await this.jobs.findById(ask.jobId);
           // Re-check after scheduling: a requeued job may be running again, or may have been deleted.
-          if (job === null || job.state === 'RUNNING') return { approval: null, live: [] };
+          if (job === null || job.state === 'RUNNING') return { approval: null };
           const closed = await this.closer.closeJobAsk(job, ask.requestId, now);
           if (closed.approval !== null) {
             // F2: the audit and ALL cancellation writes commit or roll back together, per close.
@@ -97,7 +95,6 @@ export class ApprovalJobEndSweeper implements OnModuleInit, OnModuleDestroy {
         if (change.approval !== null) {
           result.closed += 1;
           closedJobs.add(ask.jobId);
-          if (change.live.length > 0) this.live.publish(change.live); // only after the audited cancellation commits
         }
       } catch (error) {
         result.failed += 1;

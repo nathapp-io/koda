@@ -1,7 +1,7 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P3 US-007 fix round 2 (F5) / US-009 — a settled ask's fleet outputs (activity row,
- * `approval.resolved` webhook, `fleet_approval` live event) are recorded by the durable outbox consumer, once per
+ * engine webhook) are recorded by the durable outbox consumer, once per
  * engine status, instead of after the decision committed.
  *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-recorder.integration.spec.ts
@@ -111,16 +111,15 @@ describeIntegration('fleet ask recorder (PG)', () => {
 
     expect(await activity(requestId)).toMatchObject([{ action: 'approval.decided', actorType: 'USER', entityType: 'approval' }]);
     expect(await resolvedWebhooks()).toBe(2);
-    expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'approved' }]);
+    expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId, status: 'executed' }));
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', resolvedBy: 'user' });
 
-    // Recording is idempotent per engine status; a redelivery writes nothing and publishes no second frame.
+    // Recording is idempotent per engine status; a redelivery writes no second activity row.
     await deliver(APPROVAL_REQUEST_CHANGED);
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(2);
-    const frames = seen.filter((e) => e.type === 'fleet_approval');
-    expect(frames).toHaveLength(1);
-    expect(new Set(frames.map((f) => f.id)).size).toBe(1);
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
   });
 
   it('fix round 3: two concurrent deliveries of the same event record the outputs once', async () => {
@@ -134,50 +133,11 @@ describeIntegration('fleet ask recorder (PG)', () => {
     // Both deliveries run at once: the link lock serialises their recording.
     await Promise.all(records.flatMap((record) => [publisher.publish(record), publisher.publish(record)]));
 
-    // The marker is claimed under a row lock, so the duplicate delivery writes the outputs once. Publication happens
-    // after its transaction returns, so a delivery overlapping the first one's publication republishes the frame —
-    // under the same durable id (`<requestId>:<status>:fleet`), which is what the live stream forwards for clients to
-    // dedupe on.
+    // The link lock makes concurrent redeliveries claim the activity marker once.
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(2);
-    const frames = seen.filter((e) => e.type === 'fleet_approval');
-    expect(frames.length).toBeGreaterThanOrEqual(1);
-    expect(frames.length).toBeLessThanOrEqual(records.length * 2);
-    expect(new Set(frames.map((f) => f.id))).toEqual(new Set([`${requestId}:executed:fleet`]));
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
-  });
-
-  it('US-009 fix round 2: a failed listener fails the relay, and the retry re-delivers only to it', async () => {
-    const { requestId } = await pendingBashAsk();
-    await decide(requestId).expect(200);
-    const received: string[] = [];
-    let failNext = true;
-    const flaky = app.get(ProjectEventBus).subscribe(world.projectId, (frame) => {
-      if (frame.type !== 'fleet_approval') return;
-      received.push(frame.id);
-      if (!failNext) return;
-      failNext = false;
-      throw new Error('socket unavailable');
-    });
-    try {
-      // The frames are published retryably, so a listener that failed keeps the publication unacknowledged and the
-      // relay retries the event instead of losing the frame for that subscriber.
-      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('socket unavailable');
-      expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(2);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
-      expect(received).toHaveLength(1);
-
-      await deliver(APPROVAL_REQUEST_CHANGED);
-
-      // The healthy subscribers saw the frame once; only the failed one received the retry, under the same id.
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
-      expect(received).toEqual([`${requestId}:executed:fleet`, `${requestId}:executed:fleet`]);
-      expect(await activity(requestId)).toHaveLength(1);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
-    } finally {
-      flaky();
-    }
   });
 
   it('US-009: a marker write failure rolls the outputs back and the retried delivery records them once', async () => {
@@ -186,57 +146,23 @@ describeIntegration('fleet ask recorder (PG)', () => {
     const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setRecordedStatus').mockRejectedValueOnce(new Error('marker unavailable'));
     try {
       await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('marker unavailable');
-      // Nothing of the rolled-back attempt survives: no activity row, no webhook row, no live frame.
+      // Nothing of the rolled-back attempt survives: no activity row or recordedStatus change.
       expect(await activity(requestId)).toEqual([]);
       expect(await resolvedWebhooks()).toBe(2);
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toEqual([]);
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBeNull();
 
       await deliver(APPROVAL_REQUEST_CHANGED);
       expect(await activity(requestId)).toHaveLength(1);
       expect(await resolvedWebhooks()).toBe(2);
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
     } finally {
       fail.mockRestore();
     }
   });
 
-  it('US-009 fix round 1: an unacknowledged frame stays owed and reaches a listener that missed it', async () => {
-    const { requestId } = await pendingBashAsk();
-    await decide(requestId).expect(200);
-    // The process dies between the publication and its acknowledgement: the relay retries the event.
-    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setPublishedStatus').mockRejectedValueOnce(new Error('ack unavailable'));
-    let late: string[] = [];
-    let unsubscribeLate = (): void => undefined;
-    try {
-      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('ack unavailable');
-      expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(2);
-      // It reached the subscribers that were listening, and stays owed until the marker commits.
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
-
-      // A stream that opened after that attempt has not seen it; the retry delivers it, under the same id.
-      unsubscribeLate = app.get(ProjectEventBus).subscribe(world.projectId, (frame) => {
-        if (frame.type === 'fleet_approval') late.push(frame.id);
-      });
-      await deliver(APPROVAL_REQUEST_CHANGED);
-      await deliver(APPROVAL_REQUEST_CHANGED);
-
-      expect(late).toEqual([`${requestId}:executed:fleet`]);
-      // The subscriber that already had it was skipped, and nothing was recorded twice.
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
-      expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(2);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
-    } finally {
-      unsubscribeLate();
-      fail.mockRestore();
-    }
-  });
-
-  it('F6 round 4: an executed job_ended ask announces the cancelled fleet view, and a linkless ask emits nothing', async () => {
+  it('F6 round 4: an executed job_ended ask records the cancelled fleet view, and a linkless ask records nothing', async () => {
     const { requestId } = await pendingBashAsk();
     await prisma.approvalRequest.update({ where: { id: requestId }, data: { status: 'executed' } });
     await prisma.fleetApprovalAsk.update({ where: { requestId }, data: { resolvedBy: 'job_ended' } });
@@ -246,11 +172,13 @@ describeIntegration('fleet ask recorder (PG)', () => {
       expiresAt: new Date().toISOString(),
     });
     await publisher.publish(record);
-    expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'cancelled' }]);
+    expect(await activity(requestId)).toMatchObject([{ action: 'approval.cancelled' }]);
+    expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId, status: 'executed' }));
     await prisma.fleetApprovalAsk.delete({ where: { requestId } });
     seen.length = 0;
     await publisher.publish(record);
-    expect(seen.filter((e) => e.type === 'fleet_approval')).toEqual([]);
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
+    expect(await activity(requestId)).toHaveLength(1);
   });
 
   it('an expired ask records the expiry, fills the link timeout and answers to the system', async () => {

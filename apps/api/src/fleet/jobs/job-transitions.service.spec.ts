@@ -1,10 +1,8 @@
 import { InvalidTransitionError, JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
 
 const NOW = new Date('2026-10-01T00:00:00.000Z');
 
-const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'cancelled', at: NOW.toISOString() };
 const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
   id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, threadId: null, profiles: [],
   maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: 'run-1', runnerBootId: 'b1',
@@ -25,7 +23,7 @@ describe('JobTransitionsService', () => {
   const activity = { record: vi.fn() };
   const live = { event: vi.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: vi.fn() };
   const schedules = { onJobEnded: vi.fn(async () => undefined) };
-  const closer = { closeForJob: vi.fn().mockResolvedValue([APPROVAL_LIVE]) };
+  const closer = { closeForJob: vi.fn().mockResolvedValue(undefined) };
   const outcomes = { onTerminal: vi.fn(async () => undefined) };
   const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never, closer as never, outcomes as never);
   afterEach(() => vi.clearAllMocks());
@@ -35,16 +33,16 @@ describe('JobTransitionsService', () => {
   describe('leaving RUNNING (S1.5 §1.4, plan D263)', () => {
     it.each([['UPLOADING', 'runner'], ['CANCELLED', 'runner'], ['CRASHED', 'server']] as const)(
       'RUNNING -> %s closes the asks and withdraws unsent answers', async (to, by) => {
-        const r = await svc.apply({ job: { ...job(), state: 'RUNNING' }, to, by, now: NOW, actor: ACTOR });
+        await svc.apply({ job: { ...job(), state: 'RUNNING' }, to, by, now: NOW, actor: ACTOR });
         expect(repo.withdrawPendingCommands).toHaveBeenCalledWith(job().id, NOW, { types: ['APPROVAL_ANSWER'] });
         expect(closer.closeForJob).toHaveBeenCalledWith(expect.objectContaining({ id: job().id }), NOW);
-        expect(r.approvalLive).toEqual([APPROVAL_LIVE]);
+
       });
 
     it('a move that does not leave RUNNING touches no approvals', async () => {
-      const r = await svc.apply({ job: { ...job(), state: 'ASSIGNED' }, to: 'RUNNING', by: 'runner', now: NOW, actor: ACTOR });
+      await svc.apply({ job: { ...job(), state: 'ASSIGNED' }, to: 'RUNNING', by: 'runner', now: NOW, actor: ACTOR });
       expect(closer.closeForJob).not.toHaveBeenCalled();
-      expect(r.approvalLive).toEqual([]);
+
     });
   });
 
@@ -150,7 +148,7 @@ describe('JobTransitionsService thread end events (#264)', () => {
   const threadEffects = { onJobEnded: vi.fn(async () => THREAD_EVENTS) };
   const svc = new JobTransitionsService(
     repo as never, { record: vi.fn() } as never, live as never, { onJobEnded: vi.fn() } as never,
-    { closeForJob: vi.fn().mockResolvedValue([]) } as never, { onTerminal: vi.fn() } as never, threadEffects as never,
+    { closeForJob: vi.fn().mockResolvedValue(undefined) } as never, { onTerminal: vi.fn() } as never, threadEffects as never,
   );
   afterEach(() => vi.clearAllMocks());
 

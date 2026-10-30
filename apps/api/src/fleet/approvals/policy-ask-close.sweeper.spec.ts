@@ -19,23 +19,21 @@ const claim = (over: Partial<PolicyAskClose> = {}): PolicyAskClose =>
  */
 function build(over: { claims?: PolicyAskClose[] } = {}) {
   const store = { claimPendingPolicyAsks: vi.fn(async () => over.claims ?? [claim()]) };
-  const live = [{ approvalId: 'a1', status: 'cancelled' }];
-  const closer = { closePolicyAsk: vi.fn(async (requestId: string) => ({ approval: { id: requestId }, live })) };
+  const closer = { closePolicyAsk: vi.fn(async (requestId: string) => ({ approval: { id: requestId } })) };
   const txManager = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
-  const livePublisher = { publish: vi.fn() };
   mockAuditRecorder.record.mockReset();
   mockAuditRecorder.record.mockImplementation(async () => undefined);
   const sweeper = new PolicyAskCloseSweeper(
     store as unknown as FleetApprovalAskStore, closer as unknown as ApprovalCloser,
-    livePublisher as never, txManager as never, { sweepEnabled: false, approvalSweepMs: 60_000 },
+    txManager as never, { sweepEnabled: false, approvalSweepMs: 60_000 },
     mockAuditRecorder as unknown as AuditRecorder,
   );
-  return { sweeper, store, closer, livePublisher, txManager };
+  return { sweeper, store, closer, txManager };
 }
 
 describe('PolicyAskCloseSweeper (US-007 fix round 2)', () => {
-  it('replays the close its action persisted, and publishes after the close commits', async () => {
-    const { sweeper, closer, livePublisher } = build();
+  it('replays the close its action persisted in its close transaction', async () => {
+    const { sweeper, closer } = build();
 
     expect(await sweeper.tick(NOW)).toEqual({ closed: 1, failed: 0 });
 
@@ -44,7 +42,6 @@ describe('PolicyAskCloseSweeper (US-007 fix round 2)', () => {
       key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: 'a1', projectId: 'p1',
       summary: 'policy close continued: policy_deleted',
     }));
-    expect(livePublisher.publish).toHaveBeenCalledWith([{ approvalId: 'a1', status: 'cancelled' }]);
   });
 
   it('fix round 3: a deferred manual resume keeps its outcome, its resumer and its actor', async () => {
@@ -60,12 +57,11 @@ describe('PolicyAskCloseSweeper (US-007 fix round 2)', () => {
   });
 
   it('a close the engine skipped (request still held) writes nothing and is retried on a later tick', async () => {
-    const { sweeper, closer, livePublisher } = build();
-    closer.closePolicyAsk.mockResolvedValueOnce({ approval: null, live: [] });
+    const { sweeper, closer } = build();
+    closer.closePolicyAsk.mockResolvedValueOnce({ approval: null });
 
     expect(await sweeper.tick(NOW)).toEqual({ closed: 0, failed: 0 });
     expect(mockAuditRecorder.record).not.toHaveBeenCalled();
-    expect(livePublisher.publish).not.toHaveBeenCalled();
   });
 
   it('attributes the continued close to the actor the action recorded, not to the policy row', async () => {

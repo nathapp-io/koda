@@ -1,9 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { APPROVAL_REQUEST_CHANGED, type ApprovalRequestChangedPayload } from '../../approvals/approval-request-events';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord } from '../../approvals/domain/approval.domain';
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
 import type { ApprovalResolvedBy, FleetApprovalRecord } from './domain/approval.domain';
 import type { FleetApprovalAskRecord } from './domain/fleet-approval-ask.domain';
@@ -12,7 +10,7 @@ const NOW = new Date('2026-10-02T10:00:00.000Z');
 
 const link = (over: Partial<FleetApprovalAskRecord> = {}): FleetApprovalAskRecord => ({
   requestId: 'a1', kind: 'bash', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, naxAskId: 'n1', budgetPolicyId: null,
-  resolvedBy: null, outcome: null, pendingClose: null, recordedStatus: null, publishedStatus: null, createdAt: NOW, updatedAt: NOW,
+  resolvedBy: null, outcome: null, pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
   ...over,
 });
 const view = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord => ({
@@ -45,14 +43,12 @@ interface Overrides {
 
 /**
  * The subscriber with every collaborator a spy: the link is mutable, so the recorder's own writes are
- * what a redelivery of the same event reads back. `ApprovalLivePublisher` is real and its bus stubbed,
- * so the published frame is the one the recorder actually builds.
+ * what a redelivery of the same event reads back, proving the marker suppresses further recording.
  */
 function build(over: Overrides = {}) {
   const handlers = new Map<string, (p: unknown) => Promise<void>>();
   const registry = { register: vi.fn((type: string, handler: (p: unknown) => Promise<void>) => handlers.set(type, handler)) };
   let state: FleetApprovalAskRecord | null = over.link === undefined ? link() : over.link;
-  const order: string[] = [];
   const store = {
     lockByRequest: vi.fn(async () => state),
     findApproval: vi.fn(async () => (over.view === undefined ? view() : over.view)),
@@ -64,126 +60,42 @@ function build(over: Overrides = {}) {
       state = state === null ? null : { ...state, recordedStatus };
       return state;
     }),
-    setPublishedStatus: vi.fn(async (_id: string, publishedStatus: string) => {
-      order.push('marker');
-      state = state === null ? null : { ...state, publishedStatus };
-      return state;
-    }),
   };
   const queries = {
     findById: vi.fn(async () => (over.request === undefined ? request() : over.request)),
     decisionsFor: vi.fn(async () => over.decisions ?? [decision()]),
   };
-  const bus = {
-    publish: vi.fn(),
-    // The labels let a case assert the publish → marker → acknowledge order.
-    publishRetryable: vi.fn((event: LiveFleetApprovalEvent) => { order.push(`publish:${event.id}`); }),
-    acknowledgeRetryable: vi.fn((event: LiveFleetApprovalEvent) => { order.push(`ack:${event.id}`); }),
-  };
-  const live = new ApprovalLivePublisher(bus as never);
-  const publish = vi.spyOn(live, 'publish');
-  const closer = { recordResolved: vi.fn(async (v: FleetApprovalRecord) => live.event(v)) };
+  const closer = { recordResolved: vi.fn(async () => undefined) };
   const budgets = { findById: vi.fn(async () => (over.policy === undefined ? { updatedById: 'u1' } : over.policy)) };
   const tx = {
-    run: vi.fn(async (fn: () => Promise<unknown>) => {
-      const result = await fn();
-      order.push('commit');
-      return result;
-    }),
+    run: vi.fn(async (fn: () => Promise<unknown>) => fn()),
   };
   const subscriber = new FleetAskEventsSubscriber(
-    registry as never, store as never, queries as never, closer as never, budgets as never, tx as never, live,
+    registry as never, store as never, queries as never, closer as never, budgets as never, tx as never,
   );
   subscriber.onModuleInit();
   const handle = handlers.get(APPROVAL_REQUEST_CHANGED);
   if (handle === undefined) throw new Error('the subscriber did not register');
-  return { handle, store, queries, closer, budgets, tx, bus, publish, order };
+  return { handle, store, queries, closer, budgets, tx };
 }
 
 describe('FleetAskEventsSubscriber (US-009)', () => {
-  it('AC-5: publishes one fleet_approval event with the mapped status, after the transaction commits', async () => {
-    const { handle, publish, order } = build({ view: view({ status: 'approved' }) });
-
-    await handle(payload({ status: 'executed' }));
-
-    // The frame leaves only once the transaction that recorded the outputs has returned.
-    expect(order.slice(0, 2)).toEqual(['commit', 'publish:a1:executed:fleet']);
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith(
-      [expect.objectContaining({ type: 'fleet_approval', approvalId: 'a1', projectId: 'p1', status: 'approved' })],
-      { retryable: true },
-    );
-  });
-
-  it('acknowledges the delivered ids only after the publication marker commits', async () => {
-    const { handle, order } = build();
-
-    await handle(payload({ status: 'executed' }));
-
-    const at = (label: string) => order.indexOf(label);
-    expect(at('publish:a1:executed:fleet')).toBeGreaterThan(-1);
-    expect(at('marker')).toBeGreaterThan(at('publish:a1:executed:fleet'));
-    expect(at('ack:a1:executed:fleet')).toBeGreaterThan(at('marker'));
-  });
-
-  it('a failed listener rejects, keeps the frame owed and releases nothing until the retry succeeds', async () => {
-    const { handle, store, closer, bus, publish } = build();
-    bus.publishRetryable.mockImplementationOnce(() => { throw new Error('socket unavailable'); });
-
-    await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('socket unavailable');
-    // The outputs are already recorded; only the frame is owed, and nothing was marked or released.
-    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
-    expect(store.setPublishedStatus).not.toHaveBeenCalled();
-    expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
-
-    await handle(payload({ status: 'executed' }));
-
-    // The retry republishes the frame (the bus skips the listeners that already had it) and records no second row.
-    expect(publish).toHaveBeenCalledTimes(2);
-    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
-    expect(store.setPublishedStatus).toHaveBeenCalledWith('a1', 'executed');
-    expect(bus.acknowledgeRetryable).toHaveBeenCalledTimes(1);
-  });
-
-  it('gives the frame a durable id, so a republished retry is the same frame', async () => {
-    const { handle, publish } = build();
-
-    await handle(payload({ status: 'executed' }));
-
-    expect(publish.mock.calls[0]?.[0]).toMatchObject([{ id: 'a1:executed:fleet' }]);
-  });
-
-  it('republishes an undelivered frame under a separate acknowledgement, without repeating the outputs', async () => {
-    const { handle, store, closer, publish, bus } = build();
-    // A crash between the publish and its acknowledgement: the relay redelivers the event.
-    store.setPublishedStatus.mockRejectedValueOnce(new Error('ack unavailable'));
-
-    await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('ack unavailable');
-    // The frame reached its listeners, but the marker did not commit, so their ids are not released yet.
-    expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
-    await handle(payload({ status: 'executed' }));
-
-    // The activity row and the webhook are recorded once; only the frame is published again, with the same id.
-    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
-    expect(store.setRecordedStatus).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledTimes(2);
-    expect(publish.mock.calls[1]?.[0]).toMatchObject([{ id: 'a1:executed:fleet', status: 'approved' }]);
-    expect(store.setPublishedStatus).toHaveBeenLastCalledWith('a1', 'executed');
-    expect(bus.acknowledgeRetryable).toHaveBeenCalledTimes(1);
-  });
-
-  it('publishes nothing for a frame the link already acknowledged', async () => {
-    const { handle, store, closer, publish } = build({ link: link({ recordedStatus: 'executed', publishedStatus: 'executed' }) });
-
-    await handle(payload({ status: 'executed' }));
-
-    expect(store.findApproval).not.toHaveBeenCalled();
+  it('retired live AC-3: an already recorded executed status does not read or record again', async () => {
+    const { handle, store, queries, closer } = build({ link: link({ recordedStatus: 'executed' }) });
+    await handle(payload());
+    expect(store.lockByRequest).toHaveBeenCalledWith('a1');
+    expect(queries.findById).not.toHaveBeenCalled();
     expect(closer.recordResolved).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
   });
 
+  it('retired live AC-1/2: recording a settlement returns void with no post-transaction publication work', async () => {
+    const { handle, closer, tx } = build();
+    await expect(handle(payload({ status: 'rejected' }))).resolves.toBeUndefined();
+    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
+    expect(tx.run).toHaveBeenCalledTimes(1);
+  });
   it('AC-6: a redelivered executed change records the outputs once', async () => {
-    const { handle, store, closer, publish } = build();
+    const { handle, store, closer } = build();
 
     await handle(payload({ status: 'executed' }));
     await handle(payload({ status: 'executed' }));
@@ -191,27 +103,24 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     // The second delivery sees the marker the first wrote, under the same link lock.
     expect(store.setRecordedStatus).toHaveBeenCalledTimes(1);
     expect(closer.recordResolved).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledTimes(1);
   });
 
   it('AC-7: a payload for ticket.delete writes nothing', async () => {
-    const { handle, store, closer, publish } = build();
+    const { handle, store, closer } = build();
 
     await handle(payload({ permissionKey: 'ticket.delete' }));
 
     expect(store.lockByRequest).not.toHaveBeenCalled();
     expect(closer.recordResolved).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
   });
 
   it('AC-8: a payload with status approved writes nothing', async () => {
-    const { handle, store, closer, publish } = build();
+    const { handle, store, closer } = build();
 
     await handle(payload({ status: 'approved' }));
 
     expect(store.lockByRequest).not.toHaveBeenCalled();
     expect(closer.recordResolved).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
   });
 
   it('AC-9: a malformed payload logs the warning and writes nothing', async () => {
@@ -227,17 +136,16 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
   });
 
   it('AC-10: a fleet-key payload whose request has no link writes nothing', async () => {
-    const { handle, store, closer, publish } = build({ link: null });
+    const { handle, store, closer } = build({ link: null });
 
     await handle(payload({ status: 'executed' }));
 
     expect(store.findApproval).not.toHaveBeenCalled();
     expect(closer.recordResolved).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
   });
 
   it('AC-11: an executed job_ended ask records approval.cancelled and leaves resolvedBy job_ended', async () => {
-    const { handle, store, closer, publish } = build({
+    const { handle, store, closer } = build({
       link: link({ resolvedBy: 'job_ended' }), view: view({ status: 'cancelled', resolvedBy: 'job_ended' }),
     });
 
@@ -246,7 +154,6 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     // The closer reads the status off the view, so the activity row is the cancelled one.
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', status: 'cancelled' }), expect.anything());
-    expect(publish.mock.calls[0]?.[0]).toMatchObject([{ type: 'fleet_approval', status: 'cancelled' }]);
   });
 
   it('AC-12: a fleet-key payload with status pending or cancelled writes nothing', async () => {
@@ -340,7 +247,7 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
   });
 
   it('a delayed expiry event cannot reapply timeout to an ask the engine no longer holds expired', async () => {
-    const { handle, store, closer, publish } = build({
+    const { handle, store, closer } = build({
       request: request({ status: 'pending' }), view: view({ status: 'pending' }),
     });
 
@@ -349,23 +256,20 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     expect(store.setRecordedStatus).not.toHaveBeenCalled();
     expect(closer.recordResolved).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
   });
 
-  it('records a projectless ask but publishes no frame, as a live channel is per project', async () => {
-    const { handle, closer, publish } = build({ view: view({ projectId: null }) });
+  it('records a projectless ask too', async () => {
+    const { handle, closer } = build({ view: view({ projectId: null }) });
 
     await handle(payload({ status: 'executed', projectId: null }));
 
     expect(closer.recordResolved).toHaveBeenCalledTimes(1);
-    expect(publish).not.toHaveBeenCalled();
   });
 
   it('a database failure propagates, so the relay retries the event', async () => {
-    const { handle, store, publish } = build();
+    const { handle, store } = build();
     store.findApproval.mockRejectedValueOnce(new Error('db unavailable'));
 
     await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('db unavailable');
-    expect(publish).not.toHaveBeenCalled();
   });
 });

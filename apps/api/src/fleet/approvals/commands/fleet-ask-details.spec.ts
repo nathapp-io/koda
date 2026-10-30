@@ -14,7 +14,7 @@ const row: ApprovalRequestRecord = {
 };
 function build() {
   const asks = { findApproval: vi.fn().mockResolvedValue({ jobId: 'J', policyId: 'view-policy', resolvedBy: null, outcome: null }), findRequeueCandidates: vi.fn().mockResolvedValue([]) };
-  const budget = new FleetBudgetOverrideCommand({} as never, {} as never, {} as never, asks as never, {} as never, {} as never, {} as never, {} as never);
+  const budget = new FleetBudgetOverrideCommand({} as never, {} as never, {} as never, asks as never, {} as never, {} as never, {} as never);
   const bash = new FleetShellEscalateCommand({} as never, asks as never, {} as never, {} as never);
   return { asks, budget, bash };
 }

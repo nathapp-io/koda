@@ -3,7 +3,7 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandType } from '../../common/enums';
 import { Prisma } from '../../generated/prisma/client';
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { responsibleUserOf } from '../common/responsible-user';
@@ -25,7 +25,6 @@ export interface ReportOutcome {
   ack: JobAck | null;
   unknown: boolean;
   live: LiveFleetJobEvent[];
-  approvalLive: LiveFleetApprovalEvent[];
 }
 
 /** The outcome plus the job after the report when its costSpentUsd changed (S1b §2.2 signal). */
@@ -34,7 +33,7 @@ interface Processed {
   spent: FleetJobRecord | null;
 }
 
-const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [], approvalLive: [] });
+const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [] });
 
 /** Plan D156: a server-requested cancel keeps its reason (e.g. `budget:<policyId>`) over the runner's. */
 function cancelReasonFor(job: FleetJobRecord, to: string, reported: string | null): string | null {
@@ -101,23 +100,21 @@ export class JobReportProcessor {
     let next = job.ackedRunnerSeq + 1;
     let mirrored = false;
     const live: LiveFleetJobEvent[] = [];
-    const approvalLive: LiveFleetApprovalEvent[] = [];
     for (const event of await this.repo.findRunnerEventsAfter(job.id, job.leaseEpoch, job.ackedRunnerSeq)) {
       if (event.runnerSeq !== next) break;
       const applied = await this.applyOne(current, event, runnerId, now);
       current = applied.job;
       if (applied.live) live.push(applied.live);
-      approvalLive.push(...(applied.approvalLive ?? []));
       mirrored = mirrored || applied.mirrored;
       next += 1;
     }
     const ackedSeq = next - 1;
     if (ackedSeq !== job.ackedRunnerSeq) current = await bookkeeping('runner.event-log', () => this.repo.update(job.id, { ackedRunnerSeq: ackedSeq }));
     if (mirrored && live.length === 0) live.push(this.live.event(current));
-    return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live, approvalLive }, spent: costChanged(job, current) ? current : null };
+    return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live }, spent: costChanged(job, current) ? current : null };
   }
 
-  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; approvalLive?: LiveFleetApprovalEvent[]; mirrored: boolean }> {
+  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; mirrored: boolean }> {
     const effect = interpretEvent(event.type, event.payload);
     if (effect.kind === 'none') return { job, mirrored: false };
     if (effect.kind === 'mirror') return { job: await bookkeeping('runner.event-log', () => this.repo.update(job.id, effect.patch)), mirrored: true };
@@ -133,7 +130,7 @@ export class JobReportProcessor {
           payload: { approvalId: null, naxAskId: change.answer.naxAskId, choice: change.answer.choice },
         });
       }
-      return { job, approvalLive: change.live, mirrored: false };
+      return { job, mirrored: false };
     }
     if (effect.kind === 'transition' && canTransition(job.state, effect.to, 'runner')) {
       const r = await this.transitions.apply({
@@ -141,7 +138,7 @@ export class JobReportProcessor {
         extra: effect.exitCode === null ? {} : { exitCode: effect.exitCode },
       });
       await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `${job.state} -> ${r.job.state}` });
-      return { job: r.job, live: r.live, approvalLive: r.approvalLive, mirrored: false };
+      return { job: r.job, live: r.live, mirrored: false };
     }
     const reason = effect.kind === 'invalid' ? effect.reason : `transition ${job.state} -> ${effect.to}`;
     this.logger.warn(`Rejected runner event on job ${job.id} (runnerSeq ${event.runnerSeq}): ${reason}`);

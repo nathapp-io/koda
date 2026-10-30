@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { responsibleUserOf } from '../common/responsible-user';
 import { ApprovalCloser } from '../approvals/approval-closer';
@@ -46,7 +46,7 @@ export class JobTransitionsService {
   async apply(input: {
     job: FleetJobRecord; to: FleetJobState; by: TransitionActor; now: Date; actor: TransitionActorRef;
     reason?: string | null; extra?: FleetJobPatch;
-  }): Promise<{ job: FleetJobRecord; live: FleetJobLiveEvent; approvalLive: LiveFleetApprovalEvent[] }> {
+  }): Promise<{ job: FleetJobRecord; live: FleetJobLiveEvent }> {
     const { job, to, by, now } = input;
     if (!canTransition(job.state, to, by)) throw new InvalidTransitionError(job.state, to, by);
     const terminal = isTerminal(to);
@@ -70,15 +70,15 @@ export class JobTransitionsService {
     const recorded = await this.record({ before: job, after, by, now, actor: input.actor, reason: input.reason });
     const live: FleetJobLiveEvent = threadEvents.length ? { ...recorded, threadEvents } : recorded;
     // Spec §1.4 / plan D263: nax has exited or is exiting, so its asks are moot and an unsent answer must not go out.
-    const approvalLive = job.state === FleetJobState.RUNNING && to !== FleetJobState.RUNNING ? await this.leaveRunning(after, now) : [];
+    if (job.state === FleetJobState.RUNNING && to !== FleetJobState.RUNNING) await this.leaveRunning(after, now);
     // S1b §3.3: a scheduled job's end moves its schedule's counters in this same transaction.
     if (terminal && after.scheduleId) await this.schedules.onJobEnded(after, now);
-    return { job: after, live, approvalLive };
+    return { job: after, live };
   }
 
-  private async leaveRunning(job: FleetJobRecord, now: Date): Promise<LiveFleetApprovalEvent[]> {
+  private async leaveRunning(job: FleetJobRecord, now: Date): Promise<void> {
     await this.repo.withdrawPendingCommands(job.id, now, { types: [FleetCommandType.APPROVAL_ANSWER] });
-    return this.approvals.closeForJob(job, now);
+    await this.approvals.closeForJob(job, now);
   }
 
   async record(input: {

@@ -1,4 +1,3 @@
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { FleetJobEventRecord, FleetJobPatch, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { JobReport } from '../common/protocol';
 import { JobReportProcessor } from './job-report.processor';
@@ -13,7 +12,6 @@ const VALID_ASK = {
   options: ['allow', 'allow-remember', 'deny'],
 };
 
-const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'pending', at: NOW.toISOString() };
 
 const runningJob: FleetJobRecord = {
   id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'main', command: 'RUN', feature: 'demo', planFrom: null, threadId: null,
@@ -60,7 +58,7 @@ function makeProcessor(repo: ReturnType<typeof makeRepo>) {
   const budgets = { signal: vi.fn() };
   const live = { event: vi.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
   const tx = { run: (fn: () => unknown) => fn() };
-  const closer = { openBash: vi.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] }) };
+  const closer = { openBash: vi.fn().mockResolvedValue({ approval: { id: 'a1' } }) };
   const processor = new JobReportProcessor(repo as never, {} as never, live as never, fence as never, activity as never, budgets as never, closer as never, tx as never, mockAuditRecorder);
   return { processor, closer, activity };
 }
@@ -70,14 +68,15 @@ const report = (jobId: string, leaseEpoch: number): JobReport => ({
 });
 
 describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
-  it('opens a bash approval for an approval_request on a RUNNING job and returns its live event', async () => {
+  it('opens a bash approval for an approval_request on a RUNNING job without returning a fleet approval event', async () => {
     const repo = makeRepo();
     repo.seed({ ...runningJob, bashMode: 'escalate' });
     const { processor, closer } = makeProcessor(repo);
     const outcome = await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
     expect(closer.openBash).toHaveBeenCalledWith(expect.objectContaining({ id: runningJob.id }), expect.objectContaining({ naxAskId: 'ask-1f2e3d4c' }), 'r1', NOW);
-    expect(outcome.approvalLive).toEqual([APPROVAL_LIVE]);
+
     expect(outcome.ack).toEqual({ jobId: runningJob.id, ackedSeq: 1 });
+    expect(outcome).not.toHaveProperty('approvalLive');
   });
 
   it('rejects a malformed ask as an event, acks it, and opens nothing (D269)', async () => {
@@ -106,7 +105,7 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
     const repo = makeRepo();
     repo.seed({ ...runningJob, bashMode: 'escalate' });
     const { processor, closer } = makeProcessor(repo);
-    closer.openBash.mockResolvedValueOnce({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
+    closer.openBash.mockResolvedValueOnce({ approval: null, answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
 
     const outcome = await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
 
@@ -114,7 +113,7 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
       runnerId: 'r1', jobId: 'job-1', type: 'APPROVAL_ANSWER', leaseEpoch: 1,
       payload: { approvalId: null, naxAskId: 'ask-1f2e3d4c', choice: 'allow' },
     });
-    expect(outcome.approvalLive).toEqual([]);
+
     expect(outcome.ack).toEqual({ jobId: 'job-1', ackedSeq: 1 });
   });
 
@@ -122,7 +121,7 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
     const repo = makeRepo();
     repo.seed({ ...runningJob, bashMode: 'escalate' });
     const { processor, closer } = makeProcessor(repo);
-    closer.openBash.mockResolvedValueOnce({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'deny' } });
+    closer.openBash.mockResolvedValueOnce({ approval: null, answer: { naxAskId: 'ask-1f2e3d4c', choice: 'deny' } });
 
     await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
 
@@ -180,7 +179,7 @@ describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bu
       apply: vi.fn(async ({ job, to }: { job: FleetJobRecord; to: string }) => {
         expect(currentBookkeepingReason()).toBeUndefined();
         const after = await repo.update(job.id, { state: to as FleetJobRecord['state'] });
-        return { job: after, live: { id: `live-${to}`, type: 'fleet_job', projectId: 'p1', jobId: job.id, state: to, at: NOW.toISOString() }, approvalLive: [] };
+        return { job: after, live: { id: `live-${to}`, type: 'fleet_job', projectId: 'p1', jobId: job.id, state: to, at: NOW.toISOString() } };
       }),
     };
     const fence = { holds: () => true, abandon: vi.fn() };

@@ -10,6 +10,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
@@ -167,7 +168,9 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     // Permissions P3 7c US-002: the fleet's own `fleet_approval_requested` announcement is gone; the engine's
     // `approval_request_changed` (enqueued by `ApprovalRequestEvents.record`) is the only event of the ask.
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
-    expect(seen).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'fleet_approval', approvalId: request.id, status: 'pending' })]));
+    await app.get(OutboxRelay).dispatchPendingBatch();
+    expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId: request.id, status: 'pending' }));
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
   });
 
   it('AC-2: that hard stop stamps its incident with the request id', async () => {
@@ -327,7 +330,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
       withTestActor({ type: 'USER', id: world.ids.root }, () =>
         txManager.run(() => closer.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(world.ids.root) }, new Date()))));
 
-    expect(closed).toEqual({ approval: null, live: [] });
+    expect(closed).toEqual({ approval: null });
     expect(await requestOf(ask.id)).toMatchObject({ status: 'pending', result: null });
     expect((await linkOf(ask.id)).resolvedBy).toBeNull();
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: ask.id, action: 'approval.cancelled' } })).toBe(0);

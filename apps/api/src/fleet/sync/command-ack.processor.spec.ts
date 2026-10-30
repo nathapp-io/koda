@@ -1,4 +1,4 @@
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { CommandAckProcessor } from './command-ack.processor';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
@@ -6,7 +6,6 @@ import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 const NOW = new Date('2026-10-03T10:00:00.000Z');
 
-const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'cancelled', at: NOW.toISOString() };
 const JOB_LIVE: LiveFleetJobEvent = { id: 'e1', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'CRASHED', at: NOW.toISOString() };
 
 const runningJob: FleetJobRecord = {
@@ -38,7 +37,7 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
     update: vi.fn(),
     createCommand: vi.fn(),
   };
-  const transitions = { apply: vi.fn(async () => ({ job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
+  const transitions = { apply: vi.fn(async () => ({ job: runningJob, live: JOB_LIVE })) };
   const fence = { holds: vi.fn(() => true), abandon: vi.fn() };
   const activity = { record: vi.fn() };
   const approvals = { lockByRequest: vi.fn(), setOutcome: vi.fn() };
@@ -82,18 +81,18 @@ describe('CommandAckProcessor live lists (S1.5 2a)', () => {
   it('an ok ASSIGN ack returns no job and no approval events', async () => {
     const { processor } = makeProcessor(command({ type: 'ASSIGN' }));
     await expect(processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW))
-      .resolves.toEqual({ live: [], approvalLive: [] });
+      .resolves.toEqual({ live: [] });
   });
 
-  it('a rejected READOPT on a RUNNING job returns both live lists (plan D263)', async () => {
+  it('a rejected READOPT on a RUNNING job returns the job live event (plan D263)', async () => {
     const { processor, transitions } = makeProcessor(command({ type: 'READOPT' }));
     transitions.apply.mockImplementation(async () => {
       expect(currentBookkeepingReason()).toBeUndefined();
-      return { job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] };
+      return { job: runningJob, live: JOB_LIVE };
     });
     const result = await processor.process('r1', 'boot-2', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'rejected', detail: 'no' }], NOW);
     expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ to: 'CRASHED', by: 'server' }));
-    expect(result).toEqual({ live: [JOB_LIVE], approvalLive: [APPROVAL_LIVE] });
+    expect(result).toEqual({ live: [JOB_LIVE] });
   });
 });
 
@@ -138,7 +137,7 @@ describe('THREAD_PUBLISH acks (US-004)', () => {
       { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
     const result = await withThreads.process('r1', 'boot-1', [publishAck('cmd-p', 'ok')], NOW);
     expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'ok', '');
-    expect(result).toEqual({ live: [], approvalLive: [] });
+    expect(result).toEqual({ live: [] });
   });
 });
 

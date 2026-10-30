@@ -4,7 +4,6 @@ import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { ApprovalCloser } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FLEET_APPROVAL_ASK_REPOSITORY } from './domain/fleet-approval-ask.domain';
 import { ApprovalStoreModule } from './approval-store.module';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
@@ -29,7 +28,6 @@ class AskStoreConsumerModule {}
 class LegacyApprovalConsumer {
   constructor(
     readonly closer: ApprovalCloser,
-    readonly livePublisher: ApprovalLivePublisher,
   ) {}
 }
 
@@ -50,11 +48,10 @@ const memberNames = (key: 'providers' | 'exports'): string[] =>
   });
 
 describe('ApprovalStoreModule', () => {
-  it('compiles and resolves the closer and the live publisher', async () => {
+  it('compiles and resolves the closer only', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ApprovalStoreModule] }).compile();
     try {
       expect(moduleRef.get(ApprovalCloser)).toBeDefined();
-      expect(moduleRef.get(ApprovalLivePublisher)).toBeDefined();
     } finally {
       await moduleRef.close();
     }
@@ -86,12 +83,11 @@ describe('ApprovalStoreModule', () => {
     }
   });
 
-  it('AC-12: a consumer still injects the closer and the live publisher', async () => {
+  it('AC-12: a consumer still injects the closer only', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [LegacyApprovalConsumerModule] }).compile();
     try {
       const consumer = moduleRef.get(LegacyApprovalConsumer);
       expect(consumer.closer).toBeInstanceOf(ApprovalCloser);
-      expect(consumer.livePublisher).toBeInstanceOf(ApprovalLivePublisher);
     } finally {
       await moduleRef.close();
     }
@@ -99,7 +95,7 @@ describe('ApprovalStoreModule', () => {
 
   it('US-012: neither provides nor exports the legacy FleetApproval repository or its token', () => {
     // The `FleetApproval` table is gone, so nothing may still resolve the repository that read it.
-    for (const name of ['PrismaApprovalRepository', 'Symbol(APPROVAL_REPOSITORY)']) {
+    for (const name of ['PrismaApprovalRepository', 'Symbol(APPROVAL_REPOSITORY)', 'ApprovalLivePublisher']) {
       expect(memberNames('providers')).not.toContain(name);
       expect(memberNames('exports')).not.toContain(name);
     }

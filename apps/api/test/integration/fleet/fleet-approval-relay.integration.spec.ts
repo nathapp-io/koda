@@ -22,6 +22,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
+import { ProjectEventBus } from '../../../src/live/project-event-bus';
+import type { LiveEvent } from '../../../src/live/live-event';
 import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
@@ -186,6 +188,46 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     });
     if (active.length === 0) return;
     await prisma.fleetJob.updateMany({ where: { id: { in: active.map((job) => job.id) } }, data: { state: 'CANCELLED' } });
+  });
+
+  it('retired live AC-1: relay open and engine rejection publish only approval_request', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('engine-live-reject');
+    const seen: LiveEvent[] = [];
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, event => seen.push(event));
+    try {
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-000000e1') }] }] });
+      const [opened] = await requestsOf(jobId);
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      await decide(opened.id, world.tokens.root, { decision: 'reject' }).expect(200);
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      expect(seen.filter(e => e.type === 'approval_request' && e.requestId === opened.id).map(e => e.status)).toEqual(['pending', 'rejected']);
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
+      await finish(jobId, leaseEpoch, 3);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('retired live AC-2: cancelling a running job relays the engine cancellation only', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('engine-live-cancel');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-000000e2') }] }] });
+    const [opened] = await requestsOf(jobId);
+    await app.get(OutboxRelay).dispatchPendingBatch();
+    const seen: LiveEvent[] = [];
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, event => seen.push(event));
+    try {
+      // The runner reports CANCELLED after the server requests cancellation, taking RUNNING -> CANCELLED.
+      await request(server).post(`/api/projects/web/fleet/jobs/${jobId}/cancel`).set(auth(world.tokens.dev)).expect(200);
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 3, type: 'state', payload: { to: 'CANCELLED' } }] }] });
+      expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('CANCELLED');
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId: opened.id, status: 'cancelled' }));
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
+    } finally {
+      unsubscribe();
+    }
   });
 
   it('writes need an action context', async () => {

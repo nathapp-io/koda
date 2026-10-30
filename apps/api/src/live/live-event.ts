@@ -1,7 +1,7 @@
 /**
  * Track 1 Slice 5: the content-free live event pushed to browsers over SSE.
  * `type` is a union: `ticket` since Track 1 Slice 5, `fleet_job` since fleet S1,
- * `fleet_approval` since fleet S1.5, `fleet_log` since fleet S2a.
+ * `fleet_log` since fleet S2a, and the engine's `approval_request`.
  * `id` is the ticket_event envelope id (the TicketEvent row id), stable
  * across outbox retries, so clients can drop duplicate deliveries.
  */
@@ -40,19 +40,6 @@ export interface LiveFleetJobEvent {
 }
 
 /**
- * Fleet S1.5 (spec §2.5): content-free approval change; the inbox refetches.
- * Only approvals with a project are published (the bus routes on projectId).
- */
-export interface LiveFleetApprovalEvent {
-  id: string;
-  type: 'fleet_approval';
-  projectId: string;
-  approvalId: string;
-  status: string;
-  at: string;
-}
-
-/**
  * Fleet S2a (spec §2.3): content-free log growth; the viewer fetches from its cursor.
  * `id` is fresh per publish (clients dedupe by id).
  */
@@ -78,7 +65,7 @@ export interface LiveApprovalRequestEvent {
   at: string;
 }
 
-export type LiveEvent = LiveTicketEvent | LiveFleetJobEvent | LiveFleetApprovalEvent | LiveFleetLogEvent | LiveApprovalRequestEvent;
+export type LiveEvent = LiveTicketEvent | LiveFleetJobEvent | LiveFleetLogEvent | LiveApprovalRequestEvent;
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 

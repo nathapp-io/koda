@@ -31,14 +31,13 @@ function build() {
     budgets: { resume: vi.fn() },
     jobs: { requeue: vi.fn() },
     asks: { findRequeueCandidates: vi.fn().mockResolvedValue([]), findByRequest: vi.fn().mockResolvedValue(null), setOutcome: vi.fn() },
-    closer: { closeForPolicy: vi.fn().mockResolvedValue({ approval: null, live: [] }) },
-    live: { publish: vi.fn() },
+    closer: { closeForPolicy: vi.fn().mockResolvedValue({ approval: null }) },
     audit: { record: vi.fn() },
     txManager: { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) },
   };
   const command = new FleetBudgetOverrideCommand(
     mocks.policies as never, mocks.budgets as never, mocks.jobs as never, mocks.asks as never,
-    mocks.closer as never, mocks.live as never, mocks.audit as never, mocks.txManager as never,
+    mocks.closer as never, mocks.audit as never, mocks.txManager as never,
   );
   return { command, mocks };
 }
@@ -162,11 +161,11 @@ describe('FleetBudgetOverrideCommand', () => {
     expect(command.toResult({ resumedAmountUsd: '20', requeue: [candidate('job-a')], refused: ['gone'] })).toEqual({ resumedAmountUsd: '20' });
   });
 
-  it('US-007 AC-12: execute closes the policy\'s other pending ask as superseded and queues its live events', async () => {
+  it('US-007 AC-12: execute closes the policy\'s other pending ask as superseded in the execution transaction', async () => {
     const { command, mocks } = build();
     mocks.policies.lockById.mockResolvedValue(policyRecord);
     mocks.budgets.resume.mockResolvedValue({ amountUsd: '20' });
-    const closed = { approval: { id: 'other-1' }, live: [{ approvalId: 'other-1', status: 'cancelled' }] };
+    const closed = { approval: { id: 'other-1' } };
     mocks.closer.closeForPolicy.mockResolvedValue(closed);
 
     await under(decided(), () => command.execute(input, { amountUsd: 20, requeueJobIds: [] }));
@@ -175,7 +174,6 @@ describe('FleetBudgetOverrideCommand', () => {
     expect(mocks.closer.closeForPolicy).toHaveBeenCalledWith('policy-1', {
       status: 'cancelled', resolvedBy: 'superseded', actor: { type: 'USER', id: 'approver-1', responsibleUserId: 'approver-1' },
     }, expect.any(Date));
-    expect(mocks.live.publish).toHaveBeenCalledWith(closed.live);
   });
 
   it('US-007: execute still records the new cap when the policy had no other pending ask', async () => {
@@ -187,6 +185,5 @@ describe('FleetBudgetOverrideCommand', () => {
 
     expect(result.resumedAmountUsd).toBe('20');
     expect(mocks.asks.setOutcome).toHaveBeenCalledWith('request-1', { resumedAmountUsd: '20', requeueResults: [] });
-    expect(mocks.live.publish).toHaveBeenCalledWith([]);
   });
 });

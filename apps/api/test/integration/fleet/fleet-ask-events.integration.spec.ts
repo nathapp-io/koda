@@ -1,7 +1,7 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
- * Permissions P3 US-009 — a settled ask's fleet outputs (activity row and
- * `fleet_approval` live event) are recorded by the one durable outbox consumer, once per engine status, after the
+ * Permissions P3 US-009 — a settled ask's fleet activity is
+ * recorded by the one durable outbox consumer, once per engine status, after the
  * deciding or expiring transaction committed.
  *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ask-events.integration.spec.ts
@@ -132,12 +132,13 @@ integration('fleet ask events recorded from the engine (PG)', () => {
     ]);
   });
 
-  it('AC-6: relaying the same change twice records the outputs once', async () => {
-    await decide('approve');
+  it('retired live AC-3: relaying the same executed change twice records approval.decided once', async () => {
+    expect(await decide('approve')).toMatchObject({ status: 'executed' });
 
     await relay();
     await relay();
 
+    expect(await activity(requestId)).toMatchObject([{ action: 'approval.decided', entityId: requestId }]);
     expect(await activity(requestId)).toHaveLength(1);
     expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
   });

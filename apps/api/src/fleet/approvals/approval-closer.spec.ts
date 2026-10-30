@@ -29,7 +29,7 @@ function askStore() {
       const link: FleetApprovalAskRecord = {
         requestId: d.requestId, kind: d.kind, projectId: d.projectId, jobId: d.jobId ?? null, leaseEpoch: d.leaseEpoch ?? null,
         naxAskId: d.naxAskId ?? null, budgetPolicyId: d.budgetPolicyId ?? null, resolvedBy: null, outcome: null,
-        pendingClose: null, recordedStatus: null, publishedStatus: null, createdAt: NOW, updatedAt: NOW,
+        pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
       };
       links.set(link.requestId, link);
       views.set(link.requestId, {
@@ -134,12 +134,11 @@ function askService(store: ReturnType<typeof askStore>) {
 function fakes() {
   const store = askStore();
   const asks = askService(store);
-  const activity = { record: vi.fn(async () => undefined) };
-  const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
+  const activity = { record: vi.fn(async (_entry: { action: string }) => undefined) };
   mockAuditRecorder.record.mockReset();
   mockAuditRecorder.record.mockImplementation(async () => undefined);
   const closer = new ApprovalCloser(
-    store as never, asks as never, activity as never, live as never, mockAuditRecorder,
+    store as never, asks as never, activity as never, mockAuditRecorder,
   );
   return { closer, store, asks, activity };
 }
@@ -154,7 +153,7 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
   const system = { type: 'SYSTEM' as const, id: 'system', responsibleUserId: 'u1' };
   const resumer = { type: 'USER' as const, id: 'u9', responsibleUserId: 'u9' };
 
-  it('opens the ask on the engine as fleet.budget.override for the stop snapshot, then links it and announces the view', async () => {
+  it('opens the ask on the engine as fleet.budget.override for the stop snapshot, then links it and records the view', async () => {
     const r = await closer.openBudget(policy(), stop, NOW);
 
     expect(asks.open).toHaveBeenCalledWith({
@@ -172,29 +171,26 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
       actorType: 'SYSTEM', action: 'approval.requested', entityType: 'approval', entityId: 'req-1', projectId: 'p1', responsibleUserId: 'u1',
     }));
-    expect(r.live).toEqual([{ approvalId: 'req-1', status: 'pending' }]);
   });
 
-  it('supersedes the stray pending ask on the engine before opening the new one and carries both live frames', async () => {
+  it('supersedes the stray pending ask on the engine before opening the new one and records both activities', async () => {
     const first = await closer.openBudget(policy(), stop, NOW);
     const second = await closer.openBudget(policy(), { ...stop, spentUsd: '11' }, NOW);
 
     expect(asks.close).toHaveBeenCalledWith('req-1', { status: 'cancelled', reason: 'superseded' }, NOW);
     expect(store.links.get('req-1')).toEqual(expect.objectContaining({ resolvedBy: 'superseded' }));
     expect(second.approval?.status).toBe('pending');
-    // The stray's live frame is carried forward alongside the new one; the caller publishes both after commit.
-    expect(second.live).toEqual([
-      { approvalId: first.approval?.id, status: 'cancelled' },
-      { approvalId: second.approval?.id, status: 'pending' },
+    expect(first.approval?.id).not.toBe(second.approval?.id);
+    expect(activity.record.mock.calls.map(([entry]) => entry.action)).toEqual([
+      'approval.requested', 'approval.cancelled', 'approval.requested',
     ]);
   });
 
-  it('opens a global policy ask with no project and sends no live event', async () => {
+  it('opens a global policy ask with no project', async () => {
     const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), stop, NOW);
 
     expect(asks.open.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ projectId: null }));
     expect(r.approval).toEqual(expect.objectContaining({ projectId: null }));
-    expect(r.live).toEqual([]);
   });
 
   it('a hard stop whose ask the engine resolves to none throws rather than pausing with no ask', async () => {
@@ -206,7 +202,7 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
 
   it('closes the pending ask of a policy on the engine and stamps the link, or answers nothing when there is none', async () => {
     expect(await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'window_reset', actor: system }, NOW))
-      .toEqual({ approval: null, live: [] });
+      .toEqual({ approval: null });
     expect(asks.close).not.toHaveBeenCalled();
 
     await closer.openBudget(policy(), stop, NOW);
@@ -241,7 +237,7 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     activity.record.mockClear();
 
     expect(await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: resumer }, NOW))
-      .toEqual({ approval: null, live: [] });
+      .toEqual({ approval: null });
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     expect(store.setOutcome).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
@@ -261,7 +257,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(store.links.get('req-1')?.resolvedBy).toBeNull();
     expect(store.links.get('req-2')?.resolvedBy).toBe('policy_deleted');
     expect(r.approval).toEqual(expect.objectContaining({ id: 'req-2', status: 'cancelled' }));
-    expect(r.live).toEqual([{ approvalId: 'req-2', status: 'cancelled' }]);
   });
 
   it('US-007 F3: every pending ask of the policy is settled, not only the oldest', async () => {
@@ -274,7 +269,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(store.setOutcome).toHaveBeenCalledWith('req-1', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
     expect(store.setOutcome).toHaveBeenCalledWith('req-2', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
     expect(r.approval).toEqual(expect.objectContaining({ id: 'req-1' }));
-    expect(r.live).toEqual([{ approvalId: 'req-1', status: 'approved' }, { approvalId: 'req-2', status: 'approved' }]);
   });
 
   it('B1: a link an earlier close already stamped keeps that close, whatever this call was asked to write', async () => {
@@ -307,8 +301,8 @@ describe('bash half on the approval engine (US-006)', () => {
     naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test', options: ['allow', 'deny'] }, ...over,
   });
 
-  it('opens the ask on the engine as fleet.job.shell.escalate for the job requester, then links and announces it', async () => {
-    const { approval, live } = await closer.openBash(job, ask(), 'r1', NOW);
+  it('opens the ask on the engine as fleet.job.shell.escalate for the job requester, then links and records it', async () => {
+    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
     expect(asks.open).toHaveBeenCalledWith({
       key: 'fleet.job.shell.escalate', projectId: 'p1', component: 'runner',
       onBehalfOf: { type: 'USER', id: 'u9' }, origin: 'runner',
@@ -319,7 +313,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(approval).toEqual(expect.objectContaining({ id: 'req-1', type: 'nax_bash_escalate', status: 'pending', jobId: 'j1', leaseEpoch: 2, naxAskId: 'ask-1f2e3d4c' }));
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', responsibleUserId: 'u9', action: 'approval.requested' }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: approval?.id, projectId: 'p1', summary: 'bash ask opened, pending' });
-    expect(live).toHaveLength(1);
   });
 
   it('US-006 AC-2/AC-3: gives the engine the earlier of the ask deadline and now + approvalTimeoutSec', async () => {
@@ -334,7 +327,7 @@ describe('bash half on the approval engine (US-006)', () => {
   it('a re-reported ask answers the stored view and writes nothing', async () => {
     const first = await closer.openBash(job, ask(), 'r1', NOW);
     const again = await closer.openBash(job, ask(), 'r1', NOW);
-    expect(again).toEqual({ approval: first.approval, live: [] });
+    expect(again).toEqual({ approval: first.approval });
     expect(asks.open).toHaveBeenCalledTimes(1);
     expect(store.insert).toHaveBeenCalledTimes(1);
     expect(mockAuditRecorder.record).toHaveBeenCalledTimes(1);
@@ -345,9 +338,8 @@ describe('bash half on the approval engine (US-006)', () => {
     [{ bashMode: 'raw' }, {}, 'raw mode'],
     [{}, { deadlineAt: new Date(NOW.getTime() - 1) }, 'past deadline'],
   ] as const)('an ask nax cannot wait for (%p %p) opens nothing and is audited as %s', async (jobOver, askOver, reason) => {
-    const { approval, live } = await closer.openBash({ ...job, ...jobOver }, ask(askOver), 'r1', NOW);
+    const { approval } = await closer.openBash({ ...job, ...jobOver }, ask(askOver), 'r1', NOW);
     expect(approval).toBeNull();
-    expect(live).toEqual([]);
     expect(asks.open).not.toHaveBeenCalled();
     expect(store.insert).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
@@ -359,7 +351,7 @@ describe('bash half on the approval engine (US-006)', () => {
   it('an ask the policy resolves to none is answered allow at once, with no request and no link', async () => {
     asks.open.mockResolvedValueOnce({ status: 'not-needed' });
     const r = await closer.openBash(job, ask(), 'r1', NOW);
-    expect(r).toEqual({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
+    expect(r).toEqual({ approval: null, answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
     expect(store.insert).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({
@@ -380,14 +372,13 @@ describe('bash half on the approval engine (US-006)', () => {
     await closer.openBash(job, ask({ naxAskId: 'ask-00000002' }), 'r1', NOW);
     mockAuditRecorder.record.mockClear();
 
-    const live = await closer.closeForJob(job, NOW);
+    await expect(closer.closeForJob(job, NOW)).resolves.toBeUndefined();
 
     expect(asks.close.mock.calls).toEqual([
       ['req-1', { status: 'cancelled', reason: 'job_ended' }, NOW],
       ['req-2', { status: 'cancelled', reason: 'job_ended' }, NOW],
     ]);
     expect(store.setResolvedBy.mock.calls).toEqual([['req-1', 'job_ended'], ['req-2', 'job_ended']]);
-    expect(live).toHaveLength(2);
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.cancelled', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
   });
 
@@ -396,15 +387,14 @@ describe('bash half on the approval engine (US-006)', () => {
     asks.close.mockResolvedValueOnce(null);
     activity.record.mockClear();
 
-    const live = await closer.closeForJob(job, NOW);
+    await expect(closer.closeForJob(job, NOW)).resolves.toBeUndefined();
 
-    expect(live).toEqual([]);
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
   });
 
-  it('closeForJob answers [] when the job has no pending ask', async () => {
-    expect(await closer.closeForJob(job, NOW)).toEqual([]);
+  it('closeForJob answers void when the job has no pending ask', async () => {
+    await expect(closer.closeForJob(job, NOW)).resolves.toBeUndefined();
     expect(asks.close).not.toHaveBeenCalled();
   });
 
@@ -423,16 +413,14 @@ describe('bash half on the approval engine (US-006)', () => {
     const total = MAX_ASKS_CLOSED_PER_CALL + 50;
     await openMany(total);
 
-    const first = await closer.closeForJob(job, NOW);
-    expect(first).toHaveLength(MAX_ASKS_CLOSED_PER_CALL);
+    await closer.closeForJob(job, NOW);
     expect(asks.close).toHaveBeenCalledTimes(MAX_ASKS_CLOSED_PER_CALL);
     expect(store.findPendingForJobPage).toHaveBeenCalledTimes(1);   // one page == the bound
 
-    const rest = await closer.closeForJob(job, NOW);
-    expect(rest).toHaveLength(50);
+    await closer.closeForJob(job, NOW);
     expect(asks.close).toHaveBeenCalledTimes(total);
 
-    expect(await closer.closeForJob(job, NOW)).toEqual([]);
+    await expect(closer.closeForJob(job, NOW)).resolves.toBeUndefined();
   });
 
   it('US-006 AC-13 (F1 round 3): a call that stops at its bound logs the backlog it left', async () => {
@@ -455,12 +443,13 @@ describe('bash half on the approval engine (US-006)', () => {
       return calls === 3 ? null : { id: requestId, status: 'cancelled' };
     });
 
-    const first = await closer.closeForJob(job, NOW);
-    const rest = await closer.closeForJob(job, NOW);
+    await closer.closeForJob(job, NOW);
+    expect(asks.close).toHaveBeenCalledTimes(MAX_ASKS_CLOSED_PER_CALL);
+    expect(store.setResolvedBy).toHaveBeenCalledTimes(MAX_ASKS_CLOSED_PER_CALL - 1);
+    await closer.closeForJob(job, NOW);
 
     // The held ask is stepped over in the first call and closed by the continuation, not met twice in a row.
-    expect(first).toHaveLength(MAX_ASKS_CLOSED_PER_CALL - 1);
-    expect(rest).toHaveLength(21);
+    expect(asks.close).toHaveBeenCalledTimes(total + 1);
     expect(store.setResolvedBy).toHaveBeenCalledTimes(total);
   });
 
@@ -471,11 +460,10 @@ describe('bash half on the approval engine (US-006)', () => {
     const total = calls * MAX_ASKS_CLOSED_PER_CALL;
     await openMany(total);
 
-    let closed = 0;
-    for (let call = 0; call < calls; call += 1) closed += (await closer.closeForJob(job, NOW)).length;
+    for (let call = 0; call < calls; call += 1) await closer.closeForJob(job, NOW);
 
-    expect(closed).toBe(total);
+    expect(store.setResolvedBy).toHaveBeenCalledTimes(total);
     expect(asks.close).toHaveBeenCalledTimes(total);
-    expect(await closer.closeForJob(job, NOW)).toEqual([]);
+    await expect(closer.closeForJob(job, NOW)).resolves.toBeUndefined();
   });
 });
