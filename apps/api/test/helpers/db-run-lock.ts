@@ -1,5 +1,5 @@
 /**
- * One DB-mode run at a time per test database (fix round 1, F1).
+ * One DB-mode run at a time per test database (fix round 1, F1; fails closed since fix round 2, B1).
  *
  * Every DB-mode run force-resets the schema in `globalSetup` (`prisma db push --force-reset`) and every suite's
  * `beforeAll` truncates all tables, so two runs sharing one Postgres destroy each other. The repo rule already says so
@@ -14,8 +14,10 @@
  *
  * - it is granted by the database, so there is no stale-file or reused-pid failure mode: the lock disappears the moment
  *   the holding connection ends, which is exactly when a killed run stops mattering;
- * - a second run blocks inside `pg_advisory_lock` until the first finishes, with `lock_timeout` as its budget: once the
- *   budget expires it warns and runs anyway, because failing a gate on a lock timeout is worse than the collision;
+ * - a second run polls `pg_try_advisory_lock` until the first finishes, with `waitMs` as its budget: once the budget
+ *   expires — or the session cannot even be opened — this helper **throws** and the setup aborts, because the next thing
+ *   `globalSetup` does is `prisma db push --force-reset`, which would erase the fixtures of the run it could not see.
+ *   Failing closed is the whole point of the lock; an unserialised run is opt-in only, through `KODA_DB_RUN_LOCK=off`;
  * - the unlock is best-effort: a released green run must never fail on teardown.
  */
 import { createHash } from 'node:crypto';
@@ -29,7 +31,7 @@ const POLL_MS = 500;
 /** How long a wait has to last before the run says it is waiting for another one. */
 const WAIT_NOTICE_MS = 1_000;
 
-/** One held-or-not lock session: the unit cases inject a double instead of opening a connection. */
+/** One lock session: the unit cases inject a double instead of opening a connection. */
 export interface DbLockSession {
   /** Blocks until the lock is granted; answers false when the wait budget ran out. */
   tryLock(waitMs: number): Promise<boolean>;
@@ -38,13 +40,11 @@ export interface DbLockSession {
 }
 
 export interface DbRunLock {
-  /** False when this run went ahead without the lock (budget expired, or the database was unreachable). */
-  readonly ownsLock: boolean;
   release(): Promise<void>;
 }
 
 export interface AcquireDbRunLockOptions {
-  /** Total time to wait for another run before going ahead. */
+  /** Total time to wait for another run before aborting the setup. */
   waitMs?: number;
   log?: (message: string) => void;
   /** Test seam: how to open the session. */
@@ -102,9 +102,19 @@ async function openPrismaLockSession(databaseUrl: string): Promise<DbLockSession
 
 const defaultLog = (message: string): void => { process.stderr.write(`${message}\n`); };
 
+/** Best-effort close: on the abort path a failing close only means the connection was already going away. */
+async function closeQuietly(session: DbLockSession): Promise<void> {
+  try {
+    await session.close();
+  } catch {
+    // Nothing to do: the process is about to fail the run.
+  }
+}
+
 /**
- * Takes the run lock for one database, waiting (bounded) for a live run to finish. Contention never throws: a run that
- * cannot get the lock in time goes ahead and says so.
+ * Takes the run lock for one database, waiting (bounded) for a live run to finish. Contention never resolves to "go
+ * ahead anyway": when the lock cannot be had, this **throws** and `globalSetup` aborts before its force-reset.
+ * Unserialised execution is opt-in, through `KODA_DB_RUN_LOCK=off` in `globalSetup`.
  */
 export async function acquireDbRunLock(
   databaseUrl: string,
@@ -116,32 +126,47 @@ export async function acquireDbRunLock(
   try {
     session = await openSession(databaseUrl);
   } catch (error) {
-    log(`koda: could not open the test-database lock session (${String(error)}); the run goes ahead unserialised`);
-    return { ownsLock: false, release: async () => undefined };
+    // Fail closed: without a session this run cannot tell whether another run is using the database, and the next step
+    // force-resets it.
+    throw new Error(
+      `koda: could not open the test-database lock session (${String(error)}); aborting instead of resetting a test `
+      + 'database this run cannot lock (set KODA_DB_RUN_LOCK=off to run unserialised on a database nobody else uses)',
+    );
   }
 
-  let ownsLock = false;
   const startedAt = Date.now();
+  let lockError: unknown;
   try {
-    ownsLock = await session.tryLock(waitMs);
+    if (await session.tryLock(waitMs)) {
+      const waitedMs = Date.now() - startedAt;
+      if (waitedMs >= WAIT_NOTICE_MS) {
+        // Serialisation working: say so, because a silent extra minute looks like a hang.
+        log(`koda: waited ${Math.round(waitedMs / 1000)}s for another DB-mode run on this test database`);
+      }
+      return heldLock(session);
+    }
   } catch (error) {
-    log(`koda: the test-database lock failed (${String(error)}); the run goes ahead unserialised`);
-  }
-  const waitedMs = Date.now() - startedAt;
-  if (ownsLock && waitedMs >= WAIT_NOTICE_MS) {
-    // Serialisation working: say so, because a silent extra minute looks like a hang.
-    log(`koda: waited ${Math.round(waitedMs / 1000)}s for another DB-mode run on this test database`);
-  }
-  if (!ownsLock) {
-    log(`koda: another DB-mode run has been holding this test database for ${Math.round(waitMs / 1000)}s; going ahead without the lock`);
+    lockError = error;
   }
 
+  const waitedMs = Math.round((Date.now() - startedAt) / 1000);
+  await closeQuietly(session);
+  throw new Error(lockError === undefined
+    ? `koda: another DB-mode run has held this test database for ${waitedMs}s and did not release it; aborting instead `
+      + 'of force-resetting the database it is using (let that run finish, or set KODA_DB_RUN_LOCK=off when this '
+      + 'database is not shared)'
+    : `koda: the test-database lock failed (${String(lockError)}); aborting instead of resetting a test database this `
+      + 'run cannot lock (set KODA_DB_RUN_LOCK=off to run unserialised on a database nobody else uses)');
+}
+
+/** The held-lock handle: one release per lock, and teardown never fails on it. */
+function heldLock(session: DbLockSession): DbRunLock {
   let released: Promise<void> | undefined;
   const release = (): Promise<void> => {
     // One release per lock: a teardown that runs twice must not unlock a lock this run no longer holds.
     released ??= (async () => {
       try {
-        if (ownsLock) await session.unlock();
+        await session.unlock();
       } catch {
         // Best effort: the connection closing releases the advisory lock anyway.
       }
@@ -154,7 +179,7 @@ export async function acquireDbRunLock(
     return released;
   };
 
-  return { ownsLock, release };
+  return { release };
 }
 
 /**
@@ -173,7 +198,8 @@ function slot(): RunLockSlot {
 
 /**
  * The entry point `globalSetup` uses: the first call for a database takes the lock, every later call in this process
- * (however many projects cause global setup to run) answers the same lock.
+ * (however many projects cause global setup to run) answers the same lock — or the same failure, since a run that could
+ * not take the lock must not have a later project retry the force-reset behind its back.
  */
 export function acquireProcessDbRunLock(
   databaseUrl: string,

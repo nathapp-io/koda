@@ -3,12 +3,17 @@ import {
 } from './db-run-lock';
 
 /**
- * One DB-mode run at a time per test database (fix round 1, F1).
+ * One DB-mode run at a time per test database (fix round 1, F1; fix round 2, B1).
  *
  * Every DB-mode run force-resets the schema in `globalSetup` and every suite truncates all tables, so two runs sharing
  * one Postgres destroy each other. The failure this pins was `expected 201 "Created", got 401 "Unauthorized"` from
  * `AuthService.register`, which re-reads the row it just committed and answers 401 when another process truncated it in
  * between.
+ *
+ * The lock fails closed (B1): the bug was that contention or a broken session answered "go ahead without the lock", and
+ * `globalSetup` — which never looked at that answer — then force-reset a database another live run was using. So every
+ * way of not getting the lock now throws, and the setup aborts before the reset. Running unserialised is opt-in only,
+ * through `KODA_DB_RUN_LOCK=off` in `globalSetup`.
  *
  * The session is injected so these cases need no database; the Prisma-backed session is thin (lock, unlock, disconnect)
  * and is exercised by running two DB-mode suites at once.
@@ -32,38 +37,52 @@ describe('acquireDbRunLock', () => {
     });
 
     expect(db.calls).toEqual(['tryLock:1000']);
-    expect(lock.ownsLock).toBe(true);
 
     await lock.release();
     await lock.release();
     expect(db.calls).toEqual(['tryLock:1000', 'unlock', 'close']);
   });
 
-  it('goes ahead without the lock when the wait budget expires, and never unlocks a lock it does not hold', async () => {
+  it('aborts the setup when the wait budget expires, after closing the session it could not lock', async () => {
     const db = session({ tryLock: async () => false });
-    const log = vi.fn();
 
-    const lock = await acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
-      openSession: openOf(db), waitMs: 30_000, log,
+    const attempt = acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
+      openSession: openOf(db), waitMs: 30_000,
     });
 
-    expect(lock.ownsLock).toBe(false);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('another DB-mode run'));
-    await lock.release();
+    // Throwing — not answering a lock nobody holds — is what keeps `globalSetup` from force-resetting the other run.
+    await expect(attempt).rejects.toThrow(/another DB-mode run has held this test database/);
+    await expect(attempt).rejects.toThrow(/KODA_DB_RUN_LOCK=off/);
     expect(db.calls).toEqual(['tryLock:30000', 'close']);
   });
 
-  it('is a no-op when the database cannot be reached, so the specs fail with their own error', async () => {
-    const log = vi.fn();
+  it('aborts the setup when the lock query itself fails, after closing the session', async () => {
+    const db = session({ tryLock: async () => { throw new Error('terminating connection due to administrator command'); } });
 
-    const lock = await acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
-      openSession: async () => { throw new Error('connect ECONNREFUSED'); },
-      log,
+    const attempt = acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
+      openSession: openOf(db), waitMs: 1_000,
     });
 
-    expect(lock.ownsLock).toBe(false);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('ECONNREFUSED'));
-    await expect(lock.release()).resolves.toBeUndefined();
+    await expect(attempt).rejects.toThrow(/the test-database lock failed .*administrator command/);
+    expect(db.calls).toEqual(['tryLock:1000', 'close']);
+  });
+
+  it('aborts the setup when the lock session cannot be opened, rather than resetting a database it cannot lock', async () => {
+    const attempt = acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
+      openSession: async () => { throw new Error('connect ECONNREFUSED'); },
+    });
+
+    await expect(attempt).rejects.toThrow(/could not open the test-database lock session .*ECONNREFUSED/);
+    await expect(attempt).rejects.toThrow(/KODA_DB_RUN_LOCK=off/);
+  });
+
+  it('still closes the session when closing it fails during the abort', async () => {
+    const db = session({ tryLock: async () => false, close: async () => { throw new Error('close failed'); } });
+
+    await expect(acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', {
+      openSession: openOf(db), waitMs: 10,
+    })).rejects.toThrow(/did not release it/);
+    expect(db.calls).toEqual(['tryLock:10', 'close']);
   });
 
   it('swallows a failing unlock or disconnect: a released gate must not fail on teardown', async () => {
@@ -73,6 +92,21 @@ describe('acquireDbRunLock', () => {
 
     await expect(lock.release()).resolves.toBeUndefined();
     expect(db.calls).toEqual(['tryLock:900000', 'unlock', 'close']);
+  });
+
+  it('says so when it had to wait, so a serialised run does not look hung', async () => {
+    const db = session({
+      tryLock: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        return true;
+      },
+    });
+    const log = vi.fn();
+
+    const lock = await acquireDbRunLock('postgresql://koda:koda@localhost:5433/koda_test', { openSession: openOf(db), log });
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('waited 1s for another DB-mode run'));
+    await lock.release();
   });
 });
 
@@ -93,6 +127,18 @@ describe('acquireProcessDbRunLock (the per-process entry point Vitest needs)', (
     const other = await acquireProcessDbRunLock('postgresql://koda:koda@localhost:5433/koda_process_other', { openSession: open });
     expect(other).not.toBe(first);
     expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers the same failure to a later project instead of letting it retry the force-reset', async () => {
+    const url = 'postgresql://koda:koda@localhost:5433/koda_process_contended';
+    const open = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+
+    const first = acquireProcessDbRunLock(url, { openSession: open });
+    const second = acquireProcessDbRunLock(url, { openSession: open });
+
+    await expect(first).rejects.toThrow(/could not open the test-database lock session/);
+    await expect(second).rejects.toThrow(/could not open the test-database lock session/);
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });
 

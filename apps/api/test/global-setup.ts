@@ -44,14 +44,15 @@ export default async function globalSetup(): Promise<void> {
   // Fix round 1 (F1): one DB-mode run at a time per test database. `prepareSchema` force-resets the schema and every
   // suite truncates, so a second run started at the same time destroys this one (a register that commits and is
   // truncated before its own re-read answers 401, and suites fail in `beforeAll` with nothing structured to report).
-  // The lock is taken before the reset and released by globalTeardown.
-  // `KODA_DB_RUN_LOCK=off` skips it for a run on a database nobody else uses.
-  if (process.env['KODA_DB_RUN_LOCK'] !== 'off') {
-    rememberDbRunLock(await acquireProcessDbRunLock(database.databaseUrl, {
-      log: (message) => process.stderr.write(`${message}\n`),
-    }));
-  }
+  // The lock is taken before the reset and released by globalTeardown. Acquisition fails closed: when another run holds
+  // the database (or the lock session cannot be opened) this setup throws instead of resetting a database it cannot
+  // lock. `KODA_DB_RUN_LOCK=off` is the only way to run unserialised, for a database nobody else uses.
   try {
+    if (process.env['KODA_DB_RUN_LOCK'] !== 'off') {
+      rememberDbRunLock(await acquireProcessDbRunLock(database.databaseUrl, {
+        log: (message) => process.stderr.write(`${message}\n`),
+      }));
+    }
     // Once per process, not once per Vitest project: the second reset would wipe the rows the first project's files are
     // already using, which is what made early suites answer 401 intermittently (fix round 1, F1).
     await prepareSchemaOnce(database.databaseUrl, () => prepareSchema(database.databaseUrl));
