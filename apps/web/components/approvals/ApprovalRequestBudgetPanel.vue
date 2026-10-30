@@ -69,7 +69,7 @@
  * rejection. Both carry the decider's comment, validated by the engine's own rules: the amount by
  * `buildBudgetRaiseSchema`, the comment by `buildCommentSchema`.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { budgetAskOf, budgetKeepBody, budgetRaiseBody, buildBudgetRaiseSchema, requeueCandidatesOf } from '~/lib/approval-request-fleet'
 import { buildCommentSchema } from '~/lib/approval-requests'
 import type { ApprovalRequestDetail, DecideRequestBody } from '~/lib/approval-requests'
@@ -100,6 +100,19 @@ const amountError = ref('')
 const commentError = ref('')
 /** A4: every offered candidate is ticked until the decider unticks one. */
 const selected = ref<readonly string[]>(candidates.value.map((candidate) => candidate.jobId))
+
+/**
+ * A4 on a refreshed detail: the list can change under the decider (a poll, or the reload after a
+ * refused decide). A candidate the engine newly offers starts ticked, one it no longer offers is
+ * forgotten so it can never be submitted, and an id the decider unticked stays unticked — a tick is
+ * a decision about that job, not a default re-applied on every fetch.
+ */
+watch(candidates, (next, previous) => {
+  const before = new Set((previous ?? []).map((candidate) => candidate.jobId))
+  selected.value = next
+    .map((candidate) => candidate.jobId)
+    .filter((jobId) => selected.value.includes(jobId) || !before.has(jobId))
+})
 
 /** SSR-safe unique ids, so each label binds to this panel's own field. */
 const amountId = useId()

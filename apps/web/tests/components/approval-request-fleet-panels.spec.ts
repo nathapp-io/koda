@@ -220,6 +220,53 @@ describe('ApprovalRequestBudgetPanel', () => {
     m.app.unmount()
   })
 
+  test('AC-9 (edge): a refreshed detail ticks the candidates it added and forgets the ones it dropped', async () => {
+    const m = mountPanel(budgetRequest())
+    await m.change('approval-request-candidate-j2')
+    expect(m.one('approval-request-candidate-j2').props.checked).toBe(false)
+
+    // A detail refresh (a poll, or the reload after a refused decide) offers one more candidate.
+    m.app.setProps({ request: budgetRequest({
+      details: {
+        kind: 'budget', policyId: 'pol1', resolvedBy: null, outcome: null,
+        requeueCandidates: [
+          { jobId: 'j1', projectId: 'p1', feature: 'feat-a', queuedAt: '2026-10-03T09:00:00.000Z' },
+          { jobId: 'j2', projectId: 'p1', feature: 'feat-b', queuedAt: '2026-10-03T09:01:00.000Z' },
+          { jobId: 'j3', projectId: 'p1', feature: 'feat-c', queuedAt: '2026-10-03T09:02:00.000Z' },
+        ],
+        requeueCandidatesTruncated: false,
+      },
+    }) })
+    await Vue.nextTick()
+    expect(m.one('approval-request-candidate-j1').props.checked).toBe(true)
+    // The decider's unticking survives the refresh: a tick is a choice, not a default.
+    expect(m.one('approval-request-candidate-j2').props.checked).toBe(false)
+    expect(m.one('approval-request-candidate-j3').props.checked).toBe(true)
+
+    await m.type('approval-request-budget-amount', '50')
+    await m.click('approval-request-budget-raise')
+    expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1', 'j3'] } }])
+    m.app.unmount()
+  })
+
+  test('AC-9 (edge): a candidate a refresh no longer offers is never submitted', async () => {
+    const m = mountPanel(budgetRequest())
+    m.app.setProps({ request: budgetRequest({
+      details: {
+        kind: 'budget', policyId: 'pol1', resolvedBy: null, outcome: null,
+        requeueCandidates: [{ jobId: 'j1', projectId: 'p1', feature: 'feat-a', queuedAt: '2026-10-03T09:00:00.000Z' }],
+        requeueCandidatesTruncated: false,
+      },
+    }) })
+    await Vue.nextTick()
+    expect(m.byId('approval-request-candidate-j2')).toHaveLength(0)
+
+    await m.type('approval-request-budget-amount', '50')
+    await m.click('approval-request-budget-raise')
+    expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1'] } }])
+    m.app.unmount()
+  })
+
   test('AC-10: Raise sends the amount and the ticked candidates only', async () => {
     const m = mountPanel(budgetRequest())
     await m.type('approval-request-budget-amount', '50')
