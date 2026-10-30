@@ -9,7 +9,12 @@ import { VcsRouteCommands, VCS_ROUTE_VARIANTS } from './vcs-route.commands';
 describe('VcsRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
-    const service = { delete: vi.fn().mockResolvedValue(undefined), testConnection: vi.fn().mockResolvedValue({ ok: false, latencyMs: 12, error: 'Invalid token' }) };
+    const secret = 's'.repeat(32);
+    const service = {
+      delete: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ ok: false, latencyMs: 12, error: 'Invalid token' }),
+      create: vi.fn().mockResolvedValue({ id: 'c1', repoName: 'r', webhookSecret: secret }),
+    };
     const config: IVcsConfig = { encryptionKey: 'k1', defaultPollingIntervalMs: 300000, githubApiUrl: '', gitlabApiUrl: '' };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     const apply = vi.fn().mockResolvedValue({ issuesSynced: 1 });
@@ -17,7 +22,7 @@ describe('VcsRouteCommands', () => {
     new VcsRouteCommands(registry, service as unknown as VcsConnectionService, loader as unknown as ActorPrincipalLoader, config, manual as unknown as VcsManualSync).onModuleInit();
     const command = registry.get('vcs.connection.test', VCS_ROUTE_VARIANTS.test);
     if (!command) throw new Error('Missing test command');
-    return { registry, service, config, loader, command, manual, apply };
+    return { registry, service, config, loader, command, manual, apply, secret };
   }
   it.each([['vcs.sync.issue', 'rest:vcs.sync-issue'], ['vcs.sync.all', 'rest:vcs.sync-all']])('AC-9: registers prepared %s / %s', (key, variant) => {
     const { registry } = build();
@@ -59,6 +64,47 @@ describe('VcsRouteCommands', () => {
     const { registry } = build();
     expect(registry.get('vcs.connection.delete', 'rest:vcs.delete')).toBeDefined();
     expect(registry.get('vcs.connection.test', 'rest:vcs.test')).toBeDefined();
+  });
+  it('AC-8: registers the create redeem command and redacts its token', () => {
+    const { registry } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (command?.redeem?.redact === undefined) throw new Error('Missing create redeem command');
+    expect(VCS_ROUTE_VARIANTS.create).toBe('rest:vcs.create');
+    expect(command.key).toBe('vcs.connection.create');
+    const connection = { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' };
+    expect(command.redeem.redact({ slug: 's', projectId: 'p1', connection })).toEqual({
+      slug: 's', projectId: 'p1', connection: { ...connection, token: '<redacted>' },
+    });
+  });
+  it('AC-8: the create command runs the service with the runtime key and drops the webhook secret', async () => {
+    const { registry, service, config, secret } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (!command) throw new Error('Missing create command');
+    const input = command.parse({
+      slug: 's', projectId: 'p1',
+      connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' },
+    });
+    expect(input).toEqual({ slug: 's', projectId: 'p1', connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' } });
+    const output = await command.execute(input);
+    expect(service.create).toHaveBeenCalledExactlyOnceWith('p1', 'k1', input.connection);
+    expect(output).toEqual({ id: 'c1', repoName: 'r', webhookSecret: secret });
+    expect(command.toResult?.(output)).toEqual({ id: 'c1', repoName: 'r' });
+    config.encryptionKey = 'k2';
+    await command.execute(input);
+    expect(service.create).toHaveBeenLastCalledWith('p1', 'k2', input.connection);
+  });
+  it('AC-9: the create command refuses a missing encryption key without calling the service', async () => {
+    const { registry, service, config } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (!command) throw new Error('Missing create command');
+    const input = command.parse({
+      slug: 's', projectId: 'p1',
+      connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' },
+    });
+    config.encryptionKey = null;
+    await expect(command.execute(input)).rejects.toMatchObject({ prefix: 'vcs' });
+    await expect(command.execute(input)).rejects.toThrow(ValidationAppException);
+    expect(service.create).not.toHaveBeenCalled();
   });
   it('AC-9: executes with the runtime key and stores the service DTO unchanged', async () => {
     const { command, service, loader, config } = build();

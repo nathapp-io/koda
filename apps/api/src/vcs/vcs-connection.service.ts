@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { committedEffect } from '../common/committed-effects';
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { generateWebhookSecret } from './webhook-secret';
@@ -21,6 +21,7 @@ import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 export function vcsTestTarget(connection: VcsConnectionDomain): Pick<
   VcsConnectionDomain,
@@ -37,11 +38,14 @@ export function vcsTestTarget(connection: VcsConnectionDomain): Pick<
 
 @Injectable()
 export class VcsConnectionService {
+  private readonly logger = new Logger(VcsConnectionService.name);
+
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     private readonly vcsPollingService: VcsPollingService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   /**
@@ -116,7 +120,7 @@ export class VcsConnectionService {
       }),
     );
 
-    await this.vcsPollingService.refreshConnectionSchedule(connection.id);
+    await this.refreshAfterCommit(connection.id);
 
     // M9: besides a rotation, the only time the secret leaves the server.
     return { ...this.mapToResponseDto(connection), webhookSecret };
@@ -211,6 +215,30 @@ export class VcsConnectionService {
 
     const response = this.mapToResponseDto(updated);
     return generatedSecret ? { ...response, webhookSecret: generatedSecret } : response;
+  }
+
+  /**
+   * `gate-secret` (US-002): schedules the connection's polling after the write that produced it committed.
+   *
+   * Inside an approval redemption the write runs in the engine's transaction, and the scheduler reads the
+   * row through its own connection: refreshing before the commit schedules a row nobody can see yet. So the
+   * refresh is deferred to the transaction owner's after-commit queue, exactly as a permission-cache
+   * invalidation is. Outside any scope (`defer` answers false) there is nothing to wait for and today's
+   * inline refresh — and today's error propagation — stands.
+   *
+   * The deferred task is warning-only: the connection is already durable, and a failed schedule refresh must
+   * not turn an executed redemption into a 500 that loses the one-time `webhookSecret`.
+   */
+  private async refreshAfterCommit(connectionId: string): Promise<void> {
+    const deferred = this.afterCommit.defer(async () => {
+      try {
+        await this.vcsPollingService.refreshConnectionSchedule(connectionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`VCS polling refresh failed for connection ${connectionId}: ${message}`);
+      }
+    });
+    if (!deferred) await this.vcsPollingService.refreshConnectionSchedule(connectionId);
   }
 
   /**

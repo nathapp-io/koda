@@ -128,7 +128,12 @@ describe('VcsController', () => {
       encryptionKey,
     };
 
-    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: { ok: true, latencyMs: 100 } }) };
+    gate = {
+      run: vi.fn(async (call: { variant?: string; input: { projectId: string; connection: CreateVcsConnectionDto } }) =>
+        call.variant === 'rest:vcs.create'
+          ? { status: 'executed', result: await mockVcsService.create(call.input.projectId, encryptionKey, call.input.connection) }
+          : { status: 'executed', result: { ok: true, latencyMs: 100 } }),
+    };
     module = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
@@ -174,6 +179,35 @@ describe('VcsController', () => {
       await expect(
         controller.createConnection('test-project', {} as CreateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: gates create with the resolved project, the parsed body and the redeem header', async () => {
+      const dto: CreateVcsConnectionDto = {
+        provider: 'github',
+        repoOwner: 'owner',
+        repoName: 'repo',
+        token: 'ghp_abc',
+      } as CreateVcsConnectionDto;
+
+      await controller.createConnection('s', dto, 'r1');
+
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'vcs.connection.create',
+        variant: 'rest:vcs.create',
+        projectId: 'proj-1',
+        input: { slug: 's', projectId: 'proj-1', connection: dto },
+        redeem: 'r1',
+      });
+    });
+
+    it('AC-11: a pending create request answers with the approval summary', async () => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+
+      await expect(
+        controller.createConnection('test-project', {} as CreateVcsConnectionDto),
+      ).rejects.toThrow(ApprovalPending);
+      expect(mockVcsService.create).not.toHaveBeenCalled();
     });
   });
 

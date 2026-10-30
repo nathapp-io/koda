@@ -79,7 +79,6 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
   beforeEach(async () => {
     mockVcsConfig.encryptionKey = encryptionKey;
-    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) };
     // Create mock services
     const mockVcsServiceInstance = {
       create: vi.fn(),
@@ -88,6 +87,14 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       delete: vi.fn(),
       testConnection: vi.fn(),
       getFullByProject: vi.fn(),
+    };
+    // `gate` stands in for the approval engine: the create route is gated (`gate-secret` US-002), so
+    // its command runs the service exactly as the handler used to, and the assertions below hold.
+    gate = {
+      run: vi.fn(async (call: { variant?: string; input: { projectId: string; connection: CreateVcsConnectionDto } }) =>
+        call.variant === 'rest:vcs.create'
+          ? { status: 'executed', result: await mockVcsServiceInstance.create(call.input.projectId, encryptionKey, call.input.connection) }
+          : { status: 'executed', result: null }),
     };
 
     const mockProjectsServiceInstance = {

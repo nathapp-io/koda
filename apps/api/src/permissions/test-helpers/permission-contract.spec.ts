@@ -118,9 +118,8 @@ describe('permission contract checker', () => {
     }
   });
 
-  it('US-001 AC-1: explicitly lists exactly the 7 remaining secret-bearing routes', () => {
+  it('US-002: explicitly lists exactly the 6 remaining secret-bearing routes', () => {
     expect(SECRET_GATE_ROUTES).toEqual(new Set([
-      'POST /projects/:slug/vcs',
       'PATCH /projects/:slug/vcs',
       'POST /projects/:slug/vcs/webhook-secret/rotate',
       'POST /projects/:slug/webhooks',
@@ -130,9 +129,10 @@ describe('permission contract checker', () => {
     ]));
   });
 
-  it('US-001 AC-1/2: assigns every explicit secret route to gate-secret', () => {
+  it('US-002: assigns every explicit secret route to gate-secret', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
     expect(PENDING_GATE_ROUTES.has('POST /fleet/enrollments')).toBe(false);
+    expect(PENDING_GATE_ROUTES.has('POST /projects/:slug/vcs')).toBe(false);
   });
 
   it('US-006: the agent credential routes are gated, so they leave the pending rollout lists', () => {
@@ -175,9 +175,8 @@ describe('permission contract checker', () => {
    * US-007 AC-13: the allowlist is now exactly the routes 6b still owes. Stated as literals so the
    * assertion cannot pass by moving both sides together.
    */
-  it('US-007 AC-13: pending gate assignments hold exactly the 7 remaining secret routes', () => {
+  it('US-007 AC-13: pending gate assignments hold exactly the 6 remaining secret routes', () => {
     const remaining = [
-      'POST /projects/:slug/vcs',
       'PATCH /projects/:slug/vcs',
       'POST /projects/:slug/vcs/webhook-secret/rotate',
       'POST /projects/:slug/webhooks',
@@ -186,8 +185,8 @@ describe('permission contract checker', () => {
       'POST /projects/:slug/invites/:id/resend',
     ];
 
-    expect(PENDING_GATE_ROUTES.size).toBe(7);
-    expect([...PENDING_GATE_ROUTES.values()]).toEqual(Array(7).fill('gate-secret'));
+    expect(PENDING_GATE_ROUTES.size).toBe(6);
+    expect([...PENDING_GATE_ROUTES.values()]).toEqual(Array(6).fill('gate-secret'));
     expect([...PENDING_GATE_ROUTES.keys()].sort()).toEqual([...remaining].sort());
     expect(new Set(PENDING_GATE_ROUTES.keys())).toEqual(SECRET_GATE_ROUTES);
   });

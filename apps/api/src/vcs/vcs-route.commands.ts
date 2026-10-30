@@ -1,17 +1,21 @@
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../approvals/approval-command.registry';
+import { parseBody } from '../approvals/route/parse-body';
 import { parseRouteInput } from '../approvals/route/parse-route-input';
+import { redactSecret } from '../approvals/route/redact-secret';
 import { routeCommand } from '../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { VCS_CFG, type IVcsConfig } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
 import type { ApplyPrStatusesResult } from './vcs-pr-sync.service';
 import { VcsManualSync } from './vcs-manual-sync.service';
+import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
+import { VcsConnectionCreatedResponseDto } from './dto/vcs-connection-response.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 
-export const VCS_ROUTE_VARIANTS = { delete: 'rest:vcs.delete', test: 'rest:vcs.test', syncIssue: 'rest:vcs.sync-issue', syncAll: 'rest:vcs.sync-all', syncPr: 'rest:vcs.sync-pr' } as const;
+export const VCS_ROUTE_VARIANTS = { create: 'rest:vcs.create', delete: 'rest:vcs.delete', test: 'rest:vcs.test', syncIssue: 'rest:vcs.sync-issue', syncAll: 'rest:vcs.sync-all', syncPr: 'rest:vcs.sync-pr' } as const;
 
 @Injectable()
 export class VcsRouteCommands implements OnModuleInit {
@@ -24,6 +28,30 @@ export class VcsRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    // `gate-secret` (US-002): the request stores the redacted connection, so no token reaches the row,
+    // the hash or a decider. Approving runs nothing; the requester redeems it by re-sending the body,
+    // and the token that lands is the one in that re-sent body.
+    this.commands.register(routeCommand<{ slug: string; projectId: string; connection: CreateVcsConnectionDto }, VcsConnectionCreatedResponseDto>({
+      key: 'vcs.connection.create', variant: VCS_ROUTE_VARIANTS.create,
+      parse: (input) => {
+        const { slug, projectId } = parseRouteInput(input, ['slug', 'projectId']);
+        const source = input as Record<string, unknown>;
+        return { slug, projectId, connection: parseBody(CreateVcsConnectionDto, source.connection ?? {}) };
+      },
+      redeem: {
+        redact: ({ slug, projectId, connection }) => ({
+          slug, projectId, connection: { ...connection, token: redactSecret(connection.token) },
+        }),
+      },
+      run: (_principal, input) => {
+        const key = this.vcsConfig.encryptionKey;
+        if (!key) throw new ValidationAppException({}, 'vcs');
+        return this.vcs.create(input.projectId, key, input.connection);
+      },
+      // The generated secret leaves the server once, in this call's answer (M9); the request keeps the
+      // connection alone.
+      toResult: ({ webhookSecret: _webhookSecret, ...result }) => result,
+    }, this.loader));
     this.commands.register(routeCommand<{ slug: string; projectId: string }, ApplyPrStatusesResult>({
       key: 'vcs.sync.pr', variant: VCS_ROUTE_VARIANTS.syncPr,
       parse: (input) => parseRouteInput(input, ['slug', 'projectId']),

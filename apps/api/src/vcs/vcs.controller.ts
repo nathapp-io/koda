@@ -1,4 +1,5 @@
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../approvals/route/approval-redeem-header.decorator';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { VCS_ROUTE_VARIANTS } from './vcs-route.commands';
@@ -66,6 +67,7 @@ export class VcsController {
    */
   @Post()
   @Requires('vcs.connection.create')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Create a VCS connection for a project' })
   @ApiResponse({ status: 201, type: VcsConnectionCreatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -74,17 +76,26 @@ export class VcsController {
   async createConnection(
     @Param('slug') slug: string,
     @Body() dto: CreateVcsConnectionDto,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
 
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
+    // The command encrypts with the key read when it runs; refusing here keeps a missing key a 400
+    // before a request is opened, so an approval cannot be granted for a call that cannot execute.
+    if (!this.vcsConfig.encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    return JsonResponse.Ok(await this.vcsService.create(project.id, encryptionKey, dto));
+    const outcome = await this.routeGate.run<VcsConnectionCreatedResponseDto>({
+      key: 'vcs.connection.create',
+      variant: VCS_ROUTE_VARIANTS.create,
+      projectId: project.id,
+      input: { slug, projectId: project.id, connection: dto },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**

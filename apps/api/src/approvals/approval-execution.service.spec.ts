@@ -257,7 +257,7 @@ describe('ApprovalExecutionService', () => {
       deleteVcsConnection: async () => { stored = null; },
     } as never, {} as never, polling as never, {
       audited: async (fn: () => Promise<unknown>) => fn(),
-    } as never);
+    } as never, new AfterCommitService());
     s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
       const before = stored;
       try {

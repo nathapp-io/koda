@@ -5,6 +5,7 @@ import { VcsProviderType, VcsSyncModeType } from './dto/create-vcs-connection.dt
 import type { IVcsRepository } from './domain/vcs.repository';
 import type { VcsPollingService } from './vcs-polling.service';
 import type { IVcsConfig } from '../config/vcs.config';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 
 const KEY = 'ab'.repeat(32);
@@ -34,6 +35,7 @@ describe('VcsConnectionService webhook secret (M9)', () => {
       { encryptionKey: KEY, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com', gitlabApiUrl: 'https://gitlab.com/api/v4' } as IVcsConfig,
       { refreshConnectionSchedule: vi.fn() } as unknown as VcsPollingService,
       mockAuditRecorder,
+      new AfterCommitService(),
     );
   });
 

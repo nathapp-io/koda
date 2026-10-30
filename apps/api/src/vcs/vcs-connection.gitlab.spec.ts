@@ -5,6 +5,7 @@ import { VcsProviderType, VcsSyncModeType } from './dto/create-vcs-connection.dt
 import type { IVcsRepository } from './domain/vcs.repository';
 import type { VcsPollingService } from './vcs-polling.service';
 import type { IVcsConfig } from '../config/vcs.config';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 
 const KEY = 'ab'.repeat(32);
@@ -36,7 +37,7 @@ describe('VcsConnectionService — GitLab (BUG-14)', () => {
       updateVcsConnection: vi.fn().mockImplementation(async (_id, data) => connectionRow(data)),
     };
     const polling = { refreshConnectionSchedule: vi.fn().mockResolvedValue(undefined) };
-    service = new VcsConnectionService(repo as unknown as IVcsRepository, config, polling as unknown as VcsPollingService, mockAuditRecorder);
+    service = new VcsConnectionService(repo as unknown as IVcsRepository, config, polling as unknown as VcsPollingService, mockAuditRecorder, new AfterCommitService());
   });
 
   const refusal = async (promise: Promise<unknown>) => {

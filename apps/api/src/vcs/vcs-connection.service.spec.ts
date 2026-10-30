@@ -9,6 +9,7 @@ import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsPollingService } from './vcs-polling.service';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 
 // TDD type-level compile test: VcsConnectionDomain has no @prisma/client dependency
@@ -97,6 +98,7 @@ describe('VcsConnectionService', () => {
   let service: VcsConnectionService;
   let mockRepo: Mocked<IVcsRepository>;
   let mockPolling: ReturnType<typeof createMockPollingService>;
+  let afterCommit: AfterCommitService;
   const ENCRYPTION_KEY = 'test-key-32-chars-exactly-padded!!';
 
   it('prepares provider testing before settlement, then rejects a changed connection without more HTTP', async () => {
@@ -176,6 +178,7 @@ describe('VcsConnectionService', () => {
   beforeEach(async () => {
     mockRepo = createMockRepo();
     mockPolling = createMockPollingService();
+    afterCommit = new AfterCommitService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -184,6 +187,7 @@ describe('VcsConnectionService', () => {
         { provide: VcsPollingService, useValue: mockPolling },
         { provide: VCS_CFG, useValue: { encryptionKey: undefined, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
+        { provide: AfterCommitService, useValue: afterCommit },
       ],
     }).compile();
 
@@ -317,6 +321,28 @@ describe('VcsConnectionService', () => {
           webhookSecret: expect.any(String),
         }),
       );
+    });
+
+    it('AC-10: defers the polling refresh to the enclosing scope and runs it at once outside one', async () => {
+      const calls: string[] = [];
+      mockRepo.createVcsConnection.mockImplementation(async () => {
+        calls.push('create');
+        return makeConnection();
+      });
+      mockPolling.refreshConnectionSchedule.mockImplementation(async () => {
+        calls.push('refresh');
+      });
+
+      await afterCommit.scope(async () => {
+        await service.create('proj-1', ENCRYPTION_KEY, dto);
+        expect(calls).toEqual(['create']);
+      });
+      expect(calls).toEqual(['create', 'refresh']);
+
+      calls.length = 0;
+      await service.create('proj-1', ENCRYPTION_KEY, dto);
+      expect(calls).toEqual(['create', 'refresh']);
+      expect(mockPolling.refreshConnectionSchedule).toHaveBeenCalledTimes(2);
     });
   });
 
