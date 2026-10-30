@@ -190,7 +190,7 @@ function isDateText(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(new Date(value).getTime());
 }
 
-/** DTO parity (`decide-approval.dto.ts`): a finite amount above zero, at most `MAX_BUDGET_USD`, 4 dp. */
+/** A finite amount above zero, at most `MAX_BUDGET_USD`, with four decimal places of precision. */
 function isRaiseAmount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= MAX_BUDGET_USD &&
     Number(value.toFixed(4)) === value;

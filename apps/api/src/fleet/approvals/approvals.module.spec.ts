@@ -5,26 +5,17 @@ import { ApprovalCommandRegistry } from '../../approvals/approval-command.regist
 import { FleetBudgetOverrideCommand } from './commands/fleet-budget-override.command';
 import { FleetShellEscalateCommand } from './commands/fleet-shell-escalate.command';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
-import { ApprovalsService } from './approvals.service';
 
-/** DI guard, as budgets.module.spec.ts: a missing provider or an import cycle fails `bun run test`. */
 describe('ApprovalsModule', () => {
-  it('compiles and resolves the service', async () => {
+  it('AC-3: resolves and registers both engine commands during module initialization', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ApprovalsModule] }).compile();
     try {
       await moduleRef.init();
-      expect(moduleRef.get(ApprovalsService)).toBeDefined();
-      expect(moduleRef.get(ApprovalCommandRegistry).get('fleet.job.shell.escalate')).toBeInstanceOf(FleetShellEscalateCommand);
-    } finally {
-      await moduleRef.close();
-    }
-  });
-
-  it('AC-1: registers the budget override command', async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ApprovalsModule] }).compile();
-    try {
-      await moduleRef.init();
-      expect(moduleRef.get(ApprovalCommandRegistry).get('fleet.budget.override')).toBeInstanceOf(FleetBudgetOverrideCommand);
+      expect(moduleRef.get(FleetShellEscalateCommand)).toBeInstanceOf(FleetShellEscalateCommand);
+      expect(moduleRef.get(FleetBudgetOverrideCommand)).toBeInstanceOf(FleetBudgetOverrideCommand);
+      const registry = moduleRef.get(ApprovalCommandRegistry);
+      expect(registry.get('fleet.job.shell.escalate')).toBeInstanceOf(FleetShellEscalateCommand);
+      expect(registry.get('fleet.budget.override')).toBeInstanceOf(FleetBudgetOverrideCommand);
     } finally {
       await moduleRef.close();
     }

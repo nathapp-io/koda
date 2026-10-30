@@ -178,6 +178,12 @@ describeIntegration('fleet approvals over the engine routes (PG)', () => {
     await prisma.outboxEvent.deleteMany();
   });
 
+  it('AC-1: retired fleet approval adapter routes answer 404 for a global admin', async () => {
+    await request(server).get('/api/fleet/approvals').set(tok('root')).expect(404);
+    await request(server).get('/api/projects/web/fleet/approvals').set(tok('root')).expect(404);
+    await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(404);
+  });
+
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
