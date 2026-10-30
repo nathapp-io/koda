@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OutboxService } from '@nathapp/nestjs-outbox';
+import { WebhookDispatcherService } from '../webhook/webhook-dispatcher.service';
 import type { ApprovalMode } from '../permissions/catalog';
 import type { ApprovalRequestRecord, ApprovalRequestStatus } from './domain/approval.domain';
 
@@ -40,9 +41,33 @@ export function parseApprovalRequestChangedPayload(raw: unknown): ApprovalReques
   };
 }
 
+export interface ApprovalWebhookPayload extends ApprovalRequestChangedPayload {
+  path: string;
+}
+
+/** Explicit allowlist: frozen input, results and decisions never leave through webhooks. */
+export function approvalWebhookPayloadOf(request: ApprovalRequestRecord): ApprovalWebhookPayload {
+  return {
+    requestId: request.id,
+    permissionKey: request.permissionKey,
+    status: request.status,
+    projectId: request.projectId,
+    requiredMode: request.requiredMode,
+    actorType: request.actor.type,
+    actorId: request.actor.id,
+    onBehalfOfType: request.onBehalfOf?.type ?? null,
+    onBehalfOfId: request.onBehalfOf?.id ?? null,
+    expiresAt: request.expiresAt.toISOString(),
+    path: `/approvals?id=${request.id}`,
+  };
+}
+
 @Injectable()
 export class ApprovalRequestEvents {
-  constructor(private readonly outbox: OutboxService) {}
+  constructor(
+    private readonly outbox: OutboxService,
+    private readonly webhooks: WebhookDispatcherService,
+  ) {}
 
   /** Records an approval request change in the transaction that wrote its status. */
   async record(request: ApprovalRequestRecord): Promise<void> {
@@ -63,5 +88,12 @@ export class ApprovalRequestEvents {
       payload,
       metadata: { eventId: `${request.id}:${request.status}`, ...(request.projectId === null ? {} : { projectId: request.projectId }) },
     });
+    if (request.projectId !== null) {
+      await this.webhooks.dispatch(
+        request.projectId,
+        request.status === 'pending' ? 'approval.requested' : 'approval.resolved',
+        approvalWebhookPayloadOf(request),
+      );
+    }
   }
 }

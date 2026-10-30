@@ -4,6 +4,7 @@ import { FleetCommandType } from '../../../common/enums';
 import { currentContext } from '../../../action-context/action-context';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { committedEffect } from '../../../common/committed-effects';
+import type { ApprovalRequestRecord } from '../../../approvals/domain/approval.domain';
 import type { ApprovalCommand } from '../../../approvals/approval-command.registry';
 import { checkBashDecision } from '../bash-decision';
 import { FleetApprovalAskStore } from '../fleet-approval-ask.store';
@@ -24,6 +25,11 @@ export class FleetShellEscalateCommand implements ApprovalCommand<BashAskInput, 
     private readonly notifier: RunnerNotifier,
     private readonly audit: AuditRecorder,
   ) {}
+
+  async details(request: ApprovalRequestRecord): Promise<Record<string, unknown> | null> {
+    const view = await this.asks.findApproval(request.id);
+    return view ? { kind: 'bash', jobId: view.jobId, resolvedBy: view.resolvedBy, outcome: view.outcome } : null;
+  }
 
   parse(input: unknown): BashAskInput {
     if (!isRecord(input) || typeof input.jobId !== 'string' || input.jobId.length === 0 ||

@@ -5,7 +5,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
-import { WebhookDispatcherService } from './webhook-dispatcher.service';
+import { WebhookDispatchModule } from './webhook-dispatch.module';
 import { WebhookDeliveryHandler } from './webhook-delivery.handler';
 import { WebhookOutboxSubscriber } from './webhook-outbox.subscriber';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
@@ -17,20 +17,19 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Module({
-  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, OutboxModule, ProjectAccessModule],
+  imports: [WebhookDispatchModule, ApprovalEngineModule, AuthRepositoryModule, PrismaModule, OutboxModule, ProjectAccessModule],
   controllers: [WebhookController],
   providers: [
     WebhookRouteCommands,
     PrismaWebhookRepository,
     { provide: WEBHOOK_REPOSITORY, useExisting: PrismaWebhookRepository },
     WebhookService,
-    WebhookDispatcherService,
     WebhookDeliveryHandler,
     WebhookOutboxSubscriber,
     DnsResolver,
     OutboundUrlGuard,
     OutboundHttpClient,
   ],
-  exports: [WebhookService, WebhookDispatcherService, WebhookDeliveryHandler],
+  exports: [WebhookService, WebhookDispatchModule, WebhookDeliveryHandler],
 })
 export class WebhookModule {}

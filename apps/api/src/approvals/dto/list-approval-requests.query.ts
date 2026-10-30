@@ -26,6 +26,13 @@ export class ListApprovalRequestsQuery extends KodaPageQuery {
   @MaxLength(200)
   permissionKey?: string;
 
+  @ApiPropertyOptional({ maxLength: 64, minLength: 1 })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  jobId?: string;
+
   @ApiPropertyOptional({ type: Boolean })
   @IsOptional()
   @Transform(toBoolean)

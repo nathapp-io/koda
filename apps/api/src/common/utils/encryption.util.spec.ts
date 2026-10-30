@@ -105,7 +105,7 @@ describe('Token Encryption Utility', () => {
       const tampered = [
         segments[0],
         segments[1],
-        segments[2].slice(0, -2) + 'ff', // Change last byte
+        (segments[2][0] === '0' ? '1' : '0') + segments[2].slice(1), // Flip one bit deterministically
       ].join(':');
 
       expect(() => decryptToken(tampered, masterKey)).toThrow();

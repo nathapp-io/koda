@@ -21,7 +21,8 @@ export class HomeTicketDto implements HomeTicketView {
 
 export class HomeApprovalDto implements HomeApprovalView {
   @ApiProperty() id: string;
-  @ApiProperty({ enum: APPROVAL_TYPES }) type: string;
+  @ApiProperty({ enum: APPROVAL_TYPES, nullable: true }) type: string | null;
+  @ApiProperty() permissionKey: string;
   @ApiProperty({ ...NULLABLE_STRING, description: 'null for a no-project (requeue-candidate) approval' }) projectId: string | null;
   @ApiProperty({ ...NULLABLE_STRING, description: 'null when the project row is gone' }) projectSlug: string | null;
   @ApiProperty(NULLABLE_STRING) jobId: string | null;

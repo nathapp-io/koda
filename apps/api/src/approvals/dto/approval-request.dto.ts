@@ -56,13 +56,14 @@ export class ApprovalDecisionDto {
 }
 
 export class ApprovalRequestDto extends ApprovalRequestFields {
+  @ApiProperty({ type: 'object', additionalProperties: true, nullable: true }) details!: Record<string, unknown> | null;
   @ApiProperty({ type: Object, nullable: true }) input!: unknown;
   @ApiProperty({ type: Object, nullable: true }) result!: unknown;
   @ApiProperty({ type: [ApprovalDecisionDto] }) decisions!: ApprovalDecisionDto[];
 
   static from(detail: ApprovalRequestDetail): ApprovalRequestDto {
     return Object.assign(new ApprovalRequestDto(), ApprovalRequestSummaryDto.from(detail.request), {
-      input: detail.request.input, result: detail.request.result,
+      input: detail.request.input, result: detail.request.result, details: detail.details ?? null,
       decisions: detail.decisions.map(ApprovalDecisionDto.from),
     });
   }

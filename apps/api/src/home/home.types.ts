@@ -1,3 +1,6 @@
+import type { PrincipalRef } from '../permissions/permissions.types';
+import type { DecideScopes } from '../permissions/permission.service';
+
 /**
  * Home dashboard (UX redesign slice 2): one cross-project snapshot for the signed-in user.
  * The API does the aggregation so the web dashboard stays one request (MASTER-PLAN §6 slice 2).
@@ -27,10 +30,9 @@ export interface HomeCaller {
   globalAdmin: boolean;
 }
 
-/** Pending approvals in the caller's projects; no-project ones only for a global admin (mirrors /fleet/approval-counts). */
+/** Engine visibility scope for pending approval requests. */
 export interface HomeApprovalScope {
-  projectIds: string[];
-  includeUnscoped: boolean;
+  visibility: { principal: PrincipalRef; scopes: DecideScopes };
 }
 
 export interface HomeProjectRow {
@@ -55,7 +57,8 @@ export interface HomeTicketRow {
 
 export interface HomeApprovalRow {
   id: string;
-  type: string;
+  permissionKey: string;
+  type: string | null;
   projectId: string | null;
   jobId: string | null;
   requestedAt: Date;
@@ -100,7 +103,8 @@ export interface HomeTicketView {
 
 export interface HomeApprovalView {
   id: string;
-  type: string;
+  permissionKey: string;
+  type: string | null;
   projectId: string | null;
   projectSlug: string | null;
   jobId: string | null;
@@ -203,6 +207,7 @@ export function buildHomeView(input: HomeSnapshotInput): HomeView {
 
   const approvals: HomeApprovalView[] = input.approvals.slice(0, limits.approvals).map((a) => ({
     id: a.id,
+    permissionKey: a.permissionKey,
     type: a.type,
     projectId: a.projectId,
     projectSlug: a.projectId ? slugOf.get(a.projectId) ?? null : null,

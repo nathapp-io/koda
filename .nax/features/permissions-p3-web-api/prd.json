@@ -1,0 +1,367 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-web-api",
+  "branchName": "feat/permissions-p3-web-api",
+  "createdAt": "2026-10-30T00:00:00Z",
+  "updatedAt": "2026-10-30T07:16:13.920Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Pending counts and job filtering over shared approval visibility",
+      "description": "**Goal** — Add GET /approvals/counts and the jobId list filter while extracting one unchanged visibility rule for the inbox, badge and downstream home reads.\n\n**Motivation** — A pending count for the badge. `GET /fleet/approval-counts` counts only the two fleet keys, over `fleet.approval.read`.\n\n**Approach** — Designer's calls (not ruled by the user; change them in review if wrong):\n\n- **One visibility rule.** The `where` that `PrismaApprovalRequestRepository.findVisiblePage` builds today moves into a pure function, `visibleRequestWhere(visibility, filter)`, in the new file `approvals/approval-visibility.ts`. The list, the counts and the home card all call it, so the badge, the inbox and the home card cannot disagree on what a caller sees.\n- **Counts count what the list lists.** For a caller, `GET /approvals/counts` returns `total` equal to the `total` of `GET /approvals?status=pending`, so the badge and the inbox's pending tab agree.\n  - `ApprovalRequest.projectId` is a plain string with no `Project` relation, so there is no project filter: every visible pending request is counted, whatever its project's state.\n  - `unscoped` counts the visible pending requests with `projectId: null`.\n  - `projects` has one row per distinct non-null `projectId` among them (a `groupBy` on `projectId` over the visibility `where`), with `slug` read by a second query, `project.findMany({ where: { id: { in } }, select: { id, slug } })`. `slug` is `null` when the project row is gone. Rows are ordered by `slug` ascending, nulls last, then `projectId`.\n  - So `total = unscoped + Σ projects[].pending`.\n- **New schema names.** The response DTOs are `ApprovalRequestCountsDto` and `ProjectApprovalRequestCountDto`. The fleet's `ApprovalCountsDto` and `ProjectApprovalCountDto` keep their names until 7c deletes them, so the two OpenAPI schemas never collide.\n- **The job filter.** `GET /approvals` takes an optional `jobId`. It keeps only requests whose `FleetApprovalAsk` link names that job, through the existing `ApprovalRequest.fleetAsk` relation. It is a filter like `permissionKey`: visibility still applies.\n- **`openapi.json` is regenerated in each story that changes the contract** (US-001, US-002, US-003): `bun run api:export-spec` from the repo root. `apps/cli/src/generated` is not regenerated (7c deletes the CLI command that uses the fleet routes).\n\nIntegration targets:\n- `PrismaApprovalRequestRepository.findVisiblePage`.\n  - Baseline: it builds the visibility `where` inline.\n  - Target: it calls `visibleRequestWhere(visibility, filter)` and keeps its pagination and order.\n- `ApprovalRequestFilter`.\n  - Baseline: `{ status?; projectId?; permissionKey?; mine? }`.\n  - Target: it adds `jobId?: string`.\n- `ListApprovalRequestsQuery` (`approvals/dto/list-approval-requests.query.ts`) adds an optional `jobId` (string, not empty, at most 64 characters).\n- `ApprovalRequestsController` gains `@Get('counts')`, declared before `@Get(':id')`. It has `@UseGuards(RequiresGuard)`, `@Requires('approval.decide', { enforcedBy: 'service' })` and `@ApiResponse({ status: 200 })` with the `ApprovalRequestCountsDto` envelope schema.\n\nUse a `fleetAsk: { is: { jobId } }` clause in the helper. Retain the actor/on-behalf-of clauses and exact/narrowed global/project decide semantics; mine excludes decide-derived visibility even for global admins. Do not introduce an empty OR for unrestricted visibility. Missing credentials return 401; empty or over-64-character jobId returns 400. Add the two endpoint inventory cases in apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts: admin-token counts 200 and no-credentials counts 401. Keep the existing visibility integration cases unchanged.\n\n**Scope** — In: visibility helper extraction, repository grouped pending counts, query counts method, new uniquely named counts DTOs, static counts route, validated jobId filter, HTTP/unit regressions and regenerated root openapi.json. Out: home consumption of the helper (US-003), command details (US-002), webhook dispatch (US-004), removal of the legacy fleet counts/routes, list-row fleet fields and CLI client generation. Leaving out requests of soft-deleted projects from the list, the counts or the home card: `ApprovalRequest` has no `Project` relation, and all three keep the list's visibility exactly.\n\n**Interface** — verbatim shared signatures from the spec:\n```typescript\nvisibleRequestWhere(visibility: { principal: PrincipalRef; scopes: DecideScopes }, filter: ApprovalRequestFilter): Prisma.ApprovalRequestWhereInput\nApprovalRequestCountsDto { total: number; unscoped: number; projects: ProjectApprovalRequestCountDto[] }\nProjectApprovalRequestCountDto { projectId: string; slug: string | null; pending: number }\nApprovalRequestQueries.counts(principal: PrincipalRef): Promise<ApprovalRequestCounts>\nPrismaApprovalRequestRepository.countVisiblePending(visibility): Promise<{ unscoped: number; projects: Array<{ projectId: string; slug: string | null; pending: number }> }>\nApprovalRequestFilter.jobId?: string\n```\nThe helper lives at apps/api/src/approvals/approval-visibility.ts; both DTOs live at apps/api/src/approvals/dto/approval-request-counts.dto.ts. Counts and list use PermissionService.approvalDecideScopes(principal), preserving own-request access without a decide grant. Unit-test the extracted where; use test Postgres through the HTTP app for the new integration criteria.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Given two pending requests in project A (slug 'a-proj'), one in project B (slug 'b-proj'), one with no project and one rejected request in A, when a global admin calls GET /api/approvals/counts, then it answers 200 with data equal to { total: 4, unscoped: 1, projects: [{ projectId: A, slug: 'a-proj', pending: 2 }, { projectId: B, slug: 'b-proj', pending: 1 }] }.",
+        "AC-2 [integration]: For the same caller and data, GET /api/approvals/counts returns data.total equal to data.total of GET /api/approvals?status=pending.",
+        "AC-3 [integration]: Given pending requests in A and B, when a user holding the Approver role (approval.decide) in project A only calls GET /api/approvals/counts, then data equals { total: <A's count>, unscoped: 0, projects: [A only] }.",
+        "AC-4 [integration]: When an agent with no decide permission that is the actor of one pending request in project A calls GET /api/approvals/counts, then data equals { total: 1, unscoped: 0, projects: [{ projectId: A, slug: 'a-proj', pending: 1 }] } (its own request is visible, as in the list).",
+        "AC-5 [integration]: When GET /api/approvals/counts includes a visible pending request whose projectId names no Project row, then it counts the request in total and lists its project with slug: null after the rows that have a slug.",
+        "AC-6 [integration]: When GET /api/approvals/counts is called without credentials, then it answers 401.",
+        "AC-7 [unit]: visibleRequestWhere returns a where with status: 'pending' and no OR key when scopes are { everywhere: true, global: 'all', projects: [] } and the filter is { status: 'pending' }.",
+        "AC-8 [unit]: visibleRequestWhere returns an OR holding the actor clause, the on-behalf-of clause and a clause with projectId: 'p1' when scopes are { everywhere: false, global: [], projects: [{ projectId: 'p1', patterns: 'all' }] }.",
+        "AC-9 [unit]: visibleRequestWhere returns an OR of exactly the actor and on-behalf-of clauses when filter.mine is true and scopes are { everywhere: true, global: 'all', projects: [] }.",
+        "AC-10 [integration]: When GET /api/approvals?status=pending is called separately by a global admin and by a single-project Approver, then each caller receives the same records, in the same order, as before the extraction (the existing approval-request-visibility.integration.spec.ts cases pass unchanged).",
+        "AC-11 [integration]: Given two bash asks for job J, one for job K and one pending agent.create request with no fleet link, when a global admin calls GET /api/approvals?jobId=J, then it answers exactly the two requests for J.",
+        "AC-12 [integration]: When a caller who cannot see job J's requests calls GET /api/approvals?jobId=J, then it answers an empty page with total: 0.",
+        "AC-13 [integration]: When GET /api/approvals is called with jobId empty or 65 characters long, then each request answers 400."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "permissions",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extracts a shared access-control predicate and integrates counts, filtering, repository grouping and HTTP contracts; visibility and role checks require strict security TDD isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/approval-request.queries.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/fleet/approvals/dto/approval-counts.dto.ts",
+        "apps/api/test/integration/approvals/approval-request-visibility.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-visibility.ts",
+        "apps/api/src/approvals/approval-visibility.spec.ts",
+        "apps/api/src/approvals/dto/approval-request-counts.dto.ts",
+        "apps/api/test/integration/approvals/approval-request-counts.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "`findVisiblePage` calls `visibleRequestWhere` instead of building the `where` inline; `countVisiblePending` is added."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request.queries.ts",
+          "reason": "gains `counts(principal)`; `ApprovalRequestFilter` gains `jobId`."
+        },
+        {
+          "path": "apps/api/src/approvals/dto/list-approval-requests.query.ts",
+          "reason": "gains the optional `jobId` field (string, not empty, at most 64 characters)."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-requests.controller.ts",
+          "reason": "gains the counts route (GET approvals/counts), declared before the get-by-id route."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains two cases for the counts route: with the admin token it returns 200, and without credentials 401 (repo rule: every endpoint change is reflected in this file)."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the new counts operation, the ApprovalRequestCountsDto and ProjectApprovalRequestCountDto schemas, and the jobId query parameter of the list operation."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "04d02bcab0ac1c791e87afec224460d7b00872ee"
+    },
+    {
+      "id": "US-002",
+      "title": "Command-owned request details for fleet bash and budget asks",
+      "description": "**Goal** — Enrich GET /approvals/:id with optional per-key details implemented by fleet commands without invoking enrichment during decide or cancel.\n\n**Motivation** — What a fleet ask is about. A bash ask names its job. A budget ask lists the cancelled jobs a raise can re-queue. Its outcome and resolution live on the `FleetApprovalAsk` link, which `ApprovalRequestDto` never shows.\n\n**Approach** — Designer's calls (not ruled by the user; change them in review if wrong):\n\n- **Per-key details through the command.**\n  - `ApprovalCommand` gains an optional `details?(request: ApprovalRequestRecord): Promise<Record<string, unknown> | null>`.\n  - A new `ApprovalRequestQueries.getDetail(principal, id)` calls `get` and then asks the command registered for the request's key and variant (`registry.get(request.permissionKey, request.variant)`). It answers `details` (`null` when no command is registered or the command has no `details`). Only `GET /approvals/:id` calls `getDetail`.\n  - `get` is unchanged and stays the visibility pre-check of the decide and cancel handlers, so a decide or cancel never runs `details` or its candidate query.\n  - `ApprovalRequestDto.from` maps `details ?? null`, so the decide and cancel responses (built from `{ request, decisions }`) answer `details: null`. The three envelopes keep one shape.\n  - The engine never imports the fleet: the fleet commands, already registered by `ApprovalsModule.onModuleInit`, implement it.\n  - A `details` call that throws is logged as a warning through a class logger, and `getDetail` answers `details: null`. A broken detail block never hides a request from its decider.\n- **The fleet detail blocks.** Both are read through `FleetApprovalAskStore.findApproval(request.id)`, the view the adapter answers today, so the resolution matches what the fleet inbox showed:\n  - `fleet.job.shell.escalate`: `{ kind: 'bash', jobId, resolvedBy, outcome }`.\n  - `fleet.budget.override`: `{ kind: 'budget', policyId, resolvedBy, outcome }`. While the request is `pending` it also carries `requeueCandidates`, each `{ jobId, projectId, feature, queuedAt }` with `queuedAt` an ISO string, from `findRequeueCandidates(policyId, new Date(input.requestedAt), MAX_REQUEUE_CANDIDATES + 1)`, where `input` is the request's frozen input parsed by the command's own `parse` (the same `requestedAt` `execute` uses), cut to `MAX_REQUEUE_CANDIDATES`. It also carries `requeueCandidatesTruncated: true` when more existed, else `false`. A settled budget request carries neither field.\n  - A request whose link is missing (the view answers null) has `details: null`.\n- **The decide route stays as it is.** The engine's `POST /approvals/:id/decisions` already parses the fleet `params` through each command's `parseDecision`:\n  - the bash choice, checked against nax's offer;\n  - the budget raise amount, and the re-queue ids as a set.\n\n  A re-queue id that is not a candidate when the decision executes is recorded as refused in the result, as today. The adapter's earlier 400 for a non-candidate id stays only on the adapter, and goes with it in 7c.\n- **`openapi.json` is regenerated in each story that changes the contract** (US-001, US-002, US-003): `bun run api:export-spec` from the repo root. `apps/cli/src/generated` is not regenerated (7c deletes the CLI command that uses the fleet routes).\n\nIntegration targets:\n- `ApprovalRequestDetail`.\n  - Baseline: `{ request; decisions }`.\n  - Target: `{ request; decisions; details?: Record<string, unknown> | null }`; `getDetail` always sets it.\n- `ApprovalRequestsController.get`.\n  - Baseline: calls `queries.get`.\n  - Target: calls `queries.getDetail`. `decide` and `cancel` keep calling `queries.get`.\n- `ApprovalRequestDto` (`approvals/dto/approval-request.dto.ts`) adds `details`: an object, or null.\n\nInject ApprovalCommandRegistry into ApprovalRequestQueries and add its class Logger; the visibility lookup must finish before any command enrichment. For pending budgets, parse request.input and use input.policyId for candidate selection even when findApproval reports a different policyId; the block itself still reports the view's policyId. Use the cap 200 plus one probe row (limit 201), not the adapter view's requestedAt. Missing-link and throwing-detail cases must remain readable HTTP 200 responses with details:null. Preserve result/input/decision serialization; the assertion named 'detail retains result and serializes decisions without internal requestId' in approval-http.spec.ts gains details:null and the other ApprovalRequestDto.from cases are unchanged.\n\n**Scope** — In: optional command hook, query enrichment with failure isolation, GET-only controller wiring, nullable object DTO field, both fleet detail implementations, command/query unit tests, HTTP details and existing-decision-route integration, root OpenAPI regeneration. Out: counts/job filtering (US-001), home visibility (US-003), webhooks (US-004), changing budget non-candidate behavior, list-row fleet metadata, duplicating bash input.payload, retiring adapters, and regenerating CLI clients. A `jobId` (or any fleet field) on `ApprovalRequestSummaryDto` list rows: the fleet block is on the detail only. A 400 from the engine's decide route for a budget re-queue id that is not a candidate: the command records it as refused, as today.\n\n**Interface** — verbatim shared signatures from the spec:\n```typescript\nApprovalCommand.details?(request: ApprovalRequestRecord): Promise<Record<string, unknown> | null>\nApprovalRequestDetail { request; decisions; details?: Record<string, unknown> | null }\nApprovalRequestQueries.getDetail(principal, id): Promise<ApprovalRequestDetail>\nApprovalCommandRegistry.get(key: string, variant?: string): ApprovalCommand | undefined\n```\nCreate apps/api/src/fleet/approvals/commands/fleet-ask-details.spec.ts for the fleet hooks and query enrichment unit behavior; create apps/api/test/integration/approvals/approval-request-details.integration.spec.ts for HTTP behavior against test Postgres. Keep the engine's existing get method independently usable by mutation pre-checks and all non-HTTP consumers.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: When GET /api/approvals/:id reads a pending fleet.job.shell.escalate request whose link names job J, then data.details equals { kind: 'bash', jobId: J, resolvedBy: null, outcome: null }.",
+        "AC-2 [integration]: When GET /api/approvals/:id reads a pending fleet.budget.override request, then data.details contains kind: 'budget', its policyId, resolvedBy: null, outcome: null, requeueCandidates listing each job cancelled for the policy since the request opened as { jobId, projectId, feature, queuedAt } with queuedAt an ISO string, and requeueCandidatesTruncated: false.",
+        "AC-3 [unit]: When FleetBudgetOverrideCommand.details receives a request whose frozen input's policyId differs from the stubbed findApproval view's policyId and findRequeueCandidates answers 201 rows, then it returns 200 requeueCandidates and requeueCandidatesTruncated: true, having called findRequeueCandidates with input.policyId from the request's frozen input, new Date(input.requestedAt) from the request's frozen input, and limit 201, while the block still reports the view's policyId as its policyId.",
+        "AC-4 [integration]: When GET /api/approvals/:id reads a fleet.budget.override request settled cancelled by a window reset, then data.details contains resolvedBy: 'window_reset' and neither requeueCandidates nor requeueCandidatesTruncated.",
+        "AC-5 [unit]: FleetShellEscalateCommand.details returns null when FleetApprovalAskStore.findApproval answers null.",
+        "AC-6 [integration]: When GET /api/approvals/:id reads a request whose key has a registered command with no details method (an agent.create redeem request), then it answers data.details: null.",
+        "AC-7 [unit]: ApprovalRequestQueries.getDetail resolves with details: null and logs one warning naming the request id when the registered command's details rejects with Error('boom').",
+        "AC-8 [unit]: ApprovalRequestQueries.getDetail calls ApprovalCommandRegistry.get with the request's permissionKey and variant, while ApprovalRequestQueries.get calls neither the registry nor any details.",
+        "AC-9 [integration]: Given a pending budget ask and a requeue candidate returned in a pending budget ask's data.details.requeueCandidates, when POST /api/approvals/:id/decisions receives { decision: 'approve', params: { amountUsd: <above spend>, requeueJobIds: [<that candidate>] } }, then it answers 200 with data.details: null and the job is queued again after commit (the detail block feeds the existing decide route).",
+        "AC-10 [integration, failure handling]: When GET /api/approvals/:id reads a visible fleet request whose FleetApprovalAsk link is missing and the view answers null, then it answers data.details: null.",
+        "AC-11 [integration, failure handling]: When GET /api/approvals/:id reads a visible request and its registered command's details throws, then it answers 200 with data.details: null and logs a warning through the query class logger."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "fleet",
+        "permissions",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces a command/query extension across engine and fleet modules while preserving visibility pre-checks, variant routing and mutation authorization; security-sensitive read separation requires strict TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/approvals/approval-request.queries.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+        "apps/api/src/fleet/approvals/dto/fleet-approval.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/commands/fleet-ask-details.spec.ts",
+        "apps/api/test/integration/approvals/approval-request-details.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-command.registry.ts",
+          "reason": "`ApprovalCommand` gains the optional `details` method."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request.queries.ts",
+          "reason": "`ApprovalRequestDetail` gains the optional `details`; a new `getDetail` fills it from the registered command (`ApprovalCommandRegistry` is injected); `get` is unchanged; the class gains a `Logger` for a throwing `details`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-requests.controller.ts",
+          "reason": "the get-by-id handler calls `queries.getDetail`; the decide and cancel handlers keep `queries.get` and build their response from `{ request, decisions }`, which answers `details: null`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-http.spec.ts",
+          "reason": "the expectation of \"detail retains result and serializes decisions without internal requestId\" gains `details: null`; the other `ApprovalRequestDto.from` cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/dto/approval-request.dto.ts",
+          "reason": "`ApprovalRequestDto` gains `details` (object or null) and `from` maps `details ?? null`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts",
+          "reason": "implements `details`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+          "reason": "implements `details`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the details property of ApprovalRequestDto."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cfe2d9871a85bc7f824c2611530dc4fef3c03da5"
+    },
+    {
+      "id": "US-003",
+      "title": "Home needs-you approvals use engine visibility for every key",
+      "description": "**Goal** — Make the existing home needs-you approval rows and totals use the engine's visibility for every key while preserving blocked-job aggregation.\n\n**Motivation** — Home \"needs you\" for every key. `PrismaHomeRepository.pendingWhere` filters to `FLEET_ASK_KEYS`, so a gated agent write waiting on a human never reaches the home card.\n\n**Approach** — Designer's calls (not ruled by the user; change them in review if wrong):\n\n- **One visibility rule.** The `where` that `PrismaApprovalRequestRepository.findVisiblePage` builds today moves into a pure function, `visibleRequestWhere(visibility, filter)`, in the new file `approvals/approval-visibility.ts`. The list, the counts and the home card all call it, so the badge, the inbox and the home card cannot disagree on what a caller sees.\n- **Home reads the engine's visibility.**\n  - `HomeService` gains a `PermissionService` constructor dependency (after the repository). `HomeService.snapshot(caller, now)` builds the scope from `approvalDecideScopes({ type: 'USER', id: caller.id })`.\n  - `PrismaHomeRepository.findPendingApprovals` and `countPendingApprovals` use `visibleRequestWhere(scope.visibility, { status: 'pending' })` as their whole `where`, newest first. There is no project filter, as in the list and the counts.\n  - `HomeApprovalRow`, `HomeApprovalView` and `HomeApprovalDto` gain `permissionKey`. `type` becomes nullable: `fleetTypeOfKey(permissionKey)`, so the fleet type for the two fleet keys, else `null`. A fleet-key request with no link keeps its fleet type and has `jobId: null`. `jobId` comes from the link.\n  - `HomeApprovalDto.type` keeps its `enum: APPROVAL_TYPES` and gains `nullable: true`.\n  - The home card's unscoped rows now follow `approvalDecideScopes`, including admin bindings and the engine's actor/on-behalf-of and decide-pattern visibility, not the controller's `globalAdmin` flag (`can('project.read')`). A user with only a global `project.read` grant and no admin or decide binding no longer sees another principal's no-project asks; accepted, since they could not decide them. Actor, on-behalf-of and global decide-pattern visibility still apply exactly as in `visibleRequestWhere`.\n  - The blocked-jobs lookup keeps reading the `jobId`s of the scanned pending rows.\n- **`openapi.json` is regenerated in each story that changes the contract** (US-001, US-002, US-003): `bun run api:export-spec` from the repo root. `apps/cli/src/generated` is not regenerated (7c deletes the CLI command that uses the fleet routes).\n\nIntegration targets:\n- `HomeApprovalScope`.\n  - Baseline: `{ projectIds: string[]; includeUnscoped: boolean }`.\n  - Target: `{ visibility: { principal: PrincipalRef; scopes: DecideScopes } }`.\n- `HomeApprovalView` / `HomeApprovalDto`.\n  - Baseline: `type: string`.\n  - Target: `type: string | null`, plus `permissionKey: string`.\n\nDetailed modifications from the spec:\n- `apps/api/src/home/home.types.ts` — `HomeApprovalScope` becomes `{ visibility }`; `HomeApprovalRow` and `HomeApprovalView` gain `permissionKey` and their `type` becomes `string | null`.\n- `apps/api/src/home/home.types.spec.ts` — the `approval` fixture gains `permissionKey: 'fleet.job.shell.escalate'`; its assertions are unchanged.\n- `apps/api/src/home/home.service.ts` — the constructor gains `PermissionService`; `snapshot` builds the scope from `approvalDecideScopes({ type: 'USER', id: caller.id })`.\n- `apps/api/src/home/prisma-home.repository.ts` — `pendingWhere` becomes `visibleRequestWhere(scope.visibility, { status: 'pending' })`; rows map `permissionKey`, `type` from `fleetTypeOfKey` (`null` for another key) and `jobId` from the link.\n- `apps/api/src/home/dto/home-dashboard.dto.ts` — `HomeApprovalDto` gains `permissionKey`; `type` keeps `enum: APPROVAL_TYPES` and gains `nullable: true`.\n- `apps/api/src/home/prisma-home.repository.pending-approvals.spec.ts` — the four cases are rewritten for the new `where`, which is exactly what `visibleRequestWhere(visibility, { status: 'pending' })` returns (asserted by deep equality with a call to it, not by a hand-written shape): \"AC-9: labels each pending request by its fleet key and takes the job from the link\" keeps its row mapping and adds `permissionKey`; \"AC-10: a global admin scope also reads the asks no project owns\" passes an `everywhere` visibility and asserts the `where` has no `OR`; \"counts the same rows it would list, and never matches anything on an empty scope\" keeps the count-equals-list half and drops the empty-scope half (a principal always sees its own requests, so no scope is empty); \"leaves out a row whose key is not a fleet key, and reads the page newest first with its bound\" becomes: a row for `agent.create` is read with `type: null` and `permissionKey: 'agent.create'`, with the same order and bound.\n- `apps/api/src/home/home.service.spec.ts` — every `new HomeService(repo)` becomes `new HomeService(repo, permissions)` with a `PermissionService` double whose `approvalDecideScopes` answers a fixed scope; the `approval` row helper gains `permissionKey: 'fleet.job.shell.escalate'`; every expectation on the `{ projectIds, includeUnscoped }` scope becomes an expectation on `{ visibility: { principal: { type: 'USER', id: <caller id> }, scopes: <that scope> } }`.\n- `apps/api/test/integration/home/home-api.integration.spec.ts` — in `beforeAll`, `bashAsk` is seeded with `onBehalfOf: { type: 'USER', id: world.ids.dev }` (`seedFleetAsk` supports it), so `dev` still sees it under the engine visibility and \"scopes a member to their projects\", \"US-011 AC-9\" and their blocked-job, `attentionJobs`, `jobsTotal` and `pendingApprovals` assertions stay unchanged; \"gives a global admin every live project plus unscoped approvals\" and \"US-011 AC-10: the admin approvals count includes the pending budget ask that has no project\" (read as `root`) are unchanged. New US-003 cases are added to this file.\n- `openapi.json` — regenerated: `HomeApprovalDto.permissionKey` and the nullable `type`.\n\nAlso copy permissionKey through buildHomeView's explicit approval mapping; changing interface declarations alone does not serialize it. Keep HOME_LIMITS.approvals as the display bound, HOME_LIMITS.pendingScan as the blocked-job scan bound, and createdAt-desc/id-desc repository ordering exposed as requestedAt. Preserve the existing HomeDashboardDto envelope: approval rows/totals and jobs are under data.needsYou, not new flattened fields; acceptance references to home data.approvals denote the existing needs-you section. Use the US-001 helper as an upstream output, without reimplementing or tightening it.\n\n**Scope** — In: PermissionService-driven home approval scope, shared where for home rows/counts, all-key mapping, nullable fleet labels, permissionKey through row/view/DTO, existing fixture/regression updates, HTTP parity against /approvals and regenerated OpenAPI. Out: counts endpoint and job filter implementation (US-001), per-key details (US-002), outbound events (US-004), changing other home sections' project scoping, filtering approvals by live project state, web page changes and CLI generation. Leaving out requests of soft-deleted projects from the list, the counts or the home card: `ApprovalRequest` has no `Project` relation, and all three keep the list's visibility exactly.\n\n**Interface** — verbatim shapes and helper signature from the spec:\n```typescript\n{ visibility: { principal: PrincipalRef; scopes: DecideScopes } }\nvisibleRequestWhere(visibility: { principal: PrincipalRef; scopes: DecideScopes }, filter: ApprovalRequestFilter): Prisma.ApprovalRequestWhereInput\n```\nHomeApprovalScope uses the first shape; HomeApprovalRow/HomeApprovalView/HomeApprovalDto carry permissionKey: string and type: string | null. PermissionService is already globally exported; preserve repository-to-service layering and use the existing home integration suite rather than a new test file.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Given a pending agent.create request in project A and a pending bash ask in A, when a global admin calls GET /api/home, then data.needsYou.approvals contains both rows: the agent.create row has type: null and permissionKey: 'agent.create'; the bash row has type: 'nax_bash_escalate', permissionKey: 'fleet.job.shell.escalate' and its jobId; the set of ids equals the ids of GET /api/approvals?status=pending for the same caller.",
+        "AC-2 [integration]: When a user with the Approver role in project A only calls GET /api/home, then data.needsYou.approvals contains the pending requests of A and none of project B.",
+        "AC-3 [integration]: Given a new pending fleet.budget.override ask in web seeded with no onBehalfOf, when dev (Developer of web with no approval.decide) calls GET /api/home, then data.needsYou.approvals contains no row for that ask.",
+        "AC-4 [integration]: When a global admin calls GET /api/home with a pending budget ask with no project, then data.needsYou.approvalsTotal counts it and data.needsYou.approvals lists it with projectId: null and projectSlug: null.",
+        "AC-5 [integration]: When root reads GET /api/home, then a job with a pending bash ask visible to the caller is still reported as blocked by its pending approval in data.needsYou.jobs with pendingApprovals >= 1.",
+        "AC-6 [unit]: HomeService.snapshot calls PermissionService.approvalDecideScopes with { type: 'USER', id: <caller id> } and passes { visibility: { principal, scopes } } to both findPendingApprovals and countPendingApprovals.",
+        "AC-7 [integration]: When GET /api/home returns data.needsYou.approvals, then that array is ordered newest requestedAt first and holds at most HOME_LIMITS.approvals rows."
+      ],
+      "tags": [
+        "api",
+        "home",
+        "approvals",
+        "permissions",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuses US-001's predicate and the existing global PermissionService in five home production files with standard mapping and fixture updates; scope is bounded, but changing approval access control still mandates strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/home/prisma-home.repository.ts",
+        "apps/api/src/home/home.service.ts",
+        "apps/api/src/home/home.types.ts",
+        "apps/api/src/approvals/approval-visibility.ts",
+        "apps/api/test/integration/home/home-api.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/home/home.types.ts",
+          "reason": "`HomeApprovalScope` becomes `{ visibility }`; `HomeApprovalRow` and `HomeApprovalView` gain `permissionKey` and their `type` becomes `string | null`."
+        },
+        {
+          "path": "apps/api/src/home/home.types.spec.ts",
+          "reason": "the `approval` fixture gains `permissionKey: 'fleet.job.shell.escalate'`; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/home/home.service.ts",
+          "reason": "the constructor gains `PermissionService`; `snapshot` builds the scope from `approvalDecideScopes({ type: 'USER', id: caller.id })`."
+        },
+        {
+          "path": "apps/api/src/home/prisma-home.repository.ts",
+          "reason": "`pendingWhere` becomes `visibleRequestWhere(scope.visibility, { status: 'pending' })`; rows map `permissionKey`, `type` from `fleetTypeOfKey` (`null` for another key) and `jobId` from the link."
+        },
+        {
+          "path": "apps/api/src/home/dto/home-dashboard.dto.ts",
+          "reason": "`HomeApprovalDto` gains `permissionKey`; `type` keeps `enum: APPROVAL_TYPES` and gains `nullable: true`."
+        },
+        {
+          "path": "apps/api/src/home/prisma-home.repository.pending-approvals.spec.ts",
+          "reason": "the four cases are rewritten for the new `where`, which is exactly what `visibleRequestWhere(visibility, { status: 'pending' })` returns (asserted by deep equality with a call to it, not by a hand-written shape): \"AC-9: labels each pending request by its fleet key and takes the job from the link\" keeps its row mapping and adds `permissionKey`; \"AC-10: a global admin scope also reads the asks no project owns\" passes an `everywhere` visibility and asserts the `where` has no `OR`; \"counts the same rows it would list, and never matches anything on an empty scope\" keeps the count-equals-list half and drops the empty-scope half (a principal always sees its own requests, so no scope is empty); \"leaves out a row whose key is not a fleet key, and reads the page newest first with its bound\" becomes: a row for `agent.create` is read with `type: null` and `permissionKey: 'agent.create'`, with the same order and bound."
+        },
+        {
+          "path": "apps/api/src/home/home.service.spec.ts",
+          "reason": "every `new HomeService(repo)` becomes `new HomeService(repo, permissions)` with a `PermissionService` double whose `approvalDecideScopes` answers a fixed scope; the `approval` row helper gains `permissionKey: 'fleet.job.shell.escalate'`; every expectation on the `{ projectIds, includeUnscoped }` scope becomes an expectation on `{ visibility: { principal: { type: 'USER', id: <caller id> }, scopes: <that scope> } }`."
+        },
+        {
+          "path": "apps/api/test/integration/home/home-api.integration.spec.ts",
+          "reason": "in `beforeAll`, `bashAsk` is seeded with `onBehalfOf: { type: 'USER', id: world.ids.dev }` (`seedFleetAsk` supports it), so `dev` still sees it under the engine visibility and \"scopes a member to their projects\", \"US-011 AC-9\" and their blocked-job, `attentionJobs`, `jobsTotal` and `pendingApprovals` assertions stay unchanged; \"gives a global admin every live project plus unscoped approvals\" and \"US-011 AC-10: the admin approvals count includes the pending budget ask that has no project\" (read as `root`) are unchanged. New US-003 cases are added to this file."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: `HomeApprovalDto.permissionKey` and the nullable `type`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8754727e52c0bdcc4dae018bbf999fd3a11d2c0e"
+    },
+    {
+      "id": "US-004",
+      "title": "Transactional approval webhooks for every permission key",
+      "description": "**Goal** — Emit approval.requested and approval.resolved for all permission keys from the status-writing transaction through a cycle-free shared webhook dispatch module.\n\n**Motivation** — One webhook family for every key. Outbound webhooks exist only as `fleet.approval.requested` and `fleet.approval.resolved`, for the two fleet keys.\n\n**Approach** — Designer's calls (not ruled by the user; change them in review if wrong):\n\n- **Webhooks in the status transaction.**\n  - `ApprovalRequestEvents.record` already runs in the transaction that writes each status. It also calls `WebhookDispatcherService.dispatch(projectId, event, payload)` when `request.projectId` is not null:\n    - event `approval.requested` for status `pending`;\n    - event `approval.resolved` for every other status (`approved`, `rejected`, `expired`, `cancelled`, `executed` and `failed`).\n  - A decision writes `approved` in the decide transaction and execution writes `executed` in a second one, and each write records. So every approve sends `approval.resolved` twice: `status: 'approved'`, then `status: 'executed'` (or `failed`). For a redeem request the second comes when it is redeemed. A client filters by `status`.\n  - A request with no project sends nothing, as the fleet webhooks do.\n  - The payload is `ApprovalWebhookPayload`: `requestId`, `permissionKey`, `status`, `projectId`, `requiredMode`, `actorType`, `actorId`, `onBehalfOfType`, `onBehalfOfId`, `expiresAt` (ISO) and `path` (`/approvals?id=<requestId>`). It never carries the frozen input, the result or the decisions.\n- **Breaking the module cycle.**\n  - `WebhookModule` imports `ApprovalEngineModule` (its routes are gated), so the engine cannot import `WebhookModule`.\n  - A new `WebhookDispatchModule` (`webhook/webhook-dispatch.module.ts`, with no `imports`: `PrismaService`, `TRANSACTION_MANAGER` and `OutboxService` are global, as `ApprovalEngineModule` relies on) provides `PrismaWebhookRepository`, `{ provide: WEBHOOK_REPOSITORY, useExisting: PrismaWebhookRepository }` and `WebhookDispatcherService`, and exports only `WebhookDispatcherService` (repositories are module-private, `.nax/rules/api-data.md`).\n  - `WebhookModule` imports it and drops only `WebhookDispatcherService` from its `providers`; it keeps its own `PrismaWebhookRepository` and `WEBHOOK_REPOSITORY` providers (stateless, so a second instance is harmless) and keeps exporting `WebhookDispatcherService` by re-exporting `WebhookDispatchModule`.\n  - `ApprovalEngineModule` imports `WebhookDispatchModule`.\n\nThe user ruled (2026-10-30) that webhooks become `approval.requested`/`approval.resolved` for every key. 7a adds them. 7c deletes the `fleet.approval.*` events.\n\nIntegration targets:\n- `ApprovalRequestEvents`.\n  - Baseline: its constructor is `(outbox: OutboxService)`.\n  - Target: `(outbox: OutboxService, webhooks: WebhookDispatcherService)`.\n- `WebhookDispatcherService.dispatch(projectId, event, payload)`: `webhook/webhook-dispatcher.service.ts`. It records one `webhook_delivery` outbox row per active webhook subscribed to `event` (exact match on the `events` JSON array), and must run inside the triggering transaction.\n\nRecord the existing approval_request_changed outbox event first, then await dispatch; do not catch dispatcher database failures or defer dispatch until after commit. A webhook dispatch fails inside ApprovalRequestEvents.record: the error propagates and the status write rolls back, like every other write in that transaction. A project webhook with malformed events JSON is skipped and logged by WebhookDispatcherService (existing); the status write commits. Do not add raw input, result or decisions to the payload and do not send webhooks for projectId:null.\n\nModify approval-request-events.ts, approval-engine.module.ts and webhook.module.ts; update approval-request-events.spec.ts constructors with a dispatcher double while retaining its existing outbox assertions. The engine module now imports WebhookDispatchModule, which has no imports and resolves from the module spec's existing global Prisma/transaction-manager/OutboxService stubs; no new stub is expected, and if one is needed it is added to that spec's stub module. Create the dispatch-module database-free unit spec using GlobalStubsModule, checking service resolution and private repositories, and preserve WebhookModule resolution of both WebhookService and the shared dispatcher.\n\n**Scope** — In: cycle-free shared dispatcher provider module, payload helper, all-key engine webhooks in status transactions, database-free DI tests, and HTTP/Postgres lifecycle and rollback tests. Out: counts (US-001), detail blocks (US-002), home reads (US-003), notification switching, deleting fleet webhooks/routes, changing live events, adding delivery idempotency keys, and pinning failure behavior in an already-approved execution/settle transaction (the existing stale-approved sweeper owns it). Webhooks for requests with no project (global budget asks): none are sent, as today. A changed live event: the engine's `approval_request` live event is unchanged. No contract DTO change or OpenAPI regeneration is prescribed for this story.\n\n**Interface** — verbatim shared declarations from the spec:\n```typescript\nApprovalWebhookPayload\napprovalWebhookPayloadOf(request: ApprovalRequestRecord): ApprovalWebhookPayload\nWebhookDispatcherService.dispatch(projectId, event, payload)\n```\nApprovalWebhookPayload and approvalWebhookPayloadOf live in apps/api/src/approvals/approval-request-events.ts. WebhookDispatchModule lives in apps/api/src/webhook/webhook-dispatch.module.ts. Keep payload actor fields from the request, not the current decider. Integration AC-1 and AC-2 enter through the existing gate and decide routes, never by calling record directly; test rollback by spying on app.get(WebhookDispatcherService, { strict: false }) so the injected shared instance is the one that rejects.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Given a mode: human policy for type AGENT in project A and an active project webhook subscribed to approval.requested, when an agent DELETE /api/projects/:slug/labels/:id (key label.delete, not a redeem route) answers 202, then it records one webhook_delivery outbox row whose payload.event is 'approval.requested' and whose payload.payload equals { requestId, permissionKey, status: 'pending', projectId: A, requiredMode, actorType: 'AGENT', actorId, onBehalfOfType: null, onBehalfOfId: null, expiresAt, path: '/approvals?id=<requestId>' }.",
+        "AC-2 [integration]: Given a webhook subscribed to approval.resolved, when a human approves the pending label.delete request (opened as in the previous criterion) through POST /api/approvals/:id/decisions, then it records exactly two approval.resolved deliveries for that request, first status: 'approved' and second status: 'executed'.",
+        "AC-3 [integration]: When a redeem request is approved, then it records one approval.resolved delivery with status: 'approved' and none with executed until redemption, which then records one with status: 'executed'.",
+        "AC-4 [integration]: When a pending fleet bash ask is opened through the runner relay, then it records both the existing fleet.approval.requested delivery and one approval.requested delivery, each to the webhook that subscribes to it.",
+        "AC-5 [integration]: When a pending request with projectId: null (a global budget ask) is opened, then it records no approval.requested delivery.",
+        "AC-6 [integration]: When an approval changes status, then a webhook subscribed only to ticket.created receives no approval delivery.",
+        "AC-7 [unit]: approvalWebhookPayloadOf returns a payload with no input, result or decisions key when the request's input and result are non-empty objects.",
+        "AC-8 [unit]: When ApprovalRequestEvents.record receives a request with status: 'expired' and projectId: 'p1', then it calls WebhookDispatcherService.dispatch once with ('p1', 'approval.resolved', <payload with status 'expired'>), after recording the approval_request_changed outbox event.",
+        "AC-9 [unit]: ApprovalRequestEvents.record does not call dispatch when request.projectId is null.",
+        "AC-10 [integration]: Given vi.spyOn(app.get(WebhookDispatcherService, { strict: false }), 'dispatch').mockRejectedValue(new Error('boom')) on the one shared instance from WebhookDispatchModule, when POST /api/approvals/:id/decisions is called for a pending request, then it answers 500 and the request stays pending.",
+        "AC-11 [unit]: When WebhookDispatchModule is compiled with the GlobalStubsModule used by webhook.module.spec.ts, then it resolves WebhookDispatcherService without exporting PrismaWebhookRepository, and compiling WebhookModule the same way still resolves WebhookService and WebhookDispatcherService.",
+        "AC-12 [integration, failure handling]: Given an active project webhook with events set to syntactically invalid JSON, when a gated HTTP action writes a pending approval in that project, then the status write commits without a webhook_delivery for that webhook and WebhookDispatcherService logs 'Webhook <id> has malformed events JSON; skipping' at warn level, preserving the dispatcher's existing skip-and-log behavior."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "webhooks",
+        "outbox",
+        "transactions",
+        "module-wiring"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Extracts an import-free shared provider module and connects existing outbox dispatch to approval status transactions; cycle prevention, shared-instance DI and rollback need cross-module tests, but no new authorization algorithm or transaction mechanism is introduced.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/src/approvals/approval-engine.module.ts",
+        "apps/api/src/webhook/webhook.module.ts",
+        "apps/api/src/webhook/webhook-dispatcher.service.ts",
+        "apps/api/src/fleet/approvals/approval-payloads.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/webhook-dispatch.module.ts",
+        "apps/api/src/webhook/webhook-dispatch.module.spec.ts",
+        "apps/api/test/integration/approvals/approval-request-webhooks.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-request-events.ts",
+          "reason": "gains `WebhookDispatcherService` in the constructor, `ApprovalWebhookPayload`, `approvalWebhookPayloadOf`, and the dispatch in `record`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "imports `WebhookDispatchModule`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.spec.ts",
+          "reason": "the module now imports `WebhookDispatchModule`, which has no imports and resolves from the spec's existing global stubs (Prisma, transaction manager, `OutboxService`); no new stub is expected, and if one is needed it is added to the spec's stub module."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.module.ts",
+          "reason": "imports `WebhookDispatchModule`, drops only `WebhookDispatcherService` from `providers` (its `PrismaWebhookRepository` and `WEBHOOK_REPOSITORY` providers stay), and re-exports `WebhookDispatchModule` in place of `WebhookDispatcherService` in `exports`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request-events.spec.ts",
+          "reason": "`new ApprovalRequestEvents(outbox)` gains a dispatcher double; its existing outbox assertions stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a5c9ca7049158d584a417ac9aa7148c455fc1b66"
+    }
+  ],
+  "analysis": "Goal and completion: deliver additive P3 feature 7a API capabilities so 7b can move the web inbox, badge and home card onto the approval engine before 7c removes fleet adapters. Done means the four prescribed stories expose visible pending counts and job filtering, optional command-owned detail blocks, all-key home approvals and transactionally recorded all-key webhooks, while retaining existing fleet routes, notifications, webhooks and live events. Binding execution order is US-001 before US-003; US-002 and US-004 have no story dependencies. All workdirs remain apps/api, including the explicitly required root openapi.json regeneration in US-001/002/003. No schema migration or data backfill is required by this design.\n\nExploration and conventions: codebase-memory MCP is not exposed in this session, so findings were obtained with direct reads and targeted text searches. Read .nax/mono/apps/api/context.md and .nax/rules/api-data.md. Actual architecture is NestJS 12 with Fastify and Nathapp platform modules, not the detected Express label; no web implementation is in scope, and the repository guidance identifies Nuxt rather than the supplied Next.js detection. Follow Nathapp JSON envelopes, generated Prisma 7 client imports, module-private repositories and txManager.run with transparent transaction routing; never pass manual transaction clients through services. The nathapp-nestjs-patterns skill was not found among repository files and must be consulted if exposed to implementation agents. Tests use Vitest vi.*, colocated source unit specs and test/integration/**/*.integration.spec.ts for actual Postgres behavior. DB-backed HTTP suites must use canRunDbTests(), KODA_DB_TESTS=1 and the existing bootHttpApp/fixtureDb/resetDb infrastructure. NAX_SANDBOXED=1 skips host-dependent checks, which is not verification; run DB suites outside the sandbox before merge. DB-mode runs reset their database, so do not run parallel suites against one shared test DB. Module-wiring tests must be database-free unit tests.\n\nUS-001 baseline and impact: apps/api/src/approvals/prisma-approval-request.repository.ts:70-99 builds the visibility where inline and uses Paginate with createdAt descending and id descending. Its patternClauses helper at :215-220 implements exact and prefix permission matching. Extract this algorithm without semantic changes into approval-visibility.ts; in particular unrestricted visibility omits OR entirely because Prisma elides empty OR branches, mine still restricts to actor/on-behalf-of, and principal type must accompany principal id. apps/api/src/approvals/approval-request.queries.ts:11-19 defines the existing filter/detail types; :24-35 obtains PermissionService scopes and enforces hidden-as-not-found on detail. Its isVisible at :52-59 is the in-memory visibility twin and must remain aligned. apps/api/src/permissions/permission.service.ts:26-31 defines DecidePatterns/DecideScopes and :109-125 implements approvalDecideScopes, including global admin bindings, global patterns and project patterns. Actor and on-behalf-of visibility intentionally remain even without decide grants; do not replace service-enforced route checks with a guard that rejects own-request readers.\n\nCounts require repository groupBy on projectId over visible pending requests, a second project id/slug query, null slugs for absent project rows, deterministic slug/null/projectId ordering and total = unscoped + sum(project pending). Do not join/filter live Project rows. apps/api/prisma/schema.prisma:1554-1594 confirms ApprovalRequest.projectId is a nullable scalar without a Project relation, fleetAsk is an optional relation, and existing indexes cover status/project/status/createdAt. :1634-1663 confirms FleetApprovalAsk.requestId is its primary key and jobId already has an index; use fleetAsk: { is: { jobId } } without any schema change. apps/api/src/approvals/approval-requests.controller.ts:37-60 defines the service-enforced list route and envelope; :63 begins the dynamic :id route, so declare counts before it and register both uniquely named count DTOs with Swagger. apps/api/src/approvals/dto/list-approval-requests.query.ts:10-34 supplies the validation/decorator pattern for optional jobId, nonempty string, max length 64. apps/api/src/fleet/approvals/dto/approval-counts.dto.ts:3-14 is the legacy shape to mirror without reusing its schema names. Existing tests apps/api/test/integration/approvals/approval-request-visibility.integration.spec.ts:75-160 cover narrowed permissions, own requests, on-behalf-of identity, global patterns, pagination and hidden detail. These regression tests mostly call queries through AppModule, so retain them unchanged and add new HTTP-based integration coverage for the feature ACs rather than treating service-only tests as HTTP verification. apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:353-359 already checks list authentication; add counts 200 and 401 cases there. Update the repository, queries, list query DTO, controller, endpoint suite and openapi.json; create the visibility helper/unit spec, counts DTO and counts integration spec.\n\nUS-002 baseline and impact: apps/api/src/approvals/approval-command.registry.ts:37-108 defines ApprovalCommand; :133-135 looks up the exact key/variant pair without primary fallback. Extend with an optional details hook typed with ApprovalRequestRecord, leaving parse/parseDecision/execute untouched. apps/api/src/approvals/approval-request.queries.ts:21-35 currently has only repository and permission dependencies; inject the registry, add a class Logger and getDetail that first awaits get, then resolves the exact key and variant. Catch only optional detail enrichment failure, warn with request id and return details:null; do not suppress visibility or underlying request lookup errors. apps/api/src/approvals/approval-requests.controller.ts:74-76 changes GET alone to getDetail; :101 and :124 must keep get as the decide/cancel visibility pre-check. apps/api/src/approvals/dto/approval-request.dto.ts:59-69 maps detail responses and must default details to null, including mutation responses built without enrichment. SummaryDto :27-38 is an allowlist and must not gain job/fleet fields. apps/api/src/approvals/approval-http.spec.ts:46-55 has the exact DTO assertion that needs details:null.\n\nFleet enrichment stays in the commands, not an engine-to-fleet import. apps/api/src/fleet/approvals/approvals.module.ts:39-47 already registers both commands in onModuleInit. apps/api/src/fleet/approvals/fleet-approval-ask.store.ts:89-91 exposes findApproval and :113-115 exposes findRequeueCandidates through the module's public store. apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts:17-25 already injects asks; :35-49 validates choices against the offered payload and must remain unchanged. apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts:22-31 defines the frozen BudgetAskInput, :63-74 parses it, and :89-106 executes candidate selection using input.requestedAt and records noncandidates as refused. The new pending details query uses the parsed frozen input's policyId and requestedAt with MAX_REQUEUE_CANDIDATES+1, not the possibly different policyId/requestedAt from the adapter view. Report policyId/resolution/outcome from findApproval, cap output at 200 and serialize queuedAt as ISO. Settled requests omit both candidate fields altogether. Existing afterCommit at :132-153 requeues jobs after commit and updates outcomes; preserve it. Modify registry, queries, GET controller, DTO, HTTP spec and both commands, create fleet-ask-details.spec.ts and the HTTP detail integration spec, and regenerate openapi.json. Unit assertions for getDetail can live alongside command detail tests in the prescribed new fleet-ask-details.spec.ts without inventing another output file.\n\nUS-003 baseline and impact: apps/api/src/home/home.service.ts:11-18 currently has one repository dependency and derives approval scope from accessible projects and caller.globalAdmin; :20-40 scans approvals before looking up blocked jobs. Replace only approval scoping with PermissionService.approvalDecideScopes on USER/id, preserving the two-wave blocked-job flow and other dashboard scoping. apps/api/src/home/home.types.ts:7-15 sets display cap 8 and scan cap 200; :31-34 defines the obsolete scope; :56-64 and :102-111 define row/view; :210-219 explicitly copies approval properties in buildHomeView, so permissionKey must also be copied there, not just added to interfaces. apps/api/src/home/prisma-home.repository.ts:66-75 currently restricts to fleet keys, linked asks and project scope; :78-101 queries newest first and drops non-fleet rows with flatMap. Replace the entire pending where with visibleRequestWhere and use mapping that retains every key and missing-link fleet rows. Preserve select/bounds/order, read jobId only from the link and compute nullable type solely from permissionKey. apps/api/src/home/dto/home-dashboard.dto.ts:23-30 must add permissionKey and nullable enum type; :69-85 and apps/api/test/integration/home/home-api.integration.spec.ts:18-30 show the actual response contract has data.needsYou.approvals, data.needsYou.approvalsTotal and data.needsYou.jobs. The spec's references to data.approvals, approvalsTotal and jobs are shorthand for those existing nested fields; do not flatten the dashboard response or change HomeView. Keep this existing envelope while testing all stated row/count behaviors. HomeModule currently imports PrismaModule only (apps/api/src/home/home.module.ts:9-13), but PermissionService is already globally exported by apps/api/src/permissions/permissions.module.ts:41,61, so no new HomeModule import should be necessary.\n\nRewrite all four pending-approval repository unit cases in apps/api/src/home/prisma-home.repository.pending-approvals.spec.ts:42-113 to deep-equal the shared visibility helper's output instead of asserting a manually copied where. An unprivileged principal still has own-request visibility, so remove the obsolete empty-scope never-match assertion. Keep fleet label/link mapping, count/list equivalence, global no-OR behavior and newest-first bounded reads; add non-fleet agent.create mapping. apps/api/src/home/home.service.spec.ts:43-68 constructs HomeService directly and needs a permissions double plus visibility-scope expectations. home.types.spec.ts fixtures need permissionKey. apps/api/test/integration/home/home-api.integration.spec.ts:90-95 seeds the bash ask without onBehalfOf today; add the dev on-behalf-of identity so existing member/blocked-job assertions at :133-159 remain unchanged under the new visibility rule. Preserve root/unscoped cases at :162-185, add the new all-key/approver/nondecider/order HTTP cases, and update the local snapshot type for nullable type/permissionKey. The project list continues to omit deleted projects, but approvals must not inherit that filter. No new files are prescribed for this story.\n\nUS-004 baseline and impact: apps/api/src/approvals/approval-request-events.ts:44-66 records approval_request_changed inside the status transaction with an input/result-free payload. Add WebhookDispatcherService and dispatch after that existing outbox record, directly in the same transaction, for every key. apps/api/src/approvals/approval-decision.service.ts:81-130 owns the decision txManager.run and records approved/rejected after CAS; a dispatcher error must abort the decision and leave pending, including rolling back the decision/outbox writes. Cancellation at :65-76 also records through this seam. Events are injected by approval-gate.service.ts:58, approval-ask.service.ts:65, approval-execution.service.ts:80 and approval-request-expiry.sweeper.ts:52, so extending record reaches the lifecycle without changing each writer. apps/api/src/approvals/approval-execution.service.ts:163-182 resolves exact command variants and rechecks input/key; execution/redeem remain existing behavior. Status approved and later executed/failed are separate committed statuses, intentionally generating separate resolved events; redeem delays the latter until redemption. No webhook payload may expose frozen input, result or decisions.\n\napps/api/src/webhook/webhook-dispatcher.service.ts:11-32 injects a concrete repository and Nathapp OutboxService, enumerates active subscriptions and writes webhook_delivery sequentially inside the caller transaction; :35-42 skips/logs malformed events JSON. Preserve that existing behavior and exact-match subscription semantics. apps/api/src/webhook/webhook.module.ts:20-35 imports ApprovalEngineModule and currently provides/exports the dispatcher, so importing WebhookModule from the engine would introduce a cycle. Create an import-free WebhookDispatchModule with a private PrismaWebhookRepository/token alias and the dispatcher; export only the dispatcher. Import it from both modules. Keep WebhookModule's own stateless repository/token providers for its existing service/handler consumers, remove only its dispatcher provider and re-export the new module to ensure one shared dispatcher instance. apps/api/src/approvals/approval-engine.module.ts:28-48 already depends on globally available collaborators. apps/api/src/webhook/webhook.module.spec.ts:29-35,128-135 provides the GlobalStubsModule compilation precedent; add a separate dispatch-module unit spec and extend existing engine module compilation without requiring Postgres. apps/api/src/approvals/approval-request-events.spec.ts:21,31 directly constructs events and needs a dispatcher double while keeping existing outbox expectations. FleetAskEventsSubscriber still records legacy resolved outputs asynchronously (apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts:90-113); do not move new engine dispatch into that subscriber or delete the old family. Add HTTP integration tests through real gated writes, decisions, runner relay and redeem routes; only the explicit rollback failure test stubs the shared dispatch method. Add malformed-subscription failure-table coverage proving warn/skip and successful status commit.\n\nDependents and compatibility risks: ApprovalRequestQueries is also used by approval-route.commands.ts:43, approvals/mcp/approval-mcp-tools.ts:18, notifications/approvals/approval-requested.subscriber.ts:20, fleet/approvals/approvals.service.ts:56, fleet/approvals/fleet-ask-events.subscriber.ts:53 and fleet/assistant/requests/assistant-action-outcome.subscriber.ts:20. Preserve list/get/findById/decisionsFor semantics for all of them; only HTTP detail opts into enrichment. Existing decision-route integration spies on queries.get in test/integration/approvals/approval-decide-route.integration.spec.ts:67 and gated-decide-route.integration.spec.ts:75 anchor this separation. The engine API expands additively; home intentionally changes visibility and makes type nullable. A global project.read grant is not equivalent to approvalDecideScopes, so formerly visible asks may disappear when not owned or decidable, and newly visible own/non-fleet asks appear. Missing/deleted project requests must remain counted/listed. Avoid heavy candidate queries during decisions/cancellation, an engine-to-fleet module cycle, Swagger count schema collisions and accidental duplicate dispatcher instances. Approve produces two resolved statuses by design; consumers filter status rather than expecting one event per human action.\n\nMigration and verification: implement each additive story with its prescribed HTTP/unit tests, retaining compatibility suites; stage US-003 only after the shared helper exists. US-001/002/003 each run bun run api:export-spec from the repository root and commit current openapi.json; do not run CLI generation for this feature. Parallel independent stories touch queries/controller/spec, engine wiring or the same OpenAPI artifact, so reconcile constructor/controller changes and regenerate the merged spec rather than overwriting another story's additions. No web changes, adapter retirement, notification switching, permission catalog deletion or live-event changes belong here. The next migration step is 7b adopting these additive APIs; removal is exclusively 7c. Done includes HTTP access-control parity and Postgres rollback behavior, not just DTO snapshots or skipped integration tests.\n\nRefine-pass AC audit against .nax/features/permissions-p3-web-api/spec.md: all 40 numbered spec criteria remain in their original stories under the same AC numbers. US-001: AC-1 grouped counts; AC-2 list-total parity; AC-3 project Approver scope; AC-4 own-agent visibility (as in the list); AC-5 orphan project/null slug ordering; AC-6 unauthenticated 401; AC-7 unrestricted no-OR; AC-8 principal/project clauses; AC-9 mine-only clauses; AC-10 unchanged records/order for BOTH admin and single-project Approver with the existing visibility cases unchanged; AC-11 job filter; AC-12 invisible job requests; AC-13 both invalid jobId lengths. US-002: AC-1 bash detail; AC-2 budget candidate detail; AC-3 frozen-input query arguments and view policyId; AC-4 settled-window-reset omissions; AC-5 missing-link null; AC-6 no-hook null; AC-7 warning fallback; AC-8 exact variant and unchanged get without enrichment; AC-9 candidate-fed existing decide route and post-commit requeue. US-003: AC-1 all-key home/list parity; AC-2 project Approver visibility; AC-3 Developer exclusion; AC-4 unscoped totals; AC-5 still-blocked job regression; AC-6 scope dependency arguments; AC-7 ordering/cap. US-004: AC-1 gated requested payload; AC-2 approved/executed deliveries; AC-3 redeem timing; AC-4 existing fleet plus new family; AC-5 unscoped omission; AC-6 unrelated subscription; AC-7 safe payload; AC-8 expired dispatch after existing outbox record; AC-9 no-project omission; AC-10 shared-instance decision rollback; AC-11 module resolution and repository privacy. No regression qualifier was removed. The six failure-table rows map respectively to US-002 AC-7/11, US-002 AC-5/10, US-001 AC-6, US-001 AC-13, US-004 AC-10, and US-004 AC-12. Negative cases exist in every story, including US-003 AC-3; no extra speculative acceptance criterion is needed. All 12 feature-level exclusions remain verbatim, all five context files per story match the spec (US-003's helper is its bound upstream output), and dependencies remain exactly [], [], [US-001], [].\n\nAudit corrections: clarified US-004 AC-1's nested outbox row.payload.event and row.payload.payload to match webhook-dispatcher.service.ts:25-27; made home assertions target the existing data.needsYou envelope rather than inventing a flattened API; qualified the project.read-only explanation so it does not suppress actor/on-behalf-of/global-pattern visibility guaranteed by approval-request.queries.ts:52-59. Kept the spec's compound lifecycle observations together rather than dropping any clause. Reduced US-003 to medium complexity because it reuses an upstream helper and the global PermissionService, retaining strict security TDD. Reduced US-004 from expert to complex with three-session-tdd-lite because its module extraction and dispatch integration reuse existing transaction machinery and introduce no access-control algorithm. US-001 and US-002 keep complex/three-session-tdd for shared visibility and authorization-boundary enrichment respectively.",
+  "outOfScope": [
+    "Any web change: the inbox, badge, notifications page wiring, job page, budget banner and policy pages are 7b `permissions-p3-web`.",
+    "Deleting `/fleet/approvals`, `/projects/:slug/fleet/approvals`, `/fleet/approval-counts`, `FleetApprovalDto`, `ApprovalCountsDto`, the `fleet.approval.read` and `fleet.approval.decide.*` keys, the `fleet_approval` live event, the `fleet.approval.requested`/`fleet.approval.resolved` webhooks, `koda_list_approvals`'s fleet route and the CLI `koda fleet approval` command: 7c `permissions-p3-retire-fleet-approvals`.",
+    "Regenerating `apps/cli/src/generated`: only `openapi.json` is regenerated.",
+    "Leaving out requests of soft-deleted projects from the list, the counts or the home card: `ApprovalRequest` has no `Project` relation, and all three keep the list's visibility exactly.",
+    "A `jobId` (or any fleet field) on `ApprovalRequestSummaryDto` list rows: the fleet block is on the detail only.",
+    "A 400 from the engine's decide route for a budget re-queue id that is not a candidate: the command records it as refused, as today.",
+    "Notifications: the engine's `ApprovalRequestedSubscriber` keeps skipping the two fleet keys, and `FleetApprovalRequestedSubscriber` and the `fleet_approval_requested` outbox event stay. The switch, and deleting the fleet path, move to 7c, after 7b ships the `/approvals` page the engine notification links to (ruled 2026-10-30).",
+    "Webhooks for requests with no project (global budget asks): none are sent, as today.",
+    "US-004 only: a webhook dispatch that fails inside the execution or settle transaction of an approved request. The error propagates, the request stays `approved`, and the existing stale-approved sweep (`ApprovalRequestExpirySweeper`, `findStaleApproved`) owns it; no AC pins that path.",
+    "A changed live event: the engine's `approval_request` live event is unchanged.",
+    "An idempotency key on webhook deliveries: a redelivered status is not possible here, because each status is recorded once in its own write transaction.",
+    "US-002 only: the bash ask's frozen input (`input.payload`, nax's command and options) is already on `ApprovalRequestDto.input`, so the bash `details` block does not repeat it."
+  ],
+  "routingProfile": "native-codex"
+}

@@ -15,7 +15,7 @@ const ticket = (over: Partial<HomeSnapshotInput['tickets'][number]> = {}): HomeS
 });
 
 const approval = (over: Partial<HomeSnapshotInput['approvals'][number]> = {}): HomeSnapshotInput['approvals'][number] => ({
-  id: 'a1', type: 'nax_bash_escalate', projectId: 'p1', jobId: 'j1', requestedAt: daysAgo(0), expiresAt: null, ...over,
+  id: 'a1', permissionKey: 'fleet.job.shell.escalate', type: 'nax_bash_escalate', projectId: 'p1', jobId: 'j1', requestedAt: daysAgo(0), expiresAt: null, ...over,
 });
 
 const job = (over: Partial<HomeJobRow> = {}): HomeJobRow => ({

@@ -19,12 +19,13 @@ import { DecideApprovalRequestDto } from './dto/decide-approval-request.dto';
 import { rethrowApprovalError } from './approval-http-errors';
 import { ListApprovalRequestsQuery } from './dto/list-approval-requests.query';
 import { ApprovalRequestDto, ApprovalRequestSummaryDto } from './dto/approval-request.dto';
+import { ApprovalRequestCountsDto } from './dto/approval-request-counts.dto';
 
 const ref = (principal: KodaPrincipal): PrincipalRef => ({ type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id });
 
 @ApiTags('approvals')
 @ApiBearerAuth()
-@ApiExtraModels(ApprovalRequestSummaryDto, ApprovalRequestDto)
+@ApiExtraModels(ApprovalRequestSummaryDto, ApprovalRequestDto, ApprovalRequestCountsDto)
 @Controller('approvals')
 export class ApprovalRequestsController {
   constructor(
@@ -59,6 +60,20 @@ export class ApprovalRequestsController {
     } catch (error) { rethrowApprovalError(error); }
   }
 
+  @Get('counts')
+  @UseGuards(RequiresGuard)
+  @Requires('approval.decide', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Count visible pending approval requests' })
+  @ApiResponse({ status: 200, description: 'Pending counts by project and unscoped', schema: {
+    type: 'object', required: ['ret', 'data'], properties: {
+      ret: { type: 'number' }, data: { $ref: getSchemaPath(ApprovalRequestCountsDto) },
+    },
+  } })
+  @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
+  async counts(@Principal() principal: KodaPrincipal) {
+    return JsonResponse.Ok<ApprovalRequestCountsDto>(await this.queries.counts(ref(principal)));
+  }
+
   @Get(':id')
   @UseGuards(RequiresGuard)
   @Requires('approval.decide', { enforcedBy: 'service' })
@@ -71,7 +86,7 @@ export class ApprovalRequestsController {
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 404, description: 'Approval request missing or invisible' })
   async get(@Principal() principal: KodaPrincipal, @Param('id') id: string) {
-    try { return JsonResponse.Ok(ApprovalRequestDto.from(await this.queries.get(ref(principal), id))); }
+    try { return JsonResponse.Ok(ApprovalRequestDto.from(await this.queries.getDetail(ref(principal), id))); }
     catch (error) { rethrowApprovalError(error); }
   }
 
