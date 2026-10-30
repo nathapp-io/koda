@@ -2392,6 +2392,28 @@
     },
     "comment": {
       "tooLong": "The comment is too long (2000 characters at most)"
+    },
+    "inbox": {
+      "title": "Approvals",
+      "subtitle": "Every request waiting on a decision.",
+      "subtitleProject": "Requests this project is waiting on.",
+      "tabs": { "pending": "Pending", "all": "All" },
+      "row": { "requester": "Requester", "project": "Project", "expiresIn": "Time left" },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "expired": "Expired",
+        "cancelled": "Cancelled",
+        "executed": "Executed",
+        "failed": "Failed"
+      },
+      "pager": { "prev": "Previous", "next": "Next" },
+      "noProject": "No project",
+      "forbidden": "You do not have permission to see these approvals.",
+      "loadFailed": "Could not load approvals.",
+      "stale": "Could not refresh approvals. Showing the last loaded list.",
+      "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." }
     }
   }
 }

@@ -2392,6 +2392,28 @@
     },
     "comment": {
       "tooLong": "备注过长（最多 2000 个字符）"
+    },
+    "inbox": {
+      "title": "审批",
+      "subtitle": "等待决策的所有请求。",
+      "subtitleProject": "本项目等待决策的请求。",
+      "tabs": { "pending": "待处理", "all": "全部" },
+      "row": { "requester": "请求者", "project": "项目", "expiresIn": "剩余时间" },
+      "status": {
+        "pending": "待处理",
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "expired": "已过期",
+        "cancelled": "已取消",
+        "executed": "已执行",
+        "failed": "已失败"
+      },
+      "pager": { "prev": "上一页", "next": "下一页" },
+      "noProject": "无项目",
+      "forbidden": "你没有查看这些审批的权限。",
+      "loadFailed": "无法加载审批。",
+      "stale": "刷新审批失败，显示上次加载的列表。",
+      "empty": { "pending": "暂无待处理的请求。", "all": "暂无审批。" }
     }
   }
 }
