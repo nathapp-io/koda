@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T11:23:28.735Z",
+  "updatedAt": "2026-10-30T11:37:38.333Z",
   "userStories": [
     {
       "id": "US-001",
@@ -370,14 +370,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Coordinates per-user toast/browser state and engine scanning while viewerActions gates which requests expose review actions; the access-sensitive action filter requires strict security TDD in addition to lifecycle and home/bell regression checks."
+        "reasoning": "Coordinates per-user toast/browser state and engine scanning while viewerActions gates which requests expose review actions; the access-sensitive action filter requires strict security TDD in addition to lifecycle and home/bell regression checks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/composables/useApprovalNotifications.ts",
@@ -420,7 +423,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1e276de019cab16f4b8732652dc2e915d6be5b0c"
     },
     {
       "id": "US-006",
