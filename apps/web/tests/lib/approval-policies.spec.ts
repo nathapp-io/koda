@@ -266,6 +266,22 @@ describe('AC-7: list() reads every page so an override count sees every policy',
 
     expect(get).toHaveBeenCalledTimes(1)
   })
+
+  test('list() keeps paging past a hundred pages until hasNext is false', async () => {
+    const total = 150
+    const get = jest.fn(async (_path: string, options?: { query: Record<string, string> }) => {
+      const current = Number(options?.query.current ?? '1')
+      return page([policy({ id: `p${current}` })], { total, current, hasNext: current < total, hasPrev: current > 1 })
+    }) as unknown as Fn
+    install({ get })
+
+    const rows = await useApprovalPolicies({ kind: 'global' }).list()
+
+    expect(get).toHaveBeenCalledTimes(total)
+    expect(get).toHaveBeenNthCalledWith(101, '/approval-policies', { query: { current: '101', size: '100' } })
+    expect(rows).toHaveLength(total)
+    expect(rows[total - 1]?.id).toBe(`p${total}`)
+  })
 })
 
 describe('useApprovalPolicies mutations', () => {

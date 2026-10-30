@@ -15,8 +15,6 @@ import type { ApprovalPolicy, ApprovalPolicyPage, ApprovableKey, PolicyBase } fr
 
 /** The page size the list asks for: the API's maximum, so the whole list is usually one request. */
 const POLICY_PAGE_SIZE = 100
-/** A stop for a server that keeps answering `hasNext` with rows: 100 pages of 100 policies is plenty. */
-const MAX_POLICY_PAGES = 100
 
 /** The records of one list answer, with a default for every field the API always sends. */
 function toPage(answer: Partial<ApprovalPolicyPage> | null | undefined): ApprovalPolicyPage {
@@ -36,18 +34,24 @@ export function useApprovalPolicies(base: PolicyBase) {
   const keys = ref<ApprovableKey[]>([])
   const pending = ref(false)
 
-  /** Every policy of this base, page after page. */
+  /**
+   * Every policy of this base, page after page: the walk ends only when the API says there is no
+   * next page, so an override count is never computed over a truncated list. The one other exit is
+   * a page that claims `hasNext` but carries no records — no page number could make progress from
+   * there, and spinning on it would hang the page.
+   */
   async function list(): Promise<ApprovalPolicy[]> {
     pending.value = true
     try {
       const all: ApprovalPolicy[] = []
-      for (let page = 1; page <= MAX_POLICY_PAGES; page += 1) {
+      let page = 1
+      for (;;) {
         const answer = toPage(await $api.get<Partial<ApprovalPolicyPage>>(policyRoot(base), {
           query: page === 1 ? { size: String(POLICY_PAGE_SIZE) } : { current: String(page), size: String(POLICY_PAGE_SIZE) },
         }))
         all.push(...answer.records)
-        // An empty page ends the walk even when the server says there is more: nothing to add.
         if (!answer.hasNext || answer.records.length === 0) break
+        page += 1
       }
       policies.value = all
       return all
