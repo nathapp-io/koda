@@ -89,7 +89,6 @@ function askStore() {
     findPendingForPolicyPage: vi.fn(async (budgetPolicyId: string, after?: string, limit = MAX_PENDING_ASKS_PER_JOB) =>
       pendingOfPolicy(budgetPolicyId).filter((id) => after === undefined || id > after).slice(0, limit)
         .map((id) => links.get(id) as FleetApprovalAskRecord)),
-    findProjectSlug: vi.fn(async () => 'web'),
   };
 
   /** Pending links of one policy, in the page order (`requestId` ascending). */
@@ -136,14 +135,13 @@ function fakes() {
   const store = askStore();
   const asks = askService(store);
   const activity = { record: vi.fn(async () => undefined) };
-  const webhooks = { dispatch: vi.fn(async () => undefined) };
   const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
   mockAuditRecorder.record.mockReset();
   mockAuditRecorder.record.mockImplementation(async () => undefined);
   const closer = new ApprovalCloser(
-    store as never, asks as never, activity as never, webhooks as never, live as never, mockAuditRecorder,
+    store as never, asks as never, activity as never, live as never, mockAuditRecorder,
   );
-  return { closer, store, asks, activity, webhooks };
+  return { closer, store, asks, activity };
 }
 
 describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
@@ -151,8 +149,7 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
   let store!: ReturnType<typeof fakes>['store'];
   let asks!: ReturnType<typeof fakes>['asks'];
   let activity!: ReturnType<typeof fakes>['activity'];
-  let webhooks!: ReturnType<typeof fakes>['webhooks'];
-  beforeEach(() => { ({ closer, store, asks, activity, webhooks } = fakes()); });
+  beforeEach(() => { ({ closer, store, asks, activity } = fakes()); });
   const stop = { windowStart: NOW, spentUsd: '10.5' };
   const system = { type: 'SYSTEM' as const, id: 'system', responsibleUserId: 'u1' };
   const resumer = { type: 'USER' as const, id: 'u9', responsibleUserId: 'u9' };
@@ -175,7 +172,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
       actorType: 'SYSTEM', action: 'approval.requested', entityType: 'approval', entityId: 'req-1', projectId: 'p1', responsibleUserId: 'u1',
     }));
-    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.objectContaining({ approvalId: 'req-1', path: '/web/fleet/approvals?id=req-1' }));
     expect(r.live).toEqual([{ approvalId: 'req-1', status: 'pending' }]);
   });
 
@@ -193,12 +189,11 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     ]);
   });
 
-  it('opens a global policy ask with no project, and sends no webhook or live event', async () => {
+  it('opens a global policy ask with no project and sends no live event', async () => {
     const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), stop, NOW);
 
     expect(asks.open.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ projectId: null }));
     expect(r.approval).toEqual(expect.objectContaining({ projectId: null }));
-    expect(webhooks.dispatch).not.toHaveBeenCalled();
     expect(r.live).toEqual([]);
   });
 
@@ -221,7 +216,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(store.links.get('req-1')?.resolvedBy).toBe('policy_deleted');
     expect(r.approval).toEqual(expect.objectContaining({ status: 'cancelled', decidedById: null, decision: null }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ actorType: 'USER', actorId: 'u9', action: 'approval.cancelled' }));
-    expect(webhooks.dispatch).toHaveBeenLastCalledWith('p1', 'fleet.approval.resolved', expect.objectContaining({ status: 'cancelled' }));
   });
 
   it('a manual resume closes the ask cancelled on the engine and reports approved through the link, with the resumer in the outcome', async () => {
@@ -239,7 +233,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
       outcome: { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' },
     }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ actorType: 'USER', actorId: 'u9', action: 'approval.decided' }));
-    expect(webhooks.dispatch).toHaveBeenLastCalledWith('p1', 'fleet.approval.resolved', expect.objectContaining({ status: 'approved' }));
   });
 
   it('a close the engine skipped (request held elsewhere) answers nothing and writes nothing', async () => {
@@ -308,8 +301,7 @@ describe('bash half on the approval engine (US-006)', () => {
   let store!: ReturnType<typeof fakes>['store'];
   let asks!: ReturnType<typeof fakes>['asks'];
   let activity!: ReturnType<typeof fakes>['activity'];
-  let webhooks!: ReturnType<typeof fakes>['webhooks'];
-  beforeEach(() => { ({ closer, store, asks, activity, webhooks } = fakes()); });
+  beforeEach(() => { ({ closer, store, asks, activity } = fakes()); });
   const job = { id: 'j1', projectId: 'p1', leaseEpoch: 2, state: 'RUNNING', bashMode: 'escalate', approvalTimeoutSec: 600, requestedById: 'u9', requestedByType: 'USER' } as const;
   const ask = (over: Partial<{ naxAskId: string; deadlineAt: Date }> = {}) => ({
     naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test', options: ['allow', 'deny'] }, ...over,
@@ -327,7 +319,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(approval).toEqual(expect.objectContaining({ id: 'req-1', type: 'nax_bash_escalate', status: 'pending', jobId: 'j1', leaseEpoch: 2, naxAskId: 'ask-1f2e3d4c' }));
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', responsibleUserId: 'u9', action: 'approval.requested' }));
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: approval?.id, projectId: 'p1', summary: 'bash ask opened, pending' });
-    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.anything());
     expect(live).toHaveLength(1);
   });
 
@@ -360,7 +351,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(asks.open).not.toHaveBeenCalled();
     expect(store.insert).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
-    expect(webhooks.dispatch).not.toHaveBeenCalled();
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({
       key: 'runner.sync', resourceType: 'fleet-job', resourceId: 'j1', projectId: 'p1', summary: `bash ask not opened: ${reason}`,
     });
@@ -372,7 +362,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(r).toEqual({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
     expect(store.insert).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
-    expect(webhooks.dispatch).not.toHaveBeenCalled();
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({
       key: 'runner.sync', resourceType: 'fleet-job', resourceId: 'j1', projectId: 'p1', summary: 'bash ask answered allow: no approval needed',
     });
@@ -389,7 +378,6 @@ describe('bash half on the approval engine (US-006)', () => {
   it('closeForJob cancels every pending ask job_ended on the engine and reports each resolution', async () => {
     await closer.openBash(job, ask(), 'r1', NOW);
     await closer.openBash(job, ask({ naxAskId: 'ask-00000002' }), 'r1', NOW);
-    webhooks.dispatch.mockClear();
     mockAuditRecorder.record.mockClear();
 
     const live = await closer.closeForJob(job, NOW);
@@ -401,7 +389,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(store.setResolvedBy.mock.calls).toEqual([['req-1', 'job_ended'], ['req-2', 'job_ended']]);
     expect(live).toHaveLength(2);
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.cancelled', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
-    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.resolved', expect.anything());
   });
 
   it('US-006 AC-14: a close the engine skipped (request held elsewhere) writes nothing for that ask', async () => {

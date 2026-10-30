@@ -98,7 +98,7 @@ export class ApprovalsService {
     if (view === null) throw new NotFoundAppException({}, 'fleet.approvals');
     // Step 7: an answer that found the job ended closes the link `job_ended` without answering nax.
     if (view.type === 'nax_bash_escalate' && view.resolvedBy === 'job_ended') throw new ConflictAppException({}, 'fleet.approvalNotPending');
-    // The fleet's outputs of this decision (activity row, `fleet.approval.resolved` webhook, live event) are recorded by
+    // The fleet's activity and live outputs of this decision are recorded by
     // `FleetAskEventsSubscriber` from the durable `approval_request_changed` event the engine wrote in the deciding
     // transaction, once per engine status (permissions P3 US-009): a crash here loses nothing and a redelivery is a
     // no-op, which a write in this adapter could not promise.

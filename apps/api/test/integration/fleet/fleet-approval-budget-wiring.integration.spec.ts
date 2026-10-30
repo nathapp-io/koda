@@ -120,7 +120,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     project.projectId = world.projectId;
     app.get(ProjectEventBus).subscribe(world.projectId, (e) => seen.push(e));
     await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['approval.requested', 'approval.resolved']) },
     });
   });
   afterAll(async () => {
@@ -163,7 +163,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     });
     // The pending open still announces the ask exactly as it did on the legacy row.
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: request.id, action: 'approval.requested', actorType: 'SYSTEM' } })).toBe(1);
-    expect(await hooks('fleet.approval.requested')).toBe(1);
+    expect(await hooks('approval.requested')).toBe(1);
     // Permissions P3 7c US-002: the fleet's own `fleet_approval_requested` announcement is gone; the engine's
     // `approval_request_changed` (enqueued by `ApprovalRequestEvents.record`) is the only event of the ask.
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
@@ -299,7 +299,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect(request.projectId).toBeNull();
     expect(link.projectId).toBeNull();
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
-    expect(await hooks('fleet.approval.requested')).toBe(0);
+    expect(await hooks('approval.requested')).toBe(0);
     expect(seen).toEqual([]);
   });
 

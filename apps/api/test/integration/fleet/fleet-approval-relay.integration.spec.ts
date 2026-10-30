@@ -344,12 +344,12 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await finish(jobId, leaseEpoch, 3);
   });
 
-  it('AC-11: the pending open dispatches fleet.approval.requested to the project webhook with the request id', async () => {
+  it('US-005 AC-1: the pending open delivers approval.requested, not the retired fleet event', async () => {
     await enableRelay();
     // Only this case needs a subscription: every other relay here would otherwise queue a delivery to an
     // unreachable host, which is noise (and outbox work) the rest of the file does not read.
     const webhook = await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved', 'approval.requested', 'approval.resolved']) },
     });
     try {
       const { jobId, leaseEpoch } = await startRunning('webhook');
@@ -359,11 +359,12 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
       const deliveries = await prisma.outboxEvent.findMany({
         where: {
           type: 'webhook_delivery',
-          AND: [{ payload: { contains: '"event":"fleet.approval.requested"' } }, { payload: { contains: `"jobId":"${jobId}"` } }],
+          AND: [{ payload: { contains: '"event":"approval.requested"' } }, { payload: { contains: '"permissionKey":"fleet.job.shell.escalate"' } }],
         },
       });
       expect(deliveries).toHaveLength(1);
-      expect(deliveries[0]!.payload).toContain(`"approvalId":"${link!.requestId}"`);
+      expect(deliveries[0]!.payload).toContain(`"requestId":"${link!.requestId}"`);
+      expect(await prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: '"event":"fleet.approval.requested"' } } })).toBe(0);
       // A8: the webhook never carries the command text.
       expect(deliveries[0]!.payload).not.toContain('bun run test');
 

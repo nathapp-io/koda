@@ -125,7 +125,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     padmin = await loginToken(server, 'padmin@koda.test');
     padminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'padmin@koda.test' } })).id;
     await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['approval.requested', 'approval.resolved']) },
     });
   });
   afterAll(async () => {
@@ -247,7 +247,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(approvalId);
     // The decision's fleet outputs come from the durable outbox event (permissions P3 US-009).
     await deliver('approval_request_changed');
-    expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"approval.resolved"' } } })).toBe(2);
   });
 
   it('partial re-queue: an active duplicate fails alone, the resume stands (review focus 2)', async () => {

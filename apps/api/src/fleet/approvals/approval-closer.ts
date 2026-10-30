@@ -4,7 +4,6 @@ import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import type { ApprovalDecisionRecord } from '../../approvals/domain/approval.domain';
 import type { FleetActorType } from '../../common/enums';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
-import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import type { ApprovalOption } from '../common/protocol';
@@ -12,7 +11,7 @@ import { responsibleUserOf } from '../common/responsible-user';
 import { SYSTEM_ACTOR } from '../common/system-actor';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { ApprovalLivePublisher } from './approval-live.publisher';
-import { approvalActivityPayload, approvalWebhookPayload } from './approval-payloads';
+import { approvalActivityPayload } from './approval-payloads';
 import { checkBashDecision } from './bash-decision';
 import {
   ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord,
@@ -117,7 +116,6 @@ export class ApprovalCloser {
     private readonly store: FleetApprovalAskStore,
     private readonly askService: ApprovalAskService,
     private readonly activity: FleetActivityService,
-    private readonly webhooks: WebhookDispatcherService,
     private readonly livePublisher: ApprovalLivePublisher,
     private readonly audit: AuditRecorder,
   ) {}
@@ -150,7 +148,6 @@ export class ApprovalCloser {
     const view = await this.store.findApproval(requestId);
     if (view === null) throw new Error(`fleet budget ask ${requestId} has no ask link`);
     await this.record(view, system, 'approval.requested');
-    await this.dispatch(view, 'fleet.approval.requested');
     return { approval: view, live: [...stray.live, ...this.livePublisher.event(view)] };
   }
 
@@ -226,7 +223,6 @@ export class ApprovalCloser {
 
   async recordResolved(approval: FleetApprovalRecord, actor: ApprovalActor): Promise<LiveFleetApprovalEvent[]> {
     await this.record(approval, actor, closedAction(approval));
-    await this.dispatch(approval, 'fleet.approval.resolved');
     return this.livePublisher.event(approval);
   }
 
@@ -272,7 +268,6 @@ export class ApprovalCloser {
     if (view === null) throw new Error(`fleet bash ask ${requestId} has no ask link`);
     await this.record(view, runnerActor(runnerId, job), 'approval.requested');
     await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: view.id, projectId: view.projectId, summary: 'bash ask opened, pending' });
-    await this.dispatch(view, 'fleet.approval.requested');
     return { approval: view, live: this.livePublisher.event(view) };
   }
 
@@ -328,11 +323,5 @@ export class ApprovalCloser {
       actorType: actor.type, actorId: actor.id, action, entityType: 'approval', entityId: approval.id, jobId: approval.jobId,
       projectId: approval.projectId, responsibleUserId: actor.responsibleUserId, payload: approvalActivityPayload(approval, extra),
     });
-  }
-
-  private async dispatch(approval: FleetApprovalRecord, event: string): Promise<void> {
-    if (!approval.projectId) return;
-    const slug = await this.store.findProjectSlug(approval.projectId);
-    if (slug) await this.webhooks.dispatch(approval.projectId, event, approvalWebhookPayload(approval, slug));
   }
 }

@@ -1,7 +1,7 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P3 US-007 fix round 2 (F5) / US-009 — a settled ask's fleet outputs (activity row,
- * `fleet.approval.resolved` webhook, `fleet_approval` live event) are recorded by the durable outbox consumer, once per
+ * `approval.resolved` webhook, `fleet_approval` live event) are recorded by the durable outbox consumer, once per
  * engine status, instead of after the decision committed.
  *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-recorder.integration.spec.ts
@@ -46,7 +46,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
     }
   };
   const activity = (requestId: string) => prisma.fleetActivity.findMany({ where: { entityType: 'approval', entityId: requestId } });
-  const resolvedWebhooks = () => prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } });
+  const resolvedWebhooks = () => prisma.outboxEvent.count({ where: { payload: { contains: '"event":"approval.resolved"' } } });
 
   const pendingBashAsk = async () => {
     const running = await prisma.fleetJob.create({
@@ -79,9 +79,9 @@ describeIntegration('fleet ask recorder (PG)', () => {
     await request(app.getHttpServer()).post('/api/projects/web/members').set(as(world.tokens.root))
       .send({ email: 'rec-admin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(app.getHttpServer(), 'rec-admin@koda.test');
-    // A subscription is what turns a `fleet.approval.resolved` dispatch into an outbox delivery row.
+    // The engine subscription records each approval.resolved status as a webhook delivery row.
     await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['approval.requested', 'approval.resolved']) },
     });
   });
   afterAll(async () => { await app.close(); });
@@ -104,20 +104,20 @@ describeIntegration('fleet ask recorder (PG)', () => {
     const events = await prisma.outboxEvent.findMany({ where: { type: APPROVAL_REQUEST_CHANGED } });
     expect(events.map((e) => JSON.parse(e.payload).status)).toContain('executed');
     expect(await activity(requestId)).toEqual([]);
-    expect(await resolvedWebhooks()).toBe(0);
+    expect(await resolvedWebhooks()).toBe(2);
     expect(seen).toEqual([]);
 
     await deliver(APPROVAL_REQUEST_CHANGED);
 
     expect(await activity(requestId)).toMatchObject([{ action: 'approval.decided', actorType: 'USER', entityType: 'approval' }]);
-    expect(await resolvedWebhooks()).toBe(1);
+    expect(await resolvedWebhooks()).toBe(2);
     expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'approved' }]);
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', resolvedBy: 'user' });
 
     // Recording is idempotent per engine status; a redelivery writes nothing and publishes no second frame.
     await deliver(APPROVAL_REQUEST_CHANGED);
     expect(await activity(requestId)).toHaveLength(1);
-    expect(await resolvedWebhooks()).toBe(1);
+    expect(await resolvedWebhooks()).toBe(2);
     const frames = seen.filter((e) => e.type === 'fleet_approval');
     expect(frames).toHaveLength(1);
     expect(new Set(frames.map((f) => f.id)).size).toBe(1);
@@ -139,7 +139,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
     // under the same durable id (`<requestId>:<status>:fleet`), which is what the live stream forwards for clients to
     // dedupe on.
     expect(await activity(requestId)).toHaveLength(1);
-    expect(await resolvedWebhooks()).toBe(1);
+    expect(await resolvedWebhooks()).toBe(2);
     const frames = seen.filter((e) => e.type === 'fleet_approval');
     expect(frames.length).toBeGreaterThanOrEqual(1);
     expect(frames.length).toBeLessThanOrEqual(records.length * 2);
@@ -164,7 +164,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
       // relay retries the event instead of losing the frame for that subscriber.
       await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('socket unavailable');
       expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(1);
+      expect(await resolvedWebhooks()).toBe(2);
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
       expect(received).toHaveLength(1);
 
@@ -188,13 +188,13 @@ describeIntegration('fleet ask recorder (PG)', () => {
       await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('marker unavailable');
       // Nothing of the rolled-back attempt survives: no activity row, no webhook row, no live frame.
       expect(await activity(requestId)).toEqual([]);
-      expect(await resolvedWebhooks()).toBe(0);
+      expect(await resolvedWebhooks()).toBe(2);
       expect(seen.filter((e) => e.type === 'fleet_approval')).toEqual([]);
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBeNull();
 
       await deliver(APPROVAL_REQUEST_CHANGED);
       expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(1);
+      expect(await resolvedWebhooks()).toBe(2);
       expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
     } finally {
@@ -212,7 +212,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
     try {
       await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('ack unavailable');
       expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(1);
+      expect(await resolvedWebhooks()).toBe(2);
       // It reached the subscribers that were listening, and stays owed until the marker commits.
       expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
@@ -228,7 +228,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
       // The subscriber that already had it was skipped, and nothing was recorded twice.
       expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
       expect(await activity(requestId)).toHaveLength(1);
-      expect(await resolvedWebhooks()).toBe(1);
+      expect(await resolvedWebhooks()).toBe(2);
       expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
     } finally {
       unsubscribeLate();

@@ -27,14 +27,14 @@ const RECORDED_STATUSES: ReadonlySet<string> = new Set(['rejected', 'executed', 
 const liveFrameId = (requestId: string, status: string): string => `${requestId}:${status}:fleet`;
 
 /**
- * Permissions P3 US-009: the fleet's three outputs for the statuses the *engine* sets — the activity row, the
- * `fleet.approval.resolved` webhook and the `fleet_approval` live event — are recorded from the durable outbox event
- * `ApprovalRequestEvents` writes in the deciding (or expiring) transaction, instead of after it committed. A crash
- * between that commit and the outputs therefore loses nothing: the relay redelivers the event, and
+ * Permissions P3 US-009: the fleet's activity row and `fleet_approval` live event for statuses the *engine* sets
+ * are recorded from the durable outbox event `ApprovalRequestEvents` writes in the deciding (or expiring) transaction,
+ * instead of after it committed. Engine webhook delivery is handled separately by `ApprovalRequestEvents`. A crash
+ * between that commit and the fleet outputs therefore loses nothing: the relay redelivers the event, and
  * `FleetApprovalAsk.recordedStatus` makes the redelivery a no-op.
  *
  * Recording and live delivery carry independent acknowledgements (`recordedStatus`, `publishedStatus`): an undelivered
- * frame is republished by the next delivery even though its activity row and webhook are already written, and a
+ * frame is republished by the next delivery even though its activity row is already written, and a
  * delivered frame is not published twice. The frame leaves only after the transaction that recorded it returned, so a
  * reader never sees a frame for a rollback, and it is published *retryably*: a listener that failed keeps the
  * publication unacknowledged, so the relay's retry reaches it — the listeners that already had the frame (same id) are
@@ -107,8 +107,8 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
       if (!publish) return [];
       const view = await this.store.findApproval(requestId);
       if (view === null) return [];
-      // `recordResolved` writes the activity row and the webhook, and answers the live frame of the fleet status. A
-      // redelivery that only owes the frame builds it from the view instead, so the outputs stay written once.
+      // `recordResolved` writes the activity row and answers the live frame of the fleet status. Engine webhook
+      // delivery is independent; a redelivery that only owes the frame builds it from the view instead.
       const frames = record
         ? await this.closer.recordResolved(view, await this.actorFor(link, request, status))
         : this.live.event(view);
