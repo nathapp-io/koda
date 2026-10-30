@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
@@ -29,6 +31,10 @@ describeIntegration('gated project CI token route (US-006)', () => {
   const currentProject = () => db.project.findUniqueOrThrow({ where: { id: world.projectId } });
   const readToken = () => request(server()).get(`${projectPath()}/ci-webhook-token`).auth(world.tokens.root, { type: 'bearer' });
   const pending = (response: request.Response) => data<Pending>(response);
+  const message = (key: string, status: string) => {
+    const catalog = JSON.parse(readFileSync(join(__dirname, '../../../src/i18n/en/approvals.json'), 'utf8')) as Record<string, Record<string, string>>;
+    return catalog[key][status];
+  };
   const approve = async (id: string) => data<Settled>(await request(server()).post(`/api/approvals/${id}/decisions`)
     .auth(world.tokens.root, { type: 'bearer' }).send({ decision: 'approve' }).expect(200));
   const redeem = (id: string, patch: object) => patchAgent(patch, id);
@@ -68,7 +74,7 @@ describeIntegration('gated project CI token route (US-006)', () => {
     const pendingRequest = pending(await patchAgent({ ciWebhookToken: token }).expect(202));
     await approve(pendingRequest.id);
     const mismatch = await redeem(pendingRequest.id, { name: 'Other', ciWebhookToken: token }).expect(409);
-    expect(mismatch.body.ret).toBe(409);
+    expect(mismatch.body.message).toBe(message('redeemMismatch', '409'));
     expect(await currentProject()).toMatchObject({ ciWebhookToken: null });
     expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: pendingRequest.id } })).status).toBe('approved');
     const done = data<Project>(await redeem(pendingRequest.id, { ciWebhookToken: token }).expect(200));
