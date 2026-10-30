@@ -22,6 +22,18 @@ import { findCatalogEntry } from '../permissions/catalog';
 /** The longest variant the registry accepts, in characters. */
 const VARIANT_MAX_LENGTH = 100;
 
+/**
+ * The redeem mode of an approvable command (US-001 of the `gate-secret` rollout).
+ *
+ * A command carrying `redeem` cannot execute when its request is approved: the approval only releases
+ * the request, and the requester repeats the call with the full input to redeem it. Its stored input is
+ * the redacted form, so no secret reaches `ApprovalRequest.input`, the hash or a decider.
+ */
+export interface ApprovalRedeem<TInput> {
+  /** The stored, hashed form of the parsed input; absent stores it whole. Never throws for parse's output. */
+  redact?(input: TInput): unknown;
+}
+
 export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {
   /** A catalog key with `approval.approvable === true`. */
   key: string;
@@ -34,8 +46,18 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
   /**
    * Validates the caller's input. The returned value must be JSON-serialisable, and `parse` must
    * accept its own output: an approved request re-parses the input frozen when it was opened.
+   *
+   * A redeem command's stored input is the redacted one and is never re-parsed: approving its request
+   * runs nothing, and the requester redeems it by re-sending the full input, which the engine parses
+   * afresh. So `precheck` and the frozen-input re-parse are never reached for a redeem row (its command
+   * carries no `parseDecision` or `onReject` either).
    */
   parse(input: unknown): TInput;
+  /**
+   * Present: an approval only releases the request; the requester redeems it with the full input.
+   * The gate stores this command's redacted input, and approving its request runs nothing.
+   */
+  redeem?: ApprovalRedeem<TInput>;
   /**
    * Validates a decider's params for this request. Absent: a decision may carry no params. The
    * returned value must be JSON-serialisable, and `parseDecision` must accept its own output: the

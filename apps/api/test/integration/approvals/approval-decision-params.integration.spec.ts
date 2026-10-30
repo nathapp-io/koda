@@ -155,6 +155,7 @@ integration('approval fleet core migration adds the decision params column', () 
     // The generated client selects every scalar the model declares, so the schema needs the columns
     // later migrations add to ApprovalRequest too.
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
+    await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
   }, 60_000);
   afterAll(async () => { await scratch?.drop(); });
 

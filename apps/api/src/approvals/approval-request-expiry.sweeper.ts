@@ -122,6 +122,7 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
       // Counted as approved before its execution, which ends on its own: a command that throws or
       // fails its pre-checks still leaves the request approved by the timeout.
       result.approved += 1;
+      if (settled.redeem === true) continue;
       try {
         await this.execution.execute(settled.id);
       } catch (error) {
@@ -138,14 +139,33 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
    */
   private async settleOne(due: ApprovalRequestRecord, now: Date): Promise<ApprovalRequestRecord | null> {
     const locked = await this.requests.lockById(due.id);
-    if (!locked || locked.status !== 'pending' || locked.expiresAt.getTime() > now.getTime()) return null;
+    if (!locked || locked.expiresAt.getTime() > now.getTime()) return null;
+    const redeemExpiry = locked.status === 'approved' && locked.redeem === true;
+    if (locked.status !== 'pending' && !redeemExpiry) return null;
+
+    if (redeemExpiry) {
+      const settled = await this.requests.transition(locked.id, 'approved', { status: 'expired', settledAt: now });
+      if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+      await this.events.record(settled);
+      await this.audit.record({
+        key: 'system.approval.expire', resourceType: 'approval-request', resourceId: locked.id,
+        projectId: locked.projectId, summary: `redeem expired ${locked.permissionKey}`,
+      });
+      return settled;
+    }
+
     // An ended job's cancellation backlog belongs to the fleet continuation, not timeout policy.
     if (!await this.requests.canSettleTimeout(locked.id)) return null;
 
     const approved = locked.onTimeout === 'approve';
     const settled = await this.requests.transition(locked.id, 'pending', approved
       // No approver at all: the timeout released it, so nothing but the clock satisfies the mode.
-      ? { status: 'approved', decidedAt: now, satisfiedBy: 'none' }
+      ? {
+        status: 'approved', decidedAt: now, satisfiedBy: 'none',
+        ...(locked.redeem === true
+          ? { expiresAt: new Date(now.getTime() + (locked.expiresAt.getTime() - locked.createdAt.getTime())) }
+          : {}),
+      }
       : { status: 'expired', settledAt: now });
     // The row is locked by this transaction, so a lost transition means a broken boundary: throw so the
     // transaction rolls back, instead of recording an entry for a settlement that did not happen.

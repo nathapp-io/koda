@@ -48,6 +48,16 @@ export class ApprovalRequestExpiredError extends Error {
     this.name = 'ApprovalRequestExpiredError'; Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+/**
+ * A redemption asked for a request it cannot redeem (US-004): another key, variant or project, a
+ * request that is not redeemable, or a re-sent body whose redacted form is not the stored input.
+ */
+export class ApprovalRedeemMismatchError extends Error {
+  constructor(readonly id: string) {
+    super(`Approval request cannot be redeemed: ${id}`);
+    this.name = 'ApprovalRedeemMismatchError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
 /** A deferred decision lost its pending inner request, not the outer execution's row lock. */
 export class DeferredDecisionRefusedError extends Error {
   constructor(readonly reason: 'not-pending' | 'expired', readonly status?: string) {

@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { currentContext } from '../../action-context/action-context';
+import { ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import { PermissionService, type PermissionScope } from '../../permissions/permission.service';
 import { ApprovalGate, type GateOutcome } from '../approval-gate.service';
+import { approvalOf, ApprovalExecutionService } from '../approval-execution.service';
+import { rethrowApprovalError } from '../approval-http-errors';
 
 /** What a gated handler asks the route gate to run. */
 export interface RouteGateCall {
@@ -13,6 +16,11 @@ export interface RouteGateCall {
   /** The request's project, or null for a global write. */
   projectId: string | null;
   input: unknown;
+  /**
+   * The request the caller redeems (the `X-Koda-Approval-Request` header), for a redeem route only.
+   * Absent or empty is an ordinary call; an unknown value reads as a missing request (404).
+   */
+  redeem?: string;
   /**
    * Whether to check that the caller holds `key` (or `key.own`) before opening a request. Defaults to
    * true; a route that already proved the key in its guard (or service) may skip the second read.
@@ -32,17 +40,19 @@ export interface RouteGateCall {
  *    first — would let an agent that holds nothing fill the approvals inbox with requests whose
  *    execution is certain to fail. Checking here opens no request for a write that cannot run.
  *
- * Then the engine's gate decides, exactly as it does for an MCP or assistant write.
+ * Then the engine's gate decides, exactly as it does for an MCP or assistant write — unless the call
+ * redeems an approved redeem request (US-004), which the execution service runs instead.
  */
 @Injectable()
 export class ApprovalRouteGate {
   constructor(
     private readonly gate: ApprovalGate,
     private readonly permissions: PermissionService,
+    private readonly execution: ApprovalExecutionService,
   ) {}
 
   async run<TResult>(call: RouteGateCall): Promise<GateOutcome<TResult>> {
-    const { key, variant, projectId, input, keyCheck = true } = call;
+    const { key, variant, projectId, input, keyCheck = true, redeem } = call;
     const actor = currentContext()?.actor;
     if (actor === undefined) throw new Error('approval route gate needs a principal actor');
     if (actor.type === 'RUNNER') throw new ForbiddenAppException({}, 'permissions');
@@ -58,9 +68,36 @@ export class ApprovalRouteGate {
       throw new ForbiddenAppException({}, 'permissions');
     }
 
-    return this.gate.gate<TResult>(key, input, { projectId, variant });
-  }
+    // US-004: a non-empty header redeems the approved request instead of asking the engine. The key
+    // check above is the redemption's authority — the requester is the request's actor, and it was
+    // re-checked in the same call — so the redemption itself re-checks no key.
+    if (redeem !== undefined && redeem !== '') {
+      try {
+        const { request, result } = await this.execution.redeem(redeem, { key, variant, projectId, input });
+        return { status: 'executed', result: result as TResult, approval: approvalOf(request) };
+      } catch (error) {
+        rethrowApprovalError(unavailableActorAsAuth(error));
+      }
+    }
 
+    try {
+      return await this.gate.gate<TResult>(key, input, { projectId, variant });
+    } catch (error) {
+      throw unavailableActorAsAuth(error);
+    }
+  }
+}
+
+/**
+ * A caller that lost its principal between the guard and the command — disabled, deleted or paused
+ * while the request was in flight — is an authentication refusal, not a server fault. The command
+ * rebuilds the principal from the action context, so a write racing a disable can read the row after
+ * it changed; the guard answers the next request with 401 (`auth`), and this answers this one the same
+ * way instead of letting the bare `ActorUnavailableError` become a 500. The deferred path is
+ * untouched: there the engine settles its request `failed` with the error's name.
+ */
+function unavailableActorAsAuth(error: unknown): unknown {
+  return error instanceof ActorUnavailableError ? new AuthException({}, 'auth') : error;
 }
 
 /** A global write reads the principal's global keys; a project write, that project's keys. */

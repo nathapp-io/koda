@@ -2,18 +2,44 @@ import { createHash } from 'node:crypto';
 import { withCommittedEffects } from '../common/committed-effects';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
-import { runWithActionContext, type ActionApproval, type ActionContextInput } from '../action-context/action-context';
+import { currentContext, runWithActionContext, type ActionApproval, type ActionContextInput } from '../action-context/action-context';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { holdsNarrowedDecide, PermissionService } from '../permissions/permission.service';
 import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from './approval-command.registry';
+import { redeemStored } from './approval-gate.service';
+import { approvalInputHash } from './approval-input';
 import { canonicalJson } from './canonical-json';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
-import { ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
+import {
+  ApprovalRedeemMismatchError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError,
+} from './domain/approval.errors';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { ApprovalRequestEvents } from './approval-request-events';
 
 const OWN_SUFFIX = '.own';
+
+/**
+ * What a requester sends to redeem an approved redeem request (US-004 of `gate-secret`): the pair it
+ * was opened for, its project, and the full body the call would have sent without an approval.
+ */
+export interface RedeemCall {
+  key: string;
+  variant?: string;
+  projectId: string | null;
+  input: unknown;
+}
+
+/**
+ * What `run` answers: the request it settled, the command's raw result (kept for the follow-up hook,
+ * which the `toResult` projection does not carry), and — when the command's own work failed — the
+ * error it threw. `execute` maps this back to the request alone; a redemption answers the error.
+ */
+interface RunOutcome {
+  settled: ApprovalRequestRecord;
+  raw?: { result: unknown };
+  failure?: { error: unknown };
+}
 
 /** The pre-check outcomes that settle a request as failed before its command is run. */
 type PrecheckFailure = 'no-command' | 'input-hash-mismatch' | 'permission-revoked' | 'invalid-input' | 'invalid-decision';
@@ -62,6 +88,7 @@ export class ApprovalExecutionService {
     const request = await this.requests.findById(requestId);
     if (!request) throw new ApprovalRequestNotFoundError(requestId);
     if (request.status !== 'approved') throw new ApprovalRequestNotPendingError(request.status);
+    if (request.redeem === true) return request;
 
     // Every write below, the settle rows included, runs as the request's actor: the caller's own
     // context (the decider's, or none for a direct call) is not the one the command was asked under.
@@ -70,8 +97,65 @@ export class ApprovalExecutionService {
       const checked = await this.precheck(request);
       if (checked.ok === false) return this.settle(request.id, { status: 'failed', settledAt: now, result: { error: checked.error } });
 
-      return this.run(request, checked.command, checked.parsed, checked.decision, now);
+      // A redemption reports the command's own failure itself; an execution keeps settling it failed.
+      const { settled } = await this.run(request, checked.command, checked.parsed, checked.decision, now);
+      return settled;
     });
+  }
+
+  /**
+   * US-004: the requester's redemption of an approved redeem request, in the call that re-sends the
+   * full body. `execute` never runs such a request — an approval only released it — so this is the one
+   * path that executes it, once, and answers the command's raw result (a one-time secret goes straight
+   * back to the caller). The stored row keeps the `toResult` projection only.
+   *
+   * The checks are ordered cheapest-first and all run before anything executes: ownership, the pair and
+   * the request's mode, the status, the window, the command's presence, its own `parse` (whose error is
+   * the caller's answer), and the redacted body against the hash the gate wrote.
+   */
+  async redeem(requestId: string, call: RedeemCall, now: Date = new Date()): Promise<{ request: ApprovalRequestRecord; result: unknown }> {
+    const request = await this.requests.findById(requestId);
+    const actor = currentContext()?.actor;
+    // Another principal's request, and an on-behalf-of one (the assistant's), read as missing: the
+    // caller must not learn that an id it may not redeem exists.
+    if (!request || actor === undefined || request.actor.type !== actor.type || request.actor.id !== actor.id ||
+        request.onBehalfOf !== null) {
+      throw new ApprovalRequestNotFoundError(requestId);
+    }
+    if (request.redeem !== true || request.permissionKey !== call.key ||
+        (request.variant ?? null) !== (call.variant ?? null) || request.projectId !== call.projectId) {
+      throw new ApprovalRedeemMismatchError(requestId);
+    }
+    if (request.status !== 'approved') throw new ApprovalRequestNotPendingError(request.status);
+    if (request.expiresAt.getTime() <= now.getTime()) throw new ApprovalRequestExpiredError(requestId);
+
+    const command = this.registry.get(request.permissionKey, request.variant);
+    if (command?.redeem === undefined) throw new ApprovalRedeemMismatchError(requestId);
+
+    const parsed = command.parse(call.input);
+    // The same redaction the gate stored: a secret re-sent differently is not a different request.
+    const stored = redeemStored(command, parsed);
+    if (approvalInputHash(stored) !== request.inputHash) throw new ApprovalRedeemMismatchError(requestId);
+
+    return runWithActionContext(requestContext(request), () => this.runRedeem(request, command, parsed, now));
+  }
+
+  /**
+   * The redemption through the execution boundary an approved request already uses: the serialised
+   * slot, the `approved` re-read under the row lock, `prepare`, `withExecution`, the settle and the
+   * follow-up. A failed redemption answers the command's own error — the same answer an immediate call
+   * gives — instead of the settled request `execute` answers.
+   */
+  private async runRedeem(
+    request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, now: Date,
+  ): Promise<{ request: ApprovalRequestRecord; result: unknown }> {
+    const { settled, raw, failure } = await this.run(request, command, parsed, undefined, now);
+    if (settled.status === 'executed') return { request: settled, result: raw?.result };
+    if (failure !== undefined) throw failure.error;
+
+    // The command never ran: the request was settled from under this call (the key was revoked, or a
+    // queued redemption reached it first).
+    throw new ApprovalRequestNotPendingError(settled.status);
   }
 
   private async precheck(request: ApprovalRequestRecord): Promise<Prechecked> {
@@ -140,10 +224,13 @@ export class ApprovalExecutionService {
   /**
    * Steps 3 to 5. Only a failure of the callback is turned into a `failed` request: once the callback
    * has returned, a failing commit is reported to the caller and the request stays approved.
+   *
+   * The outcome also carries the command's raw result and the error it threw, which `execute` drops and
+   * a redemption answers (US-004).
    */
   private async run(
     request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, decision: unknown, now: Date,
-  ): Promise<ApprovalRequestRecord> {
+  ): Promise<RunOutcome> {
     // The row lock is released when the failed callback rolls back, before the failure settlement
     // opens its own transaction. Holding this request's slot across both keeps a waiting execute from
     // taking the still-approved row in that gap and running the command a second time.
@@ -153,23 +240,24 @@ export class ApprovalExecutionService {
       const current = await this.requests.findById(request.id);
       if (!current) throw new ApprovalRequestNotFoundError(request.id);
       if (current.status !== 'approved') throw new ApprovalRequestNotPendingError(current.status);
-      const { settled, raw } = await this.executeOnce(request, command, parsed, decision, now);
+      const outcome = await this.executeOnce(request, command, parsed, decision, now);
       // Step 5: only a committed execution has a follow-up, and its failure changes nothing.
-      if (settled.status === 'executed' && raw !== undefined) {
-        await this.followUp(request.id, command, parsed, decision, raw.result);
+      if (outcome.settled.status === 'executed' && outcome.raw !== undefined) {
+        await this.followUp(request.id, command, parsed, decision, outcome.raw.result);
       }
 
-      return settled;
+      return outcome;
     });
   }
 
   /**
    * The execution transaction. `raw` is the command's own result, kept for the follow-up hook because
-   * the request stores the `toResult` projection instead.
+   * the request stores the `toResult` projection instead. `failure` is the error the command's own work
+   * threw, which a redemption reports to its caller and an execution swallows.
    */
   private async executeOnce(
     request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, decision: unknown, now: Date,
-  ): Promise<{ settled: ApprovalRequestRecord; raw?: { result: unknown } }> {
+  ): Promise<RunOutcome> {
     // Set only when the callback itself threw: a transaction that fails to open, or to commit after
     // the callback succeeded, is reported to the caller and never settles the request.
     let callbackFailure: { error: unknown } | undefined;
@@ -178,9 +266,12 @@ export class ApprovalExecutionService {
     try {
       prepared = await command.prepare?.(parsed, decision);
     } catch (error) {
-      return { settled: await this.settle(request.id, {
-        status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
-      }) };
+      return {
+        settled: await this.settle(request.id, {
+          status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
+        }),
+        failure: { error },
+      };
     }
     try {
       // This transaction owns every write the command makes, so it also owns their after-commit
@@ -240,6 +331,7 @@ export class ApprovalExecutionService {
         settled: await this.settle(request.id, {
           status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
         }),
+        failure: { error },
       };
     }
   }
@@ -302,17 +394,24 @@ function recheckPrincipal(request: ApprovalRequestRecord): RecheckPrincipal {
   return null;
 }
 
-/** The context the request was opened in, now carrying the approval that released it. */
-function requestContext(request: ApprovalRequestRecord): ActionContextInput {
-  const approval: ActionApproval = {
+/**
+ * The approval a request carries into its execution context: what mode released it, who satisfied it,
+ * the approver and the request id.
+ */
+export function approvalOf(request: ApprovalRequestRecord): ActionApproval {
+  return {
     requiredMode: request.requiredMode,
     satisfiedBy: request.satisfiedBy ?? 'none',
     ...(request.approverType !== null && request.approverId !== null
       ? { approverType: request.approverType, approverId: request.approverId } : {}),
     requestId: request.id,
   };
+}
+
+/** The context the request was opened in, now carrying the approval that released it. */
+function requestContext(request: ApprovalRequestRecord): ActionContextInput {
   return {
-    actor: request.actor, origin: request.origin, correlationId: request.correlationId, approval,
+    actor: request.actor, origin: request.origin, correlationId: request.correlationId, approval: approvalOf(request),
     ...(request.onBehalfOf !== null ? { onBehalfOf: request.onBehalfOf } : {}),
   };
 }

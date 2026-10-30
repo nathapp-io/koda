@@ -39,6 +39,19 @@ export class UsersAdminService {
   }
 
   async create(dto: CreateUserDto): Promise<UserAdminDto> {
+    return (await this.prepareCreate(dto))();
+  }
+
+  /**
+   * Permissions P3 `gate-secret` (US-007): the create's work split the way a deferred execution needs
+   * it. The reads and the bcrypt hash (cost 12 — deliberately slow) happen here, outside the execution
+   * transaction the approval engine opens for the mutation, and the callback it answers is that
+   * mutation: user row, baseline binding and audit entry, in one commit.
+   *
+   * A refused email still costs nothing: the taken-email check runs before the hash. A concurrent
+   * create of the same email is caught by the unique index inside the callback, exactly as before.
+   */
+  async prepareCreate(dto: CreateUserDto): Promise<() => Promise<UserAdminDto>> {
     // Canonical lower-case; the check is case-insensitive because the default
     // unique index is not (a legacy mixed-case row would otherwise slip through).
     const email = dto.email.trim().toLowerCase();
@@ -49,30 +62,34 @@ export class UsersAdminService {
     // Permissions P1l (US-005): the request carries no role, so every created account is the
     // least-privileged member — roles are bound to it afterwards.
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    try {
-      // The user row and its baseline binding are one unit (B4): a user whose binding write failed must
-      // not stay behind. The cache invalidation the nested write defers lands only after the commit.
-      const user = await this.membership.afterCommit(() =>
-        this.txManager.run(async () => {
-          const created = await this.usersRepo.createUser({
-            email,
-            name: dto.name,
-            passwordHash,
-          });
-          // Permissions P1a (US-004): every user starts at the member baseline, and stays there.
-          await this.membership.bindBaseline({ type: 'USER', id: created.id });
-          await this.audit.record({
-            key: 'user.create', resourceType: 'user', resourceId: created.id,
-            projectId: null, summary: 'created',
-          });
-          return created;
-        }),
-      );
-      return UserAdminDto.from(user);
-    } catch (error) {
-      if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'users');
-      throw error;
-    }
+
+    return async () => {
+      try {
+        // The user row and its baseline binding are one unit (B4): a user whose binding write failed
+        // must not stay behind. The cache invalidation the nested write defers lands only after the
+        // commit.
+        const user = await this.membership.afterCommit(() =>
+          this.txManager.run(async () => {
+            const created = await this.usersRepo.createUser({
+              email,
+              name: dto.name,
+              passwordHash,
+            });
+            // Permissions P1a (US-004): every user starts at the member baseline, and stays there.
+            await this.membership.bindBaseline({ type: 'USER', id: created.id });
+            await this.audit.record({
+              key: 'user.create', resourceType: 'user', resourceId: created.id,
+              projectId: null, summary: 'created',
+            });
+            return created;
+          }),
+        );
+        return UserAdminDto.from(user);
+      } catch (error) {
+        if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'users');
+        throw error;
+      }
+    };
   }
 
   async update(actorId: string, userId: string, patch: UpdateUserDto): Promise<UserAdminDto> {

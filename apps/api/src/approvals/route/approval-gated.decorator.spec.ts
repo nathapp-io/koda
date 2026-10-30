@@ -5,8 +5,10 @@
  */
 import 'reflect-metadata';
 import { EXCEPTION_FILTERS_METADATA, FILTER_CATCH_EXCEPTIONS } from '@nestjs/common/constants';
-import type { ArgumentsHost } from '@nestjs/common';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { Controller, Get, type ArgumentsHost } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { getSchemaPath } from '@nestjs/swagger';
 import type { HttpAdapterHost } from '@nestjs/core';
 import type { ApprovalRequestRecord } from '../domain/approval.domain';
@@ -29,11 +31,23 @@ const record: ApprovalRequestRecord = {
   createdAt: new Date('2026-10-01T00:00:00.000Z'),
 };
 
+@Controller('probe')
+class ValidationProbe {
+  @Get()
+  @ApprovalGated({ redeem: true })
+  fail(): never {
+    throw new ValidationAppException({}, 'validation');
+  }
+}
+
 class GatedProbe {
   @ApprovalGated()
   create(): void {
     // The decorator's metadata is the subject; the body never runs.
   }
+
+  @ApprovalGated({ redeem: true })
+  redeem(): void {}
 }
 
 describe('ApprovalPending', () => {
@@ -73,6 +87,41 @@ describe('@ApprovalGated()', () => {
 
     expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, handler)).toBe(true);
     expect(Reflect.getMetadata(EXCEPTION_FILTERS_METADATA, handler)).toEqual([ApprovalPendingFilter]);
+  });
+
+  it('AC-4: redeem option documents optional request header', () => {
+    const headers = Reflect.getMetadata('swagger/apiParameters', GatedProbe.prototype.redeem) as Array<{ name: string; required: boolean }>;
+    expect(headers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'X-Koda-Approval-Request', in: 'header', required: false }),
+    ]));
+  });
+
+  it('AC-5: no options adds no header metadata', () => {
+    expect(Reflect.getMetadata('swagger/apiParameters', GatedProbe.prototype.create)).toBeUndefined();
+  });
+
+  it('AC-6: redeem handler retains gate, filter, and documented 202 response', () => {
+    const handler = GatedProbe.prototype.redeem;
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, handler)).toBe(true);
+    expect(Reflect.getMetadata(EXCEPTION_FILTERS_METADATA, handler)).toEqual([ApprovalPendingFilter]);
+    const responses = Reflect.getMetadata(API_RESPONSE_METADATA, handler) as Record<number, unknown>;
+    expect(responses[202]).toBeDefined();
+  });
+
+  it('AC-7: exports the lower-case redeem header name', async () => {
+    const { APPROVAL_REDEEM_HEADER } = await import('./approval-gated.decorator');
+    expect(APPROVAL_REDEEM_HEADER).toBe('x-koda-approval-request');
+  });
+
+  it('REG-1: redeem-gated validation errors retain their HTTP 400 response', async () => {
+    const module = await Test.createTestingModule({ controllers: [ValidationProbe] }).compile();
+    const app = module.createNestApplication();
+    try {
+      await app.init();
+      await request(app.getHttpServer()).get('/probe').expect(400);
+    } finally {
+      await app.close();
+    }
   });
 
   it('AC-15: documents the 202 answer with the request summary model', () => {

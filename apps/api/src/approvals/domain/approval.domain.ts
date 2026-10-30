@@ -42,6 +42,13 @@ export interface ApprovalRequestRecord {
    * variants existed, and every assistant and fleet ask, carries.
    */
   variant?: string;
+  /**
+   * Present when the request's command redeems (US-001 of `gate-secret`): approving it releases the
+   * request without running anything, and the requester redeems it by re-sending the full input. Its
+   * stored `input` is the command's redacted form, so no secret is in the row. Absent for every
+   * execute-after-approval request, which is what every reader of the flag relies on.
+   */
+  redeem?: true;
   projectId: string | null;
   actor: { type: 'USER' | 'AGENT' | 'SYSTEM'; id: string };
   onBehalfOf: { type: 'USER' | 'AGENT'; id: string } | null;

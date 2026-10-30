@@ -4,7 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PermissionService } from '../permissions/permission.service';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -204,6 +204,35 @@ describe('AgentsController', () => {
       expect((result as any).agent.name).toBe('Test Agent');
       expect((result as any).agent.slug).toBe('test-agent');
       expect((result as any).agent.status).toBe('ACTIVE');
+    });
+
+    // Permissions P3 `gate-secret` (US-006): the HTTP handler goes through the approval route gate
+    // like every other gated write; the seam above stays a direct service call for its own tests.
+    it('AC-15: gates the create body with the redeem header and answers the executed result', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const createAgentDto = { name: 'Test Agent', slug: 'test-agent' };
+      const payload = { apiKey: 'a'.repeat(64), agent: mockAgent };
+      gate.run.mockResolvedValue({ status: 'executed', result: payload });
+
+      await expect(controller.generateApiKey(createAgentDto, mockAdminUser, 'r1')).resolves.toMatchObject({ data: payload });
+      expect(gate.run).toHaveBeenCalledWith({
+        key: 'agent.create',
+        variant: 'rest:agents.create',
+        projectId: null,
+        input: { agent: createAgentDto },
+        redeem: 'r1',
+      });
+      expect(service.generateApiKey).not.toHaveBeenCalled();
+    });
+
+    it('maps a pending create outcome to ApprovalPending without writing', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const request = { id: 'pending-create' };
+      gate.run.mockResolvedValue({ status: 'pending', request });
+
+      await expect(controller.generateApiKey({ name: 'Test Agent', slug: 'test-agent' }, mockAgentUser))
+        .rejects.toMatchObject({ constructor: ApprovalPending, request });
+      expect(service.generateApiKey).not.toHaveBeenCalled();
     });
   });
 
@@ -542,6 +571,49 @@ describe('AgentsController', () => {
   });
 
   describe('POST /api/agents/:slug/rotate-key', () => {
+    // US-006: the HTTP handler reads its target first (404 `agents` as before) and rotates the id it
+    // froze, so a slug reused after the request opened is not rotated.
+    it('freezes the resolved target and answers the executed gate result', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const payload = { apiKey: 'a'.repeat(64), agent: mockAgent };
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
+      gate.run.mockResolvedValue({ status: 'executed', result: payload });
+
+      await expect(controller.rotateApiKey('test-agent', mockAdminUser, 'r1')).resolves.toMatchObject({ data: payload });
+      expect(service.findBySlug).toHaveBeenCalledWith('test-agent');
+      expect(gate.run).toHaveBeenCalledWith({
+        key: 'agent.key.rotate',
+        variant: 'rest:agents.rotate-key',
+        projectId: null,
+        input: { slug: 'test-agent', agentId: mockAgent.id },
+        redeem: 'r1',
+      });
+      expect(service.rotateApiKey).not.toHaveBeenCalled();
+    });
+
+    it('maps a pending rotate outcome to ApprovalPending', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      const request = { id: 'pending-rotate' };
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
+      gate.run.mockResolvedValue({ status: 'pending', request });
+
+      await expect(controller.rotateApiKey('test-agent', mockMemberUser))
+        .rejects.toMatchObject({ constructor: ApprovalPending, request });
+    });
+
+    it('404s an unknown slug before the gate is asked', async () => {
+      const gate = (controller as unknown as { routeGate: { run: ReturnType<typeof vi.fn> } }).routeGate;
+      mockAgentsService.findBySlug.mockRejectedValue(new NotFoundAppException({}, 'agents'));
+
+      try {
+        await expect(controller.rotateApiKey('nonexistent', mockAdminUser)).rejects.toBeInstanceOf(NotFoundAppException);
+        expect(gate.run).not.toHaveBeenCalled();
+      } finally {
+        // A describe-scoped mock keeps its implementation: do not leak the refusal into a later case.
+        mockAgentsService.findBySlug.mockReset();
+      }
+    });
+
     it('should rotate API key for ADMIN user', async () => {
       const rotatedKey = {
         apiKey: 'd'.repeat(64),

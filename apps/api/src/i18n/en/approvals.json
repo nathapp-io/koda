@@ -13,6 +13,10 @@
   "requestNotFound": { "404": "Approval request not found" },
   "notPending": { "409": "The approval request is already {status}" },
   "expired": { "409": "The approval request has expired" },
+  "redeemMismatch": {
+    "409": "This approval request cannot be redeemed for this call",
+    "-2": "This approval request cannot be redeemed for this call"
+  },
   "decideForbidden": { "403": "You cannot decide this approval request: {reason}" },
   "invalidDecisionParams": { "400": "Invalid decision params: {reason}", "-2": "Invalid decision params: {reason}" },
   "cancelForbidden": {

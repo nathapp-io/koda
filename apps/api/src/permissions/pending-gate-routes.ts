@@ -11,17 +11,11 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
   'PATCH /projects/:slug/webhooks/:id',
   'POST /projects/:slug/invites',
   'POST /projects/:slug/invites/:id/resend',
-  'POST /agents',
-  'POST /agents/:slug/rotate-key',
-  'POST /admin/users',
 ]);
 
 const ROUTE_ASSIGNMENTS = `
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
-POST /admin/users=gate-secret
-POST /agents=gate-secret
-POST /agents/:slug/rotate-key=gate-secret
 POST /fleet/enrollments=gate-secret
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret

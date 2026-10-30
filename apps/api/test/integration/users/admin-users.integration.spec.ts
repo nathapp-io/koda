@@ -10,6 +10,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { GlobalLock, KODA_LOCK_CLASS } from '../../../src/common/utils/advisory-lock';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
@@ -180,21 +181,102 @@ describeIntegration('/admin/users (PG)', () => {
     return prisma.user.count({ where: { disabled: false, id: { in: bindings.map(row => row.principalId) } } });
   };
 
+  /**
+   * How many backends hold (granted) or wait on the transaction-scoped advisory lock the last-admin
+   * check takes (`PrismaUsersRepository.lockUserAdministration`).
+   */
+  const lastAdminLockBackends = async (granted: boolean): Promise<number> => {
+    const rows = await prisma.$queryRaw<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM pg_locks
+      WHERE locktype = 'advisory' AND granted = ${granted} AND objsubid = 2
+        AND classid = ${KODA_LOCK_CLASS.GLOBAL}::int4 AND objid = ${GlobalLock.USER_ADMINISTRATION}::int4
+    `;
+    return rows[0]?.count ?? 0;
+  };
+
+  /** Polls until at least `expected` backends are in that state; fails loudly instead of hanging. */
+  const waitForLastAdminLock = async (granted: boolean, expected: number, what: string): Promise<void> => {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if ((await lastAdminLockBackends(granted)) >= expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  };
+
+  /**
+   * The last-admin rule is only reachable under concurrency (with one active admin left, the only
+   * caller who could disable them is themselves, which is 403 `users.self`), so this race is the one
+   * place it is exercised. Held deterministically: the test takes the advisory lock first, so both
+   * requests finish their own reads and queue on it; whichever wins then commits and the other counts
+   * that disable as done and refuses with `users.lastAdmin`. Without the barrier the loser can instead
+   * be refused by authentication — its own `disabled` bump lands between the guard and the command's
+   * reload — which is also correct, but it would hide a lock that stopped serializing.
+   */
   it('two admins disabling each other at once refuse exactly one with users.lastAdmin', async () => {
     const eve = await createUser('eve@koda.test', true);
     const eveToken = await loginToken(server, 'eve@koda.test');
     // Root and Eve are the only active admins (Dave was demoted above).
     expect(await enabledAdminCount()).toBe(2);
 
-    const [a, b] = await Promise.all([
-      request(server).patch(`/api/admin/users/${eve.id}`).set(auth(rootToken)).send({ disabled: true }),
-      request(server).patch(`/api/admin/users/${rootId}`).set(auth(eveToken)).send({ disabled: true }),
-    ]);
+    let release = (): void => {};
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(
+        `SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(` +
+          `${KODA_LOCK_CLASS.GLOBAL}::int4, ${GlobalLock.USER_ADMINISTRATION}::int4)) AS l`,
+      );
+      await barrier;
+    }, { maxWait: 20_000, timeout: 60_000 });
+    holder.catch(() => undefined);
 
-    // The lock serializes the two: the second one counts the first one's disable as done and refuses.
-    expect([a.status, b.status].sort()).toEqual([200, 409]);
-    expect([a.body.ret, b.body.ret].filter((code) => code === 409)).toHaveLength(1);
-    expect([a.body.message, b.body.message]).toContain(LAST_ADMIN_REFUSED);
-    expect(await enabledAdminCount()).toBe(1);
+    try {
+      await waitForLastAdminLock(true, 1, 'the test to hold the last-admin lock');
+
+      const pending = Promise.all([
+        request(server).patch(`/api/admin/users/${eve.id}`).set(auth(rootToken)).send({ disabled: true }),
+        request(server).patch(`/api/admin/users/${rootId}`).set(auth(eveToken)).send({ disabled: true }),
+      ]);
+      pending.catch(() => undefined);
+
+      await waitForLastAdminLock(false, 2, 'both writes to queue on the last-admin lock');
+      release();
+
+      const [a, b] = await pending;
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      expect([a.body.ret, b.body.ret].filter((code) => code === 409)).toHaveLength(1);
+      expect([a.body.message, b.body.message]).toContain(LAST_ADMIN_REFUSED);
+      expect(await enabledAdminCount()).toBe(1);
+    } finally {
+      release();
+      await holder.catch(() => undefined);
+    }
+  }, 20_000);
+
+  /**
+   * The gated write rebuilds its principal from the action context, so it reads the user row after the
+   * guard let the request in. A disable that lands in between — here written straight to the table, so
+   * the 60 s auth-state cache still says "enabled" and the guard passes — is the caller's session
+   * ending, and it answers the same 401 the guard gives rather than an unmapped 500.
+   */
+  it('a caller disabled after the guard answered is refused with 401, not a server error', async () => {
+    // The mutual disable above may have left root disabled; re-enable it and take a fresh token.
+    await prisma.user.update({ where: { id: rootId }, data: { disabled: false } });
+    const rootAgain = await loginToken(server, 'root@koda.test');
+    const frank = data<UserRow>(
+      await request(server).post('/api/admin/users').set(auth(rootAgain))
+        .send({ email: 'frank@koda.test', name: 'frank', password: TEST_PASSWORD }).expect(201),
+    );
+    await grantRole(prisma, { type: 'USER', id: frank.id }, 'admin');
+    const frankToken = await loginToken(server, 'frank@koda.test');
+    await request(server).get('/api/admin/users').set(auth(frankToken)).expect(200);
+
+    await prisma.user.update({ where: { id: frank.id }, data: { disabled: true } });
+
+    const refused = await request(server).patch(`/api/admin/users/${rootId}`).set(auth(frankToken)).send({ role: 'MEMBER' });
+    expect(refused.status).toBe(401);
+    await request(server).get('/api/admin/users').set(auth(rootAgain)).expect(200);
+
+    await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: frank.id } });
+    await prisma.user.delete({ where: { id: frank.id } });
   });
 });

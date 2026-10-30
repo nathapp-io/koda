@@ -5,6 +5,22 @@ import { UsersAdminService } from './users-admin.service';
 import { AfterCommitService } from '../permissions/after-commit.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { UserAdminRecord } from './domain/user-admin.domain';
+import * as bcrypt from 'bcrypt';
+
+// The service imports bcrypt as a namespace (`import * as bcrypt`), which `vi.spyOn` on the module
+// object cannot intercept — the namespace entries are read-only bindings. A passthrough mock keeps
+// every real hash and lets the create's hashing be asserted. The passthrough is an arrow function on
+// purpose: bcrypt's `hash` reads the module through its call context, which a mock would otherwise
+// replace with the mock itself.
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>();
+  return {
+    ...actual,
+    hash: vi.fn((...args: Parameters<typeof actual.hash>) => actual.hash(...args)),
+  };
+});
+
+const hashCalls = () => vi.mocked(bcrypt.hash);
 
 const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
   id: 'u2', email: 'u2@koda.test', name: 'U2', disabled: false,
@@ -128,6 +144,51 @@ describe('UsersAdminService', () => {
       ).rejects.toBeInstanceOf(NotFoundAppException);
 
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * US-007: the gated create has to hash outside the execution transaction, so the work is split into
+   * a preparation (read + bcrypt) and the mutation callback the engine runs inside its transaction.
+   */
+  describe('prepareCreate', () => {
+    // A block body: `mockClear()` answers the mock (a function), which `beforeEach` would otherwise
+    // register as a teardown and call with no arguments.
+    beforeEach(() => { hashCalls().mockClear(); });
+
+    it('AC-8: refuses a taken email with 409 users and never pays for bcrypt', async () => {
+      repo.findByEmail.mockResolvedValue({ id: 'existing' });
+
+      const failure = await service
+        .prepareCreate({ email: 'Taken@K.T', name: 'Taken', password: 'Admin1234!Aa' })
+        .then(() => null, (error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(ConflictAppException);
+      expect((failure as ConflictAppException).prefix).toBe('users');
+      // The canonical form is what the repository is asked about, as `create` does.
+      expect(repo.findByEmail).toHaveBeenCalledWith('taken@k.t');
+      expect(hashCalls()).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: hashes at cost 12 before any write and its callback writes that hash', async () => {
+      const mutate = await service.prepareCreate({ email: ' Late@K.T ', name: 'Late', password: 'Admin1234!Aa' });
+
+      expect(hashCalls()).toHaveBeenCalledExactlyOnceWith('Admin1234!Aa', 12);
+      expect(repo.createUser).not.toHaveBeenCalled();
+
+      repo.createUser.mockResolvedValue(user({ email: 'late@k.t' }));
+      const created = await mutate();
+
+      const hash = await hashCalls().mock.results[0].value;
+      expect(repo.createUser).toHaveBeenCalledExactlyOnceWith({
+        email: 'late@k.t', name: 'Late', passwordHash: hash,
+      });
+      expect(hash).not.toBe('Admin1234!Aa');
+      expect(bcrypt.getRounds(hash)).toBe(12);
+      // The hash is ready before the write starts: bcrypt never runs inside the execution transaction.
+      expect(hashCalls().mock.invocationCallOrder[0])
+        .toBeLessThan(repo.createUser.mock.invocationCallOrder[0]);
+      expect(created.email).toBe('late@k.t');
     });
   });
 

@@ -153,6 +153,19 @@ describe('configurableTestCommand', () => {
     expect(command.afterCommit).toBeUndefined();
   });
 
+  it('carries the redeem contract only while the switch is on', () => {
+    const { command, state } = configurableTestCommand('agent.create');
+
+    expect(command.redeem).toBeUndefined();
+    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: false };
+    expect(command.redeem?.redact?.({ name: 'a', secret: 's' })).toEqual({ name: 'a' });
+    expect(state.redeem.calls).toEqual([{ name: 'a', secret: 's' }]);
+    state.redeem = { calls: [], drop: [], answer: { value: null }, withoutRedact: false };
+    expect(command.redeem?.redact?.({ name: 'a' })).toBeNull();
+    state.redeem = { calls: [], drop: ['secret'], answer: null, withoutRedact: true };
+    expect(command.redeem).toEqual({});
+  });
+
   it('turns every state field off on reset()', () => {
     const { state, reset } = configurableTestCommand('label.delete');
     Object.assign(state, {
@@ -166,6 +179,7 @@ describe('configurableTestCommand', () => {
       parseDecision: { calls: [], result: 'ok', throws: false },
       onReject: { calls: [], throws: null },
       afterCommit: { calls: [], throws: null },
+      redeem: { calls: [], drop: ['secret'], answer: null, withoutRedact: false },
     });
 
     reset();
@@ -183,6 +197,7 @@ describe('configurableTestCommand', () => {
       parseDecision: null,
       onReject: null,
       afterCommit: null,
+      redeem: null,
     });
   });
 

@@ -89,7 +89,9 @@ export class AgentsService {
         () => this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash),
         (updated) => ({ key: 'agent.key.rotate', resourceType: 'agent', resourceId: updated.id, projectId: null, summary: 'key rotated' }),
       );
-      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
+      // Approval-gated routes run this inside a deferred execution: evicting the cached principal
+      // before that transaction commits lets a concurrent auth read re-cache the old hash for one TTL.
+      await this.invalidateAfterCommit(agent.id);
       await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
         apiKey: rawKey,
@@ -136,7 +138,7 @@ export class AgentsService {
           return agent;
         }),
       );
-      await this.agentAuthProvider?.invalidateByTag(`AGENT:${result.id}`);
+      await this.invalidateAfterCommit(result.id);
       const agentWithCapabilities = {
         ...result,
         capabilities: (capabilities ?? []).map((capability, index) => ({

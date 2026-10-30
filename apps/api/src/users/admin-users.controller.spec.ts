@@ -48,4 +48,25 @@ describe('AdminUsersController', () => {
     expect(result).toMatchObject({ ret: 0, data: { id: 'u2' } });
     expect(service.update).not.toHaveBeenCalled();
   });
+
+  it('AC-11: creates through the route gate, handing it the redeem header', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { id: 'u9' } });
+    const dto = { email: 'e@x.test', name: 'New User', password: 'StrongPass123!' };
+
+    const result = await controller.create(dto, 'r1');
+
+    expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'user.create', variant: 'rest:admin-users.create', projectId: null, input: { user: dto }, redeem: 'r1',
+    });
+    expect(service.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ret: 0, data: { id: 'u9' } });
+  });
+
+  it('US-007: a waiting create answers ApprovalPending instead of the created user', async () => {
+    gate.run.mockResolvedValue({ status: 'pending', request: { id: 'approval-1' } });
+
+    await expect(controller.create({ email: 'e@x.test', name: 'N', password: 'StrongPass123!' }, undefined))
+      .rejects.toBeInstanceOf(ApprovalPending);
+    expect(service.create).not.toHaveBeenCalled();
+  });
 });

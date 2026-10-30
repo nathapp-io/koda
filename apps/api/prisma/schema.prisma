@@ -1556,6 +1556,9 @@ model ApprovalRequest {
   permissionKey           String
   /// The registered command variant this request runs (US-001); NULL runs the key's primary command.
   variant                 String?
+  /// TRUE when the request's command redeems (gate-secret US-001): approving it releases the request
+  /// without running it, and the requester redeems it with the full input. `input` is the redacted form.
+  redeem                  Boolean   @default(false)
   projectId               String?
   actorType               String    // USER | AGENT | SYSTEM
   actorId                 String

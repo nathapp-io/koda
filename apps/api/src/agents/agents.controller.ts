@@ -1,4 +1,5 @@
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../approvals/route/approval-redeem-header.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { AGENT_ROUTE_VARIANTS } from './agent-route.commands';
@@ -85,13 +86,27 @@ export class AgentsController {
   @Post()
   @UseGuards(RequiresGuard)
   @Requires('agent.create')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Create agent and generate API key (agent.create)' })
   @ApiResponse({ status: 201, description: 'Agent created with API key' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'agent.create is missing' })
-  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Principal() principal: KodaPrincipal) {
-    const data = await this.createAgent(createAgentDto, principal);
-    return JsonResponse.Ok(data);
+  async generateApiKey(
+    @Body() createAgentDto: CreateAgentDto,
+    @Principal() principal: KodaPrincipal,
+    @ApprovalRedeemHeader() redeem?: string,
+  ) {
+    // `gate-secret` (US-006): a wait policy stores the request without the body's secret and approving
+    // it runs nothing, so the raw key only ever reaches the caller that redeems the request here.
+    const outcome = await this.routeGate.run<{ apiKey: string; agent: AgentResponseDto }>({
+      key: 'agent.create',
+      variant: AGENT_ROUTE_VARIANTS.create,
+      projectId: null,
+      input: { agent: createAgentDto },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get()
@@ -207,13 +222,28 @@ export class AgentsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RequiresGuard)
   @Requires('agent.key.rotate')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Rotate agent API key (agent.key.rotate)' })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'agent.key.rotate is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async rotateApiKey(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
-    const data = await this.rotateKey(slug, principal);
-    return JsonResponse.Ok(data);
+  async rotateApiKey(
+    @Param('slug') slug: string,
+    @Principal() principal: KodaPrincipal,
+    @ApprovalRedeemHeader() redeem?: string,
+  ) {
+    // The target is read before the gate, as `agent.delete` does: the request freezes the id, so a
+    // slug reused after it opened is a different target and the command never rotates the replacement.
+    const target = await this.agentsService.findBySlug(slug);
+    const outcome = await this.routeGate.run<{ apiKey: string; agent: AgentResponseDto }>({
+      key: 'agent.key.rotate',
+      variant: AGENT_ROUTE_VARIANTS.rotateKey,
+      projectId: null,
+      input: { slug, agentId: target.id },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }
