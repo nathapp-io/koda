@@ -231,6 +231,23 @@ describe('US-005 AC-6: an expired request raises no toast', () => {
     expect(m.toasts.calls).toEqual([])
     m.host.unmount()
   })
+
+  // Fix round 1 (F1): an ask that expires while its toast is up is no longer a decision, so the next
+  // successful refresh closes that toast even when the engine still lists the request as pending.
+  test('AC-6 (fix round 1): a request that expires while toasted is dismissed by the next refresh', async () => {
+    let expiresAt: string | null = '2099-11-01T00:00:00.000Z'
+    const m = await mountNotifications({ get: jest.fn(async () => page([summary({ id: 'r1', expiresAt })])) })
+    await m.api.refresh()
+    expect(m.toasts.calls).toHaveLength(1)
+
+    // The deadline passes; the list still reports the request as pending.
+    expiresAt = '2020-01-01T00:00:00.000Z'
+    await m.api.refresh()
+
+    expect(m.toasts.dismiss).toHaveBeenCalledWith(m.toasts.calls[0].options?.id)
+    expect(m.toasts.calls).toHaveLength(1)
+    m.host.unmount()
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

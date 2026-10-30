@@ -156,7 +156,9 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
     if (!current()) return
     const pending = new Set<string>()
     for (const row of listed) {
-      if (row.status !== 'pending') continue
+      // An ask past its deadline is no longer a decision, so it does not keep an existing toast alive:
+      // leaving it out of `pending` is what closes that toast below.
+      if (row.status !== 'pending' || expired(row)) continue
       pending.add(row.id)
       notify(row)
     }
