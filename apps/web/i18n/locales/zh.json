@@ -2501,6 +2501,88 @@
       "loadFailed": "无法加载审批。",
       "stale": "刷新审批失败，显示上次加载的列表。",
       "empty": { "pending": "暂无待处理的请求。", "all": "暂无审批。" }
+    },
+    "policies": {
+      "title": "审批策略",
+      "subtitle": "哪些操作需要等待决策，以及谁可以做出决策。",
+      "create": "新建策略",
+      "forbidden": "你没有管理审批策略的权限。",
+      "loadFailed": "无法加载审批策略。",
+      "mode": {
+        "none": "关闭",
+        "self": "由请求者决定",
+        "agent": "由 Agent 批准",
+        "human": "由人工批准"
+      },
+      "scope": { "global": "全局", "project": "项目", "any": "不限" },
+      "risk": { "low": "低", "medium": "中", "high": "高", "critical": "严重" },
+      "principal": { "USER": "用户", "AGENT": "Agent", "ASSISTANT": "助手" },
+      "subject": {
+        "all": "所有人",
+        "type": "所有 {type}",
+        "role": "角色 {role}",
+        "principal": "{type} {principal}"
+      },
+      "keys": {
+        "title": "可审批的权限键",
+        "hint": "下限是该键的策略可以选择的最低模式；默认值是没有策略时引擎的行为。",
+        "key": "权限键",
+        "scope": "范围",
+        "risk": "风险",
+        "floor": "下限",
+        "default": "默认",
+        "overrides": "覆盖数",
+        "empty": "没有可以审批的权限键。"
+      },
+      "list": {
+        "title": "策略",
+        "pattern": "模式",
+        "subject": "适用对象",
+        "mode": "模式",
+        "timeout": "超时",
+        "onTimeout": "超时后",
+        "edit": "编辑",
+        "delete": "删除",
+        "deleteConfirm": "删除 {pattern} 的策略？",
+        "noTimeout": "无超时",
+        "timeoutSeconds": "{count} 秒",
+        "empty": "还没有覆盖默认值的策略。"
+      },
+      "dialog": {
+        "createTitle": "新建审批策略",
+        "editTitle": "编辑审批策略",
+        "description": "策略会让操作暂停，直到持有相应模式的人批准。",
+        "pattern": "权限模式",
+        "patternHint": "可以是精确的键（如 label.create），也可以是前缀（如 label.*），覆盖其下的所有键。",
+        "subject": "适用对象",
+        "subjectKind": { "all": "所有人", "type": "某一主体类型", "role": "某个角色" },
+        "principalType": "主体类型",
+        "role": "角色",
+        "chooseRole": "选择角色",
+        "mode": "模式",
+        "modeHint": "只提供不低于该模式下限的模式。",
+        "timeout": "超时秒数",
+        "timeoutHint": "留空表示不超时，范围为 60 到 2592000（30 天）。",
+        "onTimeout": "超时后",
+        "onTimeoutReject": "拒绝该操作",
+        "onTimeoutApprove": "批准该操作",
+        "approverMustHoldAction": "批准者必须同时持有该操作本身的权限",
+        "requireDistinctApprover": "必须由不同的主体批准",
+        "save": "保存",
+        "saving": "保存中..."
+      },
+      "validation": {
+        "pattern": "该模式没有覆盖任何可审批的权限键。",
+        "role": "请选择策略适用的角色。",
+        "timeout": "请输入 60 到 2592000 之间的整数秒数，或留空。",
+        "timeoutApprove": "超时自动批准要求模式的下限为关闭。",
+        "mode": "该模式低于模式所覆盖权限键的下限。"
+      },
+      "toast": {
+        "created": "审批策略已创建。",
+        "updated": "审批策略已保存。",
+        "deleted": "审批策略已删除。"
+      }
     }
   }
 }

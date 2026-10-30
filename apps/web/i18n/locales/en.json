@@ -2501,6 +2501,88 @@
       "loadFailed": "Could not load approvals.",
       "stale": "Could not refresh approvals. Showing the last loaded list.",
       "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." }
+    },
+    "policies": {
+      "title": "Approval policies",
+      "subtitle": "Which actions wait for a decision, and who may give it.",
+      "create": "New policy",
+      "forbidden": "You do not have permission to manage approval policies.",
+      "loadFailed": "Could not load approval policies.",
+      "mode": {
+        "none": "Off",
+        "self": "The requester decides",
+        "agent": "An agent approves",
+        "human": "A human approves"
+      },
+      "scope": { "global": "Global", "project": "Project", "any": "Any" },
+      "risk": { "low": "Low", "medium": "Medium", "high": "High", "critical": "Critical" },
+      "principal": { "USER": "User", "AGENT": "Agent", "ASSISTANT": "Assistant" },
+      "subject": {
+        "all": "Everyone",
+        "type": "Every {type}",
+        "role": "Role {role}",
+        "principal": "{type} {principal}"
+      },
+      "keys": {
+        "title": "Approvable keys",
+        "hint": "The floor is the weakest mode a policy for the key may choose. The default is what the engine does with no policy at all.",
+        "key": "Key",
+        "scope": "Scope",
+        "risk": "Risk",
+        "floor": "Floor",
+        "default": "Default",
+        "overrides": "Overrides",
+        "empty": "No permission key can be held for approval."
+      },
+      "list": {
+        "title": "Policies",
+        "pattern": "Pattern",
+        "subject": "Applies to",
+        "mode": "Mode",
+        "timeout": "Timeout",
+        "onTimeout": "On timeout",
+        "edit": "Edit",
+        "delete": "Delete",
+        "deleteConfirm": "Delete the policy for {pattern}?",
+        "noTimeout": "No timeout",
+        "timeoutSeconds": "{count} s",
+        "empty": "No policy overrides the defaults yet."
+      },
+      "dialog": {
+        "createTitle": "New approval policy",
+        "editTitle": "Edit approval policy",
+        "description": "A policy holds an action until someone with the required mode approves it.",
+        "pattern": "Permission pattern",
+        "patternHint": "An exact key such as label.create, or a prefix such as label.* covering every key under it.",
+        "subject": "Applies to",
+        "subjectKind": { "all": "Everyone", "type": "A principal type", "role": "A role" },
+        "principalType": "Principal type",
+        "role": "Role",
+        "chooseRole": "Choose a role",
+        "mode": "Mode",
+        "modeHint": "Only the modes at or above the pattern's floor are offered.",
+        "timeout": "Timeout in seconds",
+        "timeoutHint": "Leave it blank for no timeout. Between 60 and 2592000 (30 days).",
+        "onTimeout": "When the timeout runs out",
+        "onTimeoutReject": "Reject the action",
+        "onTimeoutApprove": "Approve the action",
+        "approverMustHoldAction": "The approver must also hold the action's own permission",
+        "requireDistinctApprover": "A different principal must approve it",
+        "save": "Save",
+        "saving": "Saving..."
+      },
+      "validation": {
+        "pattern": "This pattern covers no approvable permission key.",
+        "role": "Choose the role the policy applies to.",
+        "timeout": "Enter a whole number of seconds from 60 to 2592000, or leave it blank.",
+        "timeoutApprove": "Approve on timeout needs a pattern whose floor is off.",
+        "mode": "This mode is below the floor of the keys the pattern covers."
+      },
+      "toast": {
+        "created": "Approval policy created.",
+        "updated": "Approval policy saved.",
+        "deleted": "Approval policy deleted."
+      }
     }
   }
 }
