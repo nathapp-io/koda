@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T16:35:44.915Z",
+  "updatedAt": "2026-10-30T16:44:30.155Z",
   "userStories": [
     {
       "id": "US-001",
@@ -217,14 +217,17 @@
         "notifications"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "One refresh branch reuses existing dismiss and current-user/generation guards; its existing Jest harness supplies all collaborators without a new abstraction."
+        "reasoning": "One refresh branch reuses existing dismiss and current-user/generation guards; its existing Jest harness supplies all collaborators without a new abstraction.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/composables/useApprovalRequestNotifications.ts",
@@ -244,7 +247,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "544dee409a6718fe35f2df70781e4cb747ebae1c"
     },
     {
       "id": "US-004",
