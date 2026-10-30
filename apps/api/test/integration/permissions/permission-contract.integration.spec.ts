@@ -63,8 +63,8 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  it('AC-12 (US-007): collects exactly 122 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(122);
+  it('AC-12 (US-007): collects exactly 124 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(124);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {
