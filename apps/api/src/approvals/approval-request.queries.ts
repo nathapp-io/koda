@@ -12,8 +12,14 @@ export interface ApprovalRequestFilter {
   status?: ApprovalRequestStatus;
   projectId?: string;
   permissionKey?: string;
+  jobId?: string;
   /** Only requests whose actor or on-behalf-of principal is the caller. */
   mine?: boolean;
+}
+export interface ApprovalRequestCounts {
+  total: number;
+  unscoped: number;
+  projects: Array<{ projectId: string; slug: string | null; pending: number }>;
 }
 export interface ApprovalRequestDetail { request: ApprovalRequestRecord; decisions: ApprovalDecisionRecord[] }
 
@@ -24,6 +30,12 @@ export class ApprovalRequestQueries {
   async list(principal: PrincipalRef, filter: ApprovalRequestFilter, page: IPageOption): Promise<IPageResult<ApprovalRequestRecord>> {
     const scopes = await this.permissions.approvalDecideScopes(principal);
     return this.requests.findVisiblePage({ principal, scopes }, filter, page);
+  }
+
+  async counts(principal: PrincipalRef): Promise<ApprovalRequestCounts> {
+    const scopes = await this.permissions.approvalDecideScopes(principal);
+    const counts = await this.requests.countVisiblePending({ principal, scopes });
+    return { ...counts, total: counts.unscoped + counts.projects.reduce((sum, project) => sum + project.pending, 0) };
   }
 
   /** Missing and invisible requests deliberately have the same error. */

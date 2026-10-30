@@ -350,6 +350,14 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('Approval requests', () => {
+    it('GET /api/approvals/counts with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/approvals/counts')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ total: expect.any(Number), unscoped: expect.any(Number), projects: expect.any(Array) });
+    });
+    it('GET /api/approvals/counts without credentials returns 401', async () => {
+      await request(httpServer).get('/api/approvals/counts').expect(401);
+    });
     it('GET /api/approvals with the admin token returns 200', async () => {
       const res = await request(httpServer).get('/api/approvals')
         .set('Authorization', `Bearer ${userAccessToken}`).expect(200);

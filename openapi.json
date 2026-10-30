@@ -14053,6 +14053,16 @@
             }
           },
           {
+            "name": "jobId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
             "name": "mine",
             "required": false,
             "in": "query",
@@ -14128,6 +14138,48 @@
           }
         ],
         "summary": "List visible approval requests",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approvals/counts": {
+      "get": {
+        "operationId": "ApprovalRequestsController_counts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Pending counts by project and unscoped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestCountsDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count visible pending approval requests",
         "tags": [
           "approvals"
         ]
@@ -24131,6 +24183,48 @@
           "input",
           "result",
           "decisions"
+        ]
+      },
+      "ProjectApprovalRequestCountDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true
+          },
+          "pending": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "projectId",
+          "slug",
+          "pending"
+        ]
+      },
+      "ApprovalRequestCountsDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "unscoped": {
+            "type": "number"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectApprovalRequestCountDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "unscoped",
+          "projects"
         ]
       },
       "DecideApprovalRequestDto": {
