@@ -17,10 +17,11 @@ const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENCRYPTION_KEY = 'ab'.repeat(32);
 interface Pending { id: string; permissionKey: string; projectId: string | null; redeem: boolean }
 interface Created { webhookSecret: string; repoName: string }
-interface Detail { input: Record<string, unknown> }
+interface Detail { input: Record<string, unknown>; result: unknown; status: string }
 interface CreateBody { provider: string; repoOwner: string; repoName: string; token: string; syncMode: string }
+interface Updated { syncMode: string; webhookSecret?: string }
 
-describeIntegration('gated VCS connection creation', () => {
+describeIntegration('gated VCS secret routes', () => {
   let app: NathApplication;
   let db: ReturnType<typeof fixtureDb>;
   let world: FleetHttpWorld;
@@ -42,6 +43,21 @@ describeIntegration('gated VCS connection creation', () => {
   };
   const rootPost = (payload: CreateBody) =>
     request(server()).post(`/api/projects/${p.slug}/vcs`).set(root()).send(payload);
+  const vcsPath = () => `/api/projects/${p.slug}/vcs`;
+  const rotatePath = () => `${vcsPath()}/webhook-secret/rotate`;
+  const patch = (payload: Record<string, unknown>, redeem?: string) => {
+    const call = request(server()).patch(vcsPath()).set(agentAuth()).send(payload);
+    return redeem === undefined ? call : call.set(APPROVAL_REDEEM_HEADER, redeem);
+  };
+  const rootPatch = (payload: Record<string, unknown>) =>
+    request(server()).patch(vcsPath()).set(root()).send(payload);
+  const rotate = (redeem?: string) => {
+    const call = request(server()).post(rotatePath()).set(agentAuth());
+    return redeem === undefined ? call : call.set(APPROVAL_REDEEM_HEADER, redeem);
+  };
+  const rootRotate = () => request(server()).post(rotatePath()).set(root());
+  /** A connection created at once by root; the update/rotate cases each need their own row. */
+  const rootConnection = (over: Partial<CreateBody> = {}) => rootPost(body(over)).expect(201);
   const pending = (response: request.Response) => {
     expect(response.status).toBe(202);
     return data<Pending>(response);
@@ -72,7 +88,9 @@ describeIntegration('gated VCS connection creation', () => {
     await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
     await db.vcsConnection.deleteMany({ where: { projectId: p.id } });
-    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'vcs.connection.create'], p.id);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, [
+      'project.read', 'vcs.connection.create', 'vcs.connection.update', 'vcs.webhook-secret.rotate',
+    ], p.id);
     await app.get(PermissionCache).invalidate();
   });
   afterAll(async () => { await app?.close(); vi.unstubAllEnvs(); });
@@ -126,5 +144,150 @@ describeIntegration('gated VCS connection creation', () => {
     const created = data<Created>(await rootPost(body()).expect(201));
     expect(created.webhookSecret.length).toBeGreaterThan(0);
     expect(await db.approvalRequest.count()).toBe(0);
+  });
+
+  // ── US-003: update and webhook-secret rotation, pinned to the connection ──────────────────────
+
+  it('US-003 AC-1: an agent under no policy opens a pending update and changes nothing', async () => {
+    await rootConnection();
+
+    const summary = pending(await patch({ syncMode: 'polling' }));
+
+    expect(summary).toMatchObject({ permissionKey: 'vcs.connection.update', redeem: true });
+    expect((await connection())?.syncMode).toBe('off');
+  });
+
+  it('US-003 AC-2: redeeming the approved update applies it and settles the request', async () => {
+    await rootConnection();
+    const summary = pending(await patch({ syncMode: 'polling' }));
+    await approve(summary.id);
+
+    const updated = data<Updated>(await patch({ syncMode: 'polling' }, summary.id).expect(200));
+
+    expect(updated.syncMode).toBe('polling');
+    expect((await connection())?.syncMode).toBe('polling');
+    const row = await db.approvalRequest.findUniqueOrThrow({ where: { id: summary.id } });
+    expect(row.status).toBe('executed');
+  });
+
+  it('US-003 AC-3: the stored patch is redacted and the redemption stores the re-sent token', async () => {
+    await rootConnection({ token: 'tok-old' });
+
+    const summary = pending(await patch({ token: 'tok-new' }));
+
+    const stored = (await detail(summary.id)).input as { patch: { token: string } };
+    expect(stored.patch.token).toBe('<redacted>');
+    expect(JSON.stringify(stored)).not.toContain('tok-new');
+
+    await approve(summary.id);
+    await patch({ token: 'tok-new' }, summary.id).expect(200);
+
+    const row = await connection();
+    expect(decryptToken(row?.encryptedToken ?? '', ENCRYPTION_KEY)).toBe('tok-new');
+  });
+
+  it('US-003 AC-4: a redemption that adds a token mismatches and leaves the stored token', async () => {
+    await rootConnection({ token: 'tok-orig' });
+    const summary = pending(await patch({ syncMode: 'polling' }));
+    await approve(summary.id);
+
+    const response = await patch({ syncMode: 'polling', token: 'tok-x' }, summary.id).expect(409);
+
+    expect(response.body.message).toBe(message('redeemMismatch', '409'));
+    const row = await connection();
+    expect(decryptToken(row?.encryptedToken ?? '', ENCRYPTION_KEY)).toBe('tok-orig');
+    expect(row?.syncMode).toBe('off');
+  });
+
+  it('US-003 AC-5: an update redeemed after the connection was replaced mismatches, stays approved', async () => {
+    await rootConnection({ repoName: 'first-widgets' });
+    const summary = pending(await patch({ syncMode: 'polling' }));
+    await approve(summary.id);
+
+    await db.vcsConnection.deleteMany({ where: { projectId: p.id } });
+    await rootConnection({ repoName: 'second-widgets' });
+
+    const response = await patch({ syncMode: 'polling' }, summary.id).expect(409);
+
+    expect(response.body.message).toBe(message('redeemMismatch', '409'));
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: summary.id } })).status).toBe('approved');
+    expect((await connection())?.syncMode).toBe('off');
+  });
+
+  it('US-003 AC-6: rotation opens pending, and redeeming it returns a new secret', async () => {
+    const created = data<Created>(await rootConnection());
+    const before = (await connection())?.webhookSecret;
+    expect(before).toBe(created.webhookSecret);
+
+    const summary = pending(await rotate());
+    expect(summary).toMatchObject({ permissionKey: 'vcs.webhook-secret.rotate', redeem: true });
+
+    await approve(summary.id);
+    const rotated = data<Created>(await rotate(summary.id).expect(200));
+
+    expect(rotated.webhookSecret).toEqual(expect.any(String));
+    expect(rotated.webhookSecret.length).toBeGreaterThan(0);
+    expect(rotated.webhookSecret).not.toBe(before);
+    expect((await connection())?.webhookSecret).toBe(rotated.webhookSecret);
+  });
+
+  it('US-003 AC-7: a rotation request stores the connection and answers only rotated', async () => {
+    await rootConnection();
+    const created = await connection();
+    const summary = pending(await rotate());
+    await approve(summary.id);
+    await rotate(summary.id).expect(200);
+
+    const stored = await detail(summary.id);
+
+    expect(stored.input).toEqual({ slug: p.slug, projectId: p.id, connectionId: created?.id });
+    expect(stored.result).toEqual({ rotated: true });
+  });
+
+  it('US-003 AC-8: a rotation redeemed after the connection was replaced mismatches, stays approved', async () => {
+    await rootConnection({ repoName: 'first-widgets' });
+    const summary = pending(await rotate());
+    await approve(summary.id);
+
+    await db.vcsConnection.deleteMany({ where: { projectId: p.id } });
+    await rootConnection({ repoName: 'second-widgets' });
+    const replacement = (await connection())?.webhookSecret;
+
+    const response = await rotate(summary.id).expect(409);
+
+    expect(response.body.message).toBe(message('redeemMismatch', '409'));
+    expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: summary.id } })).status).toBe('approved');
+    expect((await connection())?.webhookSecret).toBe(replacement);
+  });
+
+  it('US-003 AC-9: root updates and rotates at once, opening no request', async () => {
+    await rootConnection();
+
+    const updated = data<Updated>(await rootPatch({ syncMode: 'polling' }).expect(200));
+    expect(updated.syncMode).toBe('polling');
+
+    const rotated = data<Created>(await rootRotate().expect(200));
+    expect(rotated.webhookSecret.length).toBeGreaterThan(0);
+
+    expect(await db.approvalRequest.count()).toBe(0);
+  });
+
+  it('US-003 AC-14: a redeemed webhook-mode update returns the generated secret, the row keeps none', async () => {
+    await rootConnection();
+    await db.vcsConnection.updateMany({ where: { projectId: p.id }, data: { webhookSecret: null, syncMode: 'off' } });
+
+    const summary = pending(await patch({ syncMode: 'webhook' }));
+    await approve(summary.id);
+
+    const updated = data<Required<Updated>>(await patch({ syncMode: 'webhook' }, summary.id).expect(200));
+
+    expect(updated.syncMode).toBe('webhook');
+    expect(updated.webhookSecret).toEqual(expect.any(String));
+    expect(updated.webhookSecret.length).toBeGreaterThan(0);
+    expect((await connection())?.webhookSecret).toBe(updated.webhookSecret);
+
+    const row = await db.approvalRequest.findUniqueOrThrow({ where: { id: summary.id } });
+    expect(row.status).toBe('executed');
+    expect(row.result).not.toHaveProperty('webhookSecret');
   });
 });

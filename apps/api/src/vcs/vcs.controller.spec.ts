@@ -1,6 +1,6 @@
 import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
 import { PermissionService } from '../permissions/permission.service';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
@@ -129,10 +129,21 @@ describe('VcsController', () => {
     };
 
     gate = {
-      run: vi.fn(async (call: { variant?: string; input: { projectId: string; connection: CreateVcsConnectionDto } }) =>
-        call.variant === 'rest:vcs.create'
-          ? { status: 'executed', result: await mockVcsService.create(call.input.projectId, encryptionKey, call.input.connection) }
-          : { status: 'executed', result: { ok: true, latencyMs: 100 } }),
+      run: vi.fn(async (call: {
+        variant?: string;
+        input: { projectId: string; connection: CreateVcsConnectionDto; patch: UpdateVcsConnectionDto };
+      }) => {
+        if (call.variant === 'rest:vcs.create') {
+          return { status: 'executed', result: await mockVcsService.create(call.input.projectId, encryptionKey, call.input.connection) };
+        }
+        if (call.variant === 'rest:vcs.update') {
+          return { status: 'executed', result: await mockVcsService.update(call.input.projectId, encryptionKey, call.input.patch) };
+        }
+        if (call.variant === 'rest:vcs.rotate-webhook-secret') {
+          return { status: 'executed', result: await mockVcsService.rotateWebhookSecret(call.input.projectId) };
+        }
+        return { status: 'executed', result: { ok: true, latencyMs: 100 } };
+      }),
     };
     module = await Test.createTestingModule({
       controllers: [VcsController],
@@ -238,6 +249,52 @@ describe('VcsController', () => {
         controller.updateConnection('test-project', {} as UpdateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
     });
+
+    it('AC-13: gates the update with the connection read before the gate and the redeem header', async () => {
+      const dto: UpdateVcsConnectionDto = { syncMode: 'polling' } as UpdateVcsConnectionDto;
+
+      await controller.updateConnection('s', dto, 'r1');
+
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'vcs.connection.update',
+        variant: 'rest:vcs.update',
+        projectId: 'proj-1',
+        input: { slug: 's', projectId: 'proj-1', connectionId: 'conn-1', patch: dto },
+        redeem: 'r1',
+      });
+      const gateCall = gate.run.mock.calls[0][0] as { input: { connectionId: string } };
+      expect(gateCall.input.connectionId).toBe('conn-1');
+      expect(mockVcsService.findByProject.mock.invocationCallOrder[0])
+        .toBeLessThan(gate.run.mock.invocationCallOrder[0]);
+    });
+
+    it('AC-13: a missing connection rejects with vcs 404 before the gate', async () => {
+      mockVcsService.findByProject.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
+
+      await expect(
+        controller.updateConnection('s', {} as UpdateVcsConnectionDto, 'r1'),
+      ).rejects.toMatchObject({ prefix: 'vcs' });
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+
+    it('AC-13: an empty encryption key rejects 400 vcs before the connection is read', async () => {
+      mockVcsConfig.encryptionKey = null;
+
+      await expect(
+        controller.updateConnection('s', {} as UpdateVcsConnectionDto, 'r1'),
+      ).rejects.toThrow(ValidationAppException);
+      expect(mockVcsService.findByProject).not.toHaveBeenCalled();
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+
+    it('AC-2: a pending update request answers with the approval summary and writes nothing', async () => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+
+      await expect(
+        controller.updateConnection('s', { syncMode: 'polling' } as UpdateVcsConnectionDto),
+      ).rejects.toThrow(ApprovalPending);
+      expect(mockVcsService.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('gated routes', () => {
@@ -284,6 +341,34 @@ describe('VcsController', () => {
 
       expect(result.data).toEqual({ webhookSecret: 'c'.repeat(32) });
       expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
+    });
+
+    it('US-003 AC-7: gates the rotation with the connection read before the gate and the redeem header', async () => {
+      await controller.rotateWebhookSecret(projectContext(), 'r1');
+
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'vcs.webhook-secret.rotate',
+        variant: 'rest:vcs.rotate-webhook-secret',
+        projectId: 'proj-1',
+        input: { slug: 'test-project', projectId: 'proj-1', connectionId: 'conn-1' },
+        redeem: 'r1',
+      });
+      expect(mockVcsService.findByProject.mock.invocationCallOrder[0])
+        .toBeLessThan(gate.run.mock.invocationCallOrder[0]);
+    });
+
+    it('US-003: a missing connection rejects with vcs 404 before the gate', async () => {
+      mockVcsService.findByProject.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
+
+      await expect(controller.rotateWebhookSecret(projectContext(), 'r1')).rejects.toMatchObject({ prefix: 'vcs' });
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+
+    it('US-003: a pending rotation answers with the approval summary and rotates nothing', async () => {
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+
+      await expect(controller.rotateWebhookSecret(projectContext())).rejects.toThrow(ApprovalPending);
+      expect(mockVcsService.rotateWebhookSecret).not.toHaveBeenCalled();
     });
   });
 

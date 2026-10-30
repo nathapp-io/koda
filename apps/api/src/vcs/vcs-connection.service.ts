@@ -141,16 +141,26 @@ export class VcsConnectionService {
 
   /**
    * Update VCS connection
+   *
+   * `connectionId` pins the call to the connection its caller read: a redemption re-reads the project's
+   * connection before the gate, so a connection deleted and recreated between approval and redemption
+   * answers the new id and never reaches this write (the hashes already differ). This check is the
+   * narrower window — a swap between that read and the execution.
    */
   async update(
     projectId: string,
     encryptionKey: string,
     dto: UpdateVcsConnectionDto,
+    connectionId?: string,
   ): Promise<VcsConnectionUpdatedResponseDto> {
     // Verify connection exists
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
+      throw new NotFoundAppException({}, 'vcs');
+    }
+
+    if (connectionId !== undefined && connection.id !== connectionId) {
       throw new NotFoundAppException({}, 'vcs');
     }
 
@@ -211,7 +221,7 @@ export class VcsConnectionService {
       }),
     );
 
-    await this.vcsPollingService.refreshConnectionSchedule(updated.id);
+    await this.refreshAfterCommit(updated.id);
 
     const response = this.mapToResponseDto(updated);
     return generatedSecret ? { ...response, webhookSecret: generatedSecret } : response;
@@ -268,11 +278,18 @@ export class VcsConnectionService {
   /**
    * M9: replace the inbound webhook secret and return the new one, once.
    * Deliveries signed with the old secret are rejected from now on.
+   *
+   * `connectionId` pins the rotation to the connection its caller read before the gate, the same way
+   * `update` does: a recreated connection answers a different stored input and is never touched.
    */
-  async rotateWebhookSecret(projectId: string): Promise<WebhookSecretResponseDto> {
+  async rotateWebhookSecret(projectId: string, connectionId?: string): Promise<WebhookSecretResponseDto> {
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
+      throw new NotFoundAppException({}, 'vcs');
+    }
+
+    if (connectionId !== undefined && connection.id !== connectionId) {
       throw new NotFoundAppException({}, 'vcs');
     }
 

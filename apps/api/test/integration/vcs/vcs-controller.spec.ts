@@ -82,19 +82,32 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     // Create mock services
     const mockVcsServiceInstance = {
       create: vi.fn(),
-      findByProject: vi.fn(),
+      findByProject: vi.fn().mockResolvedValue({ id: 'conn-1' }),
       update: vi.fn(),
       delete: vi.fn(),
       testConnection: vi.fn(),
       getFullByProject: vi.fn(),
+      rotateWebhookSecret: vi.fn().mockResolvedValue({ webhookSecret: 'c'.repeat(32) }),
     };
-    // `gate` stands in for the approval engine: the create route is gated (`gate-secret` US-002), so
-    // its command runs the service exactly as the handler used to, and the assertions below hold.
+    // `gate` stands in for the approval engine: the create/update/rotate routes are gated
+    // (`gate-secret` US-002/US-003), so their commands run the service exactly as the handlers used
+    // to, and the assertions below hold.
     gate = {
-      run: vi.fn(async (call: { variant?: string; input: { projectId: string; connection: CreateVcsConnectionDto } }) =>
-        call.variant === 'rest:vcs.create'
-          ? { status: 'executed', result: await mockVcsServiceInstance.create(call.input.projectId, encryptionKey, call.input.connection) }
-          : { status: 'executed', result: null }),
+      run: vi.fn(async (call: {
+        variant?: string;
+        input: { projectId: string; connection: CreateVcsConnectionDto; patch: UpdateVcsConnectionDto };
+      }) => {
+        if (call.variant === 'rest:vcs.create') {
+          return { status: 'executed', result: await mockVcsServiceInstance.create(call.input.projectId, encryptionKey, call.input.connection) };
+        }
+        if (call.variant === 'rest:vcs.update') {
+          return { status: 'executed', result: await mockVcsServiceInstance.update(call.input.projectId, encryptionKey, call.input.patch) };
+        }
+        if (call.variant === 'rest:vcs.rotate-webhook-secret') {
+          return { status: 'executed', result: await mockVcsServiceInstance.rotateWebhookSecret(call.input.projectId) };
+        }
+        return { status: 'executed', result: null };
+      }),
     };
 
     const mockProjectsServiceInstance = {
@@ -269,7 +282,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('returns 404 when no connection exists', async () => {
       const updateDto: UpdateVcsConnectionDto = { syncMode: VcsSyncModeType.WEBHOOK };
 
-      vcsService.update.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
+      // The handler reads the connection before the gate (US-003), so the miss answers from that read.
+      vcsService.findByProject.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
       await expect(controller.updateConnection(projectSlug, updateDto)).rejects.toThrow(NotFoundAppException);
     });

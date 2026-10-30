@@ -1,7 +1,7 @@
 import { withCommittedEffects } from '../common/committed-effects';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
@@ -415,6 +415,51 @@ describe('VcsConnectionService', () => {
       );
     });
 
+    it('AC-15: defers the polling refresh to the enclosing scope and survives its failure', async () => {
+      const calls: string[] = [];
+      const warn = vi.mocked(Logger.prototype.warn);
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ webhookSecret: null }));
+      mockRepo.updateVcsConnection.mockImplementation(async () => {
+        calls.push('update');
+        return makeConnection({ syncMode: 'webhook', webhookSecret: null });
+      });
+      mockPolling.refreshConnectionSchedule.mockImplementation(async () => {
+        calls.push('refresh');
+      });
+      warn.mockClear();
+
+      // Inside a scope the refresh waits for the transaction owner's callback to return.
+      const updated = await afterCommit.scope(async () => {
+        const inner = await service.update('proj-1', ENCRYPTION_KEY, { syncMode: 'webhook' } as UpdateVcsConnectionDto);
+        expect(calls).toEqual(['update']);
+        return inner;
+      });
+      expect(calls).toEqual(['update', 'refresh']);
+      expect(updated.webhookSecret).toEqual(expect.any(String));
+
+      // A deferred refresh that fails is a warning: the executed update, and the one-time secret it
+      // answers, are already durable.
+      calls.length = 0;
+      mockPolling.refreshConnectionSchedule.mockRejectedValue(new Error('scheduler down'));
+      const answered = await afterCommit.scope(
+        async () => service.update('proj-1', ENCRYPTION_KEY, { syncMode: 'webhook' } as UpdateVcsConnectionDto),
+      );
+
+      expect(calls).toEqual(['update']);
+      expect(answered.syncMode).toBe('webhook');
+      expect(answered.webhookSecret).toEqual(expect.any(String));
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('AC-15: outside a scope the refresh stays inline and its failure propagates', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
+      mockPolling.refreshConnectionSchedule.mockRejectedValue(new Error('scheduler down'));
+
+      await expect(
+        service.update('proj-1', ENCRYPTION_KEY, { syncMode: 'polling' } as UpdateVcsConnectionDto),
+      ).rejects.toThrow('scheduler down');
+    });
+
     it('should retain webhookSecret when syncMode changes away from webhook', async () => {
       const existing = makeConnection({ syncMode: 'webhook', webhookSecret: 'old-secret' });
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(existing);
@@ -427,6 +472,44 @@ describe('VcsConnectionService', () => {
         expect.objectContaining({ syncMode: 'polling' }),
       );
       expect(mockRepo.updateVcsConnection.mock.calls[0][1]).not.toHaveProperty('webhookSecret');
+    });
+  });
+
+  describe('connection pinning (US-003)', () => {
+    const dto = { syncMode: 'polling' } as UpdateVcsConnectionDto;
+
+    it('AC-10: update refuses a connection id that is not the project current connection', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+
+      await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c-other')).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c-other')).rejects.toThrow(NotFoundAppException);
+      expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
+    });
+
+    it('AC-10: update writes when the pinned connection is the current one, or when nothing is pinned', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+
+      await expect(service.update('p1', ENCRYPTION_KEY, dto, 'c1')).resolves.toBeDefined();
+      await expect(service.update('p1', ENCRYPTION_KEY, dto)).resolves.toBeDefined();
+
+      expect(mockRepo.updateVcsConnection).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-11: rotate refuses a connection id that is not the project current connection', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+
+      await expect(service.rotateWebhookSecret('p1', 'c-other')).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(service.rotateWebhookSecret('p1', 'c-other')).rejects.toThrow(NotFoundAppException);
+      expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: rotate writes when the pinned connection is the current one', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ id: 'c1' }));
+
+      const rotated = await service.rotateWebhookSecret('p1', 'c1');
+
+      expect(rotated.webhookSecret).toHaveLength(32);
+      expect(mockRepo.updateVcsConnection).toHaveBeenCalledWith('p1', { webhookSecret: rotated.webhookSecret });
     });
   });
 

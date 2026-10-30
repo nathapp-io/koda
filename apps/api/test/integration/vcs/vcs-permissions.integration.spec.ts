@@ -2,6 +2,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
+import { APPROVAL_REDEEM_HEADER } from '../../../src/approvals/route/approval-gated.decorator';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -152,7 +153,15 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
 
   it('AC-11: project-admin-bound agent rotates and persists the secret', async () => {
     const before = (await connection()).webhookSecret;
-    const response = await request(server).post(`${BASE}/webhook-secret/rotate`).set(auth('admin-agent')).expect(200);
+    // An agent write under no policy waits for approval (US-003): opened, approved as root, then
+    // redeemed by the same agent with the full call.
+    const opened = await request(server).post(`${BASE}/webhook-secret/rotate`).set(auth('admin-agent')).expect(202);
+    const requestId = data<{ id: string }>(opened).id;
+    await request(server).post(`/api/approvals/${requestId}/decisions`).set(auth('root'))
+      .send({ decision: 'approve' }).expect(200);
+
+    const response = await request(server).post(`${BASE}/webhook-secret/rotate`).set(auth('admin-agent'))
+      .set(APPROVAL_REDEEM_HEADER, requestId).expect(200);
     const secret = data<{ webhookSecret: string }>(response).webhookSecret;
     expect(secret).toMatch(/^[0-9a-f]{32}$/);
     expect(secret).not.toBe(before);

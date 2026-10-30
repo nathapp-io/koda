@@ -8,6 +8,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
+import { APPROVAL_REDEEM_HEADER } from '../../../src/approvals/route/approval-gated.decorator';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
@@ -159,7 +160,15 @@ describeIntegration('VCS webhook secret (M9)', () => {
 
   it('AC-11: project-admin-bound agent rotates and persists the new secret', async () => {
     const before = await storedSecret();
-    const response = await request(server).post(ROTATE).set(auth('binding-admin-agent')).expect(200);
+    // An agent write under no policy waits for approval (US-003): the request is opened, approved as
+    // root, then redeemed by the same agent with the full call.
+    const opened = await request(server).post(ROTATE).set(auth('binding-admin-agent')).expect(202);
+    const requestId = data<{ id: string }>(opened).id;
+    await request(server).post(`/api/approvals/${requestId}/decisions`).set(auth('root'))
+      .send({ decision: 'approve' }).expect(200);
+
+    const response = await request(server).post(ROTATE).set(auth('binding-admin-agent'))
+      .set(APPROVAL_REDEEM_HEADER, requestId).expect(200);
     const next = data<{ webhookSecret: string }>(response).webhookSecret;
     expect(next).toMatch(HEX_32);
     expect(next).not.toBe(before);

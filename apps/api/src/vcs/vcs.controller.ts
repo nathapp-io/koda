@@ -123,6 +123,7 @@ export class VcsController {
    */
   @Patch()
   @Requires('vcs.connection.update')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Update VCS connection for a project' })
   @ApiResponse({ status: 200, type: VcsConnectionUpdatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -130,17 +131,31 @@ export class VcsController {
   async updateConnection(
     @Param('slug') slug: string,
     @Body() dto: UpdateVcsConnectionDto,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
 
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
+    // The command encrypts with the key read when it runs; refusing here keeps a missing key a 400
+    // before a request is opened. Checked before the connection read, so a missing key answers 400
+    // ahead of a missing connection's 404.
+    if (!this.vcsConfig.encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    return JsonResponse.Ok(await this.vcsService.update(project.id, encryptionKey, dto));
+    // `gate-secret` (US-003): the request pins this connection, so a connection deleted and recreated
+    // between approval and redemption answers a different id — a mismatch, never that row's update.
+    const connection = await this.vcsService.findByProject(project.id);
+
+    const outcome = await this.routeGate.run<VcsConnectionUpdatedResponseDto>({
+      key: 'vcs.connection.update',
+      variant: VCS_ROUTE_VARIANTS.update,
+      projectId: project.id,
+      input: { slug, projectId: project.id, connectionId: connection.id, patch: dto },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**
@@ -202,6 +217,7 @@ export class VcsController {
    */
   @Post('/webhook-secret/rotate')
   @Requires('vcs.webhook-secret.rotate')
+  @ApprovalGated({ redeem: true })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate the VCS webhook secret and return the new secret once' })
   @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
@@ -211,8 +227,21 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async rotateWebhookSecret(
     @CurrentProject() ctx: ProjectContext,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
-    return JsonResponse.Ok(await this.vcsService.rotateWebhookSecret(ctx.project.id));
+    // `gate-secret` (US-003): the route has no body, so the stored input is the project and the
+    // connection this call read — there is nothing else for a redemption to match, and a recreated
+    // connection answers a different id, which mismatches instead of rotating the new secret.
+    const connection = await this.vcsService.findByProject(ctx.project.id);
+    const outcome = await this.routeGate.run<WebhookSecretResponseDto>({
+      key: 'vcs.webhook-secret.rotate',
+      variant: VCS_ROUTE_VARIANTS.rotateWebhookSecret,
+      projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, connectionId: connection.id },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**
