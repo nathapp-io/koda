@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T19:39:56.489Z",
+  "updatedAt": "2026-10-30T19:43:23.925Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1021,14 +1021,17 @@
         "validation"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Command options and validation reuse existing generated API boundaries; authorization and business decision eligibility remain unchanged on the server."
+        "reasoning": "Command options and validation reuse existing generated API boundaries; authorization and business decision eligibility remain unchanged on the server.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/approval.ts",
@@ -1050,7 +1053,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e4beb034c628e116c581b0108e2905c6644bb87c"
     },
     {
       "id": "US-012",
