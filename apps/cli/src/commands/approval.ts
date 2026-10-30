@@ -6,12 +6,14 @@ import {
   projectApprovalPoliciesControllerList, projectApprovalPoliciesControllerKeys, projectApprovalPoliciesControllerCreate, projectApprovalPoliciesControllerUpdate, projectApprovalPoliciesControllerRemove,
   agentsControllerFindBySlug,
   type ApprovalRequestsControllerListData,
+  type DecideApprovalRequestDto,
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
+import { parseBudgetUsd } from '../utils/parse-usd';
 
 interface ApprovalOptions {
   status?: 'pending' | 'executed' | 'cancelled' | 'approved' | 'rejected' | 'expired' | 'failed'; project?: string; key?: string; mine?: boolean; page: number; size: number; json?: boolean; comment?: string;
@@ -83,17 +85,60 @@ function registerShow(approval: Command): void {
     });
 }
 
+interface DecisionOptions { comment?: string; json?: boolean; choice?: string; amount?: string; requeue?: string }
 function registerDecision(approval: Command, decision: 'approve' | 'reject'): void {
-  approval.command(decision + ' <id>').description(`${decision === 'approve' ? 'Approve' : 'Reject'} an approval request`)
-    .option('--comment <text>', 'Optional comment').option('--json', 'Output as JSON')
-    .action(async (id: string, options: { comment?: string; json?: boolean }) => {
-      try {
-        await context();
-        const response = unwrap<RecordValue>(await approvalRequestsControllerDecide({ path: { id }, body: { decision, ...(options.comment !== undefined ? { comment: options.comment } : {}) } }));
-        if (options.json) console.log(JSON.stringify(response, null, 2)); else console.log(`${id} ${String(response.status ?? '')}`);
-        process.exit(0);
-      } catch (err: unknown) { handleApiError(err); }
-    });
+  const command = approval.command(decision + ' <id>').description(`${decision === 'approve' ? 'Approve' : 'Reject'} an approval request`)
+    .option('--comment <text>', 'Optional comment').option('--json', 'Output as JSON');
+  if (decision === 'approve') {
+    command.option('--choice <choice>', 'Bash decision: allow or allow_for_job')
+      .option('--amount <usd>', 'Budget raise amount (> 0, at most 1,000,000, at most 4 decimals)')
+      .option('--requeue <all|ids>', 'Requeue all candidates or comma-separated job ids');
+  }
+  command.action(async (id: string, options: DecisionOptions) => {
+    try {
+      let amountUsd: number | undefined;
+      if (decision === 'approve') {
+        if (options.choice !== undefined && !['allow', 'allow_for_job'].includes(options.choice)) {
+          handleApiError(new Error('--choice must be allow or allow_for_job'), { validationError: true }); return;
+        }
+        if (options.choice !== undefined && (options.amount !== undefined || options.requeue !== undefined)) {
+          handleApiError(new Error('--choice cannot be combined with --amount or --requeue'), { validationError: true }); return;
+        }
+        if (options.requeue !== undefined && options.amount === undefined) {
+          handleApiError(new Error('--requeue requires --amount'), { validationError: true }); return;
+        }
+        if (options.amount !== undefined) {
+          try { amountUsd = parseBudgetUsd(options.amount); }
+          catch (err: unknown) { handleApiError(err, { validationError: true }); return; }
+        }
+      }
+      await context();
+      let params: RecordValue | undefined;
+      if (decision === 'approve' && options.choice !== undefined) params = { choice: options.choice };
+      else if (decision === 'approve' && amountUsd !== undefined) {
+        params = { amountUsd };
+        if (options.requeue !== undefined) {
+          if (options.requeue === 'all') {
+            const detail = unwrap<RecordValue>(await approvalRequestsControllerGet({ path: { id } }));
+            const details = record(detail.details);
+            if (details.requeueCandidatesTruncated === true) {
+              handleApiError(new Error(`Too many requeue candidates; use koda approval show ${id} to inspect them.`), { validationError: true }); return;
+            }
+            if (!Array.isArray(details.requeueCandidates)) {
+              handleApiError(new Error(`No requeue candidates are available; use koda approval show ${id} to inspect the request.`), { validationError: true }); return;
+            }
+            params.requeueJobIds = details.requeueCandidates.map((candidate) => String(record(candidate).jobId ?? ''));
+          } else {
+            params.requeueJobIds = options.requeue.split(',');
+          }
+        }
+      }
+      const body: DecideApprovalRequestDto = { decision, ...(params !== undefined ? { params } : {}), ...(options.comment !== undefined ? { comment: options.comment } : {}) };
+      const response = unwrap<RecordValue>(await approvalRequestsControllerDecide({ path: { id }, body }));
+      if (options.json) console.log(JSON.stringify(response, null, 2)); else console.log(`${id} ${String(response.status ?? '')}`);
+      process.exit(0);
+    } catch (err: unknown) { handleApiError(err); }
+  });
 }
 function registerCancel(approval: Command): void {
   approval.command('cancel <id>').description('Cancel an approval request').option('--json', 'Output as JSON')
