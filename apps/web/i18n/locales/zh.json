@@ -90,7 +90,9 @@
     "sectionKnowledge": "知识",
     "sectionFleet": "机群",
     "threads": "线程",
-    "myThreads": "我的线程"
+    "myThreads": "我的线程",
+    "approvals": "审批",
+    "approvalPolicies": "审批策略"
   },
   "palette": {
     "trigger": "搜索或跳转…",

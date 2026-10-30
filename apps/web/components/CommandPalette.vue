@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText } from 'lucide-vue-next'
+import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText, Inbox } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 interface Project { id: number; name: string; slug: string }
@@ -19,6 +19,9 @@ const canReadSkills = computed(() => globalPermissions.value.has('skill.source.r
 const canReadRoles = computed(() => globalPermissions.value.has('role.read'))
 // US-007: Admin -> Audit log is a top-level destination, gated on the key `GET /audit` needs.
 const canReadAudit = computed(() => globalPermissions.value.has('audit.read'))
+// P3b US-006: `/approvals` is a top-level destination (the badge and the sidebar both lead there), so
+// the palette offers it. Any decide key counts, narrowed patterns included — hence `mayDecide()`.
+const mayDecideApprovals = computed(() => globalPermissions.value.mayDecide())
 
 const query = ref('')
 const active = ref(0)
@@ -44,6 +47,10 @@ const commands = computed<Command[]>(() => {
   }
   if (canReadSkills.value) {
     list.push({ id: 'skills', label: t('nav.skills'), icon: Sparkles, run: go('/admin/skills') })
+  }
+  // P3b US-006: the engine inbox, right after the workspace destinations it belongs with.
+  if (mayDecideApprovals.value) {
+    list.push({ id: 'approvals', label: t('nav.approvals'), icon: Inbox, run: go('/approvals') })
   }
   const slug = props.projectSlug
   if (slug) {

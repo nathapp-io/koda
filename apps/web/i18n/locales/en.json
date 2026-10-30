@@ -90,7 +90,9 @@
     "sectionKnowledge": "Knowledge",
     "sectionFleet": "Fleet",
     "threads": "Threads",
-    "myThreads": "My threads"
+    "myThreads": "My threads",
+    "approvals": "Approvals",
+    "approvalPolicies": "Approval policies"
   },
   "palette": {
     "trigger": "Search or jump to…",

@@ -24,6 +24,8 @@ const layoutTemplate = layoutSource.match(/<template>([\s\S]*)<\/template>/)?.[1
 const ADMIN_LINKS: ReadonlyArray<readonly [href: string, key: string]> = [
   ['/admin/users', 'user.read'],
   ['/admin/roles', 'role.read'],
+  // P3b US-006: the approval engine's global policy page.
+  ['/admin/approval-policies', 'approval.policy.manage'],
   ['/admin/audit', 'audit.read'],
   ['/admin/fleet', 'fleet.dashboard.read'],
   ['/admin/fleet/runners', 'fleet.runner.read'],
@@ -306,5 +308,49 @@ describe('US-007 AC-8/AC-9: /admin/audit follows the global audit.read key', () 
 
     expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/audit"'))
     expect(nav.indexOf('href="/admin/audit"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-006 (P3b) — the approval engine's two global destinations
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('P3b US-006: /admin/approval-policies follows the global approval.policy.manage', () => {
+  test('that key alone renders the link and no other admin link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['approval.policy.manage'] }))
+
+    expect(hasLink(nav, '/admin/approval-policies')).toBe(true)
+    expect(nav).toContain('nav.sectionAdmin')
+    for (const [href] of ADMIN_LINKS) if (href !== '/admin/approval-policies') expect(hasLink(nav, href)).toBe(false)
+  })
+
+  test('the link is labelled with the nav.approvalPolicies key', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['approval.policy.manage'] }))
+
+    const link = /<a href="\/admin\/approval-policies"[^>]*>([\s\S]*?)<\/a>/.exec(nav)?.[0]
+    expect(link).toBeDefined()
+    expect(link).toContain('nav.approvalPolicies')
+  })
+
+  test('the source order survives: Roles, then the policy page, then Audit and the fleet links', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS }))
+
+    expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/approval-policies"'))
+    expect(nav.indexOf('href="/admin/approval-policies"')).toBeLessThan(nav.indexOf('href="/admin/audit"'))
+    expect(nav.indexOf('href="/admin/approval-policies"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+
+  test('without the key the link is absent however many other keys are held', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS.filter((key) => key !== 'approval.policy.manage') }))
+
+    expect(hasLink(nav, '/admin/approval-policies')).toBe(false)
+    expect(hasLink(nav, '/admin/roles')).toBe(true)
+  })
+
+  test('the inline /approvals link stays in the workspace block, after My threads', async () => {
+    const nav = primaryNav(await renderLayout({ keys: [...ALL_ADMIN_KEYS, 'approval.decide'] }))
+
+    expect(nav.indexOf('href="/threads"')).toBeLessThan(nav.indexOf('href="/approvals"'))
+    expect(nav.indexOf('href="/approvals"')).toBeLessThan(nav.indexOf('nav.sectionAdmin'))
   })
 })
