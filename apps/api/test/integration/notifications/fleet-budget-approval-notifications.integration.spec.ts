@@ -12,6 +12,7 @@ import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -27,6 +28,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   let world: FleetHttpWorld;
   let evaluator: BudgetEvaluator;
   let publisher: FanOutPublisher;
+  let relay: OutboxRelay;
   let n = 0;
 
   const policy = (over: Partial<Prisma.BudgetPolicyUncheckedCreateInput> = {}) => prisma.budgetPolicy.create({
@@ -59,6 +61,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     // whose `system.budget.window-reset` key makes the budget component the actor.
     evaluator = asTestActor(app.get(BudgetEvaluator), { type: 'SYSTEM', id: 'budget' });
     publisher = app.get(FanOutPublisher);
+    relay = app.get(OutboxRelay, { strict: false });
   });
   afterAll(async () => {
     await app.close();
@@ -125,7 +128,16 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     expect(ask).toMatchObject({ permissionKey: 'fleet.budget.override', status: 'pending', projectId: world.projectId });
     expect(row.projectId).toBe(world.projectId);
 
-    await deliver('approval_request_changed');
+    // Leave only this approval event pending so the real outbox relay exercises its registered subscriber.
+    await prisma.outboxEvent.updateMany({
+      where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() },
+    });
+    const approvalEvent = await prisma.outboxEvent.findFirstOrThrow({
+      where: { type: 'approval_request_changed', eventId: { startsWith: ask.id } },
+    });
+    await prisma.outboxEvent.update({ where: { id: approvalEvent.id }, data: { status: 'pending', publishedAt: null } });
+    await relay.dispatchPendingBatch();
+    expect(await prisma.outboxEvent.findUniqueOrThrow({ where: { id: approvalEvent.id } })).toMatchObject({ status: 'published' });
     const engineNotes = await prisma.notification.findMany({
       where: { sourceType: 'approval_request', sourceId: ask.id, kind: 'approval_request' },
     });
