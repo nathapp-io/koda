@@ -62,7 +62,6 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  * roles still hold it; it waits for P3 policy to decide whether it gates binding removal.
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
-  'fleet.approval.decide.assistant',
   'member.remove',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
@@ -179,10 +178,6 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'fleet.activity.read': ['project'],
   'fleet.analytics.read': ['global', 'project'],
   'fleet.analytics.delete': ['global'],
-  'fleet.approval.read': ['global', 'project'],
-  'fleet.approval.decide.budget': ['global', 'project'],
-  'fleet.approval.decide.bash': ['project'],
-  'fleet.approval.decide.assistant': ['project'],
   'runner.bundle.upload': ['runner'],
   'fleet.job.bundle.read': ['project'],
   'mcp.access': ['implicit'],

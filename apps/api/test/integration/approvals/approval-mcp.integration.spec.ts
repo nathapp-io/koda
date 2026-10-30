@@ -60,9 +60,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(answer.result.tools.filter((tool: { name: string }) => tool.name === 'koda_list_approvals')).toHaveLength(1);
   });
   it('AC-11 (US-004): tools/list answers exactly one koda_list_approvals, described by the approval MCP tool', async () => {
-    // The agent holds the key the retired assistant descriptor was renamed behind and the key the tool is gated by
-    // now, so neither an alias nor a second descriptor of the same name can appear for either reason.
-    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.approval.read', 'project.read'], projectId);
+    // The agent holds the key the tool is gated by, so neither an alias nor a second descriptor of the same name
+    // can appear. US-013 retired `fleet.approval.read`: a role still naming it is dropped whole, so holding it here
+    // would deny the agent `project.read` too.
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read'], projectId);
     await app.get(PermissionCache, { strict: false }).invalidate();
 
     const listed = (await rpc('tools/list')).result.tools as Array<{ name: string; description: string }>;

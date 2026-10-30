@@ -554,3 +554,32 @@ describe('catalog approval metadata', () => {
 it('cancel AC-1: cancellation is implicit, any-scope and not approvable', () => {
   expect(findCatalogEntry('approval.request.cancel')).toMatchObject({ access: 'implicit', scope: 'any', approval: { approvable: false } });
 });
+
+/**
+ * US-013: the three fleet approval adapter routes and the assistant fleet alias are gone, so their four
+ * keys leave the catalog together with the one seed entry that named them. A stored role that still
+ * names one is rewritten by the `20261111090000_retire_fleet_approval_keys` migration, because
+ * `PermissionService` drops a role whose entry list no longer expands.
+ */
+describe('US-013 retired fleet approval keys', () => {
+  it('AC-7: the catalog holds no key starting with fleet.approval.', () => {
+    const retired = PERMISSION_CATALOG.map((entry) => entry.key).filter((key) =>
+      key.startsWith('fleet.approval.'),
+    );
+
+    expect(retired).toEqual([]);
+  });
+
+  it('AC-8: the developer seed keeps the shell-escalation scope and names no fleet approval key', async () => {
+    const { SYSTEM_ROLES } = await import('./system-roles');
+    const developer = SYSTEM_ROLES.find((role) => role.key === 'developer');
+    if (developer === undefined) throw new Error('Developer seed is missing');
+
+    expect(developer.permissions).toContain('approval.decide@fleet.job.shell.escalate');
+    expect(developer.permissions.filter((entry) => entry.startsWith('fleet.approval.'))).toEqual([]);
+  });
+
+  it('AC-9 setup: the retired read key resolves to no catalog entry at all', () => {
+    expect(findCatalogEntry('fleet.approval.read')).toBeUndefined();
+  });
+});

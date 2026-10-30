@@ -221,7 +221,7 @@ describe('the seeded-role allow/deny matrix', () => {
 
     for (const row of rows) {
       expect(Object.keys(row.cells)).toEqual(PERMISSION_CATALOG.map((entry) => entry.key));
-      expect(Object.keys(row.cells)).toHaveLength(223);
+      expect(Object.keys(row.cells)).toHaveLength(219);
     }
   });
 
