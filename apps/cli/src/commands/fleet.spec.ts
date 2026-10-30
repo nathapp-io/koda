@@ -9,10 +9,20 @@ import { Command } from 'commander';
 import { fleetCommand } from './fleet';
 
 describe('fleetCommand', () => {
-  it('registers the fleet group with runner, repo, config, dispatch, ingest, job, budget, schedule, approval, analytics and status', () => {
+  it('registers the retained fleet subcommands without approval', () => {
     const program = new Command();
     fleetCommand(program);
     const fleet = program.commands.find((c) => c.name() === 'fleet');
-    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['analytics', 'approval', 'budget', 'dispatch', 'drift-check', 'ingest', 'job', 'nax-files', 'repo', 'runner', 'schedule', 'status']);
+    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['analytics', 'budget', 'dispatch', 'drift-check', 'ingest', 'job', 'nax-files', 'repo', 'runner', 'schedule', 'status']);
+  });
+
+  it('rejects fleet approval as an unknown command', () => {
+    const program = new Command();
+    program.exitOverride();
+    fleetCommand(program);
+
+    expect(() => program.parse(['node', 'koda', 'fleet', 'approval'])).toThrow(
+      expect.objectContaining({ code: 'commander.unknownCommand' }),
+    );
   });
 });
