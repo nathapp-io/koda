@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T10:32:50.988Z",
+  "updatedAt": "2026-10-30T10:54:55.175Z",
   "userStories": [
     {
       "id": "US-001",
@@ -211,14 +211,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One new panel and its existing inbox reuse US-001 client/viewer helpers and standard form/error patterns; medium scope is sufficient, while access-sensitive decide/cancel controls require strict security TDD."
+        "reasoning": "One new panel and its existing inbox reuse US-001 client/viewer helpers and standard form/error patterns; medium scope is sufficient, while access-sensitive decide/cancel controls require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/approvals/ApprovalRequestInbox.vue",
@@ -250,7 +253,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f3f6666a0d9f1f81711d832f85e0ab2b01da339f"
     },
     {
       "id": "US-004",
