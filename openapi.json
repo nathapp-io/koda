@@ -23325,10 +23325,14 @@
           },
           "type": {
             "type": "string",
+            "nullable": true,
             "enum": [
               "budget_override_required",
               "nax_bash_escalate"
             ]
+          },
+          "permissionKey": {
+            "type": "string"
           },
           "projectId": {
             "type": "string",
@@ -23357,6 +23361,7 @@
         "required": [
           "id",
           "type",
+          "permissionKey",
           "projectId",
           "projectSlug",
           "jobId",

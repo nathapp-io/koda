@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { PermissionService } from '../permissions/permission.service';
 import { ATTENTION_WINDOW_MS, HOME_LIMITS, buildHomeView, type HomeCaller, type HomeView } from './home.types';
 import { HOME_REPOSITORY, type IHomeRepository } from './home.domain';
 
@@ -8,13 +9,18 @@ import { HOME_REPOSITORY, type IHomeRepository } from './home.domain';
  */
 @Injectable()
 export class HomeService {
-  constructor(@Inject(HOME_REPOSITORY) private readonly repo: IHomeRepository) {}
+  constructor(
+    @Inject(HOME_REPOSITORY) private readonly repo: IHomeRepository,
+    private readonly permissions: PermissionService,
+  ) {}
 
   async snapshot(caller: HomeCaller, now: Date): Promise<HomeView> {
     const projects = await this.repo.findProjects(caller);
     const projectIds = projects.map((p) => p.id);
     const since = new Date(now.getTime() - ATTENTION_WINDOW_MS);
-    const scope = { projectIds, includeUnscoped: caller.globalAdmin };
+    const principal = { type: 'USER' as const, id: caller.id };
+    const scopes = await this.permissions.approvalDecideScopes(principal);
+    const scope = { visibility: { principal, scopes } };
 
     const [tickets, ticketsTotal, approvals, approvalsTotal, failedJobs, failedJobsTotal, openTicketsByProject, activity] =
       await Promise.all([

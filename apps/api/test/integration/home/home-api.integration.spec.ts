@@ -12,6 +12,7 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
+import { HOME_LIMITS } from '../../../src/home/home.types';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -21,7 +22,7 @@ interface HomeSnapshot {
   needsYou: {
     tickets: Array<{ id: string; ref: string; projectSlug: string; status: string }>;
     ticketsTotal: number;
-    approvals: Array<{ id: string; type: string; projectSlug: string | null; jobId: string | null }>;
+    approvals: Array<{ id: string; permissionKey: string; type: string | null; projectId: string | null; projectSlug: string | null; jobId: string | null; requestedAt: string }>;
     approvalsTotal: number;
     jobs: Array<{ id: string; state: string; reason: string; pendingApprovals: number }>;
     jobsTotal: number;
@@ -88,7 +89,7 @@ describeIntegration('home dashboard API (PG)', () => {
     // Permissions P3 US-011: the asks are engine requests with a `FleetApprovalAsk` link. `requestedAt` is the
     // request's `createdAt`, the job comes from the link, and a budget ask may own no project.
     bashAsk = await seedFleetAsk(prisma, {
-      kind: 'bash', projectId: webId, createdAt: new Date(now.getTime() - 3_600_000),
+      kind: 'bash', projectId: webId, createdAt: new Date(now.getTime() - 3_600_000), onBehalfOf: { type: 'USER', id: world.ids.dev },
       input: { jobId: blocked.id, leaseEpoch: 1, naxAskId: 'ask-home-bash', payload: { command: 'bun run test', commandTruncated: false, options: ['allow'] } },
       link: { jobId: blocked.id, leaseEpoch: 1, naxAskId: 'ask-home-bash' },
     });
@@ -167,7 +168,9 @@ describeIntegration('home dashboard API (PG)', () => {
     // The counts are project-wide: ops holds the one open ticket assigned to dev (a project dev cannot see).
     expect(ops).toMatchObject({ openTickets: 1, attentionJobs: 1 });
     expect(v.needsYou.approvalsTotal).toBe(2); // bash ask + unscoped budget ask
-    expect(v.needsYou.approvals.find((a) => a.projectSlug === null)).toMatchObject({ type: 'budget_override_required' });
+    expect(v.needsYou.approvals.find((a) => a.projectSlug === null)).toMatchObject({
+      type: 'budget_override_required', permissionKey: 'fleet.budget.override', projectId: null,
+    });
     expect(v.needsYou.jobsTotal).toBe(3);
     expect(v.activity.some((e) => e.projectSlug === 'ops')).toBe(true);
   });
@@ -181,6 +184,10 @@ describeIntegration('home dashboard API (PG)', () => {
       [budgetAsk.requestId, null],
       [bashAsk.requestId, 'web'],
     ]);
+    expect(v.needsYou.approvals.map((a) => a.requestedAt)).toEqual(
+      [...v.needsYou.approvals].map((a) => a.requestedAt).sort((a, b) => b.localeCompare(a)),
+    );
+    expect(v.needsYou.approvals.length).toBeLessThanOrEqual(HOME_LIMITS.approvals);
   });
 
   it('returns an empty snapshot for a signed-in user with no memberships', async () => {
