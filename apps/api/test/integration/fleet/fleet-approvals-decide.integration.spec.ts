@@ -1,15 +1,24 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
- * Permissions P3 US-010 — the `/fleet/approvals/:id/decide` adapter, end to end (PG).
+ * Permissions P3 7c US-008 — the fleet asks decided through the approval engine's route (PG).
  *
- * The adapter's contract is "who may decide, before what they sent": a decided ask is 409, an
- * unauthorised caller is 403 whatever the body says, and only then do the fleet's offer rules answer
- * 400/409 before `ApprovalDecisionService` settles the request and runs its command. Every case posts a
- * structurally valid body through the real routes, so the DTO pipe is exercised but never the reason
- * for a refusal — the malformed combinations are semantic, not transport-level.
+ * Permissions P3 US-010 wrote these cases against the fleet adapter (`/projects/:slug/fleet/approvals/:id/decide`),
+ * whose contract was "who may decide, before what they sent": a decided ask was 409, an unauthorised caller 403
+ * whatever the body says, and only then did the fleet's offer rules answer before `ApprovalDecisionService` settled
+ * the request. US-008 re-points every case at `POST /api/approvals/:id/decisions`, the route that survives US-010, so
+ * the fleet decision vocabulary is the engine's: `allow` / `allow_for_job` are `{ decision: 'approve', params: { choice } }`,
+ * `deny` and `keep_paused` are `{ decision: 'reject' }`, and `raise_budget_and_resume` is
+ * `{ decision: 'approve', params: { amountUsd, requeueJobIds } }`.
  *
- * The asks are seeded as the relay and the budget evaluator open them (`seedFleetAsk`; the evaluator for
- * the budget ones), so the row the adapter reads is the row production writes.
+ * A case whose only assertion was the adapter's own translation is deleted rather than re-pointed: the fleet error
+ * prefixes (`fleet.approvalNotPending`, `fleet.approvalSelfDecide`, `fleet.approvalInput`,
+ * `fleet.approvalDecisionInvalid`), the adapter's field allow-list on a bash ask, and its "eligibility before the body"
+ * ordering. Where the engine answers differently the expectation follows the engine, and the state assertions the
+ * adapter cases carried (pause lifted, jobs re-queued, candidate refusals recorded, ended asks answered nothing) are
+ * kept.
+ *
+ * The asks are seeded as the relay and the budget evaluator open them (`seedFleetAsk`; the evaluator for the budget
+ * ones), so the row the engine reads is the row production writes.
  *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approvals-decide.integration.spec.ts
  */
@@ -41,12 +50,10 @@ function sentence(key: string, args: Record<string, unknown> = {}): string {
   return value.replace(/\{(\w+)\}/g, (placeholder, name: string) => (name in args ? String(args[name]) : placeholder));
 }
 
-/** `FORBIDDEN` (`CommonExceptionCode.FORBIDDEN`): the code every `ForbiddenAppException` answers with. */
-const FORBIDDEN = 40003;
 /** `REQUEST_PARAMETER_ERROR`: the code every `ValidationAppException` answers with. */
 const VALIDATION = -2;
 
-describeIntegration('fleet approvals decide adapter (PG, US-010)', () => {
+describeIntegration('fleet approvals decide through the engine route (PG, US-008)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
@@ -59,10 +66,11 @@ describeIntegration('fleet approvals decide adapter (PG, US-010)', () => {
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
-  const PROJECT = '/api/projects/web/fleet/approvals';
-  const ADMIN = '/api/fleet/approvals';
-  const decide = (url: string, id: string, token: string, body: Record<string, unknown>) =>
-    request(server).post(`${url}/${id}/decide`).set(as(token)).send(body);
+  /** The engine's decide route: one route for a project ask and a global one alike. */
+  const DECISIONS = '/api/approvals';
+  const decide = (id: string, token: string, body: Record<string, unknown>) =>
+    request(server).post(`${DECISIONS}/${id}/decisions`).set(as(token)).send(body);
+  const view = (id: string, token: string) => request(server).get(`${DECISIONS}/${id}`).set(as(token));
   /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
   const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
   const requestOf = (id: string) => prisma.approvalRequest.findUniqueOrThrow({ where: { id } });
@@ -155,62 +163,54 @@ describeIntegration('fleet approvals decide adapter (PG, US-010)', () => {
     await prisma.outboxEvent.deleteMany();
   });
 
-  it('AC-1: a decision on an already rejected ask is 409 fleet.approvalNotPending', async () => {
+  it('a decision on an already rejected ask is 409 approvals.notPending', async () => {
     const { requestId } = await bashAsk({
       status: 'rejected', decisions: [{ deciderType: 'USER', deciderId: padminId, decision: 'reject' }],
     });
 
-    const res = await decide(PROJECT, requestId, padmin, { decision: 'allow' }).expect(409);
+    const res = await decide(requestId, padmin, { decision: 'reject' }).expect(409);
 
-    expect(res.body).toEqual({ ret: 409, message: sentence('fleet.approvalNotPending.409') });
+    expect(res.body).toEqual({ ret: 409, message: sentence('approvals.notPending.409', { status: 'rejected' }) });
     // The state refusal came first: the pending check alone decides, so no second decision row exists.
     expect(await prisma.approvalDecision.count({ where: { requestId } })).toBe(1);
     expect(await requestOf(requestId)).toMatchObject({ status: 'rejected' });
   });
 
-  it('AC-2: a viewer is 403 permissions before the body is validated', async () => {
-    const { requestId } = await bashAsk();
+  it('AC-2: approving a pending budget ask with params {} and no amount is 400 and the ask stays pending', async () => {
+    const { requestId, policy } = await budgetAsk();
 
-    // `amountUsd` on a bash ask is a 400 for a caller who may decide; for a viewer the eligibility
-    // check answers first, exactly as it does today.
-    const res = await decide(PROJECT, requestId, world.tokens.viewer, { decision: 'allow', amountUsd: 5 }).expect(403);
+    const res = await decide(requestId, padmin, { decision: 'approve', params: {} }).expect(400);
 
-    expect(res.body).toEqual({ ret: FORBIDDEN, message: sentence('permissions.40003') });
+    expect(res.body).toEqual({
+      ret: VALIDATION, message: sentence('approvals.invalidDecisionParams.-2', { reason: 'invalid' }),
+    });
+    // The engine validates the decision params before it records anything, so nothing settled and nothing ran.
     expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
+    expect(await prisma.approvalDecision.count({ where: { requestId } })).toBe(0);
     expect((await linkOf(requestId)).resolvedBy).toBeNull();
+    expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).not.toBeNull();
   });
 
-  it('AC-3: an agent deciding the ask of the job it requested is 403 fleet.approvalSelfDecide', async () => {
+  it('an agent deciding the ask of the job it requested is 403 approvals.decideForbidden for a low tier', async () => {
     const { requestId } = await bashAsk({ requestedBy: { type: 'AGENT', id: agent.id } });
 
-    // The engine's `tier-too-low` (an agent contributes only `self` to an `agent` default) rides on the
-    // ask's own agent, so it keeps its own error code instead of the generic permission refusal.
-    const res = await decide(PROJECT, requestId, agent.apiKey, { decision: 'allow' }).expect(403);
+    // The engine's `tier-too-low` (an agent contributes only `self` to an `agent` default) refuses the ask's own
+    // agent. US-008: the engine's own refusal, not the adapter's `fleet.approvalSelfDecide` code.
+    const res = await decide(requestId, agent.apiKey, { decision: 'approve', params: { choice: 'allow' } }).expect(403);
 
-    expect(res.body).toEqual({ ret: FORBIDDEN, message: sentence('fleet.approvalSelfDecide.40003') });
+    expect(res.body).toEqual({
+      ret: 403, message: sentence('approvals.decideForbidden.403', { reason: 'tier-too-low' }),
+    });
     expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
   });
 
-  it('AC-4: a developer sending budget fields on a bash ask is 400 fleet.approvalInput', async () => {
-    const { requestId } = await bashAsk();
-
-    const res = await decide(PROJECT, requestId, world.tokens.dev, { decision: 'allow', amountUsd: 5 }).expect(400);
-
-    expect(res.body).toEqual({
-      ret: VALIDATION,
-      message: sentence('fleet.approvalInput.-2', { reason: 'amountUsd and requeueJobIds apply only to budget approvals' }),
-    });
-    expect(await requestOf(requestId)).toMatchObject({ status: 'pending' });
-  });
-
-  it('AC-5: allowing an ask whose command was truncated is 400 fleet.approvalDecisionInvalid, and it stays pending', async () => {
+  it('approving an ask whose command was truncated is 400 and it stays pending (US-010 AC-5)', async () => {
     const { requestId, job: unanswered } = await bashAsk({ commandTruncated: true });
 
-    const res = await decide(PROJECT, requestId, world.tokens.dev, { decision: 'allow' }).expect(400);
+    const res = await decide(requestId, world.tokens.dev, { decision: 'approve', params: { choice: 'allow' } }).expect(400);
 
     expect(res.body).toEqual({
-      ret: VALIDATION,
-      message: sentence('fleet.approvalDecisionInvalid.-2', { reason: 'the command was truncated; it can only be denied' }),
+      ret: VALIDATION, message: sentence('approvals.invalidDecisionParams.-2', { reason: 'invalid' }),
     });
     expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
     // A refused decide writes nothing at all: no decision row, no answer for the runner.
@@ -218,143 +218,154 @@ describeIntegration('fleet approvals decide adapter (PG, US-010)', () => {
     expect(await prisma.fleetCommand.count({ where: { jobId: unanswered.id } })).toBe(0);
   });
 
-  it('AC-6: allowing a running job’s ask approves it and answers the runner once', async () => {
+  it('allowing a running job’s ask approves it and answers the runner once (US-010 AC-6)', async () => {
     const { requestId, job: running } = await bashAsk();
 
     const decided = data<Approval>(
-      await decide(PROJECT, requestId, world.tokens.dev, { decision: 'allow' }).expect(200),
+      await decide(requestId, world.tokens.dev, { decision: 'approve', params: { choice: 'allow' } }).expect(200),
     );
 
+    // The engine executes the command in the deciding call, so the request it answers is `executed`, not `approved`.
     expect(decided).toEqual(expect.objectContaining({
-      id: requestId, type: 'nax_bash_escalate', status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: world.ids.dev,
+      id: requestId, permissionKey: 'fleet.job.shell.escalate', status: 'executed', approverType: 'USER', approverId: world.ids.dev,
     }));
+    expect(decided.decisions).toEqual([expect.objectContaining({ decision: 'approve', params: { choice: 'allow', option: 'allow' } })]);
     expect(await requestOf(requestId)).toMatchObject({ status: 'executed', approverType: 'USER', approverId: world.ids.dev });
     const commands = await prisma.fleetCommand.findMany({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } });
     expect(commands).toHaveLength(1);
-    // The answer names the request it resolves and the option nax offered (US-008).
+    // The answer names the request it resolves and the option nax offered.
     expect(commands[0].payload).toEqual(expect.objectContaining({ approvalId: requestId, choice: 'allow' }));
   });
 
-  it('AC-7: denying a running job’s ask rejects it', async () => {
+  it('denying a running job’s ask rejects it (US-010 AC-7)', async () => {
     const { requestId } = await bashAsk();
 
-    const decided = data<Approval>(
-      await decide(PROJECT, requestId, world.tokens.dev, { decision: 'deny' }).expect(200),
-    );
+    const decided = data<Approval>(await decide(requestId, world.tokens.dev, { decision: 'reject' }).expect(200));
 
-    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'rejected', decision: 'deny', resolvedBy: 'user' }));
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'rejected' }));
+    expect(decided.decisions).toEqual([expect.objectContaining({ decision: 'reject' })]);
     expect(await requestOf(requestId)).toMatchObject({ status: 'rejected' });
   });
 
-  it('AC-8: allowing the ask of a completed job is 409 fleet.approvalNotPending', async () => {
+  it('allowing the ask of a completed job answers 200 and records the job-end resolution (US-010 AC-8)', async () => {
     const { requestId, job: ended } = await bashAsk({ jobState: 'COMPLETED' });
 
-    // The command finds the job ended and answers nothing, which today's decide reports as a conflict.
-    const res = await decide(PROJECT, requestId, world.tokens.dev, { decision: 'allow' }).expect(409);
+    // The command finds the job ended and answers nothing. The engine records the decision and settles the request;
+    // the adapter used to turn this into its own 409 after the fact.
+    const decided = data<Approval>(
+      await decide(requestId, world.tokens.dev, { decision: 'approve', params: { choice: 'allow' } }).expect(200),
+    );
 
-    expect(res.body).toEqual({ ret: 409, message: sentence('fleet.approvalNotPending.409') });
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'executed' }));
+    expect(decided.result).toEqual({ answered: false });
     expect((await linkOf(requestId)).resolvedBy).toBe('job_ended');
     expect(await prisma.fleetCommand.count({ where: { jobId: ended.id } })).toBe(0);
   });
 
-  it('AC-9: denying the ask of a completed job is 409 fleet.approvalNotPending', async () => {
+  it('denying the ask of a completed job rejects it and records the job-end resolution (US-010 AC-9)', async () => {
     const { requestId } = await bashAsk({ jobState: 'COMPLETED' });
 
-    const res = await decide(PROJECT, requestId, world.tokens.dev, { decision: 'deny' }).expect(409);
+    const decided = data<Approval>(await decide(requestId, world.tokens.dev, { decision: 'reject' }).expect(200));
 
-    expect(res.body).toEqual({ ret: 409, message: sentence('fleet.approvalNotPending.409') });
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'rejected' }));
     expect((await linkOf(requestId)).resolvedBy).toBe('job_ended');
   });
 
-  it('AC-10: an admin raising without an amount is 400 fleet.approvalDecisionInvalid, and the ask stays pending', async () => {
-    const { requestId } = await budgetAsk();
-
-    const res = await decide(ADMIN, requestId, world.tokens.root, { decision: 'raise_budget_and_resume' }).expect(400);
-
-    expect(res.body).toEqual({
-      ret: VALIDATION, message: sentence('fleet.approvalDecisionInvalid.-2', { reason: 'amountUsd is required to raise and resume' }),
-    });
-    expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
-  });
-
-  it('AC-11: raising with an id that is not a re-queue candidate is 400 fleet.approvalDecisionInvalid', async () => {
-    const { requestId } = await budgetAsk();
-
-    const res = await decide(ADMIN, requestId, world.tokens.root, {
-      decision: 'raise_budget_and_resume', amountUsd: 20, requeueJobIds: ['not-a-job'],
-    }).expect(400);
-
-    expect(res.body).toEqual({
-      ret: VALIDATION, message: sentence('fleet.approvalDecisionInvalid.-2', { reason: 'job not-a-job is not a re-queue candidate' }),
-    });
-    expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
-  });
-
-  it('AC-12: raising to an amount not above the window spend is 400 fleet.budgetAmountNotAboveSpend', async () => {
-    const { requestId } = await budgetAsk();
-
-    // The policy allows 10 and the window has already spent 10, so 5 leaves the pause pointless.
-    const res = await decide(PROJECT, requestId, padmin, { decision: 'raise_budget_and_resume', amountUsd: 5 }).expect(400);
-
-    expect(res.body).toEqual({
-      ret: VALIDATION, message: sentence('fleet.budgetAmountNotAboveSpend.-2', { amountUsd: '5', spentUsd: '10' }),
-    });
-    expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
-  });
-
-  it('AC-13: raising on an ask whose policy is no longer paused is 409 fleet.budgetNotPaused', async () => {
-    const { requestId } = await budgetAsk({ paused: false });
-
-    const res = await decide(PROJECT, requestId, padmin, { decision: 'raise_budget_and_resume', amountUsd: 20 }).expect(409);
-
-    expect(res.body).toEqual({ ret: 409, message: sentence('fleet.budgetNotPaused.409') });
-    expect(await requestOf(requestId)).toMatchObject({ status: 'pending', approverId: null });
-  });
-
-  it('AC-14: keep_paused rejects the ask and leaves the policy paused', async () => {
+  it('raising with an id that is not a re-queue candidate records the engine’s refusal', async () => {
     const { requestId, policy } = await budgetAsk();
 
-    const decided = data<Approval>(
-      await decide(PROJECT, requestId, padmin, { decision: 'keep_paused' }).expect(200),
-    );
+    // The engine has no candidate pre-check: it records the raise and reports the refused id in the ask's outcome,
+    // instead of the adapter's 400.
+    const decided = data<Approval>(await decide(requestId, world.tokens.root, {
+      decision: 'approve', params: { amountUsd: 20, requeueJobIds: ['not-a-job'] },
+    }).expect(200));
 
-    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'rejected', decision: 'keep_paused', resolvedBy: 'user' }));
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'executed' }));
+    expect(decided.result).toEqual({ resumedAmountUsd: '20' });
+    // The refusal is the engine's recorded result, read back through the detail route.
+    const decidedView = data<Approval>(await view(requestId, world.tokens.root).expect(200));
+    expect(decidedView.details?.outcome).toEqual(expect.objectContaining({
+      requeueResults: [{ jobId: 'not-a-job', ok: false, error: 'not a re-queue candidate' }],
+    }));
+    expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).toBeNull();
+  });
+
+  it('raising to an amount not above the window spend fails the request and leaves the policy paused', async () => {
+    const { requestId, policy } = await budgetAsk();
+
+    // The policy allows 10 and the window has already spent 10, so 5 leaves the pause pointless. The engine records
+    // the approve, the command refuses inside its execution transaction, and the request settles `failed`.
+    const decided = data<Approval>(await decide(requestId, padmin, {
+      decision: 'approve', params: { amountUsd: 5 },
+    }).expect(200));
+
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'failed' }));
+    expect(decided.result).toEqual({ error: 'execution-failed', name: 'ValidationAppException' });
+    const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
+    expect(after.pausedAt).not.toBeNull();
+    expect(after.amountUsd).toEqual(new Prisma.Decimal(10));
+  });
+
+  it('raising on an ask whose policy is no longer paused fails the request and resumes nothing', async () => {
+    const { requestId, policy } = await budgetAsk({ paused: false });
+
+    const decided = data<Approval>(await decide(requestId, padmin, {
+      decision: 'approve', params: { amountUsd: 20 },
+    }).expect(200));
+
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'failed' }));
+    expect(decided.result).toEqual({ error: 'execution-failed', name: 'ConflictAppException' });
+    const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
+    expect(after).toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(10) }));
+  });
+
+  it('keep_paused is a reject: the ask is rejected and the policy stays paused (US-010 AC-14)', async () => {
+    const { requestId, policy } = await budgetAsk();
+
+    const decided = data<Approval>(await decide(requestId, padmin, { decision: 'reject' }).expect(200));
+
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'rejected' }));
+    expect(decided.decisions).toEqual([expect.objectContaining({ decision: 'reject' })]);
     expect(await requestOf(requestId)).toMatchObject({ status: 'rejected' });
     const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
     expect(after.pausedAt).not.toBeNull();
     expect(after.amountUsd).toEqual(new Prisma.Decimal(10));
   });
 
-  it('AC-15: raise_budget_and_resume approves the ask and lifts the pause', async () => {
-    const { requestId, policy } = await budgetAsk();
+  it('AC-1: approving a budget ask with an amount above spend lifts the pause and re-queues the candidate', async () => {
+    const { requestId, policy, queued } = await budgetAsk();
 
-    const decided = data<Approval>(
-      await decide(PROJECT, requestId, padmin, { decision: 'raise_budget_and_resume', amountUsd: 20 }).expect(200),
-    );
+    const decided = data<Approval>(await decide(requestId, padmin, {
+      decision: 'approve', params: { amountUsd: 20, requeueJobIds: [queued.id] },
+    }).expect(200));
 
-    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'approved', decision: 'raise_budget_and_resume' }));
-    expect(decided.outcome).toEqual(expect.objectContaining({ resumedAmountUsd: '20' }));
+    expect(decided).toEqual(expect.objectContaining({ id: requestId, status: 'executed' }));
+    expect(decided.result).toEqual({ resumedAmountUsd: '20' });
+    const decidedView = data<Approval>(await view(requestId, padmin).expect(200));
+    expect(decidedView.details?.outcome).toEqual(expect.objectContaining({ requeueResults: [{ jobId: queued.id, ok: true }] }));
     const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
     expect(after).toMatchObject({ pausedAt: null, pausedWindowStart: null });
     expect(after.amountUsd).toEqual(new Prisma.Decimal(20));
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
   });
 
-  it('allow_for_job reaches the bash command as the fleet choice, not as nax’s option name', async () => {
+  it('AC-3: approving a bash ask with params { choice: allow_for_job } writes one APPROVAL_ANSWER for the job', async () => {
     // `allow_for_job` is the fleet's name for nax's `allow-remember` option; the command's params contract
-    // (and every decision row the migrator writes) names the fleet choice, so the adapter must not leak
+    // (and every decision row the migrator writes) names the fleet choice, so the engine must not leak
     // the option name into `params.choice`.
     const { requestId, job: running } = await bashAsk({ options: ['allow', 'allow-remember', 'deny'] });
 
     const decided = data<Approval>(
-      await decide(PROJECT, requestId, world.tokens.dev, { decision: 'allow_for_job' }).expect(200),
+      await decide(requestId, world.tokens.dev, { decision: 'approve', params: { choice: 'allow_for_job' } }).expect(200),
     );
 
-    expect(decided).toEqual(expect.objectContaining({ status: 'approved', decision: 'allow_for_job', resolvedBy: 'user' }));
+    expect(decided).toEqual(expect.objectContaining({ status: 'executed' }));
     // The persisted params are the command's own parsed decision: the fleet's choice name plus the nax
-    // option it maps to. The fleet view reads `choice`, so `allow_for_job` survives a round trip.
-    const [decision] = await prisma.approvalDecision.findMany({ where: { requestId } });
-    expect(decision.params).toEqual({ choice: 'allow_for_job', option: 'allow-remember' });
-    // The answer to the runner, though, names nax's own option for that choice.
+    // option it maps to, so `allow_for_job` survives a round trip.
+    const decidedView = data<Approval>(await view(requestId, world.tokens.dev).expect(200));
+    expect(decidedView.decisions).toEqual([expect.objectContaining({ decision: 'approve', params: { choice: 'allow_for_job', option: 'allow-remember' } })]);
+    // The answer to the runner names nax's own option for that choice — the protocol's `ApprovalOption` has no
+    // `allow_for_job` member — and there is exactly one of them.
     const commands = await prisma.fleetCommand.findMany({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } });
     expect(commands).toHaveLength(1);
     expect(commands[0].payload).toEqual(expect.objectContaining({ approvalId: requestId, choice: 'allow-remember' }));
@@ -363,10 +374,20 @@ describeIntegration('fleet approvals decide adapter (PG, US-010)', () => {
 
 interface Approval {
   id: string;
-  type: string;
+  permissionKey: string;
+  projectId: string | null;
   status: string;
-  decision: string | null;
-  decidedById: string | null;
-  resolvedBy: string | null;
-  outcome: Record<string, unknown> | null;
+  approverType: string | null;
+  approverId: string | null;
+  result: Record<string, unknown> | null;
+  details: {
+    kind?: string;
+    jobId?: string;
+    policyId?: string;
+    resolvedBy: string | null;
+    outcome: Record<string, unknown> | null;
+    requeueCandidates?: Array<{ jobId: string }>;
+    requeueCandidatesTruncated?: boolean;
+  } | null;
+  decisions: Array<{ decision: string; deciderType: string; deciderId: string; params: unknown }>;
 }

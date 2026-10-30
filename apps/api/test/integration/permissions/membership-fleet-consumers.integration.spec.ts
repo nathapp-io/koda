@@ -5,7 +5,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  *
  * Every principal here has exactly one kind of source in the project under test, so an AC passes only
  * when the reader consults the access sources: `PermissionService.projectIdsWithKey`
- * (reached through `GET /fleet/activity` and `GET /fleet/approval-counts`) and
+ * (reached through `GET /fleet/activity` and `GET /approvals/counts`) and
  * `PrismaScheduleRepository.findOwnerAccess` (reached through `POST /projects/:slug/fleet/schedules/:id/enable`
  * and `ScheduleTicker.tick`) on one side, and the compatibility queries in
  * `src/permissions/membership.queries.ts` on the other. Sources are real rows — bindings
@@ -141,11 +141,16 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     });
 
   /** A pending fleet ask on the approval engine: the counts read `ApprovalRequest` + its link. */
-  const approvalRow = (projectId: string) =>
+  const approvalRow = (projectId: string, kind: 'bash' | 'budget' = 'bash') =>
     seedFleetAsk(prisma, {
-      kind: 'bash', projectId, createdAt: DUE,
-      input: { jobId: `count-${(n += 1)}`, leaseEpoch: 0, naxAskId: `count-ask-${n}`, payload: {} },
-      link: { jobId: `count-${n}`, leaseEpoch: 0, naxAskId: `count-ask-${n}` },
+      kind, projectId, createdAt: DUE,
+      input: kind === 'bash'
+        ? { jobId: `count-${(n += 1)}`, leaseEpoch: 0, naxAskId: `count-ask-${n}`, payload: {} }
+        : {
+          policyId: `count-policy-${(n += 1)}`, scopeType: 'project', scopeId: projectId, windowKind: 'calendar_month_utc',
+          windowStart: DUE.toISOString(), spentUsd: '10', amountUsd: '10', requestedAt: DUE.toISOString(),
+        },
+      link: kind === 'bash' ? { jobId: `count-${n}`, leaseEpoch: 0, naxAskId: `count-ask-${n}` } : {},
     });
 
   const schedule = (over: Partial<Prisma.JobScheduleUncheckedCreateInput> = {}) =>
@@ -241,11 +246,15 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     expect(await prisma.fleetActivity.count({ where: { id: inP2.id } })).toBe(1);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-2: a user whose only source in p1 is a developer binding counts p1\'s pending approvals only', async () => {
+  it('AC-2 (US-008 AC-4): a user whose only source in p1 is a developer binding counts p1\'s pending approvals only', async () => {
     await expectOnlyProjectBinding(ids.devBind, p1Id, 'developer');
     await Promise.all([approvalRow(p1Id), approvalRow(p1Id), approvalRow(p2Id)]);
+    // US-008 AC-4: the engine counts what the caller may decide. A developer decides only
+    // `fleet.job.shell.escalate` (its narrowed `approval.decide@` entry), so a pending budget ask in p1 is counted
+    // for nobody here — the roster's `fleet.approval.read` reach is not the engine's visibility.
+    await approvalRow(p1Id, 'budget');
 
-    const res = await request(server).get('/api/fleet/approval-counts').set(as(ids.devBindToken)).expect(200);
+    const res = await request(server).get('/api/approvals/counts').set(as(ids.devBindToken)).expect(200);
     const counts = data<ApprovalCounts>(res);
 
     expect(counts.projects).toEqual([{ projectId: p1Id, slug: P1_SLUG, pending: 2 }]);

@@ -610,30 +610,32 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
 
   /**
    * Permissions P3 US-012 AC-1 (regression pin): the deletion of `FleetApproval` must leave the whole fleet loop
-   * intact — relay opens the ask, the fleet decide adapter allows it, the runner acks the answer, and the fleet GET
-   * reports the request and the stored delivery. The pin runs over the fleet routes, not the engine's, so it also
-   * covers the adapters the deletion touches.
+   * intact — relay opens the ask, the engine's decide route allows it, the runner acks the answer, and the engine GET
+   * reports the request and the stored delivery. Since US-008 the pin reads the engine routes, which are the only
+   * ones left once the fleet adapters go.
    */
-  it('US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok', async () => {
+  it('US-012 AC-1: a relayed ask allowed on the engine route and acked ok reads back approved with delivery ok', async () => {
     await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('fleet-pin');
     // A nax ask id of its own: US-011 AC-14 relays `ask-0000001b` on its own job (fix round 1).
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000020') }] }] });
     const [link] = await linksOf(jobId);
 
-    const decided = data<{ id: string; status: string; decision: string }>(await request(server)
-      .post(`/api/projects/web/fleet/approvals/${link!.requestId}/decide`)
-      .set(auth(world.tokens.dev)).send({ decision: 'allow' }).expect(200));
-    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'approved', decision: 'allow' }));
+    const decided = data<{ id: string; status: string; decisions: Array<{ decision: string }> }>(await request(server)
+      .post(`/api/approvals/${link!.requestId}/decisions`)
+      .set(auth(world.tokens.dev)).send({ decision: 'approve', params: { choice: 'allow' } }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'executed' }));
+    expect(decided.decisions).toEqual([expect.objectContaining({ decision: 'approve' })]);
 
     const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
     expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000020', choice: 'allow' });
     await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
 
-    const read = data<{ status: string; outcome: { delivery: { result: string } } }>(await request(server)
-      .get(`/api/projects/web/fleet/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
-    expect(read.status).toBe('approved');
-    expect(read.outcome.delivery.result).toBe('ok');
+    // US-008: the engine's detail route carries the ask's enrichment in `details`.
+    const read = data<{ status: string; details: { resolvedBy: string | null; outcome: { delivery: { result: string } } } }>(await request(server)
+      .get(`/api/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
+    expect(read.status).toBe('executed');
+    expect(read.details.outcome.delivery.result).toBe('ok');
 
     await finish(jobId, leaseEpoch, 3);
   });

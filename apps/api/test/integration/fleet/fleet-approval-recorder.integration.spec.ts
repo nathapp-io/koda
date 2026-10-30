@@ -34,10 +34,11 @@ describeIntegration('fleet ask recorder (PG)', () => {
   let n = 0;
   const seen: LiveEvent[] = [];
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
-  const PROJECT = '/api/projects/web/fleet/approvals';
+  const PROJECT = '/api/approvals';
 
-  const decide = (id: string, body: object = { decision: 'allow' }) =>
-    request(app.getHttpServer()).post(`${PROJECT}/${id}/decide`).set(as(padmin)).send(body);
+  /** Permissions P3 7c US-008: the engine's decide route; the fleet's `allow` is an approve with `{ choice }`. */
+  const decide = (id: string, body: object = { decision: 'approve', params: { choice: 'allow' } }) =>
+    request(app.getHttpServer()).post(`${PROJECT}/${id}/decisions`).set(as(padmin)).send(body);
   const deliver = async (type: string): Promise<void> => {
     for (const row of await prisma.outboxEvent.findMany({ where: { type }, orderBy: { createdAt: 'asc' } })) {
       await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), {
