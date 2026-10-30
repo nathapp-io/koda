@@ -164,7 +164,9 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     // The pending open still announces the ask exactly as it did on the legacy row.
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: request.id, action: 'approval.requested', actorType: 'SYSTEM' } })).toBe(1);
     expect(await hooks('fleet.approval.requested')).toBe(1);
-    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested', eventId: request.id } })).toBe(1);
+    // Permissions P3 7c US-002: the fleet's own `fleet_approval_requested` announcement is gone; the engine's
+    // `approval_request_changed` (enqueued by `ApprovalRequestEvents.record`) is the only event of the ask.
+    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
     expect(seen).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'fleet_approval', approvalId: request.id, status: 'pending' })]));
   });
 
@@ -287,7 +289,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(ask.id);
   });
 
-  it('AC-10: a global policy asks with no project and records no fleet_approval_requested event', async () => {
+  it('AC-10: a global policy asks with no project and records no announcement, webhook or live event', async () => {
     const policy = await globalPolicy();
     await job({ costSpentUsd: 10 });
 

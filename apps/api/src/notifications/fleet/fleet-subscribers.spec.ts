@@ -2,7 +2,6 @@ import type { MockInstance } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { FanOutPublisher, OutboxFanOutError } from '../../outbox/fan-out-publisher';
 import { noopLastErrors, outboxRecord } from '../../../test/helpers/outbox-record';
-import { FleetApprovalRequestedSubscriber } from './fleet-approval-requested.subscriber';
 import { FleetBudgetIncidentSubscriber } from './fleet-budget-incident.subscriber';
 import { FleetJobOutcomeSubscriber } from './fleet-job-outcome.subscriber';
 
@@ -10,17 +9,12 @@ describe('fleet notification subscribers (S4a §2.4)', () => {
   let registry: FanOutPublisher;
   const writer = { deliver: vi.fn(async () => 1) };
   const eligibility = { findGlobalAdminIds: vi.fn(async () => ['a1', 'a2']) };
-  const reader = {
-    projectSlug: vi.fn(async () => 'web'),
-    approvalContext: vi.fn(async () => ({ status: 'pending', repo: 'acme/app' })),
-  };
-  const labels = { forPolicy: vi.fn(async () => 'project KODA') };
+  const reader = { projectSlug: vi.fn(async () => 'web') };
   let warn: MockInstance;
 
   beforeEach(() => {
     registry = new FanOutPublisher(noopLastErrors);
     new FleetJobOutcomeSubscriber(registry, reader as never, writer as never).onModuleInit();
-    new FleetApprovalRequestedSubscriber(registry, reader as never, eligibility as never, labels as never, writer as never).onModuleInit();
     new FleetBudgetIncidentSubscriber(registry, eligibility as never, writer as never).onModuleInit();
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
@@ -53,44 +47,6 @@ describe('fleet notification subscribers (S4a §2.4)', () => {
     writer.deliver.mockRejectedValueOnce(new Error('db down'));
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     await expect(registry.publish(outboxRecord('fleet_job_outcome', outcome))).rejects.toBeInstanceOf(OutboxFanOutError);
-  });
-
-  const ask = { approvalId: 'ap1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', policyId: null, path: '/web/fleet/approvals?id=ap1' };
-
-  it('bash approval ask -> every global admin, labelled with the repo', async () => {
-    await registry.publish(outboxRecord('fleet_approval_requested', ask));
-    expect(writer.deliver).toHaveBeenCalledWith([
-      expect.objectContaining({ userId: 'a1', kind: 'approval_requested', title: 'Approval needed: bash on acme/app', sourceId: 'ap1' }),
-      expect.objectContaining({ userId: 'a2' }),
-    ]);
-  });
-
-  it('budget override ask -> labelled with the policy scope', async () => {
-    reader.approvalContext.mockResolvedValueOnce({ status: 'pending', repo: null });
-    await registry.publish(outboxRecord('fleet_approval_requested', { ...ask, type: 'budget_override_required', jobId: null, policyId: 'pol1' }));
-    expect(labels.forPolicy).toHaveBeenCalledWith('pol1');
-    expect(writer.deliver).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ title: 'Approval needed: budget override on project KODA' })]));
-  });
-
-  it('an ask answered or expired before the handler ran -> no notification (D514, #236 backlog)', async () => {
-    reader.approvalContext.mockResolvedValueOnce({ status: 'approved', repo: 'acme/app' });
-    await registry.publish(outboxRecord('fleet_approval_requested', ask));
-    reader.approvalContext.mockResolvedValueOnce(null);
-    await registry.publish(outboxRecord('fleet_approval_requested', ask));
-    expect(writer.deliver).not.toHaveBeenCalled();
-  });
-
-  it('AC-12: a nax_bash_escalate ask still delivers one draft per admin id findGlobalAdminIds answers', async () => {
-    eligibility.findGlobalAdminIds.mockResolvedValueOnce(['a1', 'a2', 'a3']);
-
-    await registry.publish(outboxRecord('fleet_approval_requested', ask));
-
-    expect(eligibility.findGlobalAdminIds).toHaveBeenCalledTimes(1);
-    expect(writer.deliver).toHaveBeenCalledWith([
-      expect.objectContaining({ userId: 'a1', kind: 'approval_requested', link: '/admin/fleet/approvals' }),
-      expect.objectContaining({ userId: 'a2', kind: 'approval_requested' }),
-      expect.objectContaining({ userId: 'a3', kind: 'approval_requested' }),
-    ]);
   });
 
   it('budget incident -> every global admin', async () => {

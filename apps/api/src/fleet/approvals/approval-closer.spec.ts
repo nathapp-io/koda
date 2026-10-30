@@ -1,7 +1,6 @@
 import { ApprovalCloser, MAX_ASKS_CLOSED_PER_CALL } from './approval-closer';
 import { Logger } from '@nestjs/common';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
-import { approvalWebhookPayload } from './approval-payloads';
 import type { FleetApprovalRecord } from './domain/approval.domain';
 import type { FleetApprovalAskRecord, NewFleetApprovalAsk } from './domain/fleet-approval-ask.domain';
 import { MAX_PENDING_ASKS_PER_JOB } from './domain/fleet-approval-ask.domain';
@@ -139,13 +138,12 @@ function fakes() {
   const activity = { record: vi.fn(async () => undefined) };
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const outbox = { record: vi.fn(async (e: { type: string; payload?: Record<string, unknown> }) => ({ id: 'ob1', ...e })) };
   mockAuditRecorder.record.mockReset();
   mockAuditRecorder.record.mockImplementation(async () => undefined);
   const closer = new ApprovalCloser(
-    store as never, asks as never, activity as never, webhooks as never, live as never, outbox as never, mockAuditRecorder,
+    store as never, asks as never, activity as never, webhooks as never, live as never, mockAuditRecorder,
   );
-  return { closer, store, asks, activity, webhooks, outbox };
+  return { closer, store, asks, activity, webhooks };
 }
 
 describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
@@ -154,8 +152,7 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
   let asks!: ReturnType<typeof fakes>['asks'];
   let activity!: ReturnType<typeof fakes>['activity'];
   let webhooks!: ReturnType<typeof fakes>['webhooks'];
-  let outbox!: ReturnType<typeof fakes>['outbox'];
-  beforeEach(() => { ({ closer, store, asks, activity, webhooks, outbox } = fakes()); });
+  beforeEach(() => { ({ closer, store, asks, activity, webhooks } = fakes()); });
   const stop = { windowStart: NOW, spentUsd: '10.5' };
   const system = { type: 'SYSTEM' as const, id: 'system', responsibleUserId: 'u1' };
   const resumer = { type: 'USER' as const, id: 'u9', responsibleUserId: 'u9' };
@@ -182,15 +179,6 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(r.live).toEqual([{ approvalId: 'req-1', status: 'pending' }]);
   });
 
-  it('enqueues a fleet_approval_requested outbox event for every fresh project budget ask (#208)', async () => {
-    await closer.openBudget(policy(), stop, NOW);
-    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fleet_approval_requested',
-      payload: expect.objectContaining({ approvalId: 'req-1', projectId: 'p1', path: '/web/fleet/approvals?id=req-1' }),
-      metadata: { projectId: 'p1', eventId: 'req-1' },
-    }));
-  });
-
   it('supersedes the stray pending ask on the engine before opening the new one and carries both live frames', async () => {
     const first = await closer.openBudget(policy(), stop, NOW);
     const second = await closer.openBudget(policy(), { ...stop, spentUsd: '11' }, NOW);
@@ -205,13 +193,12 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     ]);
   });
 
-  it('opens a global policy ask with no project, and sends no webhook, outbox row or live event', async () => {
+  it('opens a global policy ask with no project, and sends no webhook or live event', async () => {
     const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), stop, NOW);
 
     expect(asks.open.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ projectId: null }));
     expect(r.approval).toEqual(expect.objectContaining({ projectId: null }));
     expect(webhooks.dispatch).not.toHaveBeenCalled();
-    expect(outbox.record).not.toHaveBeenCalled();
     expect(r.live).toEqual([]);
   });
 
@@ -322,8 +309,7 @@ describe('bash half on the approval engine (US-006)', () => {
   let asks!: ReturnType<typeof fakes>['asks'];
   let activity!: ReturnType<typeof fakes>['activity'];
   let webhooks!: ReturnType<typeof fakes>['webhooks'];
-  let outbox!: ReturnType<typeof fakes>['outbox'];
-  beforeEach(() => { ({ closer, store, asks, activity, webhooks, outbox } = fakes()); });
+  beforeEach(() => { ({ closer, store, asks, activity, webhooks } = fakes()); });
   const job = { id: 'j1', projectId: 'p1', leaseEpoch: 2, state: 'RUNNING', bashMode: 'escalate', approvalTimeoutSec: 600, requestedById: 'u9', requestedByType: 'USER' } as const;
   const ask = (over: Partial<{ naxAskId: string; deadlineAt: Date }> = {}) => ({
     naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test', options: ['allow', 'deny'] }, ...over,
@@ -345,26 +331,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(live).toHaveLength(1);
   });
 
-  it('enqueues a fleet_approval_requested outbox event for every fresh project bash ask (#208)', async () => {
-    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
-    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fleet_approval_requested',
-      payload: expect.objectContaining({ approvalId: approval?.id, projectId: 'p1', jobId: 'j1', path: `/web/fleet/approvals?id=${approval?.id}` }),
-      metadata: { projectId: 'p1', eventId: approval?.id },
-    }));
-  });
-
-  it('AC-19 (S5b US-001): a fresh escalated ask still enqueues exactly approvalWebhookPayload, with no action extras', async () => {
-    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
-    const expected = approvalWebhookPayload(approval as FleetApprovalRecord, 'web');
-
-    expect(outbox.record).toHaveBeenCalledWith({ type: 'fleet_approval_requested', payload: expected, metadata: { projectId: 'p1', eventId: approval?.id } });
-
-    const payload = outbox.record.mock.calls.at(-1)?.[0].payload as Record<string, unknown>;
-    expect(Object.keys(payload).sort()).toEqual(Object.keys(expected).sort());
-    for (const extra of ['requestedById', 'threadPath', 'tool']) expect(payload).not.toHaveProperty(extra);
-  });
-
   it('US-006 AC-2/AC-3: gives the engine the earlier of the ask deadline and now + approvalTimeoutSec', async () => {
     await closer.openBash({ ...job, approvalTimeoutSec: 60 }, ask(), 'r1', NOW);
     expect(asks.open.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ deadline: new Date(NOW.getTime() + 60_000) }));
@@ -380,7 +346,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(again).toEqual({ approval: first.approval, live: [] });
     expect(asks.open).toHaveBeenCalledTimes(1);
     expect(store.insert).toHaveBeenCalledTimes(1);
-    expect(outbox.record).toHaveBeenCalledTimes(1);
     expect(mockAuditRecorder.record).toHaveBeenCalledTimes(1);
   });
 
@@ -408,7 +373,6 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(store.insert).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
     expect(webhooks.dispatch).not.toHaveBeenCalled();
-    expect(outbox.record).not.toHaveBeenCalled();
     expect(mockAuditRecorder.record).toHaveBeenCalledWith({
       key: 'runner.sync', resourceType: 'fleet-job', resourceId: 'j1', projectId: 'p1', summary: 'bash ask answered allow: no approval needed',
     });

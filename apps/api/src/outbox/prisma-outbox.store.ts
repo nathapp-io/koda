@@ -3,7 +3,6 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { IOutboxStore, OutboxRecord, OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxEvent as OutboxEventModel, Prisma, PrismaClient } from '../generated/prisma/client';
-import { FanOutPublisher } from './fan-out-publisher';
 import { GLOBAL_OUTBOX_TYPES } from './global-outbox-types';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { SystemWriter } from '../permissions/system-writer.decorator';
@@ -32,7 +31,6 @@ export class PrismaOutboxStore implements IOutboxStore {
 
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
-    private readonly publisher: FanOutPublisher,
   ) {}
 
   async save(record: OutboxRecord, client: unknown): Promise<void> {
@@ -61,9 +59,6 @@ export class PrismaOutboxStore implements IOutboxStore {
 
   async claimBatch(limit: number, leaseMs: number, now: Date, owner: string): Promise<OutboxRecord[]> {
     const leaseUntil = new Date(now.getTime() + leaseMs);
-    // Slice C is deferred: leave approval notifications pending without consuming retries or batch slots.
-    // Re-evaluate each claim so registering a notification consumer releases the backlog automatically.
-    const approvalConsumerReady = this.publisher.getHandlers('fleet_approval_requested').length > 0;
     const rows = await this.prisma.client.$queryRaw<OutboxEventModel[]>(Prisma.sql`
       UPDATE "OutboxEvent"
       SET "status" = 'processing', "owner" = ${owner}, "leaseUntil" = ${leaseUntil}, "updatedAt" = ${now}
@@ -71,7 +66,6 @@ export class PrismaOutboxStore implements IOutboxStore {
         SELECT "id" FROM "OutboxEvent"
         WHERE (("status" = 'pending' AND "nextAttemptAt" <= ${now})
            OR ("status" = 'processing' AND "leaseUntil" < ${now}))
-          AND ("type" <> 'fleet_approval_requested' OR ${approvalConsumerReady})
         ORDER BY "nextAttemptAt"
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED

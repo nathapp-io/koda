@@ -23,7 +23,6 @@ import { TicketWatchController } from './ticket-watch.controller';
 import { TicketWatchService } from './ticket-watch.service';
 import { TicketWatchersRepository } from './ticket-watchers.repository';
 import { BudgetStoreModule } from '../fleet/budgets/budget-store.module';
-import { FleetApprovalRequestedSubscriber } from './fleet/fleet-approval-requested.subscriber';
 import { FleetBudgetIncidentSubscriber } from './fleet/fleet-budget-incident.subscriber';
 import { FleetHealthAlertSubscriber } from './fleet/fleet-health-alert.subscriber';
 import { FleetHealthAlertsRepository } from './fleet/fleet-health-alerts.repository';
@@ -60,7 +59,6 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     FleetNotificationReader,
     FleetHealthAlertsRepository,
     FleetJobOutcomeSubscriber,
-    FleetApprovalRequestedSubscriber,
     FleetBudgetIncidentSubscriber,
     FleetHealthDetector,
     FleetHealthAlertSubscriber,

@@ -9,8 +9,6 @@ import type { BudgetScopeType } from '../../fleet/budgets/domain/budget.domain';
 export const FLEET_JOB_OUTCOME = 'fleet_job_outcome';
 export const FLEET_BUDGET_INCIDENT = 'fleet_budget_incident';
 export const FLEET_HEALTH_ALERT = 'fleet_health_alert';
-/** Enqueued by ApprovalCloser.enqueueRequested since #236. */
-export const FLEET_APPROVAL_REQUESTED = 'fleet_approval_requested';
 
 export const JOB_OUTCOMES = ['escalated', 'failed', 'crashed', 'pr_opened'] as const;
 export type JobOutcome = (typeof JOB_OUTCOMES)[number];
@@ -23,10 +21,6 @@ export interface FleetJobOutcomePayload { jobId: string; leaseEpoch: number; pro
   outcome: JobOutcome; repo: string; feature: string; resultPrUrl: string | null }
 export interface FleetBudgetIncidentPayload { incidentId: string; kind: BudgetIncidentNotifyKind; scope: string; spentUsd: string; amountUsd: string }
 export interface FleetHealthAlertPayload { alertId: string; kind: HealthAlertKind; runner: string; provider: string | null; expiresAt: string | null }
-/** The fields of approvalWebhookPayload (approvals/approval-payloads.ts) the consumer needs. */
-export interface FleetApprovalRequestedPayload {
-  approvalId: string; type: string; projectId: string | null; jobId: string | null; policyId: string | null;
-}
 
 const FAILURE_OUTCOME: Readonly<Record<string, JobOutcome>> = Object.freeze({
   [FleetJobState.ESCALATED]: 'escalated',
@@ -88,14 +82,4 @@ export function parseHealthAlertPayload(raw: unknown): FleetHealthAlertPayload |
   const { alertId, kind, runner, provider, expiresAt } = raw;
   if (!isText(alertId) || !oneOf(HEALTH_ALERT_KINDS, kind) || !isText(runner)) return null;
   return { alertId, kind, runner, provider: textOrNull(provider), expiresAt: textOrNull(expiresAt) };
-}
-
-export function parseApprovalRequestedPayload(raw: unknown): FleetApprovalRequestedPayload | null {
-  if (!isObject(raw)) return null;
-  const { approvalId, type, projectId, jobId, policyId } = raw;
-  if (!isText(approvalId) || !isText(type)) return null;
-  const parsed: FleetApprovalRequestedPayload = {
-    approvalId, type, projectId: textOrNull(projectId), jobId: textOrNull(jobId), policyId: textOrNull(policyId),
-  };
-  return parsed;
 }

@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
-import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import type { ApprovalDecisionRecord } from '../../approvals/domain/approval.domain';
 import type { FleetActorType } from '../../common/enums';
@@ -120,7 +119,6 @@ export class ApprovalCloser {
     private readonly activity: FleetActivityService,
     private readonly webhooks: WebhookDispatcherService,
     private readonly livePublisher: ApprovalLivePublisher,
-    private readonly outbox: OutboxService,
     private readonly audit: AuditRecorder,
   ) {}
 
@@ -153,7 +151,6 @@ export class ApprovalCloser {
     if (view === null) throw new Error(`fleet budget ask ${requestId} has no ask link`);
     await this.record(view, system, 'approval.requested');
     await this.dispatch(view, 'fleet.approval.requested');
-    await this.enqueueRequested(view);
     return { approval: view, live: [...stray.live, ...this.livePublisher.event(view)] };
   }
 
@@ -276,7 +273,6 @@ export class ApprovalCloser {
     await this.record(view, runnerActor(runnerId, job), 'approval.requested');
     await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: view.id, projectId: view.projectId, summary: 'bash ask opened, pending' });
     await this.dispatch(view, 'fleet.approval.requested');
-    await this.enqueueRequested(view);
     return { approval: view, live: this.livePublisher.event(view) };
   }
 
@@ -338,20 +334,5 @@ export class ApprovalCloser {
     if (!approval.projectId) return;
     const slug = await this.store.findProjectSlug(approval.projectId);
     if (slug) await this.webhooks.dispatch(approval.projectId, event, approvalWebhookPayload(approval, slug));
-  }
-
-  /**
-   * Enqueue every fresh project ask in the caller's transaction. Project live listeners may not
-   * have permission to decide this approval; notification consumers own recipient eligibility.
-   */
-  private async enqueueRequested(approval: FleetApprovalRecord): Promise<void> {
-    if (!approval.projectId) return;
-    const slug = await this.store.findProjectSlug(approval.projectId);
-    if (!slug) return;
-    await this.outbox.record({
-      type: 'fleet_approval_requested',
-      payload: approvalWebhookPayload(approval, slug),
-      metadata: { projectId: approval.projectId, eventId: approval.id },
-    });
   }
 }
