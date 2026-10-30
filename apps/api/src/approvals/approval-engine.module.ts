@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { WebhookDispatchModule } from '../webhook/webhook-dispatch.module';
 import { ApprovalAskService } from './approval-ask.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalExecutionService } from './approval-execution.service';
@@ -26,6 +27,7 @@ import { ApprovalRouteGate } from './route/approval-route-gate';
  * route command, after it has refused a non-principal actor and one that does not hold the key.
  */
 @Module({
+  imports: [WebhookDispatchModule],
   exports: [ApprovalPolicyResolver, ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalRouteGate, ApprovalAskService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ApprovalMcpTools],
   providers: [
     ApprovalMcpTools,
