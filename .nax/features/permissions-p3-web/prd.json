@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T10:54:55.175Z",
+  "updatedAt": "2026-10-30T11:23:28.735Z",
   "userStories": [
     {
       "id": "US-001",
@@ -288,14 +288,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Shell escalation and budget override approval controls are security-sensitive. Strict TDD covers exact params bodies, safe payload parsing, validation, row-action gates and parent-child panel dispatch."
+        "reasoning": "Shell escalation and budget override approval controls are security-sensitive. Strict TDD covers exact params bodies, safe payload parsing, validation, row-action gates and parent-child panel dispatch.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/fleet/ApprovalBashPanel.vue",
@@ -333,7 +336,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e4051f38b2fcb8235978f9fd95dae43fc59928ef"
     },
     {
       "id": "US-005",
