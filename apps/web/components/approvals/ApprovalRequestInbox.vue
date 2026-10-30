@@ -65,6 +65,14 @@
           <!-- US-003 renders the decide panel here for the open row; the detail it needs is already fetched. -->
           <div v-if="openId === row.id" class="border-t border-border px-3 py-3" data-testid="approval-request-detail">
             <LoadingState v-if="detailLoading" />
+            <ApprovalRequestPanel
+              v-else-if="detail?.id === row.id"
+              :request="detail"
+              :user-id="userId"
+              :busy="mutationBusy"
+              @decide="decide(row.id, $event)"
+              @cancel="cancel(row.id)"
+            />
           </div>
         </li>
       </ul>
@@ -105,6 +113,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
+import type { DecideRequestBody } from '~/lib/approval-requests'
 import { isForbidden } from '~/composables/useFleetBudgetPage'
 import { REQUEST_TABS, requestKeyLabel, sortPendingRequests } from '~/lib/approval-requests'
 import type { ApprovalRequestDetail, ApprovalRequestSummary, RequestTab } from '~/lib/approval-requests'
@@ -129,7 +138,10 @@ const { t, te } = useI18n()
 const toast = useAppToast()
 const route = useRoute()
 const router = useRouter()
-const { requests, page, hasNext, list, get } = useApprovalInbox()
+const { requests, page, hasNext, list, get, decide: postDecision, cancel: postCancel } = useApprovalInbox()
+const { user } = useAuth()
+const userId = computed(() => user.value?.id ?? null)
+const mutationBusy = ref(false)
 const { now } = useApprovalCountdown()
 
 const tab = ref<RequestTab>('pending')
@@ -201,6 +213,44 @@ async function loadDetail(id: string): Promise<void> {
     writeQuery(null)
   } finally {
     detailLoading.value = false
+  }
+}
+
+function isConflict(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false
+  const value = error as { code?: unknown; statusCode?: unknown; status?: unknown }
+  return value.code === 409 || value.statusCode === 409 || value.status === 409
+}
+
+async function recoverMutation(id: string, error: unknown): Promise<void> {
+  toast.error(extractApiError(error))
+  await loadDetail(id)
+  if (isConflict(error)) await reload()
+}
+
+async function decide(id: string, body: DecideRequestBody): Promise<void> {
+  if (mutationBusy.value) return
+  mutationBusy.value = true
+  try {
+    const updated = await postDecision(id, body)
+    if (openId.value === id) detail.value = updated
+  } catch (error: unknown) {
+    await recoverMutation(id, error)
+  } finally {
+    mutationBusy.value = false
+  }
+}
+
+async function cancel(id: string): Promise<void> {
+  if (mutationBusy.value) return
+  mutationBusy.value = true
+  try {
+    const updated = await postCancel(id)
+    if (openId.value === id) detail.value = updated
+  } catch (error: unknown) {
+    await recoverMutation(id, error)
+  } finally {
+    mutationBusy.value = false
   }
 }
 

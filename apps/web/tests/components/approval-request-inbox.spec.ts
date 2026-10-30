@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { ref, computed, watch, nextTick } from 'vue'
-import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
@@ -66,6 +66,7 @@ afterEach(() => {
 
 interface MountOptions {
   get: jest.Mock
+  post?: jest.Mock
   base?: Record<string, unknown>
   query?: Record<string, string>
   nameOf?: (userId: string) => string | null
@@ -73,15 +74,18 @@ interface MountOptions {
 }
 
 function mountInbox(options: MountOptions) {
-  const api = { get: options.get, post: jest.fn() }
+  const api = { get: options.get, post: options.post ?? jest.fn() }
   const toast = toastRecorder()
   const replace = jest.fn()
   const start = jest.fn()
   const stop = jest.fn()
   let pollTask: () => Promise<void> = async () => undefined
   let live: ProjectEventHandlers | null = null
+  const Panel = loadSfc(webFile('components', 'approvals', 'ApprovalRequestPanel.vue'), {
+    useI18n: () => enI18n(),
+  }, { '~/composables/useApi': apiModule })
   const app = mountSfc(inboxFile, {
-    components: uiStubs,
+    components: { ...uiStubs, ApprovalRequestPanel: Panel },
     alias: {
       '~/composables/useApi': apiModule,
       // A fixed clock: the real countdown ticks with setInterval.
@@ -97,6 +101,7 @@ function mountInbox(options: MountOptions) {
       onMounted: Vue.onMounted,
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useAuth: () => ({ user: ref({ id: 'u2' }) }),
       useAppToast: () => toast,
       useApi: () => ({ $api: api }),
       useRoute: () => ({ query: options.query ?? {} }),
@@ -221,6 +226,84 @@ describe('ApprovalRequestInbox — tabs and rows', () => {
 })
 
 describe('ApprovalRequestInbox — opening a row', () => {
+  test('AC-1: opening a label.create row renders the registered real panel with its fetched detail', async () => {
+    const detail = { ...detailOf(row('r1', { permissionKey: 'label.create' })), input: { name: 'urgent' } }
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
+    const m = mountInbox({ get })
+    await m.settle()
+    await m.toggle('r1')
+    expect(m.byId('approval-request-panel')).toHaveLength(1)
+    expect(m.app.text()).toContain('urgent')
+    m.app.unmount()
+  })
+
+  test('AC-4: approving an open request posts its decision and trimmed comment', async () => {
+    const detail = { ...detailOf(row('r1', { permissionKey: 'label.create' })), input: { label: 'new' } }
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
+    const post = jest.fn(async () => detail)
+    const m = mountInbox({ get, post })
+    await m.settle()
+    await m.toggle('r1')
+    const textarea = m.byId('approval-request-comment')[0]
+    ;(textarea.props['onUpdate:modelValue'] as (value: string) => void)(' ok ')
+    const form = m.app.one('form')
+    if (!form) throw new Error('approval form was not rendered')
+    ;(form.props.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => undefined })
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve', comment: 'ok' })
+    m.app.unmount()
+  })
+
+  test('AC-8, AC-13, AC-14: refused decide toasts and refreshes the open detail', async () => {
+    const detail = detailOf(row('r1'))
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
+    const post = jest.fn(async () => { throw new ApiError(403, 'forbidden') })
+    const m = mountInbox({ get, post })
+    await m.settle()
+    await m.toggle('r1')
+    const form = m.app.one('form')
+    if (!form) throw new Error('approval form was not rendered')
+    ;(form.props.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => undefined })
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve' })
+    expect(get.mock.calls.filter(([path]) => path === '/approvals/r1')).toHaveLength(2)
+    expect(m.toast.errors).toEqual(['forbidden'])
+    m.app.unmount()
+  })
+
+  test('AC-7: a decide conflict reloads the list', async () => {
+    const detail = detailOf(row('r1'))
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([detail]) : detail))
+    const post = jest.fn(async () => { throw new ApiError(409, 'conflict') })
+    const m = mountInbox({ get, post })
+    await m.settle()
+    await m.toggle('r1')
+    const form = m.app.one('form')
+    if (!form) throw new Error('approval form was not rendered')
+    ;(form.props.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => undefined })
+    await m.settle()
+    expect(get.mock.calls.filter(([path]) => path === '/approvals')).toHaveLength(2)
+    expect(m.toast.errors).toEqual(['conflict'])
+    m.app.unmount()
+  })
+
+  test('AC-13, AC-14, AC-15: refused cancel toasts and reloads detail and the list on 409', async () => {
+    const own = row('r1', { actorType: 'USER', actorId: 'u2' })
+    const detail = detailOf(own)
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([own]) : detail))
+    const post = jest.fn(async () => { throw new ApiError(409, 'conflict') })
+    const m = mountInbox({ get, post })
+    await m.settle()
+    await m.toggle('r1')
+    ;(m.byId('approval-request-cancel')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/approvals/r1/cancel')
+    expect(get.mock.calls.filter(([path]) => path === '/approvals/r1')).toHaveLength(2)
+    expect(get.mock.calls.filter(([path]) => path === '/approvals')).toHaveLength(2)
+    expect(m.toast.errors).toEqual(['conflict'])
+    m.app.unmount()
+  })
+
   test('AC-7: opening a row fetches its detail', async () => {
     const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([row('r1')]) : detailOf(row('r1'))))
     const m = mountInbox({ get })

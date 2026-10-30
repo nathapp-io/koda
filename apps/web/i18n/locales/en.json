@@ -2393,6 +2393,19 @@
     "comment": {
       "tooLong": "The comment is too long (2000 characters at most)"
     },
+    "panel": {
+      "input": "Frozen input",
+      "decisions": "Decision history",
+      "comment": "Comment",
+      "commentPlaceholder": "Optional comment or reason",
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel request"
+    },
+    "toast": {
+      "decisionFailed": "Could not submit the decision.",
+      "cancelFailed": "Could not cancel the request."
+    },
     "inbox": {
       "title": "Approvals",
       "subtitle": "Every request waiting on a decision.",

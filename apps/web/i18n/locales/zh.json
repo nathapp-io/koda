@@ -2393,6 +2393,19 @@
     "comment": {
       "tooLong": "备注过长（最多 2000 个字符）"
     },
+    "panel": {
+      "input": "冻结的输入",
+      "decisions": "决策记录",
+      "comment": "评论",
+      "commentPlaceholder": "可选评论或原因",
+      "approve": "批准",
+      "reject": "拒绝",
+      "cancel": "取消请求"
+    },
+    "toast": {
+      "decisionFailed": "无法提交决策。",
+      "cancelFailed": "无法取消请求。"
+    },
     "inbox": {
       "title": "审批",
       "subtitle": "等待决策的所有请求。",
