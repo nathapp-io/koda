@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T09:51:42.845Z",
+  "updatedAt": "2026-10-30T10:11:16.249Z",
   "userStories": [
     {
       "id": "US-001",
@@ -35,14 +35,17 @@
         "live-events"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New shared engine client/types and live integration also introduce permission and row-action predicates. Security override requires strict TDD; cover pure helpers, exact API calls and stream-to-hub fan-out."
+        "reasoning": "New shared engine client/types and live integration also introduce permission and row-action predicates. Security override requires strict TDD; cover pure helpers, exact API calls and stream-to-hub fan-out.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/fleet-approvals.ts",
@@ -90,7 +93,11 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "67ccb709da5129220ca2e2cf4f44af8010a507bb"
     },
     {
       "id": "US-002",
@@ -164,7 +171,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -233,7 +243,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -309,7 +322,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -389,7 +405,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -489,7 +508,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -598,7 +620,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -674,7 +699,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -739,7 +767,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -848,7 +879,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "DISCOVERY AND ARCHITECTURE\nThe codebase-memory MCP server is not exposed in this session; repository exploration therefore used direct Read, Grep and Glob. Source inspection confirms Nuxt 4 SSR and Vue, not the detected Next.js label: apps/web/package.json:6-19 defines Nuxt/Jest/Playwright scripts and :32-44 lists Nuxt, Vue, vee-validate and zod. The API uses NestJS/Fastify rather than the supplied Express label. This feature is web-only; API DTOs are read-only contract references. Follow .nax/mono/apps/web/context.md and .nax/rules/web.md. In particular, use composables/useApi rather than raw fetch, use extractApiError and useAppToast, use schema-backed forms, use semantic tokens and update both web locales (.nax/rules/web.md:17-46). Render untrusted commands, frozen input, comments, ids and outcome text through interpolation, never v-html. Permission checks remain API-owned. Read docs/ux/redesign/MASTER-PLAN.md:28-40 before navigation changes; its Status table and Decisions log must be updated with the implementation PR under repository guidance, not as a separate implementation story. Preserve the binding ten-story dependency graph and apps/web workdirs.\n\nFOUNDATION AND CONTRACTS\napps/web/composables/useFleetApprovals.ts:7-11 builds fleet adapter routes; :17-20 defines mutationEpoch and approvalsVersion; :26-36 loads fleet rows; :41-47 posts the incompatible old /decide body; :51-54 lists job approvals; :63-74 fetches /fleet/approval-counts. Create a separate engine client over /approvals, /approvals/counts, /approvals/:id, /approvals/:id/decisions and /approvals/:id/cancel. apps/web/composables/useApi.ts:44-65 unwraps the API envelope, :74-100 presents errors, :121-127 extracts transport status and :164-199 chooses browser/internal SSR base URLs and forwards cookies. Paths passed to $api are relative to its API base. ApiError.code can be envelope ret 40003/40009 rather than HTTP 403/409; apps/web/pages/admin/roles.vue:22-26 and components/fleet/ApprovalInbox.vue:183 show existing mappings. Recognize both error representations when handling forbidden/conflict responses.\n\nEngine summaries deliberately exclude input, jobId and details. apps/api/src/approvals/dto/approval-request.dto.ts:26-39 explicitly projects summary fields; :60-69 adds details/input/result/decisions only to detail responses. apps/api/src/approvals/dto/list-approval-requests.query.ts:7 lists the seven statuses pending, approved, rejected, expired, cancelled, executed and failed. Define independent web types rather than casting FleetApprovalDto. listDetailed must preserve row order, fetch only the first limit rows, default to DETAIL_FETCH_LIMIT=20, and retain null details for failures or over-limit rows. listForJob lists jobId,size=100, sorts pending by soonest expiry before settled rows newest-first, then applies the detail cap. Resolve project ids via GET /projects/:slug before project inbox/banner queries. Bump approvalRequestsVersion after successful decide and cancel only. Do not carry over the old mutationEpoch suppression requirement, which the spec explicitly defers.\n\nPERMISSIONS AND LIVE EVENTS\napps/web/lib/permissions.ts:18-23 currently exposes has/hasOwn, :28-34 implements the set and :42-45 freezes EMPTY_PERMISSIONS. Add mayDecide for approval.decide or a key beginning approval.decide@; do not change has/hasOwn semantics. PermissionSet literals in test doubles may need updating. apps/web/composables/usePermissions.ts:12-15 explains why raw keys, rather than function-bearing PermissionSet objects, are serialized; :55-68 fails closed during loading/errors; :80-82 accepts a fixed slug. Hence project approval nav links must be a slug-keyed child, not a new fixed-slug permission subscription inside the persistent layout. apps/web/lib/project-event-stream.ts:42-51 models fleet_approval, :75-84 declares optional handlers, :137-150 parses fleet approval notices and :177 onward manages EventSource/reconnect/dedupe. Add approval_request independently without removing fleet_approval. apps/web/lib/project-event-hub.ts:15-18 shares a stream per URL and :26-33 fans events to subscribers; extend the parser, listener and hub together. Existing tests/lib/permissions.spec.ts and project-event-stream*.spec.ts/project-event-hub.spec.ts are regression anchors.\n\nINBOX AND DECISION FLOW\napps/web/components/fleet/ApprovalInbox.vue:1-106 provides legacy tabs/list/panels/pagination; :133-145 defines polling/base and :158-205 tracks query-selected detail/countdown/errors. Reuse useful lifecycle conventions, not fleet type filtering, old keyboard shortcuts, assistant previews or fleet permission viewer logic. apps/web/pages/admin/fleet/approvals.vue:25-47 performs project/user cosmetic lookups; pages/[project]/fleet/approvals.vue:11-38 performs member lookups. Global inbox rows resolve projects through useFleetRepos.loadProjects, display unknown project ids directly and use approvals.inbox.noProject for null. User names come from useAdminUsers only when user.read permits it, otherwise ids; project users use useProjectMemberNames. Agents always display ids. Detail selection writes ?id while preserving unrelated query entries. On detail error, toast, close and clear id. Project resolution failure toasts and performs no approval list call. The pending tab is size 100; All is paged size 20 with no status. Use the new approvals.inbox.status namespace for all seven engine statuses.\n\nThe engine list already enforces visibility, including own requests, narrowed decide scopes and onBehalfOf visibility. viewerActions must be row-driven: a pending own USER request can cancel and can decide only in self mode; every other visible pending request can attempt decide, and settled requests expose neither action. Do not reproduce approverMustHoldAction, pattern matching, self/distinct approver constraints in the browser. Refusals toast extractApiError; every decide/cancel refusal re-fetches detail and conflict additionally reloads list. Frozen input is indented JSON text through interpolation. Generic decisions are approve/reject with a trimmed nonblank comment capped at 2000, not the legacy 1000. Project approval_request events debounce reloads by 300 ms; global/unscoped requests have no engine event, so visible polling remains necessary.\n\nFLEET DETAIL ADAPTERS\napps/web/lib/fleet-approvals.ts:73-86 validates budget payloads, :115-134 validates bash payloads, :160-168 restricts bash choices, :187-191 validates raised amount, :242-257 computes countdowns, :266-275 maps runner delivery, :280-286 makes command previews and :297-316 maps requeue failures. Retain these helpers and supporting types/constants. The old MAX_COMMENT is 1000 at :15, and builders at :201-212 produce old fleet decisions; the engine must use new 2000-character comment schemas and nested params bodies. components/fleet/ApprovalBashPanel.vue:55-87 and ApprovalBudgetPanel.vue:61-107 demonstrate legacy form conventions and selected-candidate defaults. New bash parsing feeds input.payload into bashPayload. New budget parsing feeds input into budgetPayload but must retain input.policyId separately, because budgetPayload does not return policyId. Specialized panels remain gated by viewerActions. Outcomes read details.resolvedBy/outcome, not obsolete top-level properties. No settled bash delivery polling or resumedAmountUsd display is added.\n\nNOTIFICATIONS, HOME AND NAVIGATION\napps/web/composables/useApprovalNotifications.ts:12-26 owns per-user seen/preference/active state, :110-129 scans paged legacy scopes and :149-232 re-reads permissions before scanning separate inboxes. Replace that scope algorithm with one engine pending scan plus viewerActions; retain per-user dedupe, expiry checks, explicit dismissal and browser guards/preferences. Unlike the baseline dismissScopeOnRefusal, errors now retain active toasts silently until successful refresh. apps/web/lib/notifications.ts:9-11 already renders known kinds through locale keys and params; the new approval_request kind needs locale entries and a bell rendering assertion, not a new rendering architecture. apps/web/components/home/HomeNeedsYou.vue:21-23 currently links to fleet inboxes without id; :67-70 shows fleet type labels. Switch approvalTarget to inboxHref(projectSlug,id) and only use requestKeyLabel for type:null. apps/web/lib/home-types.ts:18-26 gains permissionKey and nullable type; update home fixtures alongside it.\n\napps/web/components/fleet/ApprovalBadge.vue:34-60 consumes the old client/notifications and :70-94 polls and follows old live notices. Rewrite in place, retaining FleetApprovalBadge and slug:string|null. Engine counts include own requests even when not decidable; badge, global Pending list and home totals intentionally agree on visibility, not decide eligibility. A 403 hides the badge and stops its polling; other errors retain the snapshot silently. Successful counts load invokes notification refresh. apps/web/layouts/default.vue:54-78 defines admin permission flags/showAdminNav; :222-230 pins My threads/Roles link positions; :241 is the old admin fleet link; :248-365 is the project block; :397 mounts the slug-keyed badge. Add inline /approvals after My threads and /admin/approval-policies after Roles, include the policy flag in showAdminNav, mount ApprovalsProjectApprovalNavLinks keyed by projectSlug and add no layout script auto-import. Keep source-order and existing SLO/KB/Timeline/Settings pins. apps/web/components/CommandPalette.vue:16-21 and :31-46 demonstrates keyed command gates. Update tests/helpers/permission-nav.ts and default-permission-nav.spec.ts with the new flag/keys; remove the obsolete approval-specific schedule-gate test blocks only in the phases assigned by the spec, never the schedule cases.\n\nJOB, BANNER AND FLEET CONSUMERS\napps/web/pages/[project]/fleet/jobs/[id]/index.vue:17-18 imports legacy approval APIs/helpers; :52-55 stores FleetApprovalDto[]; :98-104 computes firstPending review href and lists approvals; :186-190 subscribes to fleet_approval; :360 renders FleetJobApprovals. Replace approval state with JobApprovalRow[] and listForJob, keeping unrelated job/log/workflow permissions untouched. Add onApprovalRequest beside onFleetApproval; 7c owns removal of the latter. components/fleet/JobApprovals.vue:28-48 reads the old payload/status/requestedAt shape. Use request summary plus optional detail; when detail is null, show raw permissionKey, because US-007 AC-6 is authoritative over generic prose suggesting a translated fallback. components/fleet/BudgetBanner.vue:58-70 currently filters the old type and clears reviewIds on failure; new behavior resolves project id, filters status/permissionKey/projectId, maps detailed policyId and retains old review mapping silently on errors. pages/[project]/fleet/index.vue:98 and lib/fleet-dashboard.ts:204 link to fleet approvals; move these to project /approvals. Corresponding job/banner/workflow/budget-gates/dashboard/index specs contain mocks and source pins that must be updated without removing unrelated assertions.\n\nPOLICY PAGES\napps/web/pages/admin/roles.vue:15-26 and :28-64 provide permission/read/delete/toast patterns; composables/useRoles.ts:48-83 implements CRUD; useProjectRoles.ts:9-12 and :26-68 implements fixed-slug role loading. Read-only API contract references: apps/api/src/approvals/dto/approval-policy.dto.ts:10-49 create, :52-86 patch and :89-113 policy/key responses; approval-policy.validation.ts:18-20 timeout bounds, :31-38 exact/prefix.* matching and :41-63 floor/timeout validation. Modes rank none<self<agent<human. Pattern must cover at least one approvable key and cannot choose below its strictest floor; approve-on-timeout requires floor none; timeout is an integer 60..2592000. Implement only presentation validation, leaving API enforcement authoritative. Although the API patch DTO accepts requiredApprovals, this UI edits only mode, timeoutSec, onTimeout, approverMustHoldAction and requireDistinctApprover. Pattern and subject are immutable selectors; blank create timeout is omitted, blank edit timeout is null.\n\nUS-008 must build PolicyBase-parameterized composable/dialog/list/keys table for both global and project routes so US-009 is a thin page. Policy list loads every size=100 page before computing override counts; project counts include inherited global rows, but inherited rows have no edit/delete controls. Global load/write requires approval.policy.manage; project load requires approval.policy.read and writes approval.policy.manage. Global role subjects need role.read; project role subjects need member.read; in either case a failed role read simply removes role from the create choices. Principal subjects cannot be created but existing ones remain listable/editable/deletable. Refused dialog mutations toast and retain input/open state; page load 403 shows forbidden.\n\nMIGRATION, TEST SEAMS AND CLEANUP\nBuild new code beside old code, rewrite named consumers, then run US-010 only after all nine prerequisites. apps/web/tests/helpers/mount-sfc.ts:24-44 distinguishes fleetComponents from explicit components, :122-147 has a closed auto-import list, and :296-300/:427-428 registers the five obsolete approval components. Import new composables explicitly. Register real components/approvals children through the components option in parent/page tests so tests exercise actual integration rather than unresolved child placeholders. Remove the obsolete fleet component map/union entries and useActionPreview auto-import only during cleanup. apps/web/pages/projects.vue:1-4 is the redirect-page pattern but uses 301; approval compatibility pages must explicitly use 302 and preserve query, including id. Old fleet notification links remain valid until 7c. Do not remove FleetApprovalDto, fleet_approval support, legacy notification kinds/links, API adapters or CLI. ThreadActionCard and useApprovalRequests stay unchanged; apps/web/composables/useApprovalRequests.ts:4-14 already posts engine decisions. tests/components/thread-action-card.spec.ts:46-64/:105/:118/:130 has obsolete negative fleet-client doubles/assertions to remove without changing card behavior.\n\nE2E fixture tests/e2e/fixtures/fleet-approvals-api.ts:26-30 and :71-74 still fetches legacy adapter lists. Replace those with engine filters, resolve project ids and fetch details where fixtures need policyId/jobId. Rewrite both fleet-approvals and fleet-bash-approvals journeys for project engine inboxes and new panels. Use waitForHydration, never networkidle, because authenticated pages hold live streams open. Retain legacy notification path-safety assertions and old fleet breadcrumb pins where unchanged; breadcrumbs are deferred and redirects remain valid. Run bun run type-check, bun run lint and bun run test from apps/web after cleanup, plus the two Playwright journeys with host prerequisites. Generated acceptance belongs under apps/web/.nax/features/permissions-p3-web and runs with bun test, not Jest; never edit or copy it. No runtime tests or quality gates were run while drafting this PRD. Each story owns the specified English/Chinese keys; US-001 adds whole-approvals namespace parity and the notification parity suite must remain aligned. All numbered spec criteria are retained in order. Extra acceptance assertions enumerate normative Failure Handling rows and the explicit negative-path/backward-compatibility requirements of this refine audit; optional hardening remains suggestedCriteria. Security-sensitive permission/policy/decision work uses three-session-tdd. Major risks are treating summaries as details, retaining fleet consumers after removal, repeating backend authorization, using legacy comment limits/bodies, breaking closed test auto-imports and layout pins, clearing last-good cosmetic state on errors, and retiring compatibility events/routes ahead of 7c.\n\nREFINE AUDIT: SPEC CRITERION INVENTORY\nRe-read the on-disk spec acceptance section at .nax/features/permissions-p3-web/spec.md:592-743 and compared every assertion and qualifier against the PRD. All 124 original criteria remain in their original story and original local order. Enumeration below maps each original spec AC to the same local acceptanceCriteria index in this PRD; additions are appended, not substituted. US-001: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-002: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-003: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12. US-004: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-005: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13. US-006: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-007: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12. US-008: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15. US-009: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9. US-010: 1->1, 2->2, 3->3. Qualifiers are retained, including the two ordered expiry values, viewer user id/mode, hasNext paging preconditions, 300 ms debounce, successful-load stale-state precondition, blank-comment omission, known-project-slug job linking, one unticked candidate, resolvedBy/outcome delivery shape, raw permissionKey for missing detail, soonest-expiring callout, first counts project, and exact global/project permissions and request bodies. No deprecated grep/file/verbatim tags occur. Assertions are observable through helper results, request doubles, mounted text/controls, route state, timers or version refs.\n\nREFINE AUDIT: NEGATIVE PATHS, REGRESSIONS AND FIT\nEvery story has a negative-path AC: US-001 rejects an overlong comment; US-002 covers list/detail/project errors; US-003 covers invalid comments and mutation refusals; US-004 refuses a non-raised budget and maps failed requeues; US-005 suppresses ineligible/expired requests and retains toasts on failed refresh; US-006 stops/hides on 403 and retains counts on transient failure; US-007 isolates detail failures and silent banner failures; US-008 covers invalid schema values, absent permissions, role read failure and dialog refusals; US-009 covers absent read/manage keys and 403 loads; US-010 now explicitly verifies redirects for authenticated users without the obsolete fleet.approval.read key. Additional regressions protect pre-existing permissionSet has/hasOwn own-key semantics and the existing HomeNeedsYou fleet type label after adding the null-type fallback. Existing engine-path, row-preview, badge-cap and legacy-redirect ACs protect the other migrated surfaces or prove old adapter behavior is replaced. Expanded the non-original refusal assertions so both decide/cancel re-fetch detail and create/edit 400/403/409 refusals all toast, without altering any original spec AC. The US-007 raw permissionKey AC takes precedence over generic key-label prose; descriptions preserve this distinction. Redirects do not enforce obsolete permission gates; destination authorization remains API-owned.\n\nAll 50 contextFiles entries match the five source files explicitly recommended for their story in spec.md:373-441. Future context paths are outputs of transitive binding dependencies, never outputs of the current story. All proposed helpers and new files are declared by the spec; no new runtime dependency was introduced. The ten story ids, every binding dependency and every apps/web workdir remain unchanged. Cross-checked API policy DTO/validator, permissions helper, shared event hub, fleet payload helpers, home rows, badge, banner and job rows against source again during this audit. US-003 is reduced to medium complexity because it adds one panel and modifies one inbox using upstream helpers; its security strategy stays strict. US-002 and US-005 use strict security TDD because their user.read gate and viewerActions-based action filtering fall under the stated security override; other routing remains the lightest justified by the actual stateful/cross-module scope. All 20 items before Stories in the spec's feature-level Out of Scope section remain verbatim in the top-level array, including its explicitly US-number-qualified items; there is no separate story-local Out of scope block under an acceptance section to hoist or relocate. Scope bullets still separate later-story work from current behavior and retain nearby deferrals. No application code was changed by this audit.",
