@@ -3,7 +3,6 @@ export type PendingGateFeature = 'gate-secret';
 
 /** Explicitly identified secret-bearing routes remain outside the high-risk rollout. */
 export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
-  'POST /fleet/enrollments',
   'POST /projects/:slug/vcs',
   'PATCH /projects/:slug/vcs',
   'POST /projects/:slug/vcs/webhook-secret/rotate',
@@ -16,7 +15,6 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 const ROUTE_ASSIGNMENTS = `
 PATCH /projects/:slug/vcs=gate-secret
 PATCH /projects/:slug/webhooks/:id=gate-secret
-POST /fleet/enrollments=gate-secret
 POST /projects/:slug/invites=gate-secret
 POST /projects/:slug/invites/:id/resend=gate-secret
 POST /projects/:slug/vcs=gate-secret
