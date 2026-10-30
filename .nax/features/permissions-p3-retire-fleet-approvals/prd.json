@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T17:50:57.956Z",
+  "updatedAt": "2026-10-30T19:27:16.291Z",
   "userStories": [
     {
       "id": "US-001",
@@ -758,14 +758,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Binding spec declares a test-only migration covering role visibility, principal decisions, audit and concurrent budget workflows; access-control override applies."
+        "reasoning": "Binding spec declares a test-only migration covering role visibility, principal decisions, audit and concurrent budget workflows; access-control override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-requests.controller.ts",
@@ -816,7 +819,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a3ee5e045eed94a844de9586274b58b5514df24d"
     },
     {
       "id": "US-009",
