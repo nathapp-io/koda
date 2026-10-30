@@ -237,14 +237,20 @@ export function parseTimeout(value: string | number | null | undefined): number 
   return Number.isFinite(parsed) ? Math.trunc(parsed) : null
 }
 
-/** The form values one dialog opens with: the stored policy's, or a create form's defaults. */
+/**
+ * The form values one dialog opens with: the stored policy's, or a create form's defaults.
+ *
+ * A create's defaults are the API's own (`ApprovalPolicyService.create`): an omitted
+ * `approverMustHoldAction` there is stored as `true`, so the checkbox starts checked. A form that
+ * started unchecked would show one thing and persist another for every policy created untouched.
+ */
 export function initialPolicyValues(policy: ApprovalPolicy | null): PolicyFormValues {
   return {
     // `human` is the strictest mode, so it is valid for every floor a new pattern can have.
     mode: policy?.mode ?? 'human',
     timeoutSec: policy?.timeoutSec === null || policy?.timeoutSec === undefined ? '' : String(policy.timeoutSec),
     onTimeout: policy?.onTimeout ?? 'reject',
-    approverMustHoldAction: policy?.approverMustHoldAction ?? false,
+    approverMustHoldAction: policy?.approverMustHoldAction ?? true,
     requireDistinctApprover: policy?.requireDistinctApprover ?? false,
   }
 }
@@ -280,9 +286,15 @@ export function buildPolicySchema(t: TranslateNamed, floor: ApprovalMode | null)
 }
 
 /**
- * The create body. It carries the selector, the mode and the on-timeout choice, and only then the
- * optional fields the caller actually set: an untouched control must not send a default the API
- * would then store as if the admin had chosen it.
+ * The create body. It carries the selector, the mode and the on-timeout choice, then the optional
+ * fields: a timeout only when one was set (a blank one means "no timeout", the API's own default),
+ * `requireDistinctApprover` only when it was ticked, and `approverMustHoldAction` only when it was
+ * **cleared**.
+ *
+ * That last asymmetry is the API's, not a preference: `ApprovalPolicyService.create` stores an
+ * omitted `approverMustHoldAction` as `true`. So an untouched (checked) box omits it and agrees with
+ * the API, while a cleared box has to say `false` explicitly — omitting it there would store the
+ * opposite of what the form showed.
  */
 export function toCreateBody(
   pattern: string,
@@ -296,7 +308,7 @@ export function toCreateBody(
     mode: values.mode,
     onTimeout: values.onTimeout,
     ...(timeout === null ? {} : { timeoutSec: timeout }),
-    ...(values.approverMustHoldAction ? { approverMustHoldAction: true } : {}),
+    ...(values.approverMustHoldAction ? {} : { approverMustHoldAction: false }),
     ...(values.requireDistinctApprover ? { requireDistinctApprover: true } : {}),
   }
 }

@@ -151,8 +151,15 @@ const loaded = ref(false)
 const loadFailed = ref(false)
 const stale = ref(false)
 const forbidden = ref(false)
+
+/** The request the URL names, if it names one: `id` is this page's one query entry. */
+function queryId(): string | null {
+  const id = route.query.id
+  return typeof id === 'string' && id !== '' ? id : null
+}
+
 /** The open row, from the route on first paint (a notification links `/approvals?id=…`). */
-const openId = ref<string | null>(typeof route.query.id === 'string' && route.query.id !== '' ? route.query.id : null)
+const openId = ref<string | null>(queryId())
 /** GET /approvals/:id of the open row: what US-003's panel renders. */
 const detail = ref<ApprovalRequestDetail | null>(null)
 const detailLoading = ref(false)
@@ -225,6 +232,43 @@ function isConflict(error: unknown): boolean {
   return value.code === 409 || value.statusCode === 409 || value.status === 409
 }
 
+/**
+ * Re-reads the open row's detail and keeps the answer only if that row is still the open one.
+ *
+ * A decide or cancel answer is the request **without** its engine `details` block (the API enriches
+ * that on read only), so storing it as the detail threw away what the panel needs next: a settled
+ * budget's re-queue results, a bash answer's delivery state. The decision is on record either way, so
+ * a failed re-read keeps `fallback` (the mutation's own answer) instead of toasting a second error.
+ */
+async function refreshedDetail(id: string, fallback: ApprovalRequestDetail | null): Promise<void> {
+  try {
+    const fetched = await get(id)
+    if (openId.value === id) detail.value = fetched
+  } catch {
+    // Intentional: the write landed; only the enriched block is missing, and a later reload retries it.
+    if (openId.value === id && fallback !== null) detail.value = fallback
+  }
+}
+
+/**
+ * A reload answers each row's status, and the open row can settle while it is on screen — another
+ * approver, a timeout, the job ending first. Its detail is then stale (decide controls on a settled
+ * request), so it is re-read when the listed status moves. A failed re-read keeps what is shown: a
+ * background refresh must never blank the panel.
+ */
+async function reconcileOpenRow(): Promise<void> {
+  const id = openId.value
+  if (id === null || detailLoading.value) return
+  const listed = requests.value.find((row) => row.id === id)
+  if (listed === undefined || detail.value?.id !== id || detail.value.status === listed.status) return
+  try {
+    const fetched = await get(id)
+    if (openId.value === id) detail.value = fetched
+  } catch {
+    // Intentional: the list stays authoritative for the countdown; the next event re-reads the detail.
+  }
+}
+
 async function recoverMutation(id: string, error: unknown): Promise<void> {
   toast.error(extractApiError(error))
   await loadDetail(id)
@@ -236,7 +280,7 @@ async function decide(id: string, body: DecideRequestBody): Promise<void> {
   mutationBusy.value = true
   try {
     const updated = await postDecision(id, body)
-    if (openId.value === id) detail.value = updated
+    await refreshedDetail(id, updated)
   } catch (error: unknown) {
     await recoverMutation(id, error)
   } finally {
@@ -249,7 +293,7 @@ async function cancel(id: string): Promise<void> {
   mutationBusy.value = true
   try {
     const updated = await postCancel(id)
-    if (openId.value === id) detail.value = updated
+    await refreshedDetail(id, updated)
   } catch (error: unknown) {
     await recoverMutation(id, error)
   } finally {
@@ -275,9 +319,11 @@ async function reload(): Promise<void> {
       loadFailed.value = true
       toast.error(extractApiError(err))
     }
+    return
   } finally {
     pending.value = false
   }
+  await reconcileOpenRow()
 }
 
 async function toggle(id: string): Promise<void> {
@@ -306,6 +352,20 @@ function goTo(next: number): void {
 watch(tab, () => {
   page.value = 1
   void reload()
+})
+
+/**
+ * The URL is this page's one pointer to the open row, and it moves while the page is open: a
+ * notification for another request (the toast links `/approvals?id=…`), and the browser's back and
+ * forward buttons. Reading it only at setup left the panel on the previous request — decide controls
+ * on a request the URL no longer named. A row this component opened or closed itself already agrees
+ * with the URL, so that case is skipped rather than fetched twice.
+ */
+watch(queryId, (id) => {
+  if (id === openId.value) return
+  openId.value = id
+  detail.value = null
+  if (id !== null) void loadDetail(id)
 })
 
 // Declared after reload, which it runs; reload only reaches `polling` when it is called.

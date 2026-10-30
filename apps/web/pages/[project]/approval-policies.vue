@@ -31,11 +31,13 @@ const editorOpen = ref(false)
 const editing = ref<ApprovalPolicy | null>(null)
 
 async function reload(): Promise<void> {
+  // A retry starts from a clean slate: a state left over from the previous attempt would be shown
+  // for a failure it says nothing about (the incomplete list outliving a later, unrelated error).
+  incomplete.value = false
+  loadFailed.value = false
   try {
     await Promise.all([list(), loadKeys()])
     loaded.value = true
-    loadFailed.value = false
-    incomplete.value = false
   } catch (err: unknown) {
     if (isForbidden(err)) {
       loadForbidden.value = true
@@ -94,12 +96,18 @@ async function onDelete(policy: ApprovalPolicy): Promise<void> {
     </p>
     <template v-else>
       <LoadingState v-if="pending && !loaded" />
-      <p v-else-if="incomplete" class="text-sm text-muted-foreground" data-testid="policies-incomplete">
-        {{ t('approvals.policies.incomplete') }}
-      </p>
-      <p v-else-if="loadFailed" class="text-sm text-status-rejected" data-testid="policies-load-failed">
-        {{ t('approvals.policies.loadFailed') }}
-      </p>
+      <div v-else-if="incomplete" class="space-y-3">
+        <p class="text-sm text-muted-foreground" data-testid="policies-incomplete">
+          {{ t('approvals.policies.incomplete') }}
+        </p>
+        <Button variant="outline" size="sm" data-testid="policies-retry" @click="reload()">{{ t('common.retry') }}</Button>
+      </div>
+      <div v-else-if="loadFailed" class="space-y-3">
+        <p class="text-sm text-status-rejected" data-testid="policies-load-failed">
+          {{ t('approvals.policies.loadFailed') }}
+        </p>
+        <Button variant="outline" size="sm" data-testid="policies-retry" @click="reload()">{{ t('common.retry') }}</Button>
+      </div>
       <template v-else>
         <ApprovableKeysTable :keys="keys" :policies="policies" />
         <section class="space-y-2">

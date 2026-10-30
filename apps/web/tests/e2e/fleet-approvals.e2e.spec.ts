@@ -93,10 +93,8 @@ test.describe('Fleet approvals (scripted runner)', () => {
     await row.getByTestId('approval-request-budget-raise').click();
     await expect(row.getByTestId('approval-request-outcome-status')).toBeVisible();
 
-    // 5. The decide response carries no engine details, so re-read the settled request: the outcome shows B
-    // re-queued; the badge drops by one (at 0 it is not rendered at all).
-    await page.reload();
-    await waitForHydration(page);
+    // 5. The decide answer carries no engine details, so the inbox re-reads the request: the outcome shows B
+    // re-queued without a reload, and the badge drops by one (at 0 it is not rendered at all).
     await expect(row.getByTestId(`approval-request-requeue-${jobB}`)).toHaveAttribute('data-ok', 'true', { timeout: 20_000 });
     if (before === 1) {
       await expect(badge).toHaveCount(0, { timeout: 10_000 });

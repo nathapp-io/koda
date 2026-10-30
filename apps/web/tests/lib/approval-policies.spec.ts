@@ -10,6 +10,7 @@ import { describe, test, expect, jest, afterEach } from '@jest/globals'
 import {
   IncompletePolicyListError,
   buildPolicySchema,
+  initialPolicyValues,
   isIncompletePolicyListError,
   modeOptions,
   overrideCount,
@@ -165,7 +166,9 @@ describe('AC-6: approve-on-timeout needs a none floor', () => {
 
 describe('the dialog bodies', () => {
   test('a create body carries only what the form set', () => {
-    expect(toCreateBody('label.create', { kind: 'type', principalType: 'AGENT' }, formValues())).toEqual({
+    expect(toCreateBody('label.create', { kind: 'type', principalType: 'AGENT' }, formValues({
+      approverMustHoldAction: true,
+    }))).toEqual({
       permissionPattern: 'label.create',
       appliesTo: { kind: 'type', principalType: 'AGENT' },
       mode: 'human',
@@ -182,9 +185,34 @@ describe('the dialog bodies', () => {
       mode: 'human',
       onTimeout: 'reject',
       timeoutSec: 600,
-      approverMustHoldAction: true,
       requireDistinctApprover: true,
     })
+  })
+
+  /**
+   * `ApprovalPolicyService.create` stores an omitted `approverMustHoldAction` as `true`, so the two
+   * halves below have to disagree on purpose: an untouched form (checked) omits it, and a cleared one
+   * says `false` — otherwise every create would store the opposite of what the box showed.
+   */
+  test('a cleared must-hold-action checkbox travels as an explicit false', () => {
+    expect(toCreateBody('label.create', { kind: 'all' }, formValues({ approverMustHoldAction: false })))
+      .toMatchObject({ approverMustHoldAction: false })
+  })
+
+  test("a create form opens on the API's own default, which is a checked must-hold-action box", () => {
+    expect(initialPolicyValues(null).approverMustHoldAction).toBe(true)
+    expect(initialPolicyValues(null)).toEqual({
+      mode: 'human', timeoutSec: '', onTimeout: 'reject',
+      approverMustHoldAction: true, requireDistinctApprover: false,
+    })
+  })
+
+  test("an edit opens on the stored policy's flags", () => {
+    expect(initialPolicyValues(policy({ timeoutSec: 120, approverMustHoldAction: false, requireDistinctApprover: true })))
+      .toEqual({
+        mode: 'human', timeoutSec: '120', onTimeout: 'reject',
+        approverMustHoldAction: false, requireDistinctApprover: true,
+      })
   })
 
   test('a role subject travels as the role id', () => {

@@ -411,8 +411,11 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
   const pageOf = (records: ApprovalRequestSummary[]) =>
     ({ total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, records })
 
-  function mountInbox(request: ApprovalRequestDetail) {
-    const api = { get: jest.fn(async (path: string) => (path === '/approvals' ? pageOf([request]) : request)), post: jest.fn(async () => request) }
+  function mountInbox(request: ApprovalRequestDetail, over: { get?: jest.Mock; post?: jest.Mock } = {}) {
+    const api = {
+      get: over.get ?? jest.fn(async (path: string) => (path === '/approvals' ? pageOf([request]) : request)),
+      post: over.post ?? jest.fn(async () => request),
+    }
     const app = mountSfc(inboxFile, {
       components: {
         ...uiStubs,
@@ -451,8 +454,6 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     if (!toggle) throw new Error('the bash row was not listed')
     ;(toggle.props.onClick as () => void)()
     await m.settle()
-    console.log('DEBUG TEXT:', m.app.text().slice(0, 1500))
-    console.log('DEBUG PROPS:', Object.keys(toggle.props).join(','))
   }
 
   test('AC-6 (end to end): Allow posts the fleet approval body to the engine', async () => {
@@ -480,6 +481,43 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     const m = mountInbox(bashRequest() as ApprovalRequestDetail)
     await openRow(m)
     expect(m.app.find('[data-testid="approval-request-bash-job"]')[0]?.props.to).toBe('/sandbox/fleet/jobs/j1')
+    m.app.unmount()
+  })
+
+  test('a raised budget stop shows its re-queue results without being reopened or reloaded', async () => {
+    const pending = budgetRequest()
+    // `POST /approvals/:id/decisions` answers the request alone: its engine `details` block is read-only
+    // enrichment, so the re-queue results arrive on the detail read that follows the decision.
+    const decided = budgetRequest({
+      status: 'executed',
+      details: { kind: 'budget', policyId: 'pol1', resolvedBy: 'user', outcome: { resumedAmountUsd: '50.0000', requeueResults: [] } },
+    })
+    const settled = budgetRequest({
+      status: 'executed',
+      details: {
+        kind: 'budget', policyId: 'pol1', resolvedBy: 'user',
+        outcome: { resumedAmountUsd: '50.0000', requeueResults: [{ jobId: 'j2', ok: false, error: '{"code":"fleet.jobState"}' }] },
+      },
+    })
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === '/approvals') return pageOf([pending])
+      detailReads += 1
+      return detailReads === 1 ? pending : settled
+    })
+    const m = mountInbox(pending, { get, post: jest.fn(async () => decided) })
+    await openRow(m)
+    ;(m.app.find('[data-testid="approval-request-budget-amount"]')[0]?.props['onUpdate:modelValue'] as (v: string) => void)('50')
+    await Vue.nextTick()
+    ;(m.app.find('[data-testid="approval-request-budget-raise"]')[0]?.props.onClick as () => void)()
+    await m.settle()
+
+    // Wire/copy read literally: the decide answer is not what the outcome panel can be built from.
+    expect(m.api.post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1', 'j2'] } })
+    const row = m.app.find('[data-testid="approval-request-requeue-j2"]')[0]
+    expect(row?.props['data-ok']).toBe('false')
+    expect(m.app.textOf(row as never)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
+    expect(m.app.find('[data-testid="approval-request-budget-raise"]')).toHaveLength(0)
     m.app.unmount()
   })
 })

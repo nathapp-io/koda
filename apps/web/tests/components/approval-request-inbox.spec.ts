@@ -69,6 +69,8 @@ interface MountOptions {
   post?: jest.Mock
   base?: Record<string, unknown>
   query?: Record<string, string>
+  /** A live route (reactive), for the tests that move `?id` while the page is open. */
+  route?: { query: Record<string, unknown> }
   nameOf?: (userId: string) => string | null
   projectName?: (projectId: string) => string
 }
@@ -104,7 +106,7 @@ function mountInbox(options: MountOptions) {
       useAuth: () => ({ user: ref({ id: 'u2' }) }),
       useAppToast: () => toast,
       useApi: () => ({ $api: api }),
-      useRoute: () => ({ query: options.query ?? {} }),
+      useRoute: () => options.route ?? ({ query: options.query ?? {} }),
       useRouter: () => ({ replace }),
       useVisiblePolling: (task: () => Promise<void>) => {
         pollTask = task
@@ -368,6 +370,191 @@ describe('ApprovalRequestInbox — opening a row', () => {
     expect(m.replace).toHaveBeenCalledWith({ query: {} })
     expect(m.byId('approval-request-detail')).toHaveLength(0)
     expect(m.toast.errors).toEqual(['boom'])
+    m.app.unmount()
+  })
+})
+
+describe('ApprovalRequestInbox — the enriched detail after a decision', () => {
+  /** The decide answer carries the request but never its engine `details` block (the API enriches on read). */
+  const decideAnswer = (over: Partial<ApprovalRequestDetail> = {}): ApprovalRequestDetail =>
+    ({ ...detailOf(row('r1', { permissionKey: 'label.create', status: 'executed' })), details: null, ...over })
+
+  function mountForDecide(getDetail: jest.Mock, post: jest.Mock) {
+    const get = jest.fn(async (path: string) => (path === '/approvals'
+      ? pageOf([row('r1', { permissionKey: 'label.create' })])
+      : getDetail(path)))
+    return mountInbox({ get, post })
+  }
+
+  async function approve(m: ReturnType<typeof mountInbox>): Promise<void> {
+    const form = m.app.one('form')
+    if (!form) throw new Error('approval form was not rendered')
+    ;(form.props.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => undefined })
+    await m.settle()
+  }
+
+  test('a successful decide re-reads the request, because the POST answer has no details', async () => {
+    let detailReads = 0
+    const getDetail = jest.fn(async () => {
+      detailReads += 1
+      return detailReads === 1 ? detailOf(row('r1', { permissionKey: 'label.create' })) : decideAnswer()
+    })
+    const post = jest.fn(async () => decideAnswer())
+    const m = mountForDecide(getDetail, post)
+    await m.settle()
+    await m.toggle('r1')
+    await approve(m)
+
+    expect(post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve' })
+    // Opening the row was one read; the enriched answer the panel needs next is the second.
+    expect(detailReads).toBe(2)
+    m.app.unmount()
+  })
+
+  test('a failed decide re-read toasts nothing of its own: the decision is already on record', async () => {
+    let detailReads = 0
+    const getDetail = jest.fn(async () => {
+      detailReads += 1
+      if (detailReads === 1) return detailOf(row('r1', { permissionKey: 'label.create' }))
+      throw new ApiError(500, 'read-down')
+    })
+    const post = jest.fn(async () => decideAnswer())
+    const m = mountForDecide(getDetail, post)
+    await m.settle()
+    await m.toggle('r1')
+    await approve(m)
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(detailReads).toBe(2)
+    // The write succeeded, so only its own refusal is a toast; the panel keeps the decision answer.
+    expect(m.toast.errors).toEqual([])
+    expect(m.byId('approval-request-detail')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('a successful cancel re-reads the request too', async () => {
+    const own = row('r1', { actorType: 'USER', actorId: 'u2' })
+    let detailReads = 0
+    const get = jest.fn(async (path: string) => {
+      if (path === '/approvals') return pageOf([own])
+      detailReads += 1
+      return detailOf(own)
+    })
+    const post = jest.fn(async () => ({ ...detailOf(own), status: 'cancelled', details: null }))
+    const m = mountInbox({ get, post })
+    await m.settle()
+    await m.toggle('r1')
+    ;(m.byId('approval-request-cancel')[0].props.onClick as () => void)()
+    await m.settle()
+
+    expect(post).toHaveBeenCalledWith('/approvals/r1/cancel')
+    expect(detailReads).toBe(2)
+    m.app.unmount()
+  })
+
+  test('a poll that finds the open row settled re-reads its detail, so the outcome replaces the controls', async () => {
+    let listed = row('r1', { permissionKey: 'fleet.budget.override' })
+    const getOpen = jest.fn(async () => detailOf(listed))
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([listed]) : getOpen()))
+    const m = mountInbox({ get })
+    await m.settle()
+    await m.toggle('r1')
+    expect(getOpen).toHaveBeenCalledTimes(1)
+
+    // Another approver settled it: the list says so on the next poll, the open detail does not.
+    listed = row('r1', { permissionKey: 'fleet.budget.override', status: 'executed' })
+    await m.poll()
+    await m.settle()
+
+    expect(getOpen).toHaveBeenCalledTimes(2)
+    m.app.unmount()
+  })
+
+  test('a poll that finds the open row unchanged leaves its detail alone', async () => {
+    const listed = row('r1', { permissionKey: 'fleet.budget.override' })
+    const getOpen = jest.fn(async () => detailOf(listed))
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf([listed]) : getOpen()))
+    const m = mountInbox({ get })
+    await m.settle()
+    await m.toggle('r1')
+    await m.poll()
+    await m.settle()
+
+    expect(getOpen).toHaveBeenCalledTimes(1)
+    m.app.unmount()
+  })
+})
+
+describe('ApprovalRequestInbox — the URL names the open row', () => {
+  const requests = (): ApprovalRequestSummary[] => [row('r1'), row('r2'), row('r3')]
+
+  const detailFor = (path: string): ApprovalRequestDetail => {
+    const id = path.replace('/approvals/', '')
+    return detailOf(row(id, { permissionKey: 'label.create' }))
+  }
+
+  const mountWithRoute = (route: { query: Record<string, unknown> }, get: jest.Mock) =>
+    mountInbox({ get, route })
+
+  test('a notification for another request opens it while the page stays mounted', async () => {
+    const route = Vue.reactive<{ query: Record<string, unknown> }>({ query: { id: 'r1' } })
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf(requests()) : detailFor(path)))
+    const m = mountWithRoute(route, get)
+    await m.settle()
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r1'))).toHaveLength(1)
+
+    route.query = { id: 'r2' }
+    await m.settle()
+
+    expect(get).toHaveBeenCalledWith('/approvals/r2')
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r2'))).toHaveLength(1)
+    // The previous request is closed: the URL names exactly one request.
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r1'))).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('back and forward move the open row with the URL', async () => {
+    const route = Vue.reactive<{ query: Record<string, unknown> }>({ query: { id: 'r1' } })
+    const get = jest.fn(async (path: string) => (path === '/approvals' ? pageOf(requests()) : detailFor(path)))
+    const m = mountWithRoute(route, get)
+    await m.settle()
+
+    // Back to a URL without `id`: nothing is open, and no request is fetched for it.
+    route.query = {}
+    await m.settle()
+    expect(m.byId('approval-request-detail')).toHaveLength(0)
+
+    // Forward again: the request is re-read rather than remembered.
+    route.query = { id: 'r3' }
+    await m.settle()
+    expect(get).toHaveBeenCalledWith('/approvals/r3')
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r3'))).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('a late answer for a request the URL no longer names cannot win', async () => {
+    const route = Vue.reactive<{ query: Record<string, unknown> }>({ query: {} })
+    const pending = new Map<string, (value: ApprovalRequestDetail) => void>()
+    const get = jest.fn((path: string) => {
+      if (path === '/approvals') return Promise.resolve(pageOf(requests()))
+      return new Promise<ApprovalRequestDetail>((resolve) => { pending.set(path, resolve) })
+    })
+    const m = mountWithRoute(route, get)
+    await m.settle()
+
+    route.query = { id: 'r2' }
+    await m.settle()
+    route.query = { id: 'r3' }
+    await m.settle()
+
+    // The older request answers last: it must not replace the row the URL names now.
+    pending.get('/approvals/r3')?.(detailFor('/approvals/r3'))
+    await m.settle()
+    pending.get('/approvals/r2')?.(detailFor('/approvals/r2'))
+    await m.settle()
+
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r3'))).toHaveLength(1)
+    expect(m.app.find('[data-testid="approval-request-detail"]', m.rowEl('r2'))).toHaveLength(0)
     m.app.unmount()
   })
 })

@@ -54,18 +54,29 @@ interface FakeApi {
   post: jest.Mock
   patch: jest.Mock
   delete: jest.Mock
+  /** The rows the fake stored, built the way `ApprovalPolicyService.create` stores a create body. */
+  persisted: ApprovalPolicy[]
 }
 
 function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
+  const persisted: ApprovalPolicy[] = []
   return {
     get: jest.fn(async (path: string) => {
       if (path.endsWith('/keys')) return { keys: APPROVABLE }
       if (path === '/roles') return ROLES
-      return { total: POLICIES.length, current: 1, size: 100, hasNext: false, hasPrev: false, records: POLICIES }
+      const records = [...POLICIES, ...persisted]
+      return { total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, records }
     }) as jest.Mock,
-    post: jest.fn(async (_path: string, body: Record<string, unknown>) => policy({ id: 'new', ...body })) as jest.Mock,
+    // `ApprovalPolicyService.create` defaults an omitted `approverMustHoldAction` to true; the fake stores
+    // the same way, so an assertion on `persisted` is an assertion on the value the page really saves.
+    post: jest.fn(async (_path: string, body: Record<string, unknown>) => {
+      const row = policy({ id: 'new', ...body, approverMustHoldAction: body.approverMustHoldAction !== false })
+      persisted.push(row)
+      return row
+    }) as jest.Mock,
     patch: jest.fn(async (path: string, body: Record<string, unknown>) => policy({ id: path.split('/').pop(), ...body })) as jest.Mock,
     delete: jest.fn(async () => undefined) as jest.Mock,
+    persisted,
     ...over,
   }
 }
@@ -175,6 +186,28 @@ describe('AC-9: without the key the page asks for nothing', () => {
     expect(allById(m.app, 'approvable-key-row')).toHaveLength(0)
     expect(allById(m.app, 'policy-row')).toHaveLength(0)
   })
+
+  test('the incomplete state clears when a retry starts, so a later generic failure is not masked', async () => {
+    let attempt = 0
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path.endsWith('/keys')) return { keys: APPROVABLE }
+          attempt += 1
+          if (attempt === 1) return { total: 2, current: 1, size: 100, hasNext: true, hasPrev: false, records: [] }
+          throw new ApiError(50000, 'down')
+        }) as jest.Mock,
+      },
+    })
+
+    expect(allById(m.app, 'policies-incomplete')).toHaveLength(1)
+    call(byId(m.app, 'policies-retry'), 'onClick')
+    await settle()
+
+    // The stale incomplete message must not outlive the attempt it described.
+    expect(allById(m.app, 'policies-incomplete')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'policies-load-failed'))).toBe(copy('approvals.policies.loadFailed'))
+  })
 })
 
 describe('AC-10: the keys table counts the overrides of every key', () => {
@@ -218,6 +251,40 @@ describe('AC-11: a create posts exactly what the form chose', () => {
     })
     expect(m.toast.success).toHaveBeenCalledTimes(1)
     expect(allById(m.app, 'policy-form')).toHaveLength(0)
+  })
+
+  test('AC-11 (edge): the must-hold-action box starts on the API default, so an untouched create persists true', async () => {
+    const m = await mountPage()
+
+    await openCreate(m.app)
+    expect(byId(m.app, 'policy-must-hold').props.checked).toBe(true)
+    typeInto(byId(m.app, 'policy-pattern'), 'label.create')
+    await settle()
+    await submitForm(m.app)
+
+    expect(m.api.post).toHaveBeenCalledTimes(1)
+    // Omitting the flag is what the API stores as `true`, so the box it showed is the value it saved.
+    expect((m.api.post.mock.calls[0] as [string, Record<string, unknown>])[1])
+      .not.toHaveProperty('approverMustHoldAction')
+    expect(m.api.persisted.map((row) => row.approverMustHoldAction)).toEqual([true])
+  })
+
+  test('AC-11 (edge): clearing the must-hold-action box persists false, not the API default', async () => {
+    const m = await mountPage()
+
+    await openCreate(m.app)
+    expect(byId(m.app, 'policy-must-hold').props.checked).toBe(true)
+    typeInto(byId(m.app, 'policy-pattern'), 'label.create')
+    call(byId(m.app, 'policy-must-hold'), 'onChange', { target: { checked: false } })
+    await settle()
+    await submitForm(m.app)
+
+    expect(m.api.post).toHaveBeenCalledTimes(1)
+    const body = (m.api.post.mock.calls[0] as [string, Record<string, unknown>])[1]
+    expect(body.approverMustHoldAction).toBe(false)
+    expect(m.api.persisted.map((row) => row.approverMustHoldAction)).toEqual([false])
+    // The reload that follows a create lists the policy the API stored, not the one the form guessed.
+    expect(allById(m.app, 'policy-row').map((row) => row.props['data-id'])).toContain('new')
   })
 
   test('a pattern covering no approvable key shows the pattern message and sends nothing', async () => {
