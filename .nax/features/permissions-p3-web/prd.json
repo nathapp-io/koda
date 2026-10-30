@@ -3,7 +3,7 @@
   "feature": "permissions-p3-web",
   "branchName": "feat/permissions-p3-web",
   "createdAt": "2026-10-30T00:00:00Z",
-  "updatedAt": "2026-10-30T12:45:50.358Z",
+  "updatedAt": "2026-10-30T12:50:51.920Z",
   "userStories": [
     {
       "id": "US-001",
@@ -758,14 +758,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A thin page reuses upstream components but introduces project read/manage gates and inherited-policy restrictions. Security override applies; test real scoped endpoint/role seams and forbidden behavior."
+        "reasoning": "A thin page reuses upstream components but introduces project read/manage gates and inherited-policy restrictions. Security override applies; test real scoped endpoint/role seams and forbidden behavior.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/approvals/ApprovalPolicyDialog.vue",
@@ -798,7 +801,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c1e73b3eb0702a839603fa2138abfe217d890388"
     },
     {
       "id": "US-010",
