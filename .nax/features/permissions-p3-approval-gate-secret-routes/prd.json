@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-routes",
   "branchName": "feat/permissions-p3-approval-gate-secret-routes",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T04:19:49.306Z",
+  "updatedAt": "2026-10-30T04:29:44.637Z",
   "userStories": [
     {
       "id": "US-001",
@@ -540,14 +540,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extends an existing gated route with a second established command variant, but removing an access-control bypass and handling CI credentials requires the security override."
+        "reasoning": "Extends an existing gated route with a second established command variant, but removing an access-control bypass and handling CI credentials requires the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/projects/projects.controller.ts",
@@ -585,7 +588,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ef4f5735256ad5c495c5e676f6f9f05ff14dfbce"
     },
     {
       "id": "US-007",
