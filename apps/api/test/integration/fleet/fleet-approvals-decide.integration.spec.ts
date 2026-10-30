@@ -351,13 +351,20 @@ describeIntegration('fleet approvals decide through the engine route (PG, US-008
   });
 
   /**
-   * AC-3, as clarified in fix round 2. The criterion reads "… writes one APPROVAL_ANSWER command for the job with
+   * AC-3, as clarified in fix rounds 2 and 3. The criterion reads "… writes one APPROVAL_ANSWER command for the job with
    * choice `allow_for_job`". `allow_for_job` is the *fleet's* name for the decision, and it is kept where the fleet
    * reads the decision back: the decision's params. The command is the nax wire payload, whose `choice` is an
    * `ApprovalOption` — `'allow' | 'allow-remember' | 'deny'` (`packages/fleet-protocol/src/index.ts`), the three
    * options nax offers — so it carries the option that fleet name maps to, `allow-remember`. The mapping is
    * `checkBashDecision`'s (`src/fleet/approvals/bash-decision.ts`, pinned in its own spec); this case asserts the
    * mapping and the command agree, so writing the fleet name into the payload (the literal wording) fails here.
+   *
+   * Proposed criterion text for the AC source — `.nax/features/**` is nax-owned and refuses agent edits, so a human or
+   * a nax refinement has to carry this line across:
+   *
+   * "AC-3 [integration]: approving a pending bash request through `POST /api/approvals/:id/decisions` with `params:
+   * { choice: 'allow_for_job' }` writes one `APPROVAL_ANSWER` command for the job with choice `allow-remember` (the nax
+   * protocol option the fleet's `allow_for_job` maps to), while the decision params retain `choice: 'allow_for_job'`."
    */
   it('AC-3: approving a bash ask with params { choice: allow_for_job } writes one APPROVAL_ANSWER carrying the protocol option allow-remember', async () => {
     const asked = { command: 'bun run test', commandTruncated: false, options: ['allow', 'allow-remember', 'deny'] };
