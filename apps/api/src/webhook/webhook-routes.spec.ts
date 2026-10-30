@@ -45,6 +45,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { join } from 'node:path';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
+import type { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { DnsResolver } from './outbound/dns-resolver';
 import { OutboundUrlGuard } from './outbound/outbound-url-guard';
@@ -240,6 +241,8 @@ describe('webhook routes (US-003)', () => {
   let testingModule: TestingModule;
   let app: NestFastifyApplication;
   let currentPrincipal: KodaPrincipal;
+  /** Every gate call the controller made, so the variant and stored input are assertable (US-004). */
+  const gateCalls: { variant: string | undefined; input: unknown }[] = [];
 
   /** Drives one request through the real pipeline (pipes, guards, filters) in-process. */
   async function callApi(
@@ -281,6 +284,15 @@ describe('webhook routes (US-003)', () => {
           inject: [WebhookService],
           useFactory: (service: WebhookService) => ({
             run: async ({ variant, input }: RouteGateCall) => {
+              gateCalls.push({ variant, input });
+              if (variant === 'rest:project-webhooks.create') {
+                const created = input as { projectId: string; webhook: CreateWebhookDto };
+                return { status: 'executed', result: await service.create(created.projectId, created.webhook) };
+              }
+              if (variant === 'rest:project-webhooks.update') {
+                const updated = input as { projectId: string; id: string; patch: UpdateWebhookDto };
+                return { status: 'executed', result: await service.update(updated.projectId, updated.id, updated.patch) };
+              }
               const ids = input as { projectId: string; id: string };
               if (variant === 'rest:project-webhooks.delete') await service.removeForProject(ids.projectId, ids.id);
               else if (variant === 'rest:webhooks.delete') await service.remove(ids.id);
@@ -348,6 +360,7 @@ describe('webhook routes (US-003)', () => {
   beforeEach(() => {
     vi.mocked(permissions.can).mockClear();
     store.webhooks.length = 0;
+    gateCalls.length = 0;
     currentPrincipal = adminPrincipal;
   });
 
@@ -360,6 +373,53 @@ describe('webhook routes (US-003)', () => {
   ] as const)('%s %s checks %s in the resolved scope', async (method, url, key, projectId) => {
     await callApi(method, url);
     expect(permissions.can).toHaveBeenCalledExactlyOnceWith(adminPrincipal, key, { projectId });
+  });
+
+  it('US-004: create and update run the gate with their variant and the parsed body', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    await callApi('POST', '/api/projects/alpha/webhooks', {
+      url: 'https://93.184.215.14/hook',
+      events: ['ticket.created'],
+    });
+    await callApi('PATCH', `/api/projects/alpha/webhooks/${webhook.id}`, { active: false });
+
+    expect(gateCalls.map((call) => call.variant)).toEqual([
+      'rest:project-webhooks.create',
+      'rest:project-webhooks.update',
+    ]);
+    expect(gateCalls[0]?.input).toMatchObject({
+      slug: 'alpha', projectId: projectA.id, webhook: { url: 'https://93.184.215.14/hook', events: ['ticket.created'] },
+    });
+    expect(gateCalls[1]?.input).toMatchObject({
+      slug: 'alpha', projectId: projectA.id, id: webhook.id, patch: { active: false },
+    });
+  });
+
+  it('US-004: the delete routes keep their gate variants and stored input', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    await callApi('DELETE', `/api/projects/alpha/webhooks/${webhook.id}`);
+
+    expect(gateCalls[0]).toEqual({ variant: 'rest:project-webhooks.delete', input: { projectId: projectA.id, id: webhook.id } });
+  });
+
+  it('US-004: a gate refusal on create writes nothing', async () => {
+    const gate = testingModule.get<{ run: () => Promise<unknown> }>(ApprovalRouteGate);
+    const run = vi.spyOn(gate, 'run').mockRejectedValueOnce(new ForbiddenAppException({}, 'permissions'));
+
+    try {
+      const res = await callApi('POST', '/api/projects/alpha/webhooks', {
+        url: 'https://93.184.215.14/hook',
+        events: ['ticket.created'],
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe(testingModule.get(I18nWrapper).I18nService.t('permissions.40003', { lang: 'en' }));
+      expect(store.webhooks).toHaveLength(0);
+    } finally {
+      run.mockRestore();
+    }
   });
 
   it('delivery reads retain secrets and exclude inactive webhooks', async () => {

@@ -26,6 +26,7 @@ import { encryptToken, decryptToken } from '../../../src/common/utils/encryption
 import * as vcsFactory from '../../../src/vcs/factory';
 import { IVcsProvider } from '../../../src/vcs/vcs-provider';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('VcsConnectionService', () => {
@@ -88,6 +89,7 @@ describe('VcsConnectionService', () => {
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
+        { provide: AfterCommitService, useValue: new AfterCommitService() },
         {
           provide: VcsPollingService,
           useValue: {

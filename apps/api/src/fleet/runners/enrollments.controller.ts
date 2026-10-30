@@ -1,11 +1,14 @@
 import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
-import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../../approvals/route/approval-redeem-header.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { ENROLLMENT_ROUTE_VARIANTS } from './runner-route.commands';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import { EnrollmentCreatedDto } from './dto/enrollment.dto';
@@ -19,17 +22,32 @@ import { ListEnrollmentsQuery } from './dto/list-enrollments.query';
 @ApiBearerAuth()
 @Controller('fleet/enrollments')
 export class EnrollmentsController {
-  constructor(private readonly enrollments: EnrollmentService) {}
+  constructor(
+    private readonly enrollments: EnrollmentService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Post()
   @HttpCode(201)
   @UseGuards(RequiresGuard)
   @Requires('fleet.enrollment.create')
   @ApiOperation({ summary: 'Issue a single-use runner enrollment token (fleet.enrollment.create, global); the token is shown once' })
+  @ApprovalGated({ redeem: true })
   @ApiResponse({ status: 201, type: EnrollmentCreatedDto })
   @ApiResponse({ status: 403, description: 'fleet.enrollment.create is missing globally' })
-  async create(@Body() dto: CreateEnrollmentDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.enrollments.create(principal.id, dto.labels ?? []));
+  async create(
+    @Body() dto: CreateEnrollmentDto,
+    @ApprovalRedeemHeader() redeem?: string,
+  ) {
+    const outcome = await this.routeGate.run<EnrollmentCreatedDto>({
+      key: 'fleet.enrollment.create',
+      variant: ENROLLMENT_ROUTE_VARIANTS.create,
+      projectId: null,
+      input: { labels: dto.labels ?? [] },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get()

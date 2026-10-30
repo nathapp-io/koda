@@ -1,4 +1,5 @@
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../approvals/route/approval-redeem-header.decorator';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { CurrentProject } from '../projects/current-project.decorator';
@@ -25,6 +26,7 @@ import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { WebhookService } from './webhook.service';
 import { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
+import type { WebhookDomain, WebhookView } from './domain/webhook.domain';
 import { JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('webhooks')
@@ -39,6 +41,7 @@ export class WebhookController {
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('webhook.create')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Register a webhook for a project' })
   @ApiResponse({ status: 201, description: 'Webhook registered' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -46,10 +49,18 @@ export class WebhookController {
   async register(
     @Param('slug') slug: string,
     @Body() createWebhookDto: CreateWebhookDto,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     const project = await this.webhookService.getProjectBySlug(slug);
-    const data = await this.webhookService.create(project.id, createWebhookDto);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run<WebhookDomain>({
+      key: 'webhook.create',
+      variant: WEBHOOK_ROUTE_VARIANTS.create,
+      projectId: project.id,
+      input: { slug, projectId: project.id, webhook: createWebhookDto },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get('projects/:slug/webhooks')
@@ -66,6 +77,7 @@ export class WebhookController {
   @Patch('projects/:slug/webhooks/:id')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('webhook.update')
+  @ApprovalGated({ redeem: true })
   @ApiOperation({ summary: 'Update a webhook for a project' })
   @ApiResponse({ status: 200, description: 'Webhook updated' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -74,10 +86,18 @@ export class WebhookController {
     @Param('slug') slug: string,
     @Param('id') id: string,
     @Body() updateWebhookDto: UpdateWebhookDto,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
     const project = await this.webhookService.getProjectBySlug(slug);
-    const data = await this.webhookService.update(project.id, id, updateWebhookDto);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run<WebhookView>({
+      key: 'webhook.update',
+      variant: WEBHOOK_ROUTE_VARIANTS.update,
+      projectId: project.id,
+      input: { slug, projectId: project.id, id, patch: updateWebhookDto },
+      redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /** Deliberate cross-project admin route (global ADMIN only); see the project-scoped route below. */

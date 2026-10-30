@@ -17,6 +17,7 @@ import type { Mock, Mocked } from 'vitest';
  * "real guard" cases below run the production `OutboundUrlGuard` with no network access.
  */
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { Prisma } from '../generated/prisma/client';
 import type { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { WebhookService } from './webhook.service';
 import { DnsResolver } from './outbound/dns-resolver';
@@ -344,6 +345,122 @@ describe('WebhookService', () => {
       );
 
       expect(webhookRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('prepareCreate', () => {
+    const dto = { url: 'https://hooks.example/hook', events: ['STATUS_CHANGE'] };
+
+    it('AC-10: checks the url once and writes nothing until the returned callback runs', async () => {
+      webhookRepo.createWebhook.mockResolvedValue(mockWebhook);
+
+      const write = await service.prepareCreate('proj-1', dto);
+
+      expect(urlGuard.checkUrl).toHaveBeenCalledExactlyOnceWith('https://hooks.example/hook');
+      expect(webhookRepo.createWebhook).not.toHaveBeenCalled();
+
+      const created = await write();
+
+      expect(webhookRepo.createWebhook).toHaveBeenCalledTimes(1);
+      expect(created).toEqual(mockWebhook);
+    });
+
+    it('AC-10 boundary: the callback generates the same 40-character secret create would', async () => {
+      webhookRepo.createWebhook.mockResolvedValue(mockWebhook);
+
+      await (await service.prepareCreate('proj-1', dto))();
+
+      expect(webhookRepo.createWebhook.mock.calls[0][0].secret).toHaveLength(40);
+    });
+
+    it('AC-11: answers a webhooks validation error and no callback for a blocked destination', async () => {
+      urlGuard.checkUrl.mockRejectedValue(new OutboundUrlRejection('blocked_destination'));
+
+      const error = await captureError(service.prepareCreate('proj-1', { url: 'https://10.0.0.5/hook', events: ['STATUS_CHANGE'] }));
+
+      expect(error).toBeInstanceOf(ValidationAppException);
+      expect((error as ValidationAppException).args).toEqual({ reason: 'blocked_destination' });
+      expect((error as ValidationAppException).prefix).toBe('webhooks');
+      expect(webhookRepo.createWebhook).not.toHaveBeenCalled();
+    });
+
+    it('AC-11 boundary: a guard the url check does not own is rethrown unchanged', async () => {
+      const failure = new Error('resolver exploded');
+      urlGuard.checkUrl.mockRejectedValue(failure);
+
+      await expect(service.prepareCreate('proj-1', dto)).rejects.toBe(failure);
+    });
+
+    it('create prepares and runs the same write', async () => {
+      webhookRepo.createWebhook.mockResolvedValue(mockWebhook);
+
+      const created = await service.create('proj-1', dto);
+
+      expect(urlGuard.checkUrl).toHaveBeenCalledExactlyOnceWith('https://hooks.example/hook');
+      expect(webhookRepo.createWebhook).toHaveBeenCalledTimes(1);
+      expect(created).toEqual(mockWebhook);
+    });
+  });
+
+  describe('prepareUpdate', () => {
+    it('AC-12: answers 404 webhooks for another project and checks no url', async () => {
+      webhookRepo.findById.mockResolvedValue({ ...mockWebhook, projectId: 'p2' });
+
+      const error = await captureError(
+        service.prepareUpdate('p1', 'wh-1', { active: false, url: 'https://hooks.example/new' }),
+      );
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect((error as NotFoundAppException).prefix).toBe('webhooks');
+      expect(urlGuard.checkUrl).not.toHaveBeenCalled();
+      expect(webhookRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: the prepared update answers 404 and calls no update when the webhook is deleted first', async () => {
+      webhookRepo.findById.mockResolvedValueOnce(mockWebhook).mockResolvedValueOnce(null);
+
+      const write = await service.prepareUpdate('proj-1', 'wh-1', { active: false });
+
+      await expect(write()).rejects.toThrow(NotFoundAppException);
+      expect(webhookRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('AC-12 boundary: the callback answers 404 when the webhook moved to another project', async () => {
+      webhookRepo.findById
+        .mockResolvedValueOnce(mockWebhook)
+        .mockResolvedValueOnce({ ...mockWebhook, projectId: 'p2' });
+
+      const write = await service.prepareUpdate('proj-1', 'wh-1', { active: false });
+
+      await expect(write()).rejects.toThrow(NotFoundAppException);
+      expect(webhookRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('checks an optional url once and writes only when the callback runs', async () => {
+      webhookRepo.findById.mockResolvedValue(mockWebhook);
+      webhookRepo.update.mockResolvedValue({ ...mockWebhook, url: 'https://hooks.example/new' });
+
+      const write = await service.prepareUpdate('proj-1', 'wh-1', { url: 'https://hooks.example/new' });
+
+      expect(urlGuard.checkUrl).toHaveBeenCalledExactlyOnceWith('https://hooks.example/new');
+      expect(webhookRepo.update).not.toHaveBeenCalled();
+
+      const view = await write();
+
+      expect(webhookRepo.update).toHaveBeenCalledExactlyOnceWith('wh-1', { url: 'https://hooks.example/new' });
+      expect(view.url).toBe('https://hooks.example/new');
+      expect(view).not.toHaveProperty('secret');
+    });
+
+    it('answers 404 instead of a 500 when the row vanishes between the re-read and the write', async () => {
+      webhookRepo.findById.mockResolvedValue(mockWebhook);
+      webhookRepo.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('gone', { code: 'P2025', clientVersion: 'test' }),
+      );
+
+      const write = await service.prepareUpdate('proj-1', 'wh-1', { active: false });
+
+      await expect(write()).rejects.toThrow(NotFoundAppException);
     });
   });
 

@@ -1,4 +1,5 @@
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalRedeemHeader } from '../../approvals/route/approval-redeem-header.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { CurrentProject } from '../current-project.decorator';
@@ -48,6 +49,7 @@ export class ProjectInvitesController {
 
   @Post()
   @HttpCode(201)
+  @ApprovalGated({ redeem: true })
   @Requires('invite.create')
   @ApiOperation({ summary: 'Add an existing user or invite a new address (invite.create)' })
   @ApiResponse({ status: 201, type: InviteCreateResultDto })
@@ -57,14 +59,19 @@ export class ProjectInvitesController {
   async create(
     @Param('slug') slug: string,
     @Body() dto: CreateInviteDto,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
     @Headers('accept-language') acceptLanguage?: string,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
-    return JsonResponse.Ok(await this.invites.create(slug, dto, principal, inviteLocale(acceptLanguage)));
+    const input = { slug, projectId: project.project.id, invite: dto, locale: inviteLocale(acceptLanguage) };
+    const outcome = await this.routeGate.run({ key: 'invite.create', variant: INVITE_ROUTE_VARIANTS.create, projectId: project.project.id, input, redeem });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':id/resend')
   @HttpCode(200)
+  @ApprovalGated({ redeem: true })
   @Requires('invite.resend')
   @ApiOperation({ summary: 'Rotate a pending invite token and resend the invite email (invite.resend)' })
   @ApiResponse({ status: 200, type: InviteResendResultDto })
@@ -74,10 +81,14 @@ export class ProjectInvitesController {
   async resend(
     @Param('slug') slug: string,
     @Param('id') id: string,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
     @Headers('accept-language') acceptLanguage?: string,
+    @ApprovalRedeemHeader() redeem?: string,
   ) {
-    return JsonResponse.Ok(await this.invites.resend(slug, id, principal, inviteLocale(acceptLanguage)));
+    const input = { slug, projectId: project.project.id, id, locale: inviteLocale(acceptLanguage) };
+    const outcome = await this.routeGate.run({ key: 'invite.resend', variant: INVITE_ROUTE_VARIANTS.resend, projectId: project.project.id, input, redeem });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':id')

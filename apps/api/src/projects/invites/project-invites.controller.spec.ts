@@ -49,13 +49,24 @@ describe('ProjectInvitesController', () => {
     expect(res).toEqual(expect.objectContaining({ ret: 0, data: [{ id: 'i1' }] }));
   });
 
-  it('create passes the accept-language locale through', async () => {
-    service.create.mockResolvedValue({ outcome: 'INVITED' });
+  it('AC-10: create sends the normalized locale through the redeem gate', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { outcome: 'INVITED' } });
+    const dto = { email: 'a@k.t', roleKey: 'viewer' };
 
-    const res = await controller.create('proj', { email: 'a@k.t', role: 'VIEWER' } as never, principal, 'zh-CN');
+    const res = await controller.create('proj', dto as never, { project: { id: 'p1' } } as never, 'zh-CN', 'r1');
 
-    expect(service.create).toHaveBeenCalledWith('proj', { email: 'a@k.t', role: 'VIEWER' }, principal, 'zh');
+    expect(gate.run).toHaveBeenCalledWith({ key: 'invite.create', variant: 'rest:project-invites.create', projectId: 'p1', input: { slug: 'proj', projectId: 'p1', invite: dto, locale: 'zh' }, redeem: 'r1' });
+    expect(service.create).not.toHaveBeenCalled();
     expect(res).toEqual(expect.objectContaining({ ret: 0 }));
+  });
+
+  it('resend sends the normalized locale through the redeem gate', async () => {
+    gate.run.mockResolvedValue({ status: 'executed', result: { invitePath: '/invite/raw' } });
+
+    await controller.resend('proj', 'i1', { project: { id: 'p1' } } as never, 'zh-CN', 'r2');
+
+    expect(gate.run).toHaveBeenCalledWith({ key: 'invite.resend', variant: 'rest:project-invites.resend', projectId: 'p1', input: { slug: 'proj', projectId: 'p1', id: 'i1', locale: 'zh' }, redeem: 'r2' });
+    expect(service.resend).not.toHaveBeenCalled();
   });
 
   it('cancel returns an empty Ok', async () => {

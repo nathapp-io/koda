@@ -3,7 +3,6 @@ import { GUARDS_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import type { ModulesContainer } from '@nestjs/core';
 import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
 import { APPROVAL_GATED_METADATA } from '../../approvals/route/approval-gated.decorator';
-import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS, type PermissionCatalogEntry } from '../catalog';
 import { routeSurface } from '../route-surface';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../requires.decorator';
@@ -46,8 +45,7 @@ export type ContractViolation =
   | { kind: 'unused-key'; key: string }
   | { kind: 'pending-key-declared'; source: string; key: string }
   | { kind: 'ungated-approvable-write'; route: string }
-  | { kind: 'gated-without-approvable-key'; route: string }
-  | { kind: 'stale-pending-gate-route'; route: string };
+  | { kind: 'gated-without-approvable-key'; route: string };
 
 /** The parts of Nest's `InstanceWrapper` the collector reads. */
 interface ProviderWrapper {
@@ -179,7 +177,6 @@ export function findContractViolations(
   declarations: PermissionDeclarations,
   catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,
   pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,
-  pendingGateRoutes: ReadonlyMap<string, string> = PENDING_GATE_ROUTES,
 ): ContractViolation[] {
   const catalogKeys = new Set(catalog.map(({ key }) => key));
   const catalogByKey = new Map(catalog.map((entry) => [entry.key, entry]));
@@ -193,7 +190,6 @@ export function findContractViolations(
   };
 
   const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-  const declarationsBySurface = new Map(declarations.routes.map((route) => [route.route, route]));
 
   for (const route of declarations.routes) {
     const requiredKeys = route.requires?.keys ?? [];
@@ -203,7 +199,7 @@ export function findContractViolations(
     if (route.gated && approvableKeys.length === 0) {
       violations.push({ kind: 'gated-without-approvable-key', route: route.route });
     }
-    if (approvableWrite && !route.gated && !pendingGateRoutes.has(route.route)) {
+    if (approvableWrite && !route.gated) {
       violations.push({ kind: 'ungated-approvable-write', route: route.route });
     }
 
@@ -218,15 +214,6 @@ export function findContractViolations(
     for (const key of route.requires.keys) record(route.route, key);
   }
 
-  for (const [surface] of pendingGateRoutes) {
-    const route = declarationsBySurface.get(surface);
-    const approvableWrite = route !== undefined && writeMethods.has(route.method) &&
-      (route.requires?.keys ?? []).some((key) => catalogByKey.get(key)?.approval?.approvable === true);
-    if (!approvableWrite || route?.gated) {
-      violations.push({ kind: 'stale-pending-gate-route', route: surface });
-    }
-  }
-
   for (const tool of declarations.tools) record(tool.tool, tool.key);
   for (const writer of declarations.systemWriters) record(writer.writer, writer.key);
 
@@ -235,31 +222,4 @@ export function findContractViolations(
   }
 
   return violations;
-}
-
-/** Derives the rollout allowlist expected for every ungated approvable write declaration. */
-export function expectedPendingGateRoutes(
-  routes: readonly RouteDeclaration[],
-  catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,
-): [string, string][] {
-  const catalogByKey = new Map(catalog.map((entry) => [entry.key, entry]));
-  const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-  return routes
-    .filter((route) => writeMethods.has(route.method) && !route.gated)
-    .flatMap((route) => {
-      const approvableKeys = (route.requires?.keys ?? [])
-        .filter((key) => catalogByKey.get(key)?.approval.approvable === true);
-      if (approvableKeys.length === 0) return [];
-
-      const feature = SECRET_GATE_ROUTES.has(route.route)
-        ? 'gate-secret'
-        : approvableKeys.some((key) => catalogByKey.get(key)?.approval.default !== 'none')
-          ? 'gate-high'
-          : approvableKeys.every((key) => /^(fleet|thread|testhook)\./.test(key))
-            ? 'gate-fleet'
-            : 'gate-core-domains';
-      return [[route.route, feature] as [string, string]];
-    })
-    .sort(([left], [right]) => left.localeCompare(right));
 }

@@ -27,6 +27,18 @@ describe('ProjectRouteCommands', () => {
     }
     expect(command.parse({ slug: 'alpha', patch: { name: 'Safe' } })).toEqual({ slug: 'alpha', patch: { name: 'Safe' } });
   });
+  it('AC-11: registers a secret-aware update command that redacts strings and preserves null', () => {
+    const { registry } = build();
+    const command = registry.get('project.update', 'rest:projects.update-ci-token');
+    expect(command).toBeDefined();
+    expect(command?.key).toBe('project.update');
+    expect(command?.redeem?.redact({ slug: 'a', patch: { ciWebhookToken: 's'.repeat(32), name: 'N' } })).toEqual({
+      slug: 'a', patch: { ciWebhookToken: '<redacted>', name: 'N' },
+    });
+    expect(command?.redeem?.redact({ slug: 'a', patch: { ciWebhookToken: null } })).toEqual({
+      slug: 'a', patch: { ciWebhookToken: null },
+    });
+  });
   it('AC-7: registers the rostered agent update command', () => {
     const { registry } = build();
     expect(registry.get('agent.update', PROJECT_ROUTE_VARIANTS.updateAgent)).toMatchObject({ key: 'agent.update' });

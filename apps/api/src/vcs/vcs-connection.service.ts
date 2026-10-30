@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { committedEffect } from '../common/committed-effects';
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { generateWebhookSecret } from './webhook-secret';
@@ -21,6 +21,7 @@ import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
+import { AfterCommitService } from '../permissions/after-commit.service';
 
 export function vcsTestTarget(connection: VcsConnectionDomain): Pick<
   VcsConnectionDomain,
@@ -37,11 +38,14 @@ export function vcsTestTarget(connection: VcsConnectionDomain): Pick<
 
 @Injectable()
 export class VcsConnectionService {
+  private readonly logger = new Logger(VcsConnectionService.name);
+
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     private readonly vcsPollingService: VcsPollingService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   /**
@@ -116,7 +120,7 @@ export class VcsConnectionService {
       }),
     );
 
-    await this.vcsPollingService.refreshConnectionSchedule(connection.id);
+    await this.refreshAfterCommit(connection.id);
 
     // M9: besides a rotation, the only time the secret leaves the server.
     return { ...this.mapToResponseDto(connection), webhookSecret };
@@ -137,16 +141,26 @@ export class VcsConnectionService {
 
   /**
    * Update VCS connection
+   *
+   * `connectionId` pins the call to the connection its caller read: a redemption re-reads the project's
+   * connection before the gate, so a connection deleted and recreated between approval and redemption
+   * answers the new id and never reaches this write (the hashes already differ). This check is the
+   * narrower window — a swap between that read and the execution.
    */
   async update(
     projectId: string,
     encryptionKey: string,
     dto: UpdateVcsConnectionDto,
+    connectionId?: string,
   ): Promise<VcsConnectionUpdatedResponseDto> {
     // Verify connection exists
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
+      throw new NotFoundAppException({}, 'vcs');
+    }
+
+    if (connectionId !== undefined && connection.id !== connectionId) {
       throw new NotFoundAppException({}, 'vcs');
     }
 
@@ -197,7 +211,16 @@ export class VcsConnectionService {
 
     const { encryptedToken: token, ...updateFields } = updateData;
     const updated = await this.audit.audited(
-      () => this.vcsRepo.updateVcsConnection(projectId, updateData),
+      // `gate-secret` (US-003, F1): a pinned call writes the connection it read, in the same statement
+      // that proves it is still the project's row. A replacement answered null, and the audited
+      // callback throws so neither the audit entry nor the write survives the refusal.
+      async () => {
+        const row = connectionId === undefined
+          ? await this.vcsRepo.updateVcsConnection(projectId, updateData)
+          : await this.vcsRepo.updateVcsConnectionById(connectionId, projectId, updateData);
+        if (row === null) throw new NotFoundAppException({}, 'vcs');
+        return row;
+      },
       (result) => ({
         key: 'vcs.connection.update',
         resourceType: 'vcs-connection',
@@ -207,10 +230,34 @@ export class VcsConnectionService {
       }),
     );
 
-    await this.vcsPollingService.refreshConnectionSchedule(updated.id);
+    await this.refreshAfterCommit(updated.id);
 
     const response = this.mapToResponseDto(updated);
     return generatedSecret ? { ...response, webhookSecret: generatedSecret } : response;
+  }
+
+  /**
+   * `gate-secret` (US-002): schedules the connection's polling after the write that produced it committed.
+   *
+   * Inside an approval redemption the write runs in the engine's transaction, and the scheduler reads the
+   * row through its own connection: refreshing before the commit schedules a row nobody can see yet. So the
+   * refresh is deferred to the transaction owner's after-commit queue, exactly as a permission-cache
+   * invalidation is. Outside any scope (`defer` answers false) there is nothing to wait for and today's
+   * inline refresh — and today's error propagation — stands.
+   *
+   * The deferred task is warning-only: the connection is already durable, and a failed schedule refresh must
+   * not turn an executed redemption into a 500 that loses the one-time `webhookSecret`.
+   */
+  private async refreshAfterCommit(connectionId: string): Promise<void> {
+    const deferred = this.afterCommit.defer(async () => {
+      try {
+        await this.vcsPollingService.refreshConnectionSchedule(connectionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`VCS polling refresh failed for connection ${connectionId}: ${message}`);
+      }
+    });
+    if (!deferred) await this.vcsPollingService.refreshConnectionSchedule(connectionId);
   }
 
   /**
@@ -240,17 +287,32 @@ export class VcsConnectionService {
   /**
    * M9: replace the inbound webhook secret and return the new one, once.
    * Deliveries signed with the old secret are rejected from now on.
+   *
+   * `connectionId` pins the rotation to the connection its caller read before the gate, the same way
+   * `update` does: a recreated connection answers a different stored input and is never touched.
    */
-  async rotateWebhookSecret(projectId: string): Promise<WebhookSecretResponseDto> {
+  async rotateWebhookSecret(projectId: string, connectionId?: string): Promise<WebhookSecretResponseDto> {
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
     }
 
+    if (connectionId !== undefined && connection.id !== connectionId) {
+      throw new NotFoundAppException({}, 'vcs');
+    }
+
     const webhookSecret = generateWebhookSecret();
     await this.audit.audited(
-      () => this.vcsRepo.updateVcsConnection(projectId, { webhookSecret }),
+      // F1: the pinned rotation writes the connection it read, atomically — a replacement answers null
+      // and the throw takes the (unwritten) audit entry with it.
+      async () => {
+        const updated = connectionId === undefined
+          ? await this.vcsRepo.updateVcsConnection(projectId, { webhookSecret })
+          : await this.vcsRepo.updateVcsConnectionById(connectionId, projectId, { webhookSecret });
+        if (updated === null) throw new NotFoundAppException({}, 'vcs');
+        return updated;
+      },
       (updated) => ({
         key: 'vcs.webhook-secret.rotate',
         resourceType: 'vcs-connection',

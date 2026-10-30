@@ -2,7 +2,8 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import type { RunnersService } from './runners.service';
-import { RunnerRouteCommands, RUNNER_ROUTE_VARIANTS } from './runner-route.commands';
+import type { EnrollmentService } from './enrollment.service';
+import { RunnerRouteCommands, RUNNER_ROUTE_VARIANTS, ENROLLMENT_ROUTE_VARIANTS } from './runner-route.commands';
 
 describe('RunnerRouteCommands', () => {
   function build() {
@@ -10,8 +11,9 @@ describe('RunnerRouteCommands', () => {
     const result = { id: 'r1', enabled: false };
     const runners = { update: vi.fn().mockResolvedValue(result), remove: vi.fn() };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
-    new RunnerRouteCommands(registry, runners as unknown as RunnersService, loader as unknown as ActorPrincipalLoader).onModuleInit();
-    return { registry, runners, loader, result };
+    const enrollments = { create: vi.fn().mockResolvedValue({ id: 'e1', labels: [], token: 'ke_x', expiresAt: 'x', usedAt: null, runnerId: null, createdById: 'u1', createdAt: 'x' }) };
+    new RunnerRouteCommands(registry, runners as unknown as RunnersService, loader as unknown as ActorPrincipalLoader, enrollments as unknown as EnrollmentService).onModuleInit();
+    return { registry, runners, loader, result, enrollments };
   }
   it('AC-13: registers both matching variants', () => {
     const { registry } = build();
@@ -31,6 +33,23 @@ describe('RunnerRouteCommands', () => {
     expect(runners.update).toHaveBeenCalledExactlyOnceWith('a1', 'r1', { enabled: false });
     expect(loader.forContext).toHaveBeenCalledOnce();
     expect(command.toResult?.(out)).toBe(result);
+  });
+  it('AC-6: registers the enrollment redeem command', () => {
+    const { registry } = build();
+    expect(registry.get('fleet.enrollment.create', 'rest:fleet-enrollments.create')).toMatchObject({
+      key: 'fleet.enrollment.create',
+      variant: ENROLLMENT_ROUTE_VARIANTS.create,
+      redeem: expect.any(Object),
+    });
+    expect(registry.get('fleet.enrollment.create', ENROLLMENT_ROUTE_VARIANTS.create)?.redeem).not.toHaveProperty('redact');
+    expect(ENROLLMENT_ROUTE_VARIANTS.create).toBe('rest:fleet-enrollments.create');
+  });
+  it('AC-7: projects the enrollment token out of persisted results', async () => {
+    const { registry } = build();
+    const command = registry.get('fleet.enrollment.create', ENROLLMENT_ROUTE_VARIANTS.create);
+    if (!command) throw new Error('Missing enrollment route command');
+    expect(command.toResult?.({ id: 'e1', labels: [], token: 'ke_x', expiresAt: 'x', usedAt: null, runnerId: null, createdById: 'u1', createdAt: 'x' }))
+      .toEqual({ id: 'e1', labels: [], expiresAt: 'x', usedAt: null, runnerId: null, createdById: 'u1', createdAt: 'x' });
   });
   it('delete parses ids and returns null without a result projector', async () => {
     const { registry, runners } = build();

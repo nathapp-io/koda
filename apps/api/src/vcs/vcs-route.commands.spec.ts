@@ -9,7 +9,14 @@ import { VcsRouteCommands, VCS_ROUTE_VARIANTS } from './vcs-route.commands';
 describe('VcsRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
-    const service = { delete: vi.fn().mockResolvedValue(undefined), testConnection: vi.fn().mockResolvedValue({ ok: false, latencyMs: 12, error: 'Invalid token' }) };
+    const secret = 's'.repeat(32);
+    const service = {
+      delete: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ ok: false, latencyMs: 12, error: 'Invalid token' }),
+      create: vi.fn().mockResolvedValue({ id: 'c1', repoName: 'r', webhookSecret: secret }),
+      update: vi.fn().mockResolvedValue({ id: 'c1', syncMode: 'polling' }),
+      rotateWebhookSecret: vi.fn().mockResolvedValue({ webhookSecret: secret }),
+    };
     const config: IVcsConfig = { encryptionKey: 'k1', defaultPollingIntervalMs: 300000, githubApiUrl: '', gitlabApiUrl: '' };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     const apply = vi.fn().mockResolvedValue({ issuesSynced: 1 });
@@ -17,7 +24,7 @@ describe('VcsRouteCommands', () => {
     new VcsRouteCommands(registry, service as unknown as VcsConnectionService, loader as unknown as ActorPrincipalLoader, config, manual as unknown as VcsManualSync).onModuleInit();
     const command = registry.get('vcs.connection.test', VCS_ROUTE_VARIANTS.test);
     if (!command) throw new Error('Missing test command');
-    return { registry, service, config, loader, command, manual, apply };
+    return { registry, service, config, loader, command, manual, apply, secret };
   }
   it.each([['vcs.sync.issue', 'rest:vcs.sync-issue'], ['vcs.sync.all', 'rest:vcs.sync-all']])('AC-9: registers prepared %s / %s', (key, variant) => {
     const { registry } = build();
@@ -60,6 +67,47 @@ describe('VcsRouteCommands', () => {
     expect(registry.get('vcs.connection.delete', 'rest:vcs.delete')).toBeDefined();
     expect(registry.get('vcs.connection.test', 'rest:vcs.test')).toBeDefined();
   });
+  it('AC-8: registers the create redeem command and redacts its token', () => {
+    const { registry } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (command?.redeem?.redact === undefined) throw new Error('Missing create redeem command');
+    expect(VCS_ROUTE_VARIANTS.create).toBe('rest:vcs.create');
+    expect(command.key).toBe('vcs.connection.create');
+    const connection = { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' };
+    expect(command.redeem.redact({ slug: 's', projectId: 'p1', connection })).toEqual({
+      slug: 's', projectId: 'p1', connection: { ...connection, token: '<redacted>' },
+    });
+  });
+  it('AC-8: the create command runs the service with the runtime key and drops the webhook secret', async () => {
+    const { registry, service, config, secret } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (!command) throw new Error('Missing create command');
+    const input = command.parse({
+      slug: 's', projectId: 'p1',
+      connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' },
+    });
+    expect(input).toEqual({ slug: 's', projectId: 'p1', connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' } });
+    const output = await command.execute(input);
+    expect(service.create).toHaveBeenCalledExactlyOnceWith('p1', 'k1', input.connection);
+    expect(output).toEqual({ id: 'c1', repoName: 'r', webhookSecret: secret });
+    expect(command.toResult?.(output)).toEqual({ id: 'c1', repoName: 'r' });
+    config.encryptionKey = 'k2';
+    await command.execute(input);
+    expect(service.create).toHaveBeenLastCalledWith('p1', 'k2', input.connection);
+  });
+  it('AC-9: the create command refuses a missing encryption key without calling the service', async () => {
+    const { registry, service, config } = build();
+    const command = registry.get('vcs.connection.create', VCS_ROUTE_VARIANTS.create);
+    if (!command) throw new Error('Missing create command');
+    const input = command.parse({
+      slug: 's', projectId: 'p1',
+      connection: { provider: 'github', repoOwner: 'o', repoName: 'r', token: 't' },
+    });
+    config.encryptionKey = null;
+    await expect(command.execute(input)).rejects.toMatchObject({ prefix: 'vcs' });
+    await expect(command.execute(input)).rejects.toThrow(ValidationAppException);
+    expect(service.create).not.toHaveBeenCalled();
+  });
   it('AC-9: executes with the runtime key and stores the service DTO unchanged', async () => {
     const { command, service, loader, config } = build();
     const input = command.parse({ projectId: 'p1', encryptionKey: 'ignored', token: 'ignored' });
@@ -89,5 +137,97 @@ describe('VcsRouteCommands', () => {
     expect(service.delete).toHaveBeenCalledExactlyOnceWith('p1');
     expect(command.toResult).toBeUndefined();
     for (const value of [null, [], {}, { projectId: '' }, { projectId: 3 }]) expect(() => command.parse(value)).toThrow(ValidationAppException);
+  });
+
+  it('US-003 AC-12: registers the update and rotate redeem commands', () => {
+    const { registry } = build();
+
+    const update = registry.get('vcs.connection.update', VCS_ROUTE_VARIANTS.update);
+    const rotate = registry.get('vcs.webhook-secret.rotate', VCS_ROUTE_VARIANTS.rotateWebhookSecret);
+
+    expect(VCS_ROUTE_VARIANTS.update).toBe('rest:vcs.update');
+    expect(VCS_ROUTE_VARIANTS.rotateWebhookSecret).toBe('rest:vcs.rotate-webhook-secret');
+    expect(update).toMatchObject({ key: 'vcs.connection.update', variant: 'rest:vcs.update', redeem: expect.any(Object) });
+    expect(rotate).toMatchObject({ key: 'vcs.webhook-secret.rotate', variant: 'rest:vcs.rotate-webhook-secret', redeem: expect.any(Object) });
+  });
+
+  it('US-003 AC-12: the update redaction keeps a token-less patch as it is, without adding a key', () => {
+    const { registry } = build();
+    const command = registry.get('vcs.connection.update', VCS_ROUTE_VARIANTS.update);
+    if (command?.redeem?.redact === undefined) throw new Error('Missing update redeem command');
+
+    const parsed = command.parse({ slug: 's', projectId: 'p1', connectionId: 'c1', patch: { syncMode: 'off' } });
+    const stored = command.redeem.redact(parsed) as { patch: Record<string, unknown> };
+
+    expect(stored).toEqual({ slug: 's', projectId: 'p1', connectionId: 'c1', patch: { syncMode: 'off' } });
+    expect(Object.hasOwn(stored.patch, 'token')).toBe(false);
+  });
+
+  it('US-003: the update redaction replaces a sent token and the command runs with the connection id', async () => {
+    const { registry, service, config } = build();
+    const command = registry.get('vcs.connection.update', VCS_ROUTE_VARIANTS.update);
+    if (command?.redeem?.redact === undefined) throw new Error('Missing update redeem command');
+
+    const input = command.parse({
+      slug: 's', projectId: 'p1', connectionId: 'c1', patch: { token: 'tok-new', syncMode: 'polling' },
+    });
+    expect(input).toEqual({ slug: 's', projectId: 'p1', connectionId: 'c1', patch: { token: 'tok-new', syncMode: 'polling' } });
+    expect(command.redeem.redact(input)).toEqual({
+      slug: 's', projectId: 'p1', connectionId: 'c1', patch: { token: '<redacted>', syncMode: 'polling' },
+    });
+
+    const output = await command.execute(input);
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('p1', 'k1', input.patch, 'c1');
+    expect(output).toEqual({ id: 'c1', syncMode: 'polling' });
+    config.encryptionKey = 'k2';
+    await command.execute(input);
+    expect(service.update).toHaveBeenLastCalledWith('p1', 'k2', input.patch, 'c1');
+  });
+
+  it('US-003 AC-14: the update result drops the generated webhook secret, the call keeps it', async () => {
+    const { registry, service, secret } = build();
+    const command = registry.get('vcs.connection.update', VCS_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing update command');
+    service.update.mockResolvedValue({ id: 'c1', syncMode: 'webhook', webhookSecret: secret });
+
+    const output = await command.execute(command.parse({ slug: 's', projectId: 'p1', connectionId: 'c1', patch: {} }));
+
+    expect(output).toEqual({ id: 'c1', syncMode: 'webhook', webhookSecret: secret });
+    expect(command.toResult?.(output)).toEqual({ id: 'c1', syncMode: 'webhook' });
+  });
+
+  it('US-003: the update command refuses a missing encryption key without calling the service', async () => {
+    const { registry, service, config } = build();
+    const command = registry.get('vcs.connection.update', VCS_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing update command');
+    const input = command.parse({ slug: 's', projectId: 'p1', connectionId: 'c1', patch: {} });
+    config.encryptionKey = null;
+
+    await expect(command.execute(input)).rejects.toMatchObject({ prefix: 'vcs' });
+    expect(service.update).not.toHaveBeenCalled();
+  });
+
+  it('US-003 AC-7: the rotate command runs with the connection id and stores only rotated', async () => {
+    const { registry, service, secret } = build();
+    const command = registry.get('vcs.webhook-secret.rotate', VCS_ROUTE_VARIANTS.rotateWebhookSecret);
+    if (!command) throw new Error('Missing rotate command');
+
+    const input = command.parse({ slug: 's', projectId: 'p1', connectionId: 'c1', body: 'ignored' });
+    expect(input).toEqual({ slug: 's', projectId: 'p1', connectionId: 'c1' });
+
+    const output = await command.execute(input);
+    expect(service.rotateWebhookSecret).toHaveBeenCalledExactlyOnceWith('p1', 'c1');
+    expect(output).toEqual({ webhookSecret: secret });
+    expect(command.toResult?.(output)).toEqual({ rotated: true });
+  });
+
+  it('US-003: the rotate command refuses an input without a connection id', () => {
+    const { registry } = build();
+    const command = registry.get('vcs.webhook-secret.rotate', VCS_ROUTE_VARIANTS.rotateWebhookSecret);
+    if (!command) throw new Error('Missing rotate command');
+
+    for (const value of [null, [], {}, { slug: 's', projectId: 'p1' }, { slug: 's', projectId: 'p1', connectionId: '' }]) {
+      expect(() => command.parse(value)).toThrow(ValidationAppException);
+    }
   });
 });

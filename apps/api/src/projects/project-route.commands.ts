@@ -6,6 +6,7 @@ import { parseRouteInput } from '../approvals/route/parse-route-input';
 import { routeCommand } from '../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { ProjectsService } from './projects.service';
+import { redactSecret } from '../approvals/route/redact-secret';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { AgentsService } from '../agents/agents.service';
@@ -14,6 +15,7 @@ import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 export const PROJECT_ROUTE_VARIANTS = {
   create: 'rest:projects.create',
   update: 'rest:projects.update',
+  updateCiToken: 'rest:projects.update-ci-token',
   delete: 'rest:projects.delete',
   updateAgent: 'rest:project-agents.update',
 } as const;
@@ -43,6 +45,21 @@ export class ProjectRouteCommands implements OnModuleInit {
         // Defense in depth: direct registry callers must not persist secrets either.
         if (patch.ciWebhookToken !== undefined) throw new ValidationAppException({}, 'approvals.invalidInput');
         return { slug, patch };
+      },
+      run: async (_principal, input) => this.service.update(input.slug, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ slug: string; patch: UpdateProjectDto }, Awaited<ReturnType<ProjectsService['update']>>>({
+      key: 'project.update', variant: PROJECT_ROUTE_VARIANTS.updateCiToken,
+      parse: (input) => {
+        const { slug } = parseRouteInput(input, ['slug']);
+        const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        const patch = parseBody(UpdateProjectDto, source.patch ?? {});
+        if (patch.ciWebhookToken === undefined) throw new ValidationAppException({}, 'approvals.invalidInput');
+        return { slug, patch };
+      },
+      redeem: {
+        redact: ({ slug, patch }) => ({ slug, patch: { ...patch, ciWebhookToken: redactSecret(patch.ciWebhookToken) } }),
       },
       run: async (_principal, input) => this.service.update(input.slug, input.patch),
       toResult: (result) => result,

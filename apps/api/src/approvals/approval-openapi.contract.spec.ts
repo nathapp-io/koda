@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 type OpenApiOperation = {
   responses?: Record<string, unknown>;
-  parameters?: { name?: string; in?: string }[];
+  parameters?: { name?: string; in?: string; required?: boolean }[];
 };
 type OpenApiDocument = {
   paths: Record<string, Record<string, OpenApiOperation>>;
@@ -135,13 +135,34 @@ const gatedOperations = [
   ['post', '/api/threads/{id}/stop'],
   ['post', '/api/threads/{id}/end-session'],
   ['post', '/api/threads/{id}/answer'],
+  ['post', '/api/fleet/enrollments'],
+  ['post', '/api/projects/{slug}/vcs'],
+  ['patch', '/api/projects/{slug}/vcs'],
+  ['post', '/api/projects/{slug}/vcs/webhook-secret/rotate'],
+  ['post', '/api/projects/{slug}/webhooks'],
+  ['patch', '/api/projects/{slug}/webhooks/{id}'],
+  ['post', '/api/projects/{slug}/invites'],
+  ['post', '/api/projects/{slug}/invites/{id}/resend'],
 ] as const;
 
-/** The `gate-secret` redeem pilots (US-006, US-007), as [method, path] pairs. */
+/** Existing `gate-secret` redeem pilots, as [method, path] pairs. */
 const REDEEM_PILOTS = [
   ['post', '/api/agents'],
   ['post', '/api/agents/{slug}/rotate-key'],
   ['post', '/api/admin/users'],
+] as const;
+
+/** Newly gated routes plus the already-gated project patch, as [method, path] pairs. */
+const REDEEM_OPERATIONS = [
+  ['post', '/api/fleet/enrollments'],
+  ['post', '/api/projects/{slug}/vcs'],
+  ['patch', '/api/projects/{slug}/vcs'],
+  ['post', '/api/projects/{slug}/vcs/webhook-secret/rotate'],
+  ['post', '/api/projects/{slug}/webhooks'],
+  ['patch', '/api/projects/{slug}/webhooks/{id}'],
+  ['post', '/api/projects/{slug}/invites'],
+  ['post', '/api/projects/{slug}/invites/{id}/resend'],
+  ['patch', '/api/projects/{slug}'],
 ] as const;
 
 function operationsWith202(): string[] {
@@ -152,7 +173,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 118 gated operations', () => {
+describe('OpenAPI contract for 126 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -177,16 +198,8 @@ describe('OpenAPI contract for 118 gated operations', () => {
     expect(openapi.paths['/api/projects/{slug}/kb/documents/{sourceId}']?.delete?.responses).toHaveProperty('202');
   });
 
-  it('AC-7 (US-010): POST /api/fleet/enrollments remains ungated', () => {
-    expect(openapi.paths['/api/fleet/enrollments']?.post?.responses).not.toHaveProperty('202');
-  });
-
   it('AC-4: POST /api/projects/{slug}/tickets has a 202 response', () => {
     expect(openapi.paths['/api/projects/{slug}/tickets']?.post?.responses).toHaveProperty('202');
-  });
-
-  it('AC-5: POST /api/projects/{slug}/invites has no 202 response', () => {
-    expect(openapi.paths['/api/projects/{slug}/invites']?.post?.responses).not.toHaveProperty('202');
   });
 
   it('AC-5: POST /api/memory has a 202 response', () => {
@@ -211,10 +224,20 @@ describe('OpenAPI contract for 118 gated operations', () => {
   it('AC-14 (US-007): each redeem pilot documents the header exactly once, and as optional', () => {
     for (const [method, path] of REDEEM_PILOTS) {
       const headers = (openapi.paths[path]?.[method]?.parameters ?? [])
-        .filter((parameter) => parameter.in === 'header');
+        .filter((parameter) => parameter.name === 'X-Koda-Approval-Request');
 
       expect(headers, `${method} ${path}`).toHaveLength(1);
-      expect(headers[0]).toMatchObject({ name: 'X-Koda-Approval-Request', required: false });
+      expect(headers[0]).toMatchObject({ name: 'X-Koda-Approval-Request', in: 'header', required: false });
+    }
+  });
+
+  it('AC-4: all nine secret-route operations have 202 and one optional approval header', () => {
+    for (const [method, path] of REDEEM_OPERATIONS) {
+      const operation = openapi.paths[path]?.[method];
+      expect(operation?.responses, `${method} ${path} 202`).toHaveProperty('202');
+      const parameters = (operation?.parameters ?? []).filter((parameter) => parameter.name === 'X-Koda-Approval-Request');
+      expect(parameters, `${method} ${path}`).toHaveLength(1);
+      expect(parameters[0]).toMatchObject({ name: 'X-Koda-Approval-Request', in: 'header', required: false });
     }
   });
 
@@ -231,9 +254,9 @@ describe('OpenAPI contract for 118 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-15 (US-007): 202 responses exist on exactly the 118 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 126 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(118);
+    expect(expected).toHaveLength(126);
     expect(operationsWith202()).toEqual(expected);
   });
 });

@@ -7,6 +7,13 @@ import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loade
 import { RunnersService } from './runners.service';
 import { RunnerDto } from './dto/runner.dto';
 import { UpdateRunnerDto } from './dto/update-runner.dto';
+import { EnrollmentService } from './enrollment.service';
+import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
+import { EnrollmentCreatedDto } from './dto/enrollment.dto';
+
+export const ENROLLMENT_ROUTE_VARIANTS = {
+  create: 'rest:fleet-enrollments.create',
+} as const;
 
 export const RUNNER_ROUTE_VARIANTS = {
   update: 'rest:fleet-runners.update',
@@ -19,9 +26,20 @@ export class RunnerRouteCommands implements OnModuleInit {
     private readonly commands: ApprovalCommandRegistry,
     private readonly runners: RunnersService,
     private readonly loader: ActorPrincipalLoader,
+    private readonly enrollments: EnrollmentService,
   ) {}
 
   onModuleInit(): void {
+    this.commands.register(routeCommand<{ labels: string[] }, EnrollmentCreatedDto>({
+      key: 'fleet.enrollment.create', variant: ENROLLMENT_ROUTE_VARIANTS.create,
+      parse: (input) => {
+        const { labels = [] } = parseBody(CreateEnrollmentDto, input);
+        return { labels };
+      },
+      run: (principal, input) => this.enrollments.create(principal.id, input.labels),
+      redeem: {},
+      toResult: ({ token: _token, ...result }) => result,
+    }, this.loader));
     this.commands.register(routeCommand<{ id: string; patch: UpdateRunnerDto }, RunnerDto>({
       key: 'fleet.runner.update', variant: RUNNER_ROUTE_VARIANTS.update,
       parse: (input) => {
