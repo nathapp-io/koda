@@ -7,6 +7,7 @@ import ApprovableKeysTable from '~/components/approvals/ApprovableKeysTable.vue'
 import { extractApiError } from '~/composables/useApi'
 import { useApprovalPolicies } from '~/composables/useApprovalPolicies'
 import { isForbidden } from '~/composables/useFleetBudgetPage'
+import { isIncompletePolicyListError } from '~/lib/approval-policies'
 import type { ApprovalPolicy, PolicyBase } from '~/lib/approval-policies'
 
 definePageMeta({ layout: 'default' })
@@ -23,6 +24,11 @@ const { policies, keys, pending, list, loadKeys, remove } = useApprovalPolicies(
 
 const loaded = ref(false)
 const loadFailed = ref(false)
+/**
+ * The list came back short (see `IncompletePolicyListError`). The override counts are computed over
+ * the whole list, so the page shows this state instead of counts it knows would be wrong.
+ */
+const incomplete = ref(false)
 /** A 403 on the load means the same thing as a missing key: this page is not yours. */
 const loadForbidden = ref(false)
 const forbidden = computed(() => !canManage.value || loadForbidden.value)
@@ -35,9 +41,14 @@ async function reload(): Promise<void> {
     await Promise.all([list(), loadKeys()])
     loaded.value = true
     loadFailed.value = false
+    incomplete.value = false
   } catch (err: unknown) {
     if (isForbidden(err)) {
       loadForbidden.value = true
+      return
+    }
+    if (isIncompletePolicyListError(err)) {
+      incomplete.value = true
       return
     }
     loadFailed.value = true
@@ -96,6 +107,9 @@ async function onDelete(policy: ApprovalPolicy): Promise<void> {
     </p>
     <template v-else>
       <LoadingState v-if="pending && !loaded" />
+      <p v-else-if="incomplete" class="text-sm text-muted-foreground" data-testid="policies-incomplete">
+        {{ t('approvals.policies.incomplete') }}
+      </p>
       <p v-else-if="loadFailed" class="text-sm text-status-rejected" data-testid="policies-load-failed">
         {{ t('approvals.policies.loadFailed') }}
       </p>

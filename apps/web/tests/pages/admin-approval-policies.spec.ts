@@ -158,6 +158,23 @@ describe('AC-9: without the key the page asks for nothing', () => {
 
     expect(m.app.text()).toContain(copy('approvals.policies.forbidden'))
   })
+
+  test('a list the API cannot read to the end shows the incomplete message and no counts', async () => {
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path.endsWith('/keys')) return { keys: APPROVABLE }
+          // The API claims another page and then answers with none: the walk cannot complete.
+          return { total: 2, current: 1, size: 100, hasNext: true, hasPrev: false, records: [] }
+        }) as jest.Mock,
+      },
+    })
+
+    expect(m.app.text()).toContain(copy('approvals.policies.incomplete'))
+    // A partial list would make every override count wrong, so none is rendered.
+    expect(allById(m.app, 'approvable-key-row')).toHaveLength(0)
+    expect(allById(m.app, 'policy-row')).toHaveLength(0)
+  })
 })
 
 describe('AC-10: the keys table counts the overrides of every key', () => {

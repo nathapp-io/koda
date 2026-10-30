@@ -73,6 +73,38 @@ export interface ApprovalPolicyPage {
   records: ApprovalPolicy[]
 }
 
+/**
+ * The list could not be read to the end: the API answered `hasNext: true` and then a page with no
+ * records, so no further page number can make progress.
+ *
+ * `useApprovalPolicies().list()` throws it instead of returning what it has, because every override
+ * count on the page is computed over that list — a short list would present wrong counts as complete.
+ * The message is developer-facing; a page words the state with its own i18n key.
+ */
+export class IncompletePolicyListError extends Error {
+  /** A structural discriminant, so the error survives a second copy of this module. */
+  readonly code = 'incompletePolicyList'
+
+  /** The page number that answered `hasNext` with nothing in it. */
+  readonly page: number
+
+  constructor(page: number) {
+    super(`approval policies: page ${page} answered hasNext with no records`)
+    this.name = 'IncompletePolicyListError'
+    this.page = page
+  }
+}
+
+/**
+ * Is `err` an `IncompletePolicyListError`? Matched by type, and by the error's own `code` for the case
+ * where the thrower and the catcher hold different copies of this module (a test harness, a bundler
+ * chunk): `instanceof` is false across copies, the code is not.
+ */
+export function isIncompletePolicyListError(err: unknown): err is IncompletePolicyListError {
+  if (err instanceof IncompletePolicyListError) return true
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'incompletePolicyList'
+}
+
 /** The five fields an edit may change: the pattern and the subject are part of the selector. */
 export interface PolicyFormValues {
   mode: ApprovalMode

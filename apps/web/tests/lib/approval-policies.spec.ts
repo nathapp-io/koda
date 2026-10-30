@@ -8,7 +8,9 @@
  */
 import { describe, test, expect, jest, afterEach } from '@jest/globals'
 import {
+  IncompletePolicyListError,
   buildPolicySchema,
+  isIncompletePolicyListError,
   modeOptions,
   overrideCount,
   parseTimeout,
@@ -206,6 +208,24 @@ describe('the dialog bodies', () => {
   })
 })
 
+describe('IncompletePolicyListError', () => {
+  test('the guard recognises the error by type and by its code', () => {
+    const error = new IncompletePolicyListError(3)
+    expect(error.page).toBe(3)
+    expect(isIncompletePolicyListError(error)).toBe(true)
+    // A second copy of this module (a test harness, a bundler chunk) makes `instanceof` false, so the
+    // guard also reads the structural code the error carries.
+    expect(isIncompletePolicyListError({ name: 'Error', message: 'x', code: 'incompletePolicyList' })).toBe(true)
+  })
+
+  test('the guard leaves every other failure alone', () => {
+    expect(isIncompletePolicyListError(new Error('boom'))).toBe(false)
+    expect(isIncompletePolicyListError({ code: 'forbidden' })).toBe(false)
+    expect(isIncompletePolicyListError(null)).toBe(false)
+    expect(isIncompletePolicyListError(undefined)).toBe(false)
+  })
+})
+
 describe('the policy paths', () => {
   test('global and project bases, with the slug and id encoded', () => {
     expect(policyRoot({ kind: 'global' })).toBe('/approval-policies')
@@ -258,13 +278,30 @@ describe('AC-7: list() reads every page so an override count sees every policy',
     expect(get).toHaveBeenCalledWith('/projects/koda/approval-policies', { query: { size: '100' } })
   })
 
-  test('a hasNext answer with no records stops instead of paging forever', async () => {
+  test('a hasNext answer with no records is an incomplete list, not a shorter one', async () => {
     const get = jest.fn(async () => page([], { hasNext: true })) as unknown as Fn
     install({ get })
 
-    await useApprovalPolicies({ kind: 'global' }).list()
+    const policies = useApprovalPolicies({ kind: 'global' })
 
+    await expect(policies.list()).rejects.toBeInstanceOf(IncompletePolicyListError)
     expect(get).toHaveBeenCalledTimes(1)
+    // Nothing is stored, so no surface can count over a list it knows is short.
+    expect(policies.policies.value).toEqual([])
+  })
+
+  test('a refresh that comes back incomplete keeps the last complete list', async () => {
+    let incomplete = false
+    const get = jest.fn(async () => (incomplete ? page([], { hasNext: true }) : page([policy({ id: 'p1' })]))) as unknown as Fn
+    install({ get })
+
+    const policies = useApprovalPolicies({ kind: 'global' })
+    await policies.list()
+    expect(policies.policies.value.map((row) => row.id)).toEqual(['p1'])
+
+    incomplete = true
+    await expect(policies.list()).rejects.toBeInstanceOf(IncompletePolicyListError)
+    expect(policies.policies.value.map((row) => row.id)).toEqual(['p1'])
   })
 
   test('list() keeps paging past a hundred pages until hasNext is false', async () => {

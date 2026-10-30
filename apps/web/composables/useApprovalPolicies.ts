@@ -10,7 +10,7 @@
  * keeps going while the API says there is more.
  */
 import { ref } from 'vue'
-import { policyItem, policyKeysPath, policyRoot } from '~/lib/approval-policies'
+import { IncompletePolicyListError, policyItem, policyKeysPath, policyRoot } from '~/lib/approval-policies'
 import type { ApprovalPolicy, ApprovalPolicyPage, ApprovableKey, PolicyBase } from '~/lib/approval-policies'
 
 /** The page size the list asks for: the API's maximum, so the whole list is usually one request. */
@@ -36,9 +36,12 @@ export function useApprovalPolicies(base: PolicyBase) {
 
   /**
    * Every policy of this base, page after page: the walk ends only when the API says there is no
-   * next page, so an override count is never computed over a truncated list. The one other exit is
-   * a page that claims `hasNext` but carries no records — no page number could make progress from
-   * there, and spinning on it would hang the page.
+   * next page, so an override count is never computed over a truncated list.
+   *
+   * A page that claims `hasNext` and carries no records cannot be followed by another one, so the
+   * list is known to be short: it throws `IncompletePolicyListError` rather than returning it, and
+   * leaves the last complete list in place. A caller shows that state; it must not present counts
+   * from a list it knows is partial.
    */
   async function list(): Promise<ApprovalPolicy[]> {
     pending.value = true
@@ -50,7 +53,8 @@ export function useApprovalPolicies(base: PolicyBase) {
           query: page === 1 ? { size: String(POLICY_PAGE_SIZE) } : { current: String(page), size: String(POLICY_PAGE_SIZE) },
         }))
         all.push(...answer.records)
-        if (!answer.hasNext || answer.records.length === 0) break
+        if (!answer.hasNext) break
+        if (answer.records.length === 0) throw new IncompletePolicyListError(page)
         page += 1
       }
       policies.value = all

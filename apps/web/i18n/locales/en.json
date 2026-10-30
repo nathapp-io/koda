@@ -2508,6 +2508,7 @@
       "create": "New policy",
       "forbidden": "You do not have permission to manage approval policies.",
       "loadFailed": "Could not load approval policies.",
+      "incomplete": "The policy list could not be read to the end, so the override counts are not shown.",
       "mode": {
         "none": "Off",
         "self": "The requester decides",
