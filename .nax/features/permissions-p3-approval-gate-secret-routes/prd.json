@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-routes",
   "branchName": "feat/permissions-p3-approval-gate-secret-routes",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T04:13:51.521Z",
+  "updatedAt": "2026-10-30T04:19:49.306Z",
   "userStories": [
     {
       "id": "US-001",
@@ -451,14 +451,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two route/command adapters reuse existing invite grant checks, inline email and redeem execution without changing domain rules; invite tokens still mandate strict security TDD."
+        "reasoning": "Two route/command adapters reuse existing invite grant checks, inline email and redeem execution without changing domain rules; invite tokens still mandate strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/projects/invites/project-invites.controller.ts",
@@ -504,7 +507,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9ad0971547d76f01cf94b9ad10d6fc541d956c99"
     },
     {
       "id": "US-006",
