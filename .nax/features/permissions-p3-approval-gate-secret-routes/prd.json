@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-secret-routes",
   "branchName": "feat/permissions-p3-approval-gate-secret-routes",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T03:09:36.047Z",
+  "updatedAt": "2026-10-30T03:27:17.658Z",
   "userStories": [
     {
       "id": "US-001",
@@ -116,14 +116,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces shared credential redaction and an after-commit async side-effect boundary across VCS, permissions and approvals; token handling requires strict security TDD."
+        "reasoning": "Introduces shared credential redaction and an after-commit async side-effect boundary across VCS, permissions and approvals; token handling requires strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs.controller.ts",
@@ -203,7 +206,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bfc5aa5081032c700f7456d01fc63eb8a24f5145"
     },
     {
       "id": "US-003",
