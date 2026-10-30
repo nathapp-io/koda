@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext } from '../../../action-context/action-context';
+import type { ApprovalRequestRecord } from '../../../approvals/domain/approval.domain';
 import type { ApprovalCommand } from '../../../approvals/approval-command.registry';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { committedEffect } from '../../../common/committed-effects';
@@ -63,6 +64,21 @@ export class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInpu
     private readonly audit: AuditRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
+
+  async details(request: ApprovalRequestRecord): Promise<Record<string, unknown> | null> {
+    const view = await this.asks.findApproval(request.id);
+    if (!view) return null;
+    const detail: Record<string, unknown> = { kind: 'budget', policyId: view.policyId, resolvedBy: view.resolvedBy, outcome: view.outcome };
+    if (request.status === 'pending') {
+      const input = this.parse(request.input);
+      const rows = await this.asks.findRequeueCandidates(input.policyId, new Date(input.requestedAt), MAX_REQUEUE_CANDIDATES + 1);
+      detail.requeueCandidates = rows.slice(0, MAX_REQUEUE_CANDIDATES).map(({ jobId, projectId, feature, queuedAt }) => ({
+        jobId, projectId, feature, queuedAt: queuedAt.toISOString(),
+      }));
+      detail.requeueCandidatesTruncated = rows.length > MAX_REQUEUE_CANDIDATES;
+    }
+    return detail;
+  }
 
   parse(input: unknown): BudgetAskInput {
     if (!isRecord(input) || !isText(input.policyId) || !isText(input.scopeType) || !isText(input.windowKind) ||

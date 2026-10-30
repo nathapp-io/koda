@@ -47,7 +47,7 @@ describe('approval HTTP boundary', () => {
   it('detail retains result and serializes decisions without internal requestId', () => {
     const decision = { id: 'decision', requestId: record.id, deciderType: 'USER' as const, deciderId: 'user', decision: 'reject' as const, comment: null, decidedAt: date, params: null };
     expect(ApprovalRequestDto.from({ request: record, decisions: [decision] })).toEqual({
-      ...ApprovalRequestSummaryDto.from(record), input: record.input, result: record.result,
+      ...ApprovalRequestSummaryDto.from(record), input: record.input, result: record.result, details: null,
       decisions: [{ id: 'decision', deciderType: 'USER', deciderId: 'user', decision: 'reject', comment: null, params: null, decidedAt: date.toISOString() }],
     });
     expect(ApprovalDecisionDto.from(decision)).not.toHaveProperty('requestId');

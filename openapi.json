@@ -24146,6 +24146,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
           "input": {
             "type": "object",
             "nullable": true
@@ -24180,6 +24185,7 @@
           "decidedAt",
           "settledAt",
           "createdAt",
+          "details",
           "input",
           "result",
           "decisions"

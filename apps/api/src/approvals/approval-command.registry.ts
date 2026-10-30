@@ -17,6 +17,7 @@
  * parses its own body. A primary and a variant of one key never answer for each other.
  */
 import { Injectable } from '@nestjs/common';
+import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { findCatalogEntry } from '../permissions/catalog';
 
 /** The longest variant the registry accepts, in characters. */
@@ -35,6 +36,8 @@ export interface ApprovalRedeem<TInput> {
 }
 
 export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {
+  /** Read-only, GET-only request enrichment; failures do not hide the request. */
+  details?(request: ApprovalRequestRecord): Promise<Record<string, unknown> | null>;
   /** A catalog key with `approval.approvable === true`. */
   key: string;
   /**

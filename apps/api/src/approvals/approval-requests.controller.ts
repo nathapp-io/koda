@@ -86,7 +86,7 @@ export class ApprovalRequestsController {
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 404, description: 'Approval request missing or invisible' })
   async get(@Principal() principal: KodaPrincipal, @Param('id') id: string) {
-    try { return JsonResponse.Ok(ApprovalRequestDto.from(await this.queries.get(ref(principal), id))); }
+    try { return JsonResponse.Ok(ApprovalRequestDto.from(await this.queries.getDetail(ref(principal), id))); }
     catch (error) { rethrowApprovalError(error); }
   }
 

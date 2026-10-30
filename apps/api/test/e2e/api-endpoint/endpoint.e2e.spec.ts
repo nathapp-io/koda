@@ -5891,6 +5891,9 @@ describeIntegration('project fleet decide approval lifecycle', () => {
       input: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask', payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } },
       link: { jobId: job.id, leaseEpoch: 1, naxAskId: 'smoke-ask' },
     });
+    const detail = data<{ details: unknown }>(await request(server()).get(`/api/approvals/${requestId}`).set(auth(world.tokens.root)).expect(200));
+    expect(detail.details).toEqual({ kind: 'bash', jobId: job.id, resolvedBy: null, outcome: null });
+    await request(server()).get('/api/approvals/missing').set(auth(world.tokens.root)).expect(404);
     const outer = data<{ id: string; permissionKey: string }>(await decide(requestId).expect(202));
     expect(outer.permissionKey).toBe('fleet.approval.decide.bash');
     expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'pending' });
