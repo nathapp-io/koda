@@ -10,9 +10,17 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * escalate job. (2) A human allows one from the inbox and the runner receives the answer; (3) an unanswered ask expires.
  * API polls stay at one request per 2 s: the global throttle is 100 requests a minute (only /fleet/runner/* is exempt).
  * Project `fleet-e2e` and repo acme/e2e-app come from prisma/seed-e2e.ts.
+ *
+ * Permissions P3b US-007 moved the surfaces these journeys drive onto the approval engine: the job page's Review
+ * callout and the job page's own rows read `GET /approvals?jobId=`, and the inbox they open is `/[project]/approvals`
+ * (`approval-request-*` testids). The fixtures still read the fleet view for the ask's id and status, which is the same
+ * `ApprovalRequest` row (`toFleetApproval` answers `request.id`), so a settled ask is asserted through the engine's
+ * status on the page.
  */
 const SLUG = 'fleet-e2e';
 const POLL = { intervals: [2_000] };
+/** The engine settles an approved ask as `executed` (its `approved` step is skipped); either reads as settled. */
+const SETTLED = /^(approved|executed)$/;
 
 test.describe('Fleet bash approvals (scripted relay runner)', () => {
   let token = '';
@@ -53,7 +61,8 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).filter((a) => a.status === 'pending').length, { timeout: 20_000, ...POLL }).toBe(1);
     const [approval] = await jobApprovals(token, SLUG, jobId);
 
-    // The jobs list marks the job; the job page calls it out and Review opens the inbox row.
+    // The jobs list marks the job; the job page calls it out, previews the command from the engine detail and
+    // Review opens the engine inbox row.
     await webLogin(page);
     await page.goto(`/${SLUG}/fleet`);
     await waitForHydration(page);
@@ -61,31 +70,41 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await page.goto(`/${SLUG}/fleet/jobs/${jobId}`);
     await waitForHydration(page);
     await expect(page.getByTestId('fleet-job-approval-callout')).toContainText('1');
+    await expect(page.getByTestId(`fleet-job-approval-${approval.id}`)).toContainText(ask.command);
     await page.getByTestId('fleet-job-approval-review').click();
-    await page.waitForURL(new RegExp(`/${SLUG}/fleet/approvals\\?id=${approval.id}$`));
+    await page.waitForURL(new RegExp(`/${SLUG}/approvals\\?id=${approval.id}$`));
     await waitForHydration(page);
 
-    // The row shows the masked command, the masked note and the countdown; Allow once decides it.
-    const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
-    await expect(row.getByTestId('fleet-approval-bash-command')).toHaveText(ask.command);
-    await expect(row.getByTestId('fleet-approval-bash-masked')).toBeVisible();
-    await expect(row.getByTestId('fleet-approval-countdown')).toBeVisible();
-    await row.getByTestId('fleet-approval-bash-allow').click();
-    await expect(row.getByTestId('fleet-approval-outcome-decision')).toContainText('Allowed once');
-    await expect(row.getByTestId('fleet-approval-outcome-delivery')).toHaveAttribute('data-delivery', 'waiting');
+    // The engine's bash panel shows the masked command, the masked note and the countdown; Allow once decides it.
+    const row = page.getByTestId(`approval-request-row-${approval.id}`);
+    const panel = row.getByTestId('approval-request-bash-panel');
+    await expect(panel.getByTestId('approval-request-bash-command')).toHaveText(ask.command);
+    await expect(panel.getByTestId('approval-request-bash-masked')).toBeVisible();
+    await expect(panel.getByTestId('approval-request-bash-countdown')).toBeVisible();
+    await panel.getByTestId('approval-request-bash-allow').click();
 
-    // The runner receives exactly the human's answer and acks it; the reloaded row reads delivered.
+    // The decide response carries no engine details, so the outcome shows the settled status and no buttons yet.
+    await expect(row.getByTestId('approval-request-outcome-status')).toBeVisible();
+    await expect(panel.getByTestId('approval-request-bash-allow')).toHaveCount(0);
+
+    // The runner receives exactly the human's answer and acks it; the row then reads delivered. The outcome
+    // rides the engine's details, which the fleet-side subscriber writes a beat after the decision, so the read
+    // is retried rather than assumed present on the first reload.
     const answer = await runner.takeCommand('APPROVAL_ANSWER', jobId, { result: 'ok' });
     expect(answer.payload).toEqual({ approvalId: approval.id, naxAskId: ask.naxAskId, choice: 'allow' });
-    await page.reload();
-    await waitForHydration(page);
-    await expect(row.getByTestId('fleet-approval-outcome-delivery')).toHaveAttribute('data-delivery', 'delivered', { timeout: 10_000 });
+    await expect.poll(async () => {
+      await page.reload();
+      await waitForHydration(page);
+      return row.getByTestId('approval-request-outcome-delivery').getAttribute('data-delivery').catch(() => null);
+    }, { timeout: 20_000, intervals: [2_000] }).toBe('delivered');
 
-    // The job completes; its page lists the ask as approved and the timeline shows it was requested.
+    // The job completes; its page lists the ask as settled and the timeline shows it was requested.
     await finish(lease, feature, 21);
     await page.goto(`/${SLUG}/fleet/jobs/${jobId}`);
     await waitForHydration(page);
-    await expect(page.getByTestId(`fleet-job-approval-${approval.id}`)).toHaveAttribute('data-status', 'approved');
+    const jobRow = page.getByTestId(`fleet-job-approval-${approval.id}`);
+    await expect(jobRow).toContainText(ask.command);
+    await expect(jobRow).toHaveAttribute('data-status', SETTLED);
     await expect(page.getByTestId('fleet-job-approval-callout')).toHaveCount(0);
     await expect(page.getByTestId('fleet-job-timeline')).toContainText(`Approval requested: ${ask.command}`);
   });
@@ -101,21 +120,21 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     const [approval] = await jobApprovals(token, SLUG, jobId);
 
     await webLogin(page);
-    await page.goto(`/${SLUG}/fleet/approvals?id=${approval.id}`);
+    await page.goto(`/${SLUG}/approvals?id=${approval.id}`);
     await waitForHydration(page);
-    const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
-    await expect(row.getByTestId('fleet-approval-bash-deny')).toBeVisible();
-    // At 0 the panel stops offering a decision (D292). The expiry sweep may already have replaced the panel with the
-    // outcome (its live notice re-fetches the row), so either end state is accepted here.
-    await expect(row.getByTestId('fleet-approval-bash-deny')).toHaveCount(0, { timeout: 45_000 });
-    await expect(row.getByTestId('fleet-approval-bash-countdown').or(row.getByTestId('fleet-approval-outcome-decision'))).toBeVisible();
+    const row = page.getByTestId(`approval-request-row-${approval.id}`);
+    await expect(row.getByTestId('approval-request-bash-deny')).toBeVisible();
+    // At 0 the panel stops offering a decision (D292). The engine may already have re-read the row as settled,
+    // so either end state is accepted here.
+    await expect(row.getByTestId('approval-request-bash-deny')).toHaveCount(0, { timeout: 45_000 });
+    await expect(row.getByTestId('approval-request-bash-countdown').or(row.getByTestId('approval-request-outcome-status'))).toBeVisible();
 
-    // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) marks it expired; the reloaded row reads Expired, Timed out.
+    // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) expires it; the reloaded row reads Expired.
     await expect.poll(async () => (await jobApprovals(token, SLUG, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
     await page.reload();
     await waitForHydration(page);
     await expect(row).toHaveAttribute('data-status', 'expired');
-    await expect(row.getByTestId('fleet-approval-outcome-decision')).toContainText('Timed out');
+    await expect(row.getByTestId('approval-request-outcome-status')).toContainText('Expired');
     expect((await runner.commandsFor(jobId)).filter((c) => c.type === 'APPROVAL_ANSWER')).toEqual([]);
 
     await finish(lease, feature, 22);

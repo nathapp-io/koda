@@ -98,3 +98,38 @@ describe('fleet jobs list', () => {
     expect(list).toContain('<RepoConfigList :slug="slug" :repos="options.repos.value" />')
   })
 })
+
+/**
+ * P3b US-007: the browser journeys the fleet approvals run drive the approval engine's inbox, because the two
+ * links they click (the jobs list's banner review link and the job page's Review callout) now open
+ * `/<slug>/approvals`. The specs pin the engine route and row testids here, so a future edit cannot quietly point
+ * one of them back at the fleet inbox the redirect retires.
+ */
+describe('the approval journeys drive the engine inbox (P3b US-007)', () => {
+  const journeys: Array<[string, string]> = [
+    ['bash journey', read('tests', 'e2e', 'fleet-bash-approvals.e2e.spec.ts')],
+    ['budget journey', read('tests', 'e2e', 'fleet-approvals.e2e.spec.ts')],
+  ]
+  /** The retired fleet inbox route and the fleet row testids, none of which the engine inbox renders. */
+  const RETIRED = [
+    '/${SLUG}/fleet/approvals',
+    'fleet-approval-row-',
+    'fleet-approval-bash-',
+    'fleet-approval-budget-panel',
+    'fleet-approval-candidate-',
+    'fleet-approval-amount',
+    'fleet-approval-raise',
+    'fleet-approval-outcome',
+    'fleet-approval-requeue',
+    'fleet-approval-countdown',
+  ]
+
+  test.each(journeys)('%s opens the engine inbox row it landed on', (_name, source) => {
+    expect(source).toContain('/${SLUG}/approvals')
+    expect(source).toContain('approval-request-row-${approval.id}')
+  })
+
+  test.each(journeys)('%s asserts no retired fleet inbox path or row testid', (_name, source) => {
+    for (const retired of RETIRED) expect(source).not.toContain(retired)
+  })
+})

@@ -12,6 +12,11 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * The database is re-created per Playwright run but the calendar-month window is shared by the whole
  * fleet suite: the policy and the raised limit are therefore stated as headroom above the window's
  * existing spend, which is exactly D254's $0.50 / $2 on a clean window (see monthSpendUsd).
+ *
+ * Permissions P3b US-007 moved the banner's Review link onto the approval engine: it opens
+ * `/[project]/approvals?id=…` (`approval-request-*` testids) instead of the fleet inbox. The fixtures still read the
+ * fleet view for the ask's id and status, which is the same `ApprovalRequest` row (`toFleetApproval` answers
+ * `request.id`).
  */
 const SLUG = 'fleet-e2e';
 
@@ -61,7 +66,7 @@ test.describe('Fleet approvals (scripted runner)', () => {
     await expect.poll(() => jobState(token, SLUG, jobB), { timeout: 20_000 }).toBe('CANCELLED');
     const [approval] = await pendingBudgetApprovals(token, SLUG);
 
-    // 3. The banner on the jobs list leads to the override; the header badge counts it.
+    // 3. The banner on the jobs list leads to the engine inbox row; the header badge counts it.
     await webLogin(page);
     await page.goto(`/${SLUG}/fleet`);
     await waitForHydration(page);
@@ -70,19 +75,23 @@ test.describe('Fleet approvals (scripted runner)', () => {
     const before = Number(await badge.getAttribute('data-count'));
     expect(before).toBeGreaterThanOrEqual(1);
     await page.getByTestId('fleet-budget-banner-review').click();
-    await page.waitForURL(new RegExp(`/${SLUG}/fleet/approvals\\?id=${approval.id}$`));
+    await page.waitForURL(new RegExp(`/${SLUG}/approvals\\?id=${approval.id}$`));
     await waitForHydration(page);
 
-    // 4. The row is open with B offered and ticked; raise to $2 above the window's opening spend
+    // 4. The engine's budget panel is open with B offered and ticked; raise to $2 above the window's opening spend
     // ($2 on a clean database), always above the spend at decide time.
-    const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
-    await expect(row.getByTestId('fleet-approval-budget-panel')).toBeVisible();
-    await expect(row.getByTestId(`fleet-approval-candidate-${jobB}`)).toBeChecked();
-    await row.getByTestId('fleet-approval-amount').fill((round2(priorSpend) + 2).toFixed(2));
-    await row.getByTestId('fleet-approval-raise').click();
+    const row = page.getByTestId(`approval-request-row-${approval.id}`);
+    await expect(row.getByTestId('approval-request-budget-panel')).toBeVisible();
+    await expect(row.getByTestId(`approval-request-candidate-${jobB}`)).toBeChecked();
+    await row.getByTestId('approval-request-budget-amount').fill((round2(priorSpend) + 2).toFixed(2));
+    await row.getByTestId('approval-request-budget-raise').click();
+    await expect(row.getByTestId('approval-request-outcome-status')).toBeVisible();
 
-    // 5. The outcome shows B re-queued; the badge drops by one (at 0 it is not rendered at all).
-    await expect(row.getByTestId(`fleet-approval-requeue-result-${jobB}`)).toHaveAttribute('data-ok', 'true');
+    // 5. The decide response carries no engine details, so re-read the settled request: the outcome shows B
+    // re-queued; the badge drops by one (at 0 it is not rendered at all).
+    await page.reload();
+    await waitForHydration(page);
+    await expect(row.getByTestId(`approval-request-requeue-${jobB}`)).toHaveAttribute('data-ok', 'true', { timeout: 20_000 });
     if (before === 1) {
       await expect(badge).toHaveCount(0, { timeout: 10_000 });
     } else {
