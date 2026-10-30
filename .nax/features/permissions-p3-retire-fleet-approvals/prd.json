@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T17:18:41.413Z",
+  "updatedAt": "2026-10-30T17:33:52.422Z",
   "userStories": [
     {
       "id": "US-001",
@@ -439,14 +439,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-cutting transaction/result/DI changes across jobs, sync, budgets and durable activity idempotence plus a schema migration create high regression risk."
+        "reasoning": "Cross-cutting transaction/result/DI changes across jobs, sync, budgets and durable activity idempotence plus a schema migration create high regression risk.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/approvals/approval-closer.ts",
@@ -624,7 +627,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e734780e21946452ddb9395e590a3437173d6426"
     },
     {
       "id": "US-007",
