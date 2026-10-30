@@ -19,13 +19,16 @@ const inboxFile = webFile('components', 'approvals', 'ApprovalRequestInbox.vue')
 /**
  * The panel mounts its real children: US-004's ACs are about what the whole decide surface renders
  * and which body it sends, so a stubbed child would assert nothing about the code under test.
+ *
+ * The keys are the names Nuxt auto-imports the files under — the `components/approvals` directory
+ * prefix plus the file name — which is what the panel's template resolves them through.
  */
 function specializedChildren(): Record<string, unknown> {
   const globals = { useI18n: () => T }
   return {
-    ApprovalRequestBashPanel: loadSfc(bashPanelFile, globals),
-    ApprovalRequestBudgetPanel: loadSfc(budgetPanelFile, globals),
-    ApprovalRequestOutcome: loadSfc(outcomeFile, globals),
+    ApprovalsApprovalRequestBashPanel: loadSfc(bashPanelFile, globals),
+    ApprovalsApprovalRequestBudgetPanel: loadSfc(budgetPanelFile, globals),
+    ApprovalsApprovalRequestOutcome: loadSfc(outcomeFile, globals),
   }
 }
 
@@ -423,7 +426,7 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     const app = mountSfc(inboxFile, {
       components: {
         ...uiStubs,
-        ApprovalRequestPanel: loadSfc(panelFile, { useI18n: () => T }),
+        ApprovalsApprovalRequestPanel: loadSfc(panelFile, { useI18n: () => T }),
         ...specializedChildren(),
       },
       alias: {

@@ -87,7 +87,9 @@ function mountInbox(options: MountOptions) {
     useI18n: () => enI18n(),
   }, { '~/composables/useApi': apiModule })
   const app = mountSfc(inboxFile, {
-    components: { ...uiStubs, ApprovalRequestPanel: Panel },
+    // The name Nuxt auto-imports `components/approvals/ApprovalRequestPanel.vue` under: the inbox's
+    // template resolves its panel through it, so a mismatch would render an unresolved element.
+    components: { ...uiStubs, ApprovalsApprovalRequestPanel: Panel },
     alias: {
       '~/composables/useApi': apiModule,
       // A fixed clock: the real countdown ticks with setInterval.

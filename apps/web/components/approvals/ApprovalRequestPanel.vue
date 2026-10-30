@@ -13,7 +13,7 @@
       </ul>
     </div>
     <!-- US-004: a fleet key decides through its own panel, worded from the payload it froze. -->
-    <ApprovalRequestBashPanel
+    <ApprovalsApprovalRequestBashPanel
       v-if="kind === 'bash'"
       :request="request"
       :can-decide="actions.decide"
@@ -22,7 +22,7 @@
       :project-slug="projectSlug ?? null"
       @decide="emit('decide', $event)"
     />
-    <ApprovalRequestBudgetPanel
+    <ApprovalsApprovalRequestBudgetPanel
       v-else-if="kind === 'budget'"
       :request="request"
       :can-decide="actions.decide"
@@ -40,7 +40,7 @@
     </form>
     <Button v-if="actions.cancel" type="button" variant="outline" :disabled="busy" data-testid="approval-request-cancel" @click="emit('cancel')">{{ t('approvals.panel.cancel') }}</Button>
     <!-- US-004: a settled fleet request shows what became of it, and nothing left to answer. -->
-    <ApprovalRequestOutcome v-if="settled && kind !== 'generic'" :request="request" />
+    <ApprovalsApprovalRequestOutcome v-if="settled && kind !== 'generic'" :request="request" />
   </section>
 </template>
 

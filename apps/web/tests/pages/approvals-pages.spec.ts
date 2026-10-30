@@ -129,10 +129,12 @@ function mountPage(file: string, options: { api: { get: jest.Mock; post: jest.Mo
     '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(new Date('2026-11-01T00:00:00.000Z')) }) },
   }
   // The real inbox: the pages are tested as they render, not against a stub that mirrors their props.
+  // `Approvals*` is the name Nuxt auto-imports a `components/approvals/*.vue` file under (the directory
+  // prefix plus the file name), and it is what the inbox's template resolves its panel through.
   const inbox = loadSfc(inboxFile, globals, alias)
   const panel = loadSfc(webFile('components', 'approvals', 'ApprovalRequestPanel.vue'), globals, alias)
   const app = mountSfc(file, {
-    components: { ...uiStubs, ApprovalsApprovalRequestInbox: inbox, ApprovalRequestPanel: panel },
+    components: { ...uiStubs, ApprovalsApprovalRequestInbox: inbox, ApprovalsApprovalRequestPanel: panel },
     globals,
     alias,
   })

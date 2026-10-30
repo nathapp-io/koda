@@ -65,7 +65,7 @@
           <!-- US-003 renders the decide panel here for the open row; the detail it needs is already fetched. -->
           <div v-if="openId === row.id" class="border-t border-border px-3 py-3" data-testid="approval-request-detail">
             <LoadingState v-if="detailLoading" />
-            <ApprovalRequestPanel
+            <ApprovalsApprovalRequestPanel
               v-else-if="detail?.id === row.id"
               :request="detail"
               :user-id="userId"
