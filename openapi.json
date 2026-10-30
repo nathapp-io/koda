@@ -1822,6 +1822,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3728,6 +3737,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3743,6 +3761,24 @@
         "responses": {
           "201": {
             "description": "Webhook registered"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request data"
@@ -3801,6 +3837,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3816,6 +3861,24 @@
         "responses": {
           "200": {
             "description": "Webhook updated"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request data"
@@ -3937,6 +4000,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3956,6 +4028,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VcsConnectionCreatedResponseDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -4027,6 +4117,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -4046,6 +4145,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VcsConnectionUpdatedResponseDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -4190,6 +4307,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4199,6 +4325,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WebhookSecretResponseDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -8809,7 +8953,17 @@
     "/api/fleet/enrollments": {
       "post": {
         "operationId": "EnrollmentsController_create",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -8827,6 +8981,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EnrollmentCreatedDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -12887,6 +13059,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -12906,6 +13087,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InviteCreateResultDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -12958,6 +13157,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -12967,6 +13175,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InviteResendResultDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
