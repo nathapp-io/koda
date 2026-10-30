@@ -45,9 +45,25 @@ function fakeStorage(initial: Record<string, string> = {}) {
 
 type Permission = 'granted' | 'denied' | 'default'
 
-/** The browser's `Notification` as the composable reads it: `permission` and `requestPermission()`. */
+interface FakeBrowserNotification {
+  close: jest.Mock
+  onclick: (() => void) | null
+}
+
+/** A constructible browser Notification double with per-instance close spies. */
 function fakeNotification(permission: Permission) {
-  return { permission, requestPermission: jest.fn(async (): Promise<Permission> => permission) }
+  const instances: FakeBrowserNotification[] = []
+  class NotificationDouble {
+    static permission = permission
+    static requestPermission = jest.fn(async (): Promise<Permission> => permission)
+    close = jest.fn()
+    onclick: (() => void) | null = null
+
+    constructor(_title: string, _options?: { tag?: string }) {
+      instances.push(this)
+    }
+  }
+  return { NotificationDouble, instances }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,6 +109,7 @@ interface HarnessOptions {
   permission?: Permission
   /** Leave `Notification` undefined, as a browser without it (or node during SSR). */
   withoutNotification?: boolean
+  hiddenTab?: boolean
 }
 
 /**
@@ -118,13 +135,14 @@ async function mountNotifications(options: HarnessOptions) {
   }
   g.navigateTo = navigate
   g.localStorage = storage
+  if (options.hiddenTab) g.document = { visibilityState: 'hidden' }
   if (options.withoutNotification === true) delete g.Notification
-  else g.Notification = notification
+  else g.Notification = notification.NotificationDouble
 
   const mod = await import('~/composables/useApprovalRequestNotifications')
   let api!: Notifications
   const host = mountSetup(() => { api = mod.useApprovalRequestNotifications(counts) })
-  return { api, host, toasts, navigate, storage }
+  return { api, host, toasts, navigate, storage, browserNotifications: notification.instances }
 }
 
 afterEach(() => {
@@ -136,6 +154,64 @@ afterEach(() => {
   delete g.navigateTo
   delete g.localStorage
   delete g.Notification
+  delete g.document
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-003 AC-1 to AC-6 — successful zero-count reconciliation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-003: a successful zero-count refresh closes approval notices', () => {
+  test('AC-1/AC-2: dismisses the active toast without listing on a shared zero snapshot', async () => {
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
+    const get = jest.fn(async () => page([summary({ id: 'r1' })]))
+    const m = await mountNotifications({ get, counts })
+
+    await m.api.refresh()
+    const id = m.toasts.calls[0].options?.id
+    expect(m.toasts.calls).toHaveLength(1)
+    expect(id).toBe('approval-request-u1-r1')
+
+    counts.value = countsOf(0)
+    await m.api.refresh()
+
+    expect(m.toasts.dismiss).toHaveBeenCalledWith(id)
+    expect(get).toHaveBeenCalledTimes(1)
+    m.host.unmount()
+  })
+
+  test('AC-3: closes the associated browser notification in a hidden tab', async () => {
+    const storage = fakeStorage({ 'koda-approval-notifications-u1': 'true' })
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
+    const get = jest.fn(async () => page([summary({ id: 'r1' })]))
+    const m = await mountNotifications({ get, counts, storage, permission: 'granted', hiddenTab: true })
+
+    await m.api.refresh()
+    expect(m.browserNotifications).toHaveLength(1)
+    const browser = m.browserNotifications[0]
+
+    counts.value = countsOf(0)
+    await m.api.refresh()
+
+    expect(browser.close).toHaveBeenCalledTimes(1)
+    m.host.unmount()
+  })
+
+  test('AC-6: zero dismissal retains per-user announce history', async () => {
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
+    const get = jest.fn(async () => page([summary({ id: 'r1' })]))
+    const m = await mountNotifications({ get, counts })
+    await m.api.refresh()
+
+    counts.value = countsOf(0)
+    await m.api.refresh()
+    counts.value = countsOf(1)
+    await m.api.refresh()
+
+    expect(m.toasts.calls).toHaveLength(1)
+    expect(m.toasts.dismiss).toHaveBeenCalledWith(m.toasts.calls[0].options?.id)
+    m.host.unmount()
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,23 +464,32 @@ describe('US-005 AC-14: a failed pending list leaves the active toasts untouched
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('useApprovalRequestNotifications: the SSR and account guards', () => {
-  test('a null counts snapshot reads nothing', async () => {
+  test('AC-4: a null counts snapshot leaves an existing toast undismissed', async () => {
+    const counts = ref<ApprovalRequestCounts | null>(countsOf(1))
     const get = jest.fn(async () => page([summary()]))
-    const m = await mountNotifications({ get, counts: ref<ApprovalRequestCounts | null>(null) })
-
+    const m = await mountNotifications({ get, counts })
     await m.api.refresh()
 
-    expect(get).not.toHaveBeenCalled()
+    counts.value = null
+    await m.api.refresh()
+
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(m.toasts.dismiss).not.toHaveBeenCalled()
     m.host.unmount()
   })
 
-  test('a signed-out caller reads nothing and toasts nothing', async () => {
+  test('AC-5: a signed-out zero-count refresh dismisses nothing', async () => {
     const get = jest.fn(async () => page([summary()]))
-    const m = await mountNotifications({ get, user: ref<{ id: string } | null>(null) })
+    const m = await mountNotifications({
+      get,
+      counts: ref<ApprovalRequestCounts | null>(countsOf(0)),
+      user: ref<{ id: string } | null>(null),
+    })
 
     await m.api.refresh()
 
     expect(get).not.toHaveBeenCalled()
+    expect(m.toasts.dismiss).not.toHaveBeenCalled()
     expect(m.toasts.calls).toEqual([])
     m.host.unmount()
   })

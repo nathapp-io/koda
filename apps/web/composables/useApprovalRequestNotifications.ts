@@ -18,8 +18,9 @@ interface ActiveNotice {
  * Pending tab lists (`GET /approvals?status=pending`, one page of 100) instead of re-deriving
  * permissions per scope:
  *
- * - **The counts snapshot is the gate.** A refresh with `total: 0` reads nothing at all; the caller
- *   hands in the snapshot it already loaded for the badge (US-006), so the two agree.
+ * - **The counts snapshot is the gate.** A successful `total: 0` snapshot dismisses every active notice
+ *   without reading the list; a null snapshot leaves notices untouched. The caller hands in the snapshot
+ *   it already loaded for the badge (US-006), so the two agree.
  * - **The row decides who may answer it.** `viewerActions` is the same rule the inbox rows use: an
  *   own ask in `human` mode is cancellable but not decidable, so it raises no toast. The badge may
  *   count it (7a's rule) — a notice would only offer a control the API refuses.
@@ -128,9 +129,9 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
   }
 
   /**
-   * One poll: the pending page, then reconcile. Anything the list no longer holds closes. A failed or
-   * refused list keeps every toast and shows nothing — a flaky poll must not empty the screen, and the
-   * next poll retries.
+   * One poll: a successful zero-count snapshot closes every notice without listing; otherwise list the
+   * pending page and reconcile. Anything the list no longer holds closes. A failed or refused list keeps
+   * every toast and shows nothing — a flaky poll must not empty the screen, and the next poll retries.
    */
   async function refresh(): Promise<void> {
     const token = ++generation
@@ -138,7 +139,11 @@ export function useApprovalRequestNotifications(counts: Ref<ApprovalRequestCount
     // Permissions P1 US-011: the account is its id, so a same-id role change never invalidates a refresh.
     const current = (): boolean => mounted && generation === token && auth.user.value?.id === userId
     const snapshot = counts.value
-    if (!snapshot || snapshot.total <= 0 || !userId || !current()) return
+    if (!snapshot || !userId || !current()) return
+    if (snapshot.total <= 0) {
+      for (const id of [...active.keys()]) dismiss(id)
+      return
+    }
     // Bound the retained announce history: a settled request can never become pending again.
     const history = announced.value[userId]
     if (history) {
