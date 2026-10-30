@@ -3,7 +3,7 @@
   "feature": "permissions-p3-retire-fleet-approvals",
   "branchName": "feat/permissions-p3-retire-fleet-approvals",
   "createdAt": "2026-10-30T00:00:00.000Z",
-  "updatedAt": "2026-10-30T17:33:52.422Z",
+  "updatedAt": "2026-10-30T17:50:57.956Z",
   "userStories": [
     {
       "id": "US-001",
@@ -645,14 +645,17 @@
         "breaking-change"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Removes an event contract across shared stream/hub/page consumers and redirects while keeping structural helper behavior and existing engine reloads."
+        "reasoning": "Removes an event contract across shared stream/hub/page consumers and redirects while keeping structural helper behavior and existing engine reloads.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/project-event-stream.ts",
@@ -735,7 +738,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "936614b9dd4a8f706bdd26d79cacf9de2e1b0ebe"
     },
     {
       "id": "US-008",
