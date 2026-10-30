@@ -2505,6 +2505,7 @@
     "policies": {
       "title": "审批策略",
       "subtitle": "哪些操作需要等待决策，以及谁可以做出决策。",
+      "project": { "title": "项目审批策略", "inherited": "继承" },
       "create": "新建策略",
       "forbidden": "你没有管理审批策略的权限。",
       "loadFailed": "无法加载审批策略。",

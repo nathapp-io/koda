@@ -23,6 +23,9 @@
         >
           <TableCell>
             <code>{{ policy.permissionPattern }}</code>
+            <span v-if="isInherited(policy)" class="ml-2 text-xs text-muted-foreground" data-testid="policy-inherited">
+              {{ t('approvals.policies.project.inherited') }}
+            </span>
           </TableCell>
           <TableCell data-testid="policy-row-subject">{{ policySubjectText(t, policy) }}</TableCell>
           <TableCell data-testid="policy-row-mode">{{ t(`approvals.policies.mode.${policy.mode}`) }}</TableCell>

@@ -2505,6 +2505,7 @@
     "policies": {
       "title": "Approval policies",
       "subtitle": "Which actions wait for a decision, and who may give it.",
+      "project": { "title": "Project approval policies", "inherited": "Inherited" },
       "create": "New policy",
       "forbidden": "You do not have permission to manage approval policies.",
       "loadFailed": "Could not load approval policies.",
