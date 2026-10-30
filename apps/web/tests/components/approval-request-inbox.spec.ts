@@ -252,6 +252,28 @@ describe('ApprovalRequestInbox — opening a row', () => {
     m.app.unmount()
   })
 
+  test('AC-8 (edge): a route id that is not on the loaded page still shows its row and detail', async () => {
+    const get = jest.fn(async (path: string) => {
+      if (path === '/approvals') return pageOf([row('other')])
+      if (path === '/approvals/linked') return detailOf(row('linked', { permissionKey: 'fleet.job.shell.escalate' }))
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const m = mountInbox({ get, query: { id: 'linked' } })
+    await m.settle()
+    expect(get).toHaveBeenCalledWith('/approvals/linked')
+    // The linked request is not in the page the list answered: it is rendered from its own detail.
+    expect(m.byId('approval-request-row-linked')).toHaveLength(1)
+    expect(m.rowEl('linked').props['data-linked']).toBe('true')
+    expect(m.byId('approval-request-detail')).toHaveLength(1)
+    expect(m.app.textOf(m.rowEl('linked'))).toContain(T.t('approvals.keys.fleet_job_shell_escalate'))
+    expect(m.app.textOf(m.rowEl('linked'))).toContain(T.t('approvals.inbox.linked'))
+    // Closing it leaves only the page the list answered.
+    await m.toggle('linked')
+    expect(m.byId('approval-request-row-linked')).toHaveLength(0)
+    expect(m.byId('approval-request-row-other')).toHaveLength(1)
+    m.app.unmount()
+  })
+
   test('AC-10: a failed detail fetch closes the row, drops id and toasts', async () => {
     const get = jest.fn(async (path: string) => {
       if (path === '/approvals') return pageOf([row('r1')])

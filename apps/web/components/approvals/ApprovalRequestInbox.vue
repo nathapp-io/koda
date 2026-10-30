@@ -27,7 +27,16 @@
       <p v-if="stale" class="text-sm text-muted-foreground" data-testid="approvals-inbox-stale">{{ t('approvals.inbox.stale') }}</p>
       <EmptyState v-if="rows.length === 0" :message="t(`approvals.inbox.empty.${tab}`)" />
       <ul v-else class="divide-y divide-border rounded-md border border-border" data-testid="approvals-inbox-list">
-        <li v-for="row in rows" :key="row.id" :data-testid="`approval-request-row-${row.id}`" :data-status="row.status">
+        <li
+          v-for="row in rows"
+          :key="row.id"
+          :data-testid="`approval-request-row-${row.id}`"
+          :data-status="row.status"
+          :data-linked="String(isLinked(row))"
+        >
+          <p v-if="isLinked(row)" class="px-3 pt-2 text-xs font-medium text-muted-foreground">
+            {{ t('approvals.inbox.linked') }}
+          </p>
           <button
             type="button"
             class="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent"
@@ -137,9 +146,26 @@ const detailLoading = ref(false)
 
 const projectId = props.base.kind === 'project' ? props.base.projectId : undefined
 
-/** The Pending tab reads top-down in expiry order: those are the decisions that run out first. */
-const rows = computed<ApprovalRequestSummary[]>(() =>
-  tab.value === 'pending' ? sortPendingRequests(requests.value) : requests.value)
+/**
+ * The open row when the loaded page does not hold it — a link into `/approvals?id=…` may name a request
+ * the default Pending page (one page of 100) does not list, and its detail must still be shown.
+ */
+const linkedRow = computed<ApprovalRequestSummary | null>(() => {
+  const open = detail.value
+  if (open === null || openId.value !== open.id) return null
+  return requests.value.some((row) => row.id === open.id) ? null : open
+})
+
+/**
+ * The rows on screen: the pending page in expiry order (those decisions run out first), with a linked
+ * open request pinned above them when the page does not carry it.
+ */
+const rows = computed<ApprovalRequestSummary[]>(() => {
+  const listed = tab.value === 'pending' ? sortPendingRequests(requests.value) : requests.value
+  return linkedRow.value === null ? listed : [linkedRow.value, ...listed]
+})
+
+const isLinked = (row: ApprovalRequestSummary): boolean => linkedRow.value?.id === row.id
 
 const keyLabel = (key: string): string => requestKeyLabel(t, te, key)
 

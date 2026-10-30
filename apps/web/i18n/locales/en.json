@@ -2410,6 +2410,7 @@
       },
       "pager": { "prev": "Previous", "next": "Next" },
       "noProject": "No project",
+      "linked": "Not on this page. Opened from the link you followed.",
       "forbidden": "You do not have permission to see these approvals.",
       "loadFailed": "Could not load approvals.",
       "stale": "Could not refresh approvals. Showing the last loaded list.",
