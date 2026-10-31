@@ -4,7 +4,7 @@
     <span v-if="repo.autoReview" class="text-xs text-muted-foreground">{{ repo.autoReviewProfiles.join(', ') }}</span>
     <Button v-if="repo.autoReview && allowed" size="sm" variant="outline" @click="openDialog(true)">{{ t('fleet.repos.autoReview.edit') }}</Button>
     <p v-if="notice" class="text-xs text-muted-foreground">{{ notice }}</p>
-    <p v-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
+    <p v-if="error" role="alert" class="text-xs text-muted-foreground">{{ error }}</p>
     <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
       <DialogContent>
         <DialogHeader><DialogTitle>{{ t('fleet.repos.autoReview.title') }}</DialogTitle></DialogHeader>
