@@ -1,4 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { BudgetPausedException } from '../budgets/budget.exceptions';
+import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import type { OpenPullRequest } from '../git-broker/github-app-client';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
@@ -26,6 +30,8 @@ const PENDING = 'pending';
  */
 @Injectable()
 export class ReviewHeadDispatcher {
+  private readonly logger = new Logger(ReviewHeadDispatcher.name);
+
   constructor(
     @Inject(FLEET_PR_REVIEW_REPOSITORY) private readonly reviews: IFleetPrReviewRepository,
     private readonly jobs: FleetJobsService,
@@ -53,7 +59,8 @@ export class ReviewHeadDispatcher {
       const pending = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.insertPending(repo.id, pr.number, pr.headSha));
       if (pending === null) continue;
       calls += 1;
-      await this.dispatch(actorId, repo, pr, pending);
+      const stopRepo = await this.dispatch(actorId, repo, pr, pending);
+      if (stopRepo) break;
     }
 
     return calls;
@@ -78,30 +85,57 @@ export class ReviewHeadDispatcher {
 
   /**
    * Call 5 and, on success, the job link: the review is dispatched on the enabler's behalf, then the claim
-   * records its job. A throw is left to propagate for now — US-007 adds the outcome mapping (`remove` for a
-   * retryable failure, `failed:<reason>` for a permanent one) that turns it into a settled row.
+   * records its job. Retryable failures remove the claim; permanent failures settle it as failed.
+   * Returns true only when a shared project budget pause should stop this repo's pass.
    */
-  private async dispatch(actorId: string, repo: FleetRepoRecord, pr: OpenPullRequest, pending: FleetPrReviewRecord): Promise<void> {
-    const result = await this.jobs.dispatch(
-      actorId,
-      repo.projectId,
-      {
-        command: 'REVIEW',
-        repoId: repo.id,
-        prNumber: pr.number,
-        profiles: repo.autoReviewProfiles,
-        maxCostUsd: Number(repo.autoReviewMaxCostUsd),
-      },
-      { auditKey: 'system.pr-review.dispatch' },
-    );
+  private async dispatch(actorId: string, repo: FleetRepoRecord, pr: OpenPullRequest, pending: FleetPrReviewRecord): Promise<boolean> {
+    let result: Awaited<ReturnType<FleetJobsService['dispatch']>>;
+    try {
+      result = await this.jobs.dispatch(
+        actorId,
+        repo.projectId,
+        {
+          command: 'REVIEW',
+          repoId: repo.id,
+          prNumber: pr.number,
+          profiles: repo.autoReviewProfiles,
+          maxCostUsd: Number(repo.autoReviewMaxCostUsd),
+        },
+        { auditKey: 'system.pr-review.dispatch' },
+      );
+    } catch (error) {
+      if (error instanceof BudgetPausedException) {
+        await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
+        return true;
+      }
+      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+        await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
+        return false;
+      }
+      if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
+        const response = getExceptionResponse(error);
+        const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
+          ? response.args.reason
+          : error.constructor.name;
+        await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markFailed(pending.id, `failed:${reason}`.slice(0, 200)));
+        return false;
+      }
+      this.logger.warn(`Review dispatch failed for repo ${repo.id} PR ${pr.number}: ${error instanceof Error ? error.constructor.name : 'UnknownError'}`);
+      await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(pending.id));
+      return false;
+    }
     await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markDispatched(pending.id, result.job.id));
+    return false;
   }
 }
 
-/**
- * Call 5: a draft, a head from a fork or a deleted repository, or a PR last updated before auto-review was
- * turned on is not reviewed. Without an enable time the last rule skips nothing.
- */
+function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
+  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
+  if (typeof response !== 'object' || response === null) return {};
+  return response as { prefix?: string; args?: Record<string, unknown> };
+}
+
+/** Call 5: exclude drafts, forks/deleted heads and PRs predating auto-review enablement. */
 function skips(repo: FleetRepoRecord, pr: OpenPullRequest): boolean {
   if (pr.draft) return true;
   if (pr.headRepoFullName === null) return true;
