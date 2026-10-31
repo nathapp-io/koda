@@ -48,7 +48,7 @@ function selectArtifact(files: BundleFiles): BundleFile | null | undefined {
     const match = /^nax bot review: artifact (.+)$/.exec(line);
     if (!match) continue;
     const suffix = ARTIFACT.exec(match[1]);
-    if (!suffix) continue;
+    if (!suffix) return undefined;
     const selected = artifacts.filter((file) => ARTIFACT.test(file.name) && file.name.endsWith(suffix[0]));
     return selected.length === 1 ? selected[0] : undefined;
   }

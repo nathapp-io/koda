@@ -18,6 +18,7 @@ describe('parseBotReview', () => {
   it('AC-4 replaces every control character before clipping', () => expect(parseBotReview(files([run('r1', artifact([event({ finding: 'a\nb\u0007c' })]))]), 42)).toMatchObject({ events: [{ finding: 'a b c' }] }));
   it('AC-5 parses one valid artifact', () => expect(parseBotReview(files([run('r1')]), 42)).toEqual({ outcome: 'done', trusted: true, events: [{ key: 'f-12345678', threadId: 'thread-1', finding: 'finding', reason: 'reason', disagreedBy: ['alice'] }] }));
   it('AC-6 selects the artifact named by stdout', () => expect(parseBotReview(files([run('r1', artifact([event({ threadId: 'one' })])), run('r2', artifact([event({ threadId: 'two' })]))], 'nax bot review: artifact /x/out/bot/pr-42/r2/bot-review.json'), 42)).toMatchObject({ events: [{ threadId: 'two' }] }));
+  it('AC-6 reports ambiguity when stdout names a missing artifact', () => expect(parseBotReview(files([run('r1')], 'nax bot review: artifact /x/out/other-review.json'), 42)).toEqual({ outcome: 'invalid', reason: 'artifact-ambiguous' }));
   it('AC-7 reports ambiguity without a success line', () => expect(parseBotReview(files([run('r1'), run('r2')], 'ordinary output'), 42)).toEqual({ outcome: 'invalid', reason: 'artifact-ambiguous' }));
   it('AC-8 reports absent when no artifact exists', () => expect(parseBotReview(files([]), 42)).toEqual({ outcome: 'absent' }));
   it('AC-9 rejects malformed JSON', () => expect(parseBotReview(files([{ ...run('r1'), text: '{' }]), 42)).toEqual({ outcome: 'invalid', reason: 'artifact-invalid' }));
