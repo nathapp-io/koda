@@ -1,0 +1,482 @@
+{
+  "project": "koda",
+  "feature": "fleet-pr-review",
+  "branchName": "feat/fleet-pr-review",
+  "createdAt": "2026-10-01T00:00:00.000Z",
+  "updatedAt": "2026-10-31T05:56:42.387Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The REVIEW kind in the protocol and the API model",
+      "description": "**Goal** — Add the shared REVIEW job model and the API's recoverable bot_review placement gate.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim API/protocol design requirements (US-008 owns the separate web FleetJobKind change):\n- `FleetJobKind` (`apps/api/src/common/enums.ts:143`): adds `REVIEW`.\n- `packages/fleet-protocol/src/index.ts` (types only): `FleetJobKindName` adds `'REVIEW'`; `AssignPayload` adds `review?: { prNumber: number; botLogin: string }`; `RunnerCapabilities` adds `botReview?: true`.\n- New `apps/api/src/fleet/common/review-jobs.ts`: `REVIEW_FEATURE_PREFIX = 'review-pr-'`, `reviewFeature(prNumber): string`, `prNumberOfReviewFeature(feature): number | null` (null unless the feature is the prefix followed by a positive safe integer written without a leading zero).\n- `parseCapabilitiesCore` (`apps/api/src/fleet/common/capabilities-core.ts`): accepts `botReview: true`, fails `botReview` for any other present value, like `configJobs`.\n- Runner capability `botReview?: true`. For a `REVIEW` job, `capabilityMisfit` checks `botReview` first (before profiles, interaction and tools): without it the misfit is `bot_review`, which is not permanent.\n- `MisfitReason`, `capabilityMisfit` (`placement-rules.ts`): add `'bot_review'` with the order above.\n- Misfit enum lists: `'bot_review'` joins `PlacementMisfitDto`'s enum (`fleet-job.dto.ts:129`) and `MISFIT_REASONS` (`fleet/dashboard/dashboard.types.ts:109`). The job DTO command enum (`fleet-job.dto.ts:51`) adds `'REVIEW'`.\n\nThe API may import `@nathapp/fleet-protocol` with `import type` only (`fleet/common/protocol.spec.ts`); runtime helpers are mirrored in the API (`fleet/common/config-jobs.ts`). Protocol edits ride an `apps/api` story, as in `fleet-s5a-thread-core`.\n\n**Implementation connections** — Modify packages/fleet-protocol/src/index.ts; apps/api/src/common/enums.ts; apps/api/src/fleet/common/capabilities-core.ts; apps/api/src/fleet/jobs/placement-rules.ts; apps/api/src/fleet/dashboard/dashboard.types.ts; apps/api/src/fleet/jobs/dto/fleet-job.dto.ts. Create the local review helpers and co-located unit spec. The exhaustive `Record<FleetJobKindName, true>` named `kinds` in apps/api/src/fleet/common/protocol.spec.ts gains `REVIEW: true` and stays exhaustive over the union. Extend existing capability and placement unit suites. Regenerate openapi.json and the CLI client with `bun run generate` from the repository root; generated source is never hand-edited.\n\n**Scope** — In: protocol types, API kind constants, canonical feature helpers, capability validation, misfit ordering/enum schemas and generation. Out: dispatch request rules (US-002), assignment and budgets (US-003), actual probing (US-004), runner execution (US-005 through US-007), and the web union/rendering change named above (US-008). CLI commands for reviews; the generated CLI client is regenerated but no command is added.\n\n**Interface** — `REVIEW_FEATURE_PREFIX = 'review-pr-'`; `reviewFeature(prNumber): string`; `prNumberOfReviewFeature(feature): number | null`; `review?: { prNumber: number; botLogin: string }`; `botReview?: true`.",
+      "acceptanceCriteria": [
+        "[unit] reviewFeature(42) returns 'review-pr-42'.",
+        "[unit] prNumberOfReviewFeature('review-pr-42') returns 42.",
+        "[unit] prNumberOfReviewFeature('review-pr-042') returns null.",
+        "[unit] prNumberOfReviewFeature('review-pr-99999999999999999999') returns null.",
+        "[unit] prNumberOfReviewFeature('login') returns null.",
+        "[unit] parseCapabilities returns an object whose botReview is true when given a capabilities object with botReview: true.",
+        "[unit] parseCapabilities throws ValidationAppException with args.reason 'botReview' when given an otherwise valid capabilities object with botReview: false.",
+        "[unit] firstMisfit returns 'bot_review' for a REVIEW job and a runner whose capabilities lack botReview.",
+        "[unit] firstMisfit returns 'bot_review' for a REVIEW job and a runner that lacks botReview and also lacks the job's profile provider.",
+        "[unit] firstMisfit returns null for a REVIEW job and an otherwise matching runner with botReview: true.",
+        "[unit] PERMANENT_MISFITS.has('bot_review') returns false.",
+        "[unit] MISFIT_REASONS includes 'bot_review'.",
+        "[unit] parseCapabilities returns a capabilities object with no botReview key when given an otherwise valid legacy capabilities object that omits botReview, preserving acceptance of existing runner reports."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "api",
+        "protocol",
+        "placement"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive union/enum entries, a small pure feature parser and configJobs-style capability/placement checks reuse existing patterns; no new service, credential path or concurrent workflow is introduced."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/common/config-jobs.ts",
+        "apps/api/src/fleet/common/capabilities-core.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/dashboard/dashboard.types.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/common/review-jobs.ts",
+        "apps/api/src/fleet/common/review-jobs.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "prNumberOfReviewFeature('review-pr-0') returns null.",
+        "prNumberOfReviewFeature('review-pr-42x') returns null.",
+        "parseCapabilities fails with 'botReview' when botReview is the string 'true'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/common/protocol.spec.ts",
+          "reason": "the exhaustive `Record<FleetJobKindName, true>` named `kinds` (line 50) stops compiling once `REVIEW` joins `FleetJobKindName`; it gains `REVIEW: true` and stays exhaustive over the union."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Dispatch input rules for REVIEW",
+      "description": "**Goal** — Accept a PR-number-based REVIEW dispatch while retaining RUN/PLAN validation and reserving review feature names.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim design requirements:\n- Fields: `ref` = the repo's default branch; `feature` = `review-pr-<prNumber>`; `planFrom` null; `bashMode` `raw`; `profiles`, `maxCostUsd`, `selectorLabels` and `pinnedRunnerId` from the dispatch body.\n- `DispatchFleetJobDto` (`fleet/jobs/dto/dispatch-fleet-job.dto.ts`) — Baseline: `command` `@IsIn(['RUN','PLAN'])`, `feature` required. Target: `@IsIn(['RUN','PLAN','REVIEW'])`; `feature` optional; new optional `prNumber` (integer 1..2147483647).\n- `normalizeDispatch(dto, defaultBranch)` (`fleet/jobs/dispatch-input.ts`), reasons in this order:\n  - `RUN`/`PLAN`: missing `feature` fails `feature`; a `review-pr-` feature fails `feature is reserved for REVIEW`; a `prNumber` fails `prNumber is only for REVIEW`.\n  - `REVIEW`: missing `prNumber` fails `prNumber required for REVIEW`; `feature` fails `feature is derived for REVIEW`; `planFrom` fails `planFrom is only for PLAN`; `ref` fails `ref is the default branch for REVIEW`; a non-raw `bashMode` fails `bashMode must be raw for REVIEW`; non-empty `ticketRefs` fails `ticketRefs is not for REVIEW`. The result has `feature` `reviewFeature(prNumber)` and `ref` = the default branch.\n\n**One active review per PR, through the existing index.** A `REVIEW` job's `feature` is `review-pr-<number>`. The partial unique index `FleetJob_active_repo_feature_key` (`(repoId, feature)` over `QUEUED/ASSIGNED/RUNNING/UPLOADING`) already makes a second active job on one feature a 409. `RUN` and `PLAN` may no longer use a feature that starts with `review-pr-`.\n\nAPI i18n `fleet.dispatchInput` is `\"Invalid dispatch: {reason}\"` in both locales, so new reasons need no new key.\n\n**Implementation connections** — Change apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts and apps/api/src/fleet/jobs/dispatch-input.ts, consuming the US-001 local review helper. Guard the now-optional feature before string operations. Keep existing PLAN planFrom/path restrictions, common profile validation/order, maxCostUsd conversion, bash defaults, approval timeout, label deduplication/sorting and pin propagation. Extend dispatch-input.spec.ts and dto/dispatch-fleet-job.dto.spec.ts. Existing schedule and assistant callers remain RUN/PLAN. Repository contract guidance requires root `bun run generate` when this DTO changes; regenerate rather than manually editing generated clients.\n\n**Scope** — In: transport decorators/types, conditional normalization and specified validation errors. Out: provider-first rejection, route persistence/conflict handling, assignment and budget cancellation (US-003); capability models (US-001); runner parsing/execution (US-005 through US-007); web rendering (US-008). Dispatching a `REVIEW` through the assistant tool `koda_dispatch_job`; its `command` stays `RUN` or `PLAN`.\n\n**Interface** — `@IsIn(['RUN','PLAN','REVIEW'])`; `normalizeDispatch(dto, defaultBranch)`; `reviewFeature(prNumber): string`. New optional `prNumber` is an integer 1..2147483647; feature is optional only at the DTO layer, not for normalized RUN/PLAN jobs.",
+      "acceptanceCriteria": [
+        "[unit] normalizeDispatch returns feature 'review-pr-42' for REVIEW with prNumber: 42 and default branch 'main'.",
+        "[unit] normalizeDispatch returns ref 'main' for REVIEW with prNumber: 42 and default branch 'main'.",
+        "[unit] normalizeDispatch throws ValidationAppException for 'fleet.dispatchInput' with args.reason 'prNumber required for REVIEW' for REVIEW without prNumber.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'feature is derived for REVIEW' for otherwise valid REVIEW input with a feature.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'planFrom is only for PLAN' for otherwise valid REVIEW input with planFrom.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'ref is the default branch for REVIEW' for otherwise valid REVIEW input with a ref.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'bashMode must be raw for REVIEW' for otherwise valid REVIEW input with bashMode: 'escalate'.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'ticketRefs is not for REVIEW' for otherwise valid REVIEW input with ticketRefs: ['KD-1'].",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'feature' for RUN without a feature.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'feature is reserved for REVIEW' for RUN with feature 'review-pr-5'.",
+        "[unit] normalizeDispatch throws ValidationAppException with args.reason 'prNumber is only for REVIEW' for otherwise valid RUN input with prNumber: 3.",
+        "[unit] DispatchFleetJobDto validation fails on prNumber for command: 'REVIEW' and prNumber: 0.",
+        "[unit] normalizeDispatch({ repoId: 'repo-1', command: 'RUN', feature: 'auth-flow', maxCostUsd: 5 }, 'trunk') returns { repoId: 'repo-1', ref: 'trunk', command: 'RUN', feature: 'auth-flow', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null }, preserving existing RUN defaults."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "api",
+        "dispatch",
+        "validation"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A bounded DTO and pure normalization change using existing validators and exception patterns; no credentials or authorization behavior changes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/dispatch-input.ts",
+        "apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts",
+        "apps/api/src/fleet/jobs/dispatch-input.spec.ts",
+        "apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.spec.ts",
+        "apps/api/src/fleet/common/review-jobs.ts"
+      ],
+      "suggestedCriteria": [
+        "normalizeDispatch throws reason 'feature is reserved for REVIEW' for PLAN with feature 'review-pr-5' and otherwise valid PLAN input.",
+        "normalizeDispatch throws reason 'prNumber required for REVIEW' when a REVIEW request omits prNumber and also supplies a feature.",
+        "DispatchFleetJobDto validation fails on prNumber when prNumber is 2147483648.",
+        "normalizeDispatch returns bashMode 'raw' for REVIEW with prNumber: 42 and omitted bashMode."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Dispatching and assigning a REVIEW",
+      "description": "**Goal** — Connect manual GitHub REVIEW dispatch to persisted jobs, identity-bearing assignments and existing budget hard stops.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim design requirements:\n**GitHub only, checked first.** `FleetJobsService.dispatch` rejects a `REVIEW` for a repo whose provider is not `github`, before `normalizeDispatch` runs, with 422 `fleet.dispatchInput` reason `review is GitHub-only`.\n- `FleetJobsService.dispatch`: after loading the repo and before `normalizeDispatch`, a `REVIEW` for a non-`github` repo throws `ValidationAppException({ reason: 'review is GitHub-only' }, 'fleet.dispatchInput')`.\n- `AssignPayload` gains `review?: { prNumber: number; botLogin: string }`, present only for `REVIEW`; `botLogin` is the `name` of the `GitIdentity` passed to `buildAssignPayload` (for GitHub `<githubAppSlug>[bot]`, fallback `koda-fleet[bot]`).\n- `buildAssignPayload`: a `REVIEW` job gains `review: { prNumber: prNumberOfReviewFeature(job.feature), botLogin: gitIdentity.name }`; a `REVIEW` row whose feature does not parse throws `Error('invalid review feature')`.\n- `BUDGET_STOP_COMMANDS` (`fleet/budgets/prisma-budget.repository.ts:22`, module-private): adds `REVIEW`.\n\nThe runner-cost behavior quoted below is shared design context owned by US-007; US-003 owns the budget command inclusion, not runner cost reading.\n\n**One active review per PR, through the existing index.** A `REVIEW` job's `feature` is `review-pr-<number>`. The partial unique index `FleetJob_active_repo_feature_key` (`(repoId, feature)` over `QUEUED/ASSIGNED/RUNNING/UPLOADING`) already makes a second active job on one feature a 409. `RUN` and `PLAN` may no longer use a feature that starts with `review-pr-`.\n\n**Cost.** A `REVIEW` writes no `status.json`. The runner reports its cost from the nax cost ledger in `<outDir>` with the existing `readPlanCost`, as for `PLAN`. `REVIEW` joins `BUDGET_STOP_COMMANDS`, so a budget hard stop cancels queued reviews like `RUN` and `PLAN`.\n\n**Trust.** koda does not check PR authorship or forks; nax classifies the PR's trust itself.\n\n**Notifications.** A failed `REVIEW` notifies its requester through the existing job-outcome recorder, like any job.\n\n**Failure handling** — A second active REVIEW for the same PR answers 409 from the existing active-feature conflict. With no runner advertising botReview, dispatch answers 201 and the job stays QUEUED with misfit bot_review; a pinned runner lacking botReview also produces 201 because this misfit is recoverable.\n\n**Implementation connections** — Modify apps/api/src/fleet/jobs/fleet-jobs.service.ts, apps/api/src/fleet/jobs/assign-payload.ts and apps/api/src/fleet/budgets/prisma-budget.repository.ts. Use US-001 helpers and the US-002 DTO/normalization. Preserve project ownership/not-found handling before the provider check, existing transactional insertion/audit/outbox behavior, DuplicateActiveJobError mapping, CAS placement and transition services. buildAssignPayload's production caller remains placement.service.ts; gitIdentityFor derives the login, not a new App-user lookup. The current kind-agnostic job-outcome recorder already covers ordinary failed REVIEW jobs; do not bypass it. Create apps/api/test/integration/fleet/fleet-review-dispatch.integration.spec.ts using existing HTTP fixtures and shared DB gates; extend assign-payload.spec.ts and the budget-evaluator integration pattern. Regenerate openapi.json and the CLI client with root `bun run generate`.\n\n**Scope** — In: provider-first service validation, route persistence/conflicts/placement, assignment review metadata, queued-review budget cancellation, preservation of existing failure notifications and generation. Out: DTO normalization (US-002), shared capability declarations (US-001), runner token/probe/execution/verdict work (US-004 through US-007), and web labels (US-008). CLI commands for reviews; the generated CLI client is regenerated but no command is added. Fleet analytics for `REVIEW` jobs; the analytics queries keep counting `RUN` and `PLAN` only. Automatic dispatch of reviews on new PR heads, per-repo auto-review settings and the auto-review switch; those are part B (feature `fleet-auto-review`).\n\n**Interface** — `FleetJobsService.dispatch(actorId, projectId, dto, opts)`; `review?: { prNumber: number; botLogin: string }`; `review: { prNumber: prNumberOfReviewFeature(job.feature), botLogin: gitIdentity.name }`; `Error('invalid review feature')`.",
+      "acceptanceCriteria": [
+        "[integration] POST /projects/:slug/fleet/jobs answers 201 for a GitHub repo with { command: 'REVIEW', repoId, prNumber: 42, maxCostUsd: 1 }.",
+        "[integration] The job created by POST /projects/:slug/fleet/jobs for a GitHub repo with { command: 'REVIEW', repoId, prNumber: 42, maxCostUsd: 1 } is stored with feature 'review-pr-42'.",
+        "[integration] POST /projects/:slug/fleet/jobs answers 422 for a GitLab repo with { command: 'REVIEW', repoId, prNumber: 42, maxCostUsd: 1 }.",
+        "[integration] The 422 response for the GitLab REVIEW dispatch carries reason 'review is GitHub-only'.",
+        "[integration] A second REVIEW dispatch for the same repo and prNumber: 42 answers 409 while the first is QUEUED.",
+        "[integration] A REVIEW dispatch answers 201 with 'bot_review' among placement misfits when the only runner lacks botReview.",
+        "[integration] A REVIEW dispatch pinned to a runner that lacks botReview answers 201.",
+        "[integration] A budget hard stop on the job's project cancels a QUEUED REVIEW job.",
+        "[unit] buildAssignPayload returns review equal to { prNumber: 42, botLogin: 'koda-fleet[bot]' } for a REVIEW job with feature 'review-pr-42' and a GitIdentity named 'koda-fleet[bot]'.",
+        "[unit] buildAssignPayload throws 'invalid review feature' for a REVIEW job with feature 'review-pr-x'.",
+        "[unit] buildAssignPayload returns a payload with no review key for a RUN job.",
+        "[integration] A REVIEW job remains QUEUED after dispatch when no runner has botReview."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "api",
+        "dispatch",
+        "identity",
+        "budgets",
+        "integration"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three small changes reuse existing dispatch, assignment and budget infrastructure without changing transaction or locking algorithms; passing the trusted forge identity still invokes the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/assign-payload.ts",
+        "apps/api/src/fleet/budgets/prisma-budget.repository.ts",
+        "apps/api/test/integration/fleet/fleet-budget-evaluator.integration.spec.ts",
+        "apps/api/src/fleet/common/review-jobs.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-review-dispatch.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "FleetJobsService.dispatch throws 'fleet.dispatchInput' with reason 'review is GitHub-only' for a GitLab REVIEW request that also omits prNumber.",
+        "buildAssignPayload returns review.botLogin 'custom-fleet[bot]' when the passed GitIdentity.name is 'custom-fleet[bot]'.",
+        "When a human-requested REVIEW transitions to FAILED, the existing job-outcome path delivers its requester a failure notification."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "The runner detects K0 and strips ambient identity variables",
+      "description": "**Goal** — Prove nax's K0 review support before advertising it and isolate every nax invocation from inherited forge identity.\n\n**Motivation** — `nax bot review` reviews a PR, remembers its own earlier findings and threads, and (nax feature `bot-forge-identity`, \"K0\") accepts a caller-supplied forge identity: `NAX_FORGE_TOKEN_FILE` (a file nax reads and deletes at startup) and `NAX_FORGE_LOGIN`.\n\n**Approach** — Verbatim design requirements:\n**K0 detection.** The runner reports `botReview: true` only when nax has `bot review` and honours the K0 contract: `<naxCommand> bot review --help` exits 0, and `<naxCommand> --version` run with `NAX_FORGE_TOKEN=probe` added to its environment exits 1 with stderr containing `NAX_FORGE_TOKEN is not supported`. A nax without K0 ignores that variable and exits 0. `NaxCli.run` gains a per-call `env` overlay for this. The static capability probe never reports `botReview`.\n\n**Ambient forge-identity variables are stripped.** `NAX_FORGE_TOKEN`, `NAX_FORGE_TOKEN_FILE`, `NAX_FORGE_LOGIN` and `NAX_FORGE_USER_ID` join `CREDENTIAL_ENV_VARS`, so a value the daemon inherited never reaches any nax call (a K0 nax would refuse to start on an inherited `NAX_FORGE_TOKEN`). The `REVIEW` and probe overlays are applied after the strip.\n\n- `CREDENTIAL_ENV_VARS` (`apps/runner/src/credentials/credential-env.ts:6`): adds the four `NAX_FORGE_*` names.\n- `NaxCallOptions` / `createNaxCli` (`apps/runner/src/nax/nax-cli.ts`): `NaxCallOptions` gains `env?: Readonly<Record<string, string>>`, merged after `withoutCredentialVars(process.env)` and `NAX_GLOBAL_CONFIG_DIR`.\n- `FakeNaxCli` (`apps/runner/test/helpers/fake-nax-cli.ts`): records each call's `env`; by default answers `--version` with exit 0 whatever the env (a non-K0 nax) and `bot review --help` as an unknown command.\n- Nax probe: adds `botReview: true` per call 3.\n\n**Implementation connections** — Modify apps/runner/src/credentials/credential-env.ts, apps/runner/src/nax/nax-cli.ts, apps/runner/src/capabilities/nax-probe.ts and apps/runner/test/helpers/fake-nax-cli.ts; ensure apps/runner/src/capabilities/capability-probe.ts never reports botReview in static mode. Keep ordinary readNaxVersion startup/floor validation intact; the K0 call is a separate run with the deliberate env overlay. Record env in the fake and keep its default answers (`--version` exits 0 whatever the env, `bot review --help` is an unknown command), so every existing nax-probe spec keeps its exact report. Extend existing injected probe and nax-cli specs, including real-spawn env observation via a harmless fixture where appropriate; do not require installed nax.\n\n**Scope** — In: ambient identity sanitation, explicit per-call env overlays, capability probing and fake call recording. Out: API capability parsing/placement (US-001), assignment/checkout/argv/restart (US-005), REVIEW job token-file injection (US-006), verdicts (US-007), and web labels (US-008). Installing nax with the `bot-forge-identity` feature on runner hosts; until it is installed, no runner reports `botReview` and `REVIEW` jobs stay queued.\n\n**Interface** — `env?: Readonly<Record<string, string>>`; `NaxCli.run`; `botReview?: true`. The overlay is merged after `withoutCredentialVars(process.env)` and `NAX_GLOBAL_CONFIG_DIR`.",
+      "acceptanceCriteria": [
+        "[unit] withoutCredentialVars returns an env with none of NAX_FORGE_TOKEN, NAX_FORGE_TOKEN_FILE, NAX_FORGE_LOGIN and NAX_FORGE_USER_ID when given an env containing all four.",
+        "[unit] createNaxCli(...).run(args, { cwd, env: { A: '1' } }) spawns nax with A equal to '1' in its environment.",
+        "[unit] createNaxCli(...).run spawns nax without NAX_FORGE_TOKEN when process.env contains an inherited NAX_FORGE_TOKEN and no env option is supplied.",
+        "[unit] The nax probe reports botReview: true when bot review --help exits 0 and --version called with env NAX_FORGE_TOKEN=probe exits 1 with stderr containing 'NAX_FORGE_TOKEN is not supported'.",
+        "[unit] The nax probe calls --version for the K0 check with NAX_FORGE_TOKEN equal to 'probe' in the call's env option.",
+        "[unit] The nax probe omits botReview when --version with NAX_FORGE_TOKEN=probe exits 0.",
+        "[unit] The nax probe omits botReview when bot review --help exits non-zero.",
+        "[unit] The static capability probe reports no botReview.",
+        "[unit] A default FakeNaxCli.run(['--version'], { cwd, env: { NAX_FORGE_TOKEN: 'probe' } }) returns code 0, preserving its existing non-K0 answer regardless of the env overlay.",
+        "[unit] A default FakeNaxCli.run(['bot', 'review', '--help'], { cwd }) returns stdout JSON whose error.code is 'UNKNOWN_COMMAND', preserving its existing unknown-command answer."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "runner",
+        "capabilities",
+        "security",
+        "environment"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A central environment list, one per-call option and two bounded probe calls extend existing abstractions; credential sanitation and explicit identity overlays require strict security TDD despite the modest implementation scope."
+      },
+      "contextFiles": [
+        "apps/runner/src/credentials/credential-env.ts",
+        "apps/runner/src/nax/nax-cli.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/src/capabilities/capability-probe.ts",
+        "apps/runner/test/helpers/fake-nax-cli.ts"
+      ],
+      "suggestedCriteria": [
+        "The nax probe omits botReview when the K0 --version check exits 1 but stderr does not contain 'NAX_FORGE_TOKEN is not supported'.",
+        "The nax probe omits botReview when the K0 --version check times out.",
+        "createNaxCli(...).run uses NAX_FORGE_TOKEN='probe' from its explicit env overlay even when process.env contains a different NAX_FORGE_TOKEN."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/helpers/fake-nax-cli.ts",
+          "reason": "the fake records each call's `env` and keeps its default answers (`--version` exits 0 whatever the env, `bot review --help` is an unknown command), so every existing nax-probe spec keeps its exact report."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "The runner accepts, checks out and readopts a REVIEW",
+      "description": "**Goal** — Carry a validated REVIEW assignment through detached checkout, exact bot review argv construction and restart recovery without a PRD or status.json.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim design requirements:\n- `parseAssign` (`apps/runner/src/supervisor/assign-parser.ts:159`): accepts `REVIEW` with a `review` object (`prNumber` positive safe integer; `botLogin` 1..100 characters matching `^[A-Za-z0-9][A-Za-z0-9-]*\\[bot\\]$`) and `bashMode` `raw`; rejects `REVIEW` without `review` (`bad('review')`), with another `bashMode` (`bad('bashMode')`), and `review` on any other command (`bad('review')`).\n- Runner checkout: detached at the default branch's sha, no `prd.json` read, returned branch `null`.\n- `prepareCheckout` (`apps/runner/src/executor/checkout.ts`): a `REVIEW` resolves `assign.ref`, checks out `--detach <sha>` and returns `{ ok: true, branch: null, refSha }`, before the `prd.json` read.\n- Runner argv: `<naxCommand> bot review <prNumber> --profile <chain>` (the job profiles plus `koda-job-<jobId>`, joined with commas).\n- `buildNaxArgv` (`executor/nax-process.ts`): `REVIEW` returns `[...naxCommand, 'bot', 'review', String(assign.review.prNumber), '--profile', chain]`.\n- `Supervisor.readopt`: `REVIEW` joins the `PLAN` branch.\n\n**Restart.** On readopt, a `REVIEW` takes the `PLAN` branch: watch it when the process is alive and ours, otherwise finish it (judge as above). It is never rejected for a missing `status.json`.\n\n**Trust.** koda does not check PR authorship or forks; nax classifies the PR's trust itself.\n\n**Implementation connections** — Modify apps/runner/src/supervisor/assign-parser.ts, apps/runner/src/executor/checkout.ts, apps/runner/src/executor/nax-process.ts and apps/runner/src/supervisor/supervisor.ts. Use the protocol review type introduced by US-001; clean and copy validated fields rather than retaining arbitrary input. Keep current profile/path validations, per-job profile marker and process-identity checks. Resolve REVIEW before PRD reads without changing PLAN's .nax check or RUN branch protection. Existing no-process-recorded, terminal, ASSIGNED, config and thread readopt behavior remains intact. Extend parser and Supervisor unit tests, argv tests and existing isolated real-git test/unit/checkout.spec.ts; no live forge is necessary.\n\n**Scope** — In: REVIEW assignment validation, detached checkout, exact argv and PLAN-style readoption. Out: payload construction on the API (US-003), capability detection (US-004), token-file writing/spawn overlays (US-006) and final verdict/cost reporting (US-007). A cost cap enforced inside the review; nax `bot review` takes no cost flag, so `maxCostUsd` is not passed to nax.\n\n**Interface** — `review?: { prNumber: number; botLogin: string }`; `prepareCheckout` returns `{ ok: true, branch: null, refSha }`; `buildNaxArgv` returns `[...naxCommand, 'bot', 'review', String(assign.review.prNumber), '--profile', chain]`; `Supervisor.readopt(jobId, leaseEpoch)`.",
+      "acceptanceCriteria": [
+        "[unit] parseAssign accepts a REVIEW payload with review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } and returns it with that review.",
+        "[unit] parseAssign returns { ok: false, detail: 'invalid review' } for an otherwise valid REVIEW command envelope whose payload omits review.",
+        "[unit] parseAssign returns { ok: false, detail: 'invalid review' } for an otherwise valid REVIEW command envelope whose payload has review.botLogin 'koda fleet'.",
+        "[unit] parseAssign returns { ok: false, detail: 'invalid review' } for an otherwise valid REVIEW command envelope whose payload has review.prNumber 0.",
+        "[unit] parseAssign returns { ok: false, detail: 'invalid bashMode' } for an otherwise valid REVIEW command envelope whose payload has bashMode 'escalate'.",
+        "[unit] parseAssign returns { ok: false, detail: 'invalid review' } for an otherwise valid RUN command envelope whose payload carries a review object.",
+        "[integration] prepareCheckout returns { ok: true, branch: null } with the branch's sha as refSha for a REVIEW assign whose ref is the default branch, in a clone with no .nax/features/review-pr-42/prd.json.",
+        "[integration] When prepareCheckout processes a REVIEW assign at the default branch in a clone with no .nax/features/review-pr-42/prd.json, the clone's HEAD is detached at the default branch's sha.",
+        "[unit] buildNaxArgv(['nax'], assign) returns ['nax', 'bot', 'review', '42', '--profile', 'native-ds,koda-job-<jobId>'] for a REVIEW assign with review.prNumber 42 and profiles ['native-ds'], substituting the assign's jobId for <jobId>.",
+        "[unit] Supervisor.readopt(jobId, leaseEpoch) calls begin(row, 'watch') for a RUNNING REVIEW row with a recorded pid whose process is alive and ours according to isAlive and matchesProcess.",
+        "[unit] Supervisor.readopt(jobId, leaseEpoch) calls begin(row, 'finish') for a RUNNING REVIEW row with a recorded pid whose process is gone according to isAlive.",
+        "[unit] buildNaxArgv(['nax'], assign) returns ['nax', 'run', '--headless', '--json', '-f', 'auth-flow', '--profile', 'native-ds,koda-job-j1', '--max-cost', '5'] for an otherwise valid RUN assign with jobId 'j1', feature 'auth-flow', profiles ['native-ds'] and maxCostUsd '5', preserving existing RUN invocation behavior."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "runner",
+        "assignment",
+        "checkout",
+        "restart",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four bounded branches extend existing assignment, checkout, argv and PLAN-style readoption paths without new process machinery; validating injected identity and preserving process-ownership checks still require the security override."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/executor/checkout.ts",
+        "apps/runner/src/executor/nax-process.ts",
+        "apps/runner/src/supervisor/supervisor.ts",
+        "apps/runner/test/unit/checkout.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseAssign rejects a REVIEW payload whose review.prNumber is 9007199254740992.",
+        "parseAssign rejects a REVIEW payload whose review.botLogin exceeds 100 characters.",
+        "parseAssign rejects a PLAN payload carrying a review object.",
+        "Supervisor.readopt begins finish for a RUNNING REVIEW row whose recorded process is alive but fails matchesProcess."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "The runner starts a review with the token file",
+      "description": "**Goal** — Start REVIEW with the current job-scoped token in a mode-0600 disposable file and remove every runner-owned leftover.\n\n**Motivation** — `nax bot review` reviews a PR, remembers its own earlier findings and threads, and (nax feature `bot-forge-identity`, \"K0\") accepts a caller-supplied forge identity: `NAX_FORGE_TOKEN_FILE` (a file nax reads and deletes at startup) and `NAX_FORGE_LOGIN`.\n\n**Approach** — Verbatim design requirements:\n**Token file (narrow exception to D88).** nax K0 rejects a login without a token file, and a GitHub App token cannot answer \"who am I\". For `REVIEW` only, the runner writes the job's current token to `<jobDir>/forge-token` (created with mode `0600`) and passes its path in `NAX_FORGE_TOKEN_FILE`. nax reads and deletes the file at startup; the runner removes a leftover when the spawn fails, at job cleanup, and in the attempt wipe. The token is never put in an environment variable or argv. The runner rule in `.nax/mono/apps/runner/context.md` (\"A git token never goes to ... a file ...\") already names this exception (amended on this branch before the run).\n\n- Runner env: the stripped job env plus `NAX_FORGE_TOKEN_FILE=<jobDir>/forge-token` and `NAX_FORGE_LOGIN=<review.botLogin>`.\n- `CredentialProvider` (`credentials/broker.ts`): adds optional `currentToken?(job: JobRow): string | null`; `CredentialBroker` implements it from `TokenCache.state(job.jobId, job.leaseEpoch, nowMs())`.\n- New `apps/runner/src/executor/review-token.ts`: `REVIEW_TOKEN_FILE = 'forge-token'`; `writeReviewToken(jobDir, token): Promise<string>` creates `<jobDir>/forge-token` in one call with mode `0600` and returns its path; `removeReviewToken(jobDir): Promise<void>` removes it if present.\n- `HostExecutorDeps` (`executor/host-executor.ts`): gains optional `spawnNax?` (default the module's `spawnNax`) so specs observe argv and env without starting a process.\n- `HostExecutor.spawn`: for `REVIEW`, `credentials.currentToken?.(job)`; null or absent throws `Error('git token: none')` before any write or start; otherwise `writeReviewToken`, then start nax with the two env variables; if the start throws, `removeReviewToken` runs before the error propagates.\n- `HostExecutor.cleanup`: calls `removeReviewToken(jobDir)`. `ATTEMPT_FILES` (`host-executor.ts:52`) adds `forge-token`.\n\n`JobRun.prepareAndSpawn` maps a throw from `spawn` to `FAILED 'spawn failed: <message>'`.\n\n**Failure handling** — The runner has no current token at spawn: `FAILED`, reason `spawn failed: git token: none`; nothing written, nax not started.\n\n**Implementation connections** — Add review-token.ts and its co-located spec; modify credentials/broker.ts and executor/host-executor.ts. TokenCache.state must be queried for this exact job id and lease epoch using the broker clock; return null for any state other than a live token. Keep the existing credential shim and stripped job PATH/env behavior for all job kinds and apply REVIEW overlays after stripping. Never log/persist the token outside the narrow file exception or include it in an archive. File creation must be restricted in the write call, not chmod after a permissive write. Preserve finally-based cleanup of profiles, approvals and broker resources. Add forge-token to the existing attempt wipe before reuse. Extend HostExecutor tests with an injected spawnNax and fixed-token provider, real temp files and mode checks; exercise existing JobRun spawn-error mapping without depending on US-007 verdict changes.\n\n**Scope** — In: current-token lookup, secure token-file helpers, REVIEW-only environment overlay, injected spawn seam and cleanup on failure/end/retry. Out: capability probes (US-004), assignment/argv/checkout/readopt (US-005), posted-review verdict and cost seam (US-007), and API assignment metadata (US-003). Refreshing the token during a review: the job token is minted at prepare and valid for an hour, so a review that runs past it fails at its next forge call. Fetching or storing the App bot's numeric user id; nax compares the injected login.\n\n**Interface** — `currentToken?(job: JobRow): string | null`; `REVIEW_TOKEN_FILE = 'forge-token'`; `writeReviewToken(jobDir, token): Promise<string>`; `removeReviewToken(jobDir): Promise<void>`; optional `HostExecutorDeps.spawnNax?` defaults to the module's `spawnNax`.",
+      "acceptanceCriteria": [
+        "[unit] writeReviewToken(jobDir, 'tok-review-9') creates <jobDir>/forge-token containing 'tok-review-9' and returns its path.",
+        "[unit] The file created by writeReviewToken has mode 0600.",
+        "[unit] removeReviewToken(jobDir) removes <jobDir>/forge-token.",
+        "[unit] CredentialBroker.currentToken(job) returns the token string when the token cache holds a token for the job's id and lease epoch.",
+        "[unit] CredentialBroker.currentToken(job) returns null when the token cache holds none for the job.",
+        "[unit] HostExecutor.spawn calls the injected spawnNax with env NAX_FORGE_TOKEN_FILE equal to <jobDir>/forge-token for a REVIEW job whose provider's currentToken returns 'tok-review-9'.",
+        "[unit] HostExecutor.spawn calls the injected spawnNax with env NAX_FORGE_LOGIN equal to 'koda-fleet[bot]' for a REVIEW job whose assign.review.botLogin is 'koda-fleet[bot]' and whose provider's currentToken returns 'tok-review-9'.",
+        "[unit] HostExecutor.spawn passes no env value equal to 'tok-review-9' to the injected spawnNax for a REVIEW job whose provider's currentToken returns 'tok-review-9'.",
+        "[unit] HostExecutor.spawn calls spawnNax with no NAX_FORGE_TOKEN_FILE key in its env for a RUN job.",
+        "[unit] HostExecutor.spawn throws 'git token: none' and never calls spawnNax for a REVIEW job whose provider's currentToken returns null, and <jobDir>/forge-token remains absent.",
+        "[unit] After the injected spawnNax throws for a REVIEW job, <jobDir>/forge-token no longer exists.",
+        "[unit] HostExecutor.cleanup removes a still-existing <jobDir>/forge-token for a REVIEW job.",
+        "[unit] The attempt wipe in HostExecutor.prepare removes <jobDir>/forge-token left by an earlier attempt.",
+        "[unit] A non-cancelled REVIEW job run through JobRun whose executor.spawn throws 'git token: none' reports FAILED with reason 'spawn failed: git token: none'."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "runner",
+        "security",
+        "credentials",
+        "executor"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces a narrowly scoped secret-on-disk exception spanning token cache, process environment and error/cleanup/retry lifecycles; security override requires strict isolation."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/credentials/broker.ts",
+        "apps/runner/src/credentials/token-cache.ts",
+        "apps/runner/src/credentials/job-files.ts",
+        "apps/runner/test/unit/host-executor-auth.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/executor/review-token.ts",
+        "apps/runner/src/executor/review-token.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "HostExecutor.spawn throws 'git token: none' for REVIEW when the credential provider omits currentToken.",
+        "CredentialBroker.currentToken(job) returns null when the cached token for that job and epoch has expired.",
+        "CredentialBroker.currentToken(job) returns null when the only cached token belongs to a different lease epoch.",
+        "removeReviewToken(jobDir) resolves when forge-token does not exist.",
+        "The argv passed to spawnNax for a REVIEW contains no 'tok-review-9' token value.",
+        "collectBundleEntries excludes forge-token when a leftover forge-token exists in the job directory."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "The runner judges a review",
+      "description": "**Goal** — Derive REVIEW completion from nax's posted-review stdout marker, with cancellation precedence and ledger-based terminal cost.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim design requirements:\n**Verdict by nax's success line.** The runner has no nax exit code (nax runs detached), and nax writes `bot-review.json` before it posts, so the artifact alone does not mean the review posted. nax prints `nax bot review: artifact <path>` to stdout only when the review posted. A `REVIEW` is:\n- `CANCELLED` when a cancel was requested (checked first);\n- `COMPLETED` when `<jobDir>/nax.stdout` has a line starting `nax bot review: artifact `;\n- otherwise `FAILED` with reason `review not posted`.\nIngesting the artifact into koda is K2.\n\nIn the following shared design paragraph, US-003 owns budget command inclusion; this story owns ledger reading and terminal cost reporting.\n\n**Cost.** A `REVIEW` writes no `status.json`. The runner reports its cost from the nax cost ledger in `<outDir>` with the existing `readPlanCost`, as for `PLAN`. `REVIEW` joins `BUDGET_STOP_COMMANDS`, so a budget hard stop cancels queued reviews like `RUN` and `PLAN`.\n\n- `JobExecutor` (`executor/job-executor.ts`): adds `readReviewPosted(job: JobRow): Promise<boolean>`; `HostExecutor` implements it with `reviewPosted(stdoutPath)` from the new `apps/runner/src/verdict/review-posted.ts`, true when the file has a line starting `nax bot review: artifact `, false when it has none or does not exist.\n- `JobRun.judge` (`supervisor/job-run.ts:410`, private): a `REVIEW` branch beside `PLAN` returns the call-5 verdict and a snapshot whose `costSpentUsd` is `readPlanCost(job)` when defined; it never calls `readStatus`.\n\n**Failure handling** — If nax wrote bot-review.json but did not post, the job is FAILED with reason review not posted. If nax never ran far enough to print the success line, the job is FAILED with reason review not posted.\n\n**Implementation connections** — Create verdict/review-posted.ts and verdict/review-posted.spec.ts; modify executor/job-executor.ts, executor/host-executor.ts, supervisor/job-run.ts and test/helpers/fake-executor.ts. The fake `JobExecutor` gains a `readReviewPosted` that resolves `false` unless a test sets it, so every existing job-run spec keeps its behaviour. Read exactly <jobDir>/nax.stdout in HostExecutor. Place the REVIEW judge branch before the existing readStatus path; reuse readPlanCost and omit costSpentUsd if it is undefined. Preserve normal log draining, bundle upload, terminal snapshots and RUNNING -> UPLOADING -> terminal transitions. REVIEW must not call PLAN commit/push or RUN progress-push behavior. Drive the new verdict through JobRun with FakeExecutor rather than testing a private method alone; use real stdout files for the pure marker helper and extend HostExecutor tests for path wiring.\n\n**Scope** — In: success-marker reader, executor seam/implementations/fake, verdict precedence and terminal cost reporting. Out: token delivery (US-006), restart routing (US-005), API budget command inclusion (US-003), and web labels (US-008). Ingesting `bot-review.json` into koda, passing project decisions to the review (`--decisions`), and storing review outcomes as memory; those are K2. A stderr tail in the failure reason of a `review not posted` job; the stderr log is still uploaded with the job.\n\n**Interface** — `reviewPosted(stdoutPath)`; `readReviewPosted(job: JobRow): Promise<boolean>`; `readPlanCost(outDir)`; `JobRun.judge` returns the verdict and a snapshot whose `costSpentUsd` is `readPlanCost(job)` when defined.",
+      "acceptanceCriteria": [
+        "[unit] reviewPosted(path) returns true for a stdout file with a line 'nax bot review: artifact /out/bot/pr-42/r1/bot-review.json'.",
+        "[unit] reviewPosted(path) returns false for a stdout file containing no line starting 'nax bot review: artifact '.",
+        "[unit] reviewPosted(path) returns false when the file does not exist.",
+        "[unit] HostExecutor.readReviewPosted(job) returns reviewPosted(<jobDir>/nax.stdout).",
+        "[unit] A REVIEW job run through JobRun reports terminal state COMPLETED when no cancel was requested and the fake executor's readReviewPosted resolves true.",
+        "[unit] A REVIEW job run through JobRun reports FAILED with reason 'review not posted' when no cancel was requested and readReviewPosted resolves false.",
+        "[unit] A REVIEW job run through JobRun reports CANCELLED when a cancel is requested and readReviewPosted resolves true.",
+        "[unit] A REVIEW job run through JobRun reports costSpentUsd '0.0421' in its terminal snapshot when readPlanCost resolves '0.0421'.",
+        "[unit] A REVIEW job run through JobRun never calls the fake executor's readStatus.",
+        "[unit] A non-cancelled REVIEW job run through JobRun reports FAILED with reason 'review not posted' when bot-review.json exists but nax did not post the review and readReviewPosted returns false because stdout has no success line.",
+        "[unit] A non-cancelled REVIEW job run through JobRun reports FAILED with reason 'review not posted' when nax never ran far enough to print the success line and readReviewPosted returns false.",
+        "[unit] A new FakeExecutor.readReviewPosted(job) resolves false unless a test overrides it, preserving the fake's existing job-run behavior by default.",
+        "[unit] A non-cancelled RUN job run through JobRun with the existing default FakeExecutor completed status and a process that has exited still reports terminal state COMPLETED after the REVIEW judge branch is added."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "runner",
+        "verdict",
+        "cost",
+        "lifecycle"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A pure stdout-marker reader, one executor method and a PLAN-shaped judge branch reuse the existing lifecycle and ledger reader; there is no new state machine, credential handling or asynchronous orchestration."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/executor/job-executor.ts",
+        "apps/runner/src/verdict/plan-cost.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/test/helpers/fake-executor.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/verdict/review-posted.ts",
+        "apps/runner/src/verdict/review-posted.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "reviewPosted(path) returns false when the marker text occurs only after another prefix on a line.",
+        "A REVIEW terminal snapshot omits costSpentUsd when readPlanCost resolves undefined.",
+        "A REVIEW job run through JobRun never calls finishPlan or pushProgress."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/helpers/fake-executor.ts",
+          "reason": "the fake `JobExecutor` stops type-checking once `JobExecutor` gains `readReviewPosted`; it gains a `readReviewPosted` that resolves `false` unless a test sets it, so every existing job-run spec keeps its behaviour."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Web: review jobs are labelled",
+      "description": "**Goal** — Render REVIEW jobs as PR reviews with a readable PR number and translate their capability misfit in both web locales.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") puts the review loop in koda: koda owns the bot identity (the `koda-fleet` App, whose key lives only in koda), triggers reviews, and later (K2) feeds project decisions in and stores review outcomes as memory.\n\n**Approach** — Verbatim design requirements:\n- Web (`apps/web`): `FleetJobKind` and `MisfitReason` (`lib/fleet-types.ts`) add `REVIEW` and `bot_review`; `reviewPrNumber(feature): number | null` in `lib/fleet-jobs.ts`; the job list (`pages/[project]/fleet/index.vue`) and the job page header (`pages/[project]/fleet/jobs/[id]/index.vue`) show `PR #<n>` in place of the feature for a `REVIEW`; `fleet.command.REVIEW` = `PR review` (Chinese `PR 评审`); `fleet.misfit.bot_review` = `nax on this runner cannot run PR reviews` (Chinese `此运行器上的 nax 无法执行 PR 评审`).\n\n**Implementation connections** — Modify apps/web/lib/fleet-types.ts, apps/web/lib/fleet-jobs.ts, apps/web/pages/[project]/fleet/index.vue, apps/web/pages/[project]/fleet/jobs/[id]/index.vue, apps/web/i18n/locales/en.json and apps/web/i18n/locales/zh.json. Keep the helper consistent with the API's canonical review-pr- positive-safe-integer feature convention, and only replace features for REVIEW jobs. Use existing codeLabel/i18n and interpolation rendering; preserve config-job labels, routes, permissions, event-driven refresh and non-review features. Update apps/web/tests/i18n/fleet-locale-parity.spec.ts: the `ENUMS` table pins `fleet.command` to the four command keys and `fleet.misfit` to its reason keys, asserting each locale covers exactly those keys; `fleet.command` gains `REVIEW`, `fleet.misfit` gains `bot_review`, and the parity assertion is unchanged. Extend existing fleet-jobs helper tests and page suites; use the mountSfc/fleet harness for behavioral label assertions, not only source matching.\n\n**Scope** — In: web kind/misfit unions, feature parser, job-list kind/feature text, job-header feature text and both locale labels/parity pins. Out: API/protocol work (US-001 through US-003), capability detection (US-004), runner execution (US-005 through US-007), and a review dispatch form or navigation redesign. Automatic dispatch of reviews on new PR heads, per-repo auto-review settings and the auto-review switch; those are part B (feature `fleet-auto-review`). Correcting the stale `RUN`/`PLAN` doc enums in the dashboard, home and ticket job DTOs; they already omit the config and thread kinds.\n\n**Interface** — `reviewPrNumber(feature): number | null`; `fleet.command.REVIEW` = `PR review` / `PR 评审`; `fleet.misfit.bot_review` = `nax on this runner cannot run PR reviews` / `此运行器上的 nax 无法执行 PR 评审`.",
+      "acceptanceCriteria": [
+        "[unit] reviewPrNumber('review-pr-42') returns 42.",
+        "[unit] reviewPrNumber('login') returns null.",
+        "[unit] The fleet job list renders a REVIEW job with feature 'review-pr-42' with kind label 'PR review'.",
+        "[unit] The fleet job list renders a REVIEW job with feature 'review-pr-42' with text 'PR #42' in place of 'review-pr-42'.",
+        "[unit] The job page header shows 'PR #42' for a REVIEW job with feature 'review-pr-42'.",
+        "[unit] A placement misfit 'bot_review' renders label 'nax on this runner cannot run PR reviews'.",
+        "[unit] The Chinese locale defines fleet.command.REVIEW.",
+        "[unit] The Chinese locale defines fleet.misfit.bot_review.",
+        "[unit] The fleet job list continues to show feature text 'login' for a RUN job with feature 'login'.",
+        "[unit] The job page header shows 'nax config' for a CONFIG_EDIT job in the English locale, preserving its existing fleet.jobs.configFeature label."
+      ],
+      "tags": [
+        "fleet-pr-review",
+        "web",
+        "ui",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Straightforward additive presentation changes across existing types, a pure helper, two views and locale tables; no new UI architecture, credentials or authorization behavior."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/pages/[project]/fleet/index.vue",
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/i18n/locales/en.json"
+      ],
+      "suggestedCriteria": [
+        "reviewPrNumber('review-pr-042') returns null.",
+        "reviewPrNumber('review-pr-99999999999999999999') returns null."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the `ENUMS` table pins `fleet.command` to the four command keys (line 33) and `fleet.misfit` to its reason keys (line 23), asserting each locale covers exactly those keys; `fleet.command` gains `REVIEW`, `fleet.misfit` gains `bot_review`, and the parity assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Goal and completion: deliver fleet S6 K1 part A as one REVIEW job capability across the API, shared protocol, runner and web. A manual POST /projects/:slug/fleet/jobs for a GitHub PR queues or assigns a REVIEW; only a runner that proves both bot review support and the K0 forge-identity contract may take it. Execution detaches at the default branch commit, injects the App identity through a disposable token file and bot login, and completes only on nax's posted-review stdout marker. Cancellation wins over success. Cost uses the existing ledger reader; failures retain existing outcome notifications. Automatic PR-head dispatch and K2 memory ingestion are separate features. The eight story ids, workdirs and dependency edges are binding; do not add cross-story dependencies, even though the full deployed capability requires both API assignment and runner execution. Runner tests can construct protocol payloads before US-003 lands.\n\nDiscovery and architecture: codebase-memory MCP was unavailable in this session, so discovery used direct Read/Grep/Glob at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The supplied detection labels Express and Next.js are inaccurate: .nax/mono/apps/api/context.md:23 identifies NestJS 12 + Fastify and Prisma 7, and .nax/mono/apps/web/context.md:22 identifies Nuxt 4 SSR with Vue. This is an enhancement to a Bun/Turborepo monorepo, not greenfield. The API owns persistence, dispatch validation, budgets, placement and transitions; the Bun-only runner owns execution and journal events; the web remains a thin, hand-written Nuxt client. Root package.json:8 lists both apps/* and packages/* workspaces; packages/fleet-protocol is an actual shared package despite the abbreviated detected-package list. Read each app's .nax/mono/apps/<app>/context.md before implementation. API implementers must also locate/read nathapp-nestjs-patterns before writing NestJS code; no repository-local SKILL.md for that skill was found during planning. Never edit generated AGENTS.md or generated CLI source manually.\n\nUS-001 model and placement impact: packages/fleet-protocol/src/index.ts:65 defines RunnerCapabilities, :132 defines FleetJobKindName and :236 defines AssignPayload. Widen these types with optional botReview?: true and review?: { prNumber: number; botLogin: string }, plus REVIEW in the kind union. Keep API production imports type-only: apps/api/src/fleet/common/protocol.spec.ts:36 enforces this restriction, and :50 has an exhaustive Record<FleetJobKindName, true> that must gain REVIEW: true. Runtime helpers therefore live in the new apps/api/src/fleet/common/review-jobs.ts, following the local mirror approach in apps/api/src/fleet/common/config-jobs.ts:1. The API's kind constant is apps/api/src/common/enums.ts:143. parseCapabilitiesCore at apps/api/src/fleet/common/capabilities-core.ts:123 currently destructures capability flags, validates configJobs at :143 and copies it at :162; botReview must be validated and copied, not silently dropped, and any supplied value other than true must fail with botReview. The external wrapper parseCapabilities and its specs remain the public validation path. Placement's MisfitReason and PERMANENT_MISFITS are apps/api/src/fleet/jobs/placement-rules.ts:10 and :21; capabilityMisfit at :94 precedes profile, interaction and tool checks. Insert the REVIEW capability gate first within capabilityMisfit, without moving it ahead of firstMisfit's existing disabled/offline/budget/label/executor gates (:117). Missing botReview is recoverable, not permanent, so a pinned review must still queue with 201. firstMisfit, evaluateRunners, PlacementService and the dashboard dry-run all share these rules. Update FleetJobDto.command at apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:51, PlacementMisfitDto.reason at :129 and dashboard MISFIT_REASONS at apps/api/src/fleet/dashboard/dashboard.types.ts:109. These enum changes flow into dashboard and credential-board schemas too. Existing tests to extend include capabilities.spec.ts, placement-rules.spec.ts and protocol.spec.ts; create review-jobs.spec.ts for canonical positive-safe-integer parsing.\n\nUS-002 validation and callers: DispatchFleetJobDto at apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10 currently limits command to RUN/PLAN and requires feature at :11. Make feature optional at the transport layer while keeping it mandatory for RUN/PLAN in normalizeDispatch; add optional integer prNumber in 1..2147483647 and expose matching Swagger metadata. normalizeDispatch at apps/api/src/fleet/jobs/dispatch-input.ts:26 currently dereferences dto.feature immediately; guard the optional feature before regex/includes access, then separate command-specific rules in the specified error-precedence order. REVIEW derives review-pr-N and defaultBranch, uses raw mode and null planFrom, and preserves the shared profile chain, cost conversion, timeout default, label sorting/deduplication and pin handling. Existing dispatch-input.spec.ts:8 verifies full defaults; :15 verifies profile order and sorted labels; :42 verifies RUN bash modes and PLAN restrictions. Extend those tests and the existing dto/dispatch-fleet-job.dto.spec.ts. normalizeDispatch is also called by schedules/schedules.service.ts:208 and assistant/tools/dispatch-job-tool.ts:145; schedule-template.ts:10 produces DispatchFleetJobDto. Keep their existing RUN/PLAN behavior and do not widen the assistant tool or schedule scope incidentally. Changing feature to optional and command to a larger union can expose downstream narrowing assumptions; fix only compatibility consequences, not new review UI/assistant/schedule features.\n\nUS-003 dispatch, assignment, budget and notifications: apps/api/src/fleet/jobs/fleet-jobs.service.ts:67 loads the repo, checks project ownership at :69, then normalizes at :70. Add the non-GitHub REVIEW ValidationAppException after the ownership/not-found check and before normalization, so GitHub-only takes precedence even for otherwise malformed review input. Preserve the existing permissioned controller and route-command path; do not add a new endpoint. Pinned dispatch only rejects PERMANENT_MISFITS (:86); budget checks, insertion, ticket effects, audit and placement are already orchestrated by the service. DuplicateActiveJobError is mapped outside the aborted transaction at :124 to the existing fleet.jobs conflict. The one-active-review invariant reuses the committed partial index apps/api/prisma/migrations/20260930090000_fleet_jobs/migration.sql:152, mirrored in test/helpers/partial-indexes.ts:7, over repoId/feature and QUEUED, ASSIGNED, RUNNING, UPLOADING. No new PR column, index or database migration is needed: apps/api/prisma/schema.prisma:968 stores command as String. review-pr- is now reserved for RUN/PLAN; existing rows with that prefix are a rollout compatibility risk to assess, not a reason to invent a backfill or silently rewrite them. apps/api/src/fleet/jobs/assign-payload.ts:17 derives GitHub identity from githubAppSlug with koda-fleet fallback; :27 builds AssignPayload. Its production caller is placement.service.ts:207. For REVIEW, derive the PR from the canonical feature and use the passed GitIdentity.name; fail invalid stored features explicitly. Do not attach review to other commands or persist/mint tokens here. apps/api/src/fleet/budgets/prisma-budget.repository.ts:22 filters hard-stop commands, with queries at :128 and :138; add REVIEW without broadening analytics. Budget cancellation continues through FleetJobsService.cancelForBudget and JobTransitionsService. FleetJobOutcomeRecorder.onTerminal at apps/api/src/fleet/jobs/job-outcome.recorder.ts:28 excludes agent-requested and thread jobs, not arbitrary other kinds, so a failed human-requested REVIEW should naturally reach the existing outbox/subscriber path. Preserve transaction boundaries, source-id deduplication and requester eligibility rather than building a review-specific notification service. Existing assign-payload.spec.ts supplies fixtures. Create test/integration/fleet/fleet-review-dispatch.integration.spec.ts using existing HTTP/Prisma fixtures; fleet-budget-evaluator.integration.spec.ts:17 uses canRunDbTests, :48 wraps evaluations with a system action context, and :88 demonstrates project hard-stop cancellation.\n\nUS-004 probing and environment isolation: apps/runner/src/credentials/credential-env.ts:6 centrally strips inherited GH/GitLab variables and is shared by probes, job checks and host execution. Add all four NAX_FORGE identity variables here so ambient daemon identity never reaches any nax command. NaxCallOptions at apps/runner/src/nax/nax-cli.ts:16 has cwd and timeout only; createNaxCli at :77 constructs its sanitized environment at :80. Merge the optional explicit env overlay after the sanitized process environment and NAX_GLOBAL_CONFIG_DIR, not before sanitation. readNaxVersion at :155 must retain its normal floor check; the special K0 version invocation is an independent low-level NaxCli.run call expected to fail with the precise unsupported-variable message. apps/runner/src/capabilities/nax-probe.ts:148 performs the probe in an empty directory, obtains the ordinary version and bounds the final report (:116). Advertise botReview only after both required observations, not from a version number or help alone. StaticCapabilityProbe at apps/runner/src/capabilities/capability-probe.ts:21 spreads cloned static config and adds configJobs; it must never advertise botReview. apps/runner/test/helpers/fake-nax-cli.ts:37 records calls and :49 implements default version answers; extend call recording for env without changing default non-K0 behavior or exact existing capability reports. Existing runner src/capabilities/nax-probe.spec.ts, src/nax/nax-cli.spec.ts, test/unit/nax-cli.spec.ts and test/unit/fake-nax-probe.spec.ts cover the impacted seams. Probes must remain injected; ordinary unit tests must not depend on the host's installed nax. This story is security-critical because it changes credential/environment isolation and supports an explicit identity override.\n\nUS-005 assignment, checkout, argv and restart: apps/runner/src/supervisor/assign-parser.ts:159 is the untrusted-payload boundary; :164 rejects unknown kinds and :191 enforces raw mode for special jobs. Add REVIEW, validate a positive safe-integer prNumber and the exact bounded bot-login grammar, and reject review fields on every other kind. Copy only validated review fields into the clean AssignPayload. The parser limit is positive safe integer, while the API dispatch DTO is bounded to 2147483647; do not accidentally unify these separate contracts. prepareCheckout at apps/runner/src/executor/checkout.ts:25 resolves the ref first, handles PLAN at :37 and reads a PRD for everything else at :44. Add REVIEW's detached checkout before the PRD path; it does not require a feature PRD or copy PLAN's .nax-directory check. Preserve RUN branch/PRD protections and PLAN expected-branch behavior. buildNaxArgv at apps/runner/src/executor/nax-process.ts:11 already validates profiles and builds the per-job chain; add the exact bot review argv before the RUN cost-flag branch. The koda-job-<jobId> profile remains in argv because HostExecutor.matchesProcess at host-executor.ts:181 uses it to identify detached children. Supervisor.readopt at apps/runner/src/supervisor/supervisor.ts:163 handles existing thread/config special cases, rejects rows with no recorded process, then at :183 chooses PLAN watch/finish using isAlive and matchesProcess without status.json. Let REVIEW share that branch, retaining all other guards. Relevant tests are existing src/supervisor/supervisor.spec.ts, assignment-parser tests, test/unit/checkout.spec.ts and host-executor tests; real-git filesystem tests use isolated git fixtures. Treat login/argv validation as a security boundary.\n\nUS-006 token delivery: CredentialProvider at apps/runner/src/credentials/broker.ts:27 currently exposes acquire/release; add optional synchronous currentToken(job). CredentialBroker at :74 owns TokenCache. Read TokenCache.state(jobId, leaseEpoch, nowMs()) at apps/runner/src/credentials/token-cache.ts:68 and return state.token.token only for kind token; pending, error and expired states produce null. Never read another job/epoch or dump cache objects into logs. HostExecutorDeps at apps/runner/src/executor/host-executor.ts:35 needs an optional injected spawnNax for deterministic tests. HostExecutor prepares a 0700 job directory (:95), wipes ATTEMPT_FILES (:52, :93), acquires credentials and writes a per-job outDir profile. Its spawn at :161 currently calls the module spawnNax directly after acquiring the shim path; apply the REVIEW-only token-file/login overlay to this existing stripped environment. An absent currentToken method must behave like null. Throw git token: none before writing or starting anything; do not substitute an ambient token. The new review-token helpers create forge-token with mode 0600 in the write call itself and remove it idempotently. apps/runner/src/credentials/job-files.ts:20 illustrates mode-restricted writes but warns at :26 that writeFile mode applies only to creation; the token contract requires secure creation, not a permissive write followed by chmod. nax reads/deletes the file at startup; the runner must still cover spawn exceptions, cleanup and attempt wipe. Keep cleanup's existing finally-based profile/approvals/credentials release behavior at host-executor.ts:293 when inserting token removal. JobRun already maps spawn exceptions to FAILED spawn failed: <message>; preserve that integration. collectBundleEntries at apps/runner/src/bundle/build-bundle.ts:40 only includes nax-out and explicit stdout/stderr plus command-specific output, not the job root, so forge-token must remain outside bundled paths. Ensure the new token never reaches argv, env values, logs, journal or archives. Existing host-executor-auth.spec.ts and host-executor.spec.ts can inject a provider and spawn function; use real temporary files and permission checks, not a live token or real nax. Cleanup of the shared job directory must not undermine existing higher-epoch protection in the supervisor.\n\nUS-007 verdict and reporting: JobExecutor at apps/runner/src/executor/job-executor.ts:66 defines the required executor interface; adding readReviewPosted requires both HostExecutor and FakeExecutor updates. FakeExecutor at apps/runner/test/helpers/fake-executor.ts:12 is used only for JobRun/Supervisor state machines and must default its new result to false so existing tests keep their behavior. HostExecutor's stdout path already comes from dirs(job)/nax.stdout; add readReviewPosted there without consulting the nax-out artifact. The new reviewPosted helper recognizes a line STARTING with the exact marker and returns false on absent file or no marker. JobRun.judge at apps/runner/src/supervisor/job-run.ts:410 currently branches PLAN then immediately calls readStatus for everything else (:417); place REVIEW beside PLAN and before that status read. Cancellation is evaluated first, then posted marker, otherwise FAILED review not posted; readPlanCost supplies costSpentUsd only when defined, with workflow undefined. apps/runner/src/verdict/plan-cost.ts:8 reads outDir/cost/*.jsonl, deduplicates callId and formats totals; reuse rather than add another cost algorithm. JobRun.finish at :456 already drains logs and applies PLAN-only publishing/RUN-only progress pushing; REVIEW must not enter either publication path. Existing logs, bundles, state transitions and terminal snapshots must still run, including RUNNING -> UPLOADING -> terminal. The stdout marker matters because bot-review.json is written before posting; neither artifact existence nor exit code is success evidence. Existing src/supervisor/job-run.spec.ts is the state-machine test anchor; add co-located review-posted.spec.ts and extend HostExecutor tests. A failed review's stderr is still shipped, but adding stderr to its failure reason is explicitly excluded.\n\nUS-008 web: apps/web/lib/fleet-types.ts:151 defines MisfitReason and :157 defines FleetJobKind; these hand-written unions currently cover RUN/PLAN/config kinds. Add only REVIEW and bot_review here; do not use this change to repair unrelated stale enums or introduce a generated web client. apps/web/lib/fleet-jobs.ts:1 already owns pure job helpers. Add reviewPrNumber with canonical parsing consistent with the API helper and use it in the list and header only for REVIEW. Existing feature rendering is apps/web/pages/[project]/fleet/index.vue:177 and apps/web/pages/[project]/fleet/jobs/[id]/index.vue:263, with translated command labels already handled by codeLabel. Preserve config-job feature labels and all existing live reloads, permission flags and route links; display PR #42 rather than the internal reserved feature slug. Add exact English/Chinese command and misfit strings and extend the existing ENUMS arrays in tests/i18n/fleet-locale-parity.spec.ts:23 and :33; :93 checks exact key sets, so weakening parity is not acceptable. Relevant tests are tests/lib/fleet-jobs.spec.ts, tests/pages/fleet-jobs-list.spec.ts, tests/pages/fleet-job-detail.spec.ts and the locale parity suite. The current list tests contain a source-string regression anchor for config feature rendering (fleet-jobs-list.spec.ts:90), while detail tests expose mountSfc and fleet-harness utilities (fleet-job-detail.spec.ts:7); add runtime rendering assertions for the new labels and retain old behavior rather than relying only on grep assertions. The scope changes labels, not layout/navigation/design tokens, so no redesign or dispatch-form expansion is needed. Render via interpolation, not v-html.\n\nCompatibility and rollout: this is an additive optional-wire-field change gated by a newly proven capability; no protocol-version bump is specified. Old runners omit botReview and leave reviews QUEUED, including pinned dispatches, until upgraded and equipped with K0 nax. Do not claim ordinary bot-review command support is sufficient. Preserve optional-field omission for every non-REVIEW assign and retain fake defaults, exact old capability reports, and exhaustive enum tests. Deploy API/protocol support before enabling review dispatch in operational use, then the upgraded runner plus compatible nax; web labeling can ship after US-001. Existing job kind storage is a string and the active-feature index is already shipped, so there is no schema/data migration in this feature. API contract generation is root package.json:21-23: bun run generate exports openapi.json and regenerates apps/cli/src/generated. Run it for US-001 and US-003 as specified; because US-002 changes the request DTO, regeneration is also required with that contract change by repository guidance. Never hand-edit generated output and never add a review CLI command. Cross-package files generated under the API stories are intentional even though their binding workdir stays apps/api.\n\nTesting and execution constraints: API tests use Vitest/vi with SWC metadata; co-locate unit specs and reserve test/integration for actual database/HTTP/transaction behavior. API integration runs must use the shared canRunDbTests gate and KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; a skipped DB suite is not verification. The test setup force-resets the dedicated test DB; do not run concurrent DB suites against it, and use KODA_TEST_DB_CONTAINER=1 for a second checkout. Runner tests use bun:test, real temporary files and SQLite where relevant, injected processes/probes, isolated git for checkout tests, and the shared sandbox gates only for genuinely host-dependent work. Web uses Jest and the existing mount harness; no new browser polling or stream is needed. Generated acceptance files remain under each app's .nax/features/fleet-pr-review and must not be copied or edited; run their story-filtered acceptance commands from the app contexts. Runtime checks, lint/type-check/build and generation are validation steps, not acceptance criteria or extra stories. All authentication, credential/environment isolation, injected identity and token-file stories use three-session-tdd. Primary risks are incorrect validation precedence, treating bot_review as permanent, falsely advertising K0, leaking ambient/token identity, permissive token-file creation or missed cleanup, misclassifying review success from artifacts, reading status.json on restart/verdict, unintended RUN/PLAN regressions, and schema/client/locale drift. Additional optional edge cases remain in suggestedCriteria. The refine pass explicitly requires regression acceptance assertions, so nine compatibility anchors are now required alongside the preserved spec assertions.\n\nRefine audit, manually cross-checked against .nax/features/fleet-pr-review/spec.md: all 82 original acceptance criteria remain in their original stories, including the otherwise-matching placement qualifier, the checkout-without-prd qualifier, exact token job-id/lease-epoch scope, process-alive-and-ours ownership, and terminal cost-snapshot qualification. Four compound original ACs were split into one assertion each: US-006 file creation/returned path and missing-token throw/no-spawn; US-008 helper success/failure and the two Chinese keys. Spec-ordinal to current acceptanceCriteria-ordinal inventory: US-001 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8,9->9,10->10,11->11,12->12; US-002 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8,9->9,10->10,11->11,12->12; US-003 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8,9->9,10->10,11->11; US-004 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8; US-005 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8,9->9,10->10,11->11; US-006 1->1+2,2->3,3->4,4->5,5->6,6->7,7->8,8->9,9->10,10->11+12,11->13,12->14,13->15; US-007 1->1,2->2,3->3,4->4,5->5,6->6,7->7,8->8,9->9; US-008 1->1+2,2->3,3->4,4->5,5->6,6->7+8. Five additional assertions explicitly enumerate failure-table consequences: US-003 queued state; US-006 exact spawn-failure reason and no token file; US-007 artifact-only and no-success-line failures. With the nine refine-requested regression anchors the PRD has 100 independent assertions. Every story already has a negative path, including US-008's parser returning null for login.\n\nRefine corrections: made parser errors observable as { ok: false, detail: 'invalid review' } or 'invalid bashMode', matching assign-parser.ts:16; made readopt modes observable via public begin(row, mode); made dependent file/env assertions self-contained; clarified cancellation prerequisites on success/failure verdicts so they cannot contradict cancel-first semantics. Existing FakeNaxCli version/help answers, legacy capability acceptance, RUN normalization/argv/completion, FakeExecutor default false and non-review web labels now have explicit compatibility ACs. All spec-recommended contextFiles are present within the five-file cap, including en.json restored to US-008; parity-suite edits remain required in its description. New-file ownership and all binding workdirs/dependency edges remain unchanged, with no dangling ids. All twelve feature-level out-of-scope items remain verbatim, and the no-CLI-command boundary is echoed beside generation work without excluding regeneration. Routing is medium/tdd-simple for additive model/validation/verdict/web work, medium/three-session-tdd for identity-bearing dispatch and runner parser/probe seams, and complex/three-session-tdd for the new token-file lifecycle. Security isolation was not weakened when lowering complexity. No application implementation or test execution is claimed by this planning audit.",
+  "outOfScope": [
+    "Automatic dispatch of reviews on new PR heads, per-repo auto-review settings and the auto-review switch; those are part B (feature `fleet-auto-review`).",
+    "Ingesting `bot-review.json` into koda, passing project decisions to the review (`--decisions`), and storing review outcomes as memory; those are K2.",
+    "`nax bot fix` jobs and GitLab review jobs.",
+    "Dispatching a `REVIEW` through the assistant tool `koda_dispatch_job`; its `command` stays `RUN` or `PLAN`.",
+    "Fleet analytics for `REVIEW` jobs; the analytics queries keep counting `RUN` and `PLAN` only.",
+    "A cost cap enforced inside the review; nax `bot review` takes no cost flag, so `maxCostUsd` is not passed to nax.",
+    "Refreshing the token during a review: the job token is minted at prepare and valid for an hour, so a review that runs past it fails at its next forge call.",
+    "CLI commands for reviews; the generated CLI client is regenerated but no command is added.",
+    "Fetching or storing the App bot's numeric user id; nax compares the injected login.",
+    "Installing nax with the `bot-forge-identity` feature on runner hosts; until it is installed, no runner reports `botReview` and `REVIEW` jobs stay queued.",
+    "A stderr tail in the failure reason of a `review not posted` job; the stderr log is still uploaded with the job.",
+    "Correcting the stale `RUN`/`PLAN` doc enums in the dashboard, home and ticket job DTOs; they already omit the config and thread kinds."
+  ],
+  "routingProfile": "native-codex-ds"
+}
