@@ -171,11 +171,11 @@ A job dispatched with `bashMode: gated` or `escalate` relays nax's bash approval
 - Choose the mode per job: the web dispatch form and schedule dialog have a "Shell command approvals" select (RUN only)
   and an ask timeout in minutes; the CLI takes `--bash-mode gated|escalate` and `--approval-timeout <seconds>` on
   `koda fleet dispatch`, `koda fleet schedule add` and `schedule edit`.
-- Answer asks in the project's approvals inbox (`/<project>/fleet/approvals`) or with
-  `koda fleet approval decide <approvalId> --decision allow|allow_for_job|deny --project <slug>` (find ids with
-  `koda fleet approval list --project <slug>`; without `--project` the CLI uses the global-admin routes). Project
-  developers and admins may answer; the job page shows "Waiting for approval" while an ask is open, and the inbox
-  shows whether the runner delivered the answer.
+- Answer asks in the approvals inbox (`/<project>/approvals`, or `/approvals` across projects) or with
+  `koda approval approve <id> --choice allow|allow_for_job` / `koda approval reject <id>` (find ids with
+  `koda approval list --project <slug> --key fleet.job.shell.escalate --status pending`). An approver needs
+  `approval.decide` in the project and the ask's own key `fleet.job.shell.escalate` (project developers and admins
+  have both); they are notified when an ask opens. The job page shows "Waiting for approval" while an ask is open.
 - An answer that reaches the runner after nax's deadline is not sent (`ask_expired`): nax has already denied it.
 
 ## Run logs (S2a)
@@ -241,9 +241,9 @@ koda fleet job logs <jobId> --follow               # nax run log as it streams; 
 koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
 koda fleet budget set --scope project --window month --amount 50 --project web
 koda fleet budget resume <policyId> --amount 80 --project web
-koda fleet approval list                            # pending first; add --page / --size
-koda fleet approval show <approvalId>               # a pending budget override lists its re-queue candidates
-koda fleet approval decide <approvalId> --decision raise_budget_and_resume --amount 80 --project web
+koda approval list --status pending --project web  # bash asks and budget overrides; --key, --page / --size
+koda approval show <id>                             # a pending budget override lists its re-queue candidates
+koda approval approve <id> --amount 80 --requeue all   # raise the budget and resume; reject = keep paused
 koda fleet schedule add --repo acme/app --feature login --cron "0 9 * * 1-5" --timezone Asia/Singapore --max-cost 5
 koda fleet schedule list                            # next fire, or disabled (completed / no_progress / ...)
 koda fleet schedule show <scheduleId>               # the template and the last 10 jobs it dispatched
@@ -268,17 +268,17 @@ routes, so a pause resumed in one shows in the other within 30 seconds. A hard s
 (ASSIGNED or RUNNING) is only stopped when the policy's `runningJobs` is `cancel`; under the default `finish` it runs
 to completion and keeps billing, so a hard stop is not a kill switch for work already in flight.
 
-A global or project ADMIN answers the approval with `koda fleet approval decide`: `koda fleet approval list --status
-pending` finds it, `koda fleet approval show <approvalId>` shows what it wants, and `decide` either
-`--decision keep_paused` or `--decision raise_budget_and_resume --amount <usd>` — the latter clears the pause and
-re-queues the candidates named with `--requeue` (their job ids come from `show`; `--requeue all` is refused once the
-candidate list is too long to be shown in full). `koda fleet budget resume` answers it too and resumes the policy,
+A global or project ADMIN (anyone holding `approval.decide` and `fleet.budget.override`) answers the approval with
+`koda approval`: `koda approval list --key fleet.budget.override --status pending` finds it, `koda approval show <id>`
+shows what it wants, and then either `koda approval reject <id>` keeps the pause or `koda approval approve <id>
+--amount <usd>` raises the limit, clears the pause and re-queues the candidates named with `--requeue` (their job ids
+come from `show`; `--requeue all` is refused once the candidate list is too long to be shown in full). `koda fleet budget resume` answers it too and resumes the policy,
 but it needs `--amount`: without one the amount stays at the value the hard stop fired on, and a resume is only
 accepted when the amount is above this window's spend.
 
 Answer the override in the web: the header badge counts pending approvals, the jobs-list banner has a "Review
-override" link, and `/<project>/fleet/approvals` (project and repo budgets) or `/admin/fleet/approvals` (fleet-wide
-and runner budgets) lists them. "Raise and resume" takes a new limit above the spend and re-queues the ticked jobs the
+override" link, and `/<project>/approvals` (project and repo budgets) or `/approvals` (every project, plus fleet-wide
+and runner budgets for global admins) lists them. "Raise and resume" takes a new limit above the spend and re-queues the ticked jobs the
 pause cancelled before they started; "Keep paused" leaves the pause (resume later from the budgets page).
 
 Schedules are also managed on the web: `/<project>/fleet/schedules` lists a project's schedules with their next fire in
