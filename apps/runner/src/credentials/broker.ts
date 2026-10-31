@@ -27,6 +27,11 @@ export interface AcquireOptions {
 export interface CredentialProvider {
   acquire(job: JobRow, options: AcquireOptions): Promise<AcquireResult>;
   release(job: JobRow): Promise<void>;
+  /**
+   * US-006: the live token the cache holds for this exact (jobId, leaseEpoch), or null for any other state (none yet,
+   * expired, a token error). A REVIEW job needs it to write nax's forge token file.
+   */
+  currentToken?(job: JobRow): string | null;
 }
 
 /** Read-only project repository credentials; no job-local command shims. */
@@ -119,6 +124,15 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     if (!options.wait) return { ok: true, credentials };
     const refused = await this.firstToken(job, options.isCancelled, repoId);
     return refused ?? { ok: true, credentials };
+  }
+
+  /**
+   * US-006: the same `TokenCache.state` the socket answers from, for this exact job and epoch on the broker's clock
+   * (`HostExecutor.spawn` writes it to nax's forge token file). Anything but a live token is null.
+   */
+  currentToken(job: JobRow): string | null {
+    const state = this.deps.tokens.state(job.jobId, job.leaseEpoch, this.deps.nowMs());
+    return state.kind === 'token' ? state.token.token : null;
   }
 
   async releaseRepo(job: JobRow, repoId: string): Promise<void> {

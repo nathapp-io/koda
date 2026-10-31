@@ -24,9 +24,10 @@ import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
-import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
+import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
+import { removeReviewToken, writeReviewToken } from './review-token';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { cleanWorkspace, ensureClone } from './workspace';
@@ -46,10 +47,13 @@ export interface HostExecutorDeps {
   readonly jobCheck?: JobCheck;
   /** The process lookups for the identity check and the reap; unset reads `ps` (PS_PROCESS_INFO). Unit specs inject fakes. */
   readonly processInfo?: ProcessInfo;
+  /** US-006: the nax start; unset spawns the real detached nax. A spec observes argv and env without a process. */
+  readonly spawnNax?: (argv: readonly string[], options: SpawnNaxOptions) => { pid: number; pgid: number };
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow'];
+// US-006: `forge-token` is a REVIEW job's token file; a retry must not start with the previous attempt's.
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token'];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -158,10 +162,36 @@ export class HostExecutor implements JobExecutor {
     const inherited = process.env['PATH'] ?? '';
     // D88: the shims come first on nax's PATH; no token variable is ever set here.
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
-    return spawnNax(argv, {
-      cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
-      env: { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path },
-    });
+    const env: Record<string, string | undefined> = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path };
+    // US-006: a REVIEW overlays the stripped environment AFTER stripping, so a copy the daemon inherited cannot leak in.
+    const review = job.command === 'REVIEW';
+    if (review) Object.assign(env, await this.reviewEnv(job, jobDir));
+    const options: SpawnNaxOptions = {
+      cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'), env,
+    };
+    try {
+      return this.startNax(argv, options);
+    } catch (error) {
+      if (review) await removeReviewToken(jobDir);   // no nax started, so nothing else deletes the token file
+      throw error;
+    }
+  }
+
+  private startNax(argv: readonly string[], options: SpawnNaxOptions): SpawnHandle {
+    return (this.deps.spawnNax ?? spawnNax)(argv, options);
+  }
+
+  /**
+   * US-006: the narrow file exception to D88. nax K0 rejects a login without a token file, and a GitHub App token
+   * cannot answer "who am I": the job's current token goes into `<jobDir>/forge-token` (0600), which nax reads and
+   * deletes at startup. It is never an environment value or an argv element.
+   */
+  private async reviewEnv(job: JobRow, jobDir: string): Promise<Record<string, string>> {
+    const token = this.deps.credentials.currentToken?.(job) ?? null;
+    if (token === null) throw new Error('git token: none');   // before any write and before any start
+    const login = job.assign.review?.botLogin;
+    if (login === undefined) throw new Error('invalid review');   // buildNaxArgv already refused such an assign
+    return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, token), NAX_FORGE_LOGIN: login };
   }
 
   isAlive(pid: number): boolean {
@@ -299,7 +329,11 @@ export class HostExecutor implements JobExecutor {
       try {
         await this.deps.approvals.close(job.jobId, job.leaseEpoch);
       } finally {
-        await this.deps.credentials.release(job);
+        try {
+          await this.deps.credentials.release(job);
+        } finally {
+          await removeReviewToken(this.dirs(job).jobDir);   // US-006: a token file nax never got to delete itself
+        }
       }
     }
   }
