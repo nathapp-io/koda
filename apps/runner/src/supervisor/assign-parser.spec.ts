@@ -59,6 +59,22 @@ describe('parseAssign (D30)', () => {
   });
 });
 
+describe('REVIEW assignment (US-005)', () => {
+  const review = (over: Record<string, unknown> = {}) => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' }, ...over });
+  test('AC-1 accepts and cleans a review assignment', () => {
+    expect(parseAssign(cmd(review()))).toMatchObject({ ok: true, assign: { command: 'REVIEW', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } } });
+  });
+  test.each([
+    ['AC-2 missing review', (({ review: _review, ...rest }) => rest)(review()), 'review'],
+    ['AC-3 invalid bot login', review({ review: { prNumber: 42, botLogin: 'koda fleet' } }), 'review'],
+    ['AC-4 invalid PR number', review({ review: { prNumber: 0, botLogin: 'koda-fleet[bot]' } }), 'review'],
+    ['AC-5 invalid bash mode', review({ bashMode: 'escalate' }), 'bashMode'],
+    ['AC-6 review on RUN', { ...assignFor('RUN'), review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }, 'review'],
+  ] as const)('%s', (_label, payload, detail) => {
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: `invalid ${detail}` });
+  });
+});
+
 describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
   test.each(['raw', 'gated', 'escalate'] as const)('accepts %s on RUN', (bashMode) => {
     const r = parseAssign(cmd(assignFor('RUN', { bashMode, approvalTimeoutSec: 90 })));

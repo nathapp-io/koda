@@ -4,7 +4,7 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -78,6 +78,14 @@ const viewer = computed<JobViewer>(() => ({
 const canEditConfig = computed(() => permissions.value.has('fleet.job.config.edit'))
 /** S3 §6: config jobs run no nax session; the page shows the config panel instead of progress, stories and cost. */
 const configJob = computed(() => job.value !== null && isConfigJob(job.value))
+const jobTitle = computed(() => {
+  const current = job.value
+  if (!current) return ''
+  if (configJob.value) return t('fleet.jobs.configFeature')
+  if (current.command !== 'REVIEW') return current.feature
+  const prNumber = reviewPrNumber(current.feature)
+  return prNumber === null ? current.feature : `PR #${prNumber}`
+})
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canDispatch)
@@ -260,7 +268,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed || !job" @retry="loadJobDetail()" />
     <template v-else>
-      <PageHeader :title="configJob ? t('fleet.jobs.configFeature') : job.feature" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.repoName(job.repoId)} @ ${job.ref}`">
+      <PageHeader :title="jobTitle" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.repoName(job.repoId)} @ ${job.ref}`">
         <template #actions>
           <NuxtLink :to="logsHref" class="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-muted" data-testid="fleet-job-logs-link">
             {{ t('fleet.jobs.actions.logs') }}

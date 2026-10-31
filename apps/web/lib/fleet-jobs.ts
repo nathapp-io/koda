@@ -212,6 +212,14 @@ export function pickActiveJob(records: readonly FleetJobDto[]): FleetJobDto | nu
   return records.find(job => isActiveJobState(job.state)) ?? null
 }
 
+/** REVIEW jobs encode their PR using the API's canonical review-pr-<positive safe integer> feature. */
+export function reviewPrNumber(feature: string): number | null {
+  const match = /^review-pr-([1-9]\d*)$/.exec(feature)
+  if (!match) return null
+  const number = Number(match[1])
+  return Number.isSafeInteger(number) ? number : null
+}
+
 /** S3 D465: config jobs share one fixed feature, so at most one is active per repo. */
 export const CONFIG_JOB_FEATURE = 'nax-config'
 

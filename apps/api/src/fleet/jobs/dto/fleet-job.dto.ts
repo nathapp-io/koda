@@ -48,7 +48,7 @@ export class FleetJobDto {
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare ref: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD', 'REVIEW'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD' | 'REVIEW';
   @ApiProperty() declare feature: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
@@ -126,7 +126,7 @@ export class FleetJobDto {
 export class PlacementMisfitDto {
   @ApiProperty() declare runnerId: string;
   @ApiProperty() declare name: string;
-  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads'] })
+  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads', 'bot_review'] })
   declare reason: MisfitReason;
 }
 

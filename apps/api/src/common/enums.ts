@@ -140,7 +140,7 @@ export const FleetJobState = {
 export type FleetJobState = (typeof FleetJobState)[keyof typeof FleetJobState];
 
 /** Fleet S1: FleetJob.command. S3 adds the config kinds (spec §1); S5a adds THREAD. */
-export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN', CONFIG_EDIT: 'CONFIG_EDIT', CONFIG_DRIFT: 'CONFIG_DRIFT', THREAD: 'THREAD' } as const;
+export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN', CONFIG_EDIT: 'CONFIG_EDIT', CONFIG_DRIFT: 'CONFIG_DRIFT', THREAD: 'THREAD', REVIEW: 'REVIEW' } as const;
 export type FleetJobKind = (typeof FleetJobKind)[keyof typeof FleetJobKind];
 
 /** Fleet S1: FleetCommand.type. */

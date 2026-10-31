@@ -156,9 +156,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
   const kind = p['command'];
-  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && !isConfigKind(kind))) return bad('command');
+  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && kind !== 'REVIEW' && !isConfigKind(kind))) return bad('command');
   const isConfig = isConfigKind(kind);
   const isThread = kind === 'THREAD';
+  const isReview = kind === 'REVIEW';
   const repo = p['repo'];
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');
@@ -174,7 +175,11 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (!Array.isArray(profiles) || profiles.length !== 0) return bad('profiles');
   } else if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread) && p['bashMode'] !== 'raw')) return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw')) return bad('bashMode');
+  const rawReview = p['review'];
+  if (isReview) {
+    if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || rawReview['botLogin'].length < 1 || rawReview['botLogin'].length > 100 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(rawReview['botLogin'])) return bad('review');
+  } else if (rawReview !== undefined) return bad('review');
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
@@ -203,7 +208,9 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const expectBranch = rawExpectBranch === undefined ? {} : { expectBranch: rawExpectBranch as string };
   if (!isThread) {
     if (p['thread'] !== undefined) return bad('thread');
-    return { ok: true, assign: { ...baseAssign, ...expectBranch } };
+    const reviewValue = rawReview as Obj;
+    const review = isReview ? { review: { prNumber: reviewValue['prNumber'] as number, botLogin: reviewValue['botLogin'] as string } } : {};
+    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review } };
   }
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');

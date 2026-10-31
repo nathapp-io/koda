@@ -15,6 +15,10 @@ export interface FakeRequirements {
 export interface NaxAnswers {
   /** `--version` output (default 0.83.1), or a raw result. */
   version?: string | NaxResult;
+  /** Result for `--version` when the K0 probe token is explicitly supplied. */
+  k0Version?: NaxResult;
+  /** Result for `bot review --help` (default: unknown command). */
+  botReview?: NaxResult;
   /** Keyed by the `--profile` value as passed (a chain keeps its commas; no flag is `default`, which answers DEFAULT_CONFIG unless set). */
   config?: Readonly<Record<string, FakeRequirements | NaxResult>>;
   /** AuthListReport rows; a requested provider without a row is listed unavailable, as nax does. */
@@ -37,19 +41,23 @@ const flag = (args: readonly string[], name: string): string | undefined => {
 
 /** A scripted nax (D96): records every call and answers from `answers`, which a test may replace between calls. */
 export class FakeNaxCli implements NaxCli {
-  readonly calls: Array<{ args: string[]; cwd: string; timeoutMs?: number }> = [];
+  readonly calls: Array<{ args: string[]; cwd: string; timeoutMs?: number; env?: Readonly<Record<string, string>> }> = [];
 
   constructor(public answers: NaxAnswers = {}) {}
 
-  async run(args: readonly string[], options: { cwd: string; timeoutMs?: number }): Promise<NaxResult> {
-    this.calls.push({ args: [...args], cwd: options.cwd, timeoutMs: options.timeoutMs });
-    return this.answer(args);
+  async run(args: readonly string[], options: { cwd: string; timeoutMs?: number; env?: Readonly<Record<string, string>> }): Promise<NaxResult> {
+    this.calls.push({ args: [...args], cwd: options.cwd, timeoutMs: options.timeoutMs, ...(options.env === undefined ? {} : { env: options.env }) });
+    return this.answer(args, options.env);
   }
 
-  private answer(args: readonly string[]): NaxResult {
+  private answer(args: readonly string[], env?: Readonly<Record<string, string>>): NaxResult {
     const a = this.answers;
     const [command] = args;
-    if (command === '--version') return isResult(a.version) ? a.version : { code: 0, stdout: `${a.version ?? '0.83.1'}\n`, stderr: '', timedOut: false };
+    if (command === '--version') {
+      if (env?.['NAX_FORGE_TOKEN'] === 'probe' && a.k0Version !== undefined) return a.k0Version;
+      return isResult(a.version) ? a.version : { code: 0, stdout: `${a.version ?? '0.83.1'}\n`, stderr: '', timedOut: false };
+    }
+    if (args[0] === 'bot' && args[1] === 'review' && args[2] === '--help') return a.botReview ?? naxError('UNKNOWN_COMMAND');
     if (command === 'config') {
       const chain = flag(args, '--profile') ?? 'default';
       const entry = a.config?.[chain] ?? (chain === 'default' ? DEFAULT_CONFIG : undefined);

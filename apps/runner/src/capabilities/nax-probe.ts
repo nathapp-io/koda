@@ -149,8 +149,8 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const empty = await (this.deps.makeEmptyDir ?? makeEmptyDir)();
     try {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
-      const [scan, base, sandbox, protocols, tools] = await Promise.all([
-        this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(),
+      const [scan, base, sandbox, protocols, tools, botReview] = await Promise.all([
+        this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
       ]);
       const nativeConfig = await readNativeModelConfig(this.deps.naxHome);
       const providers = [...new Set([...scan.providers, ...nativeConfig.providers])].sort();
@@ -175,6 +175,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         // descriptors to the ASSIGN. The tools themselves are defined and executed on the server.
         kodaTools: true,
         projectCode: true,
+        ...(botReview ? { botReview: true as const } : {}),
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
       });
@@ -251,6 +252,14 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const json = parseNaxJson(await this.deps.nax.run(['sandbox', 'probe', '--json'], { cwd }));
     const parsed = json.ok ? parseSandboxProbe(json.value) : null;
     return parsed ?? { available: false, error: `nax sandbox probe failed: ${json.ok ? 'NAX_OUTPUT_UNPARSEABLE' : json.code}` };
+  }
+
+  /** K0 is present only when both the command exists and nax explicitly rejects ambient token injection. */
+  private async botReview(cwd: string): Promise<boolean> {
+    const help = await this.deps.nax.run(['bot', 'review', '--help'], { cwd });
+    if (help.code !== 0 || help.timedOut || help.spawnError !== undefined) return false;
+    const version = await this.deps.nax.run(['--version'], { cwd, env: { NAX_FORGE_TOKEN: 'probe' } });
+    return version.code === 1 && !version.timedOut && version.stderr.includes('NAX_FORGE_TOKEN is not supported');
   }
 
   private async protocols(): Promise<NaxProtocol[]> {

@@ -414,6 +414,17 @@ export class JobRun {
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
       return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
+    if (row.command === 'REVIEW') {
+      const costSpentUsd = await this.deps.executor.readPlanCost(row);
+      if (cancelled) {
+        return { verdict: { state: 'CANCELLED', reason: null }, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
+      }
+      const posted = await this.deps.executor.readReviewPosted(row);
+      const verdict = posted
+        ? { state: 'COMPLETED' as const, reason: null }
+        : { state: 'FAILED' as const, reason: 'review not posted' };
+      return { verdict, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
+    }
     const status = await this.deps.executor.readStatus(row);
     if (row.command === 'RUN' && status?.workflow) {
       let reasons: readonly string[] | undefined;

@@ -93,6 +93,44 @@ describe('RUN happy path (D35)', () => {
   });
 });
 
+describe('REVIEW verdicts (US-007)', () => {
+  test('posted review completes without reading status and reports ledger cost', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = true;
+    b.ex.planCost = '0.0421';
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)?.costSpentUsd).toBe('0.0421');
+    expect(b.ex.calls).not.toContain('readStatus:j1');
+  });
+
+  test('unposted review fails with review not posted', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = false;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+  });
+
+  test('cancel takes precedence over a posted review', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = true;
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+
+  test('cancel remains CANCELLED if reading the posted marker would throw', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPostedError = new Error('stdout unreadable');
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(b.ex.calls).not.toContain('readReviewPosted:j1');
+  });
+});
+
 describe('verdicts', () => {
   test.each(['PLAN', 'RUN'] as const)('%s missing output reports nax stderr through a lifecycle event (#207)', async (command) => {
     const b = build(command);
@@ -156,6 +194,14 @@ describe('failures before the process runs', () => {
     b.ex.spawnError = new Error('ENOENT nax');
     await b.run.start('prepare');
     expect(states(b)).toEqual([{ to: 'FAILED', reason: 'spawn failed: ENOENT nax' }]);
+  });
+  test('AC-14 (US-006): a REVIEW job with no git token at spawn is FAILED with the mapped reason', async () => {
+    const b = build('REVIEW');
+    b.ex.spawnError = new Error('git token: none');
+    await b.run.start('prepare');
+    expect(states(b)).toEqual([{ to: 'FAILED', reason: 'spawn failed: git token: none' }]);
+    expect(b.ex.calls).toEqual(['prepare:j1', 'spawn:j1', 'cleanup:j1']);   // no bundle, no upload
+    expect(b.uploads).toEqual([]);
   });
   test('a cancel while the job waits for the repo mutex ends ASSIGNED -> CANCELLED at once, holding nothing (D66)', async () => {
     const b = build();

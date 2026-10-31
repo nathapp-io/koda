@@ -96,6 +96,15 @@ export class FakeExecutor implements JobExecutor {
     return this.logFiles;
   }
 
+  reviewPosted = false;
+  reviewPostedError: Error | null = null;
+
+  async readReviewPosted(job: JobRow): Promise<boolean> {
+    this.note('readReviewPosted', job);
+    if (this.reviewPostedError) throw this.reviewPostedError;
+    return this.reviewPosted;
+  }
+
   async readStatus(job: JobRow): Promise<StatusView | null> {
     this.note('readStatus', job);
     if (this.statusError) throw this.statusError;

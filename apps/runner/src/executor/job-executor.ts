@@ -74,6 +74,7 @@ export interface JobExecutor {
   /** S2a §2.4, plan D321: where this job's nax writes its run log, stdout and stderr (no I/O). */
   logSources(job: JobRow): JobLogSources;
   readStatus(job: JobRow): Promise<StatusView | null>;
+  readReviewPosted(job: JobRow): Promise<boolean>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   /** #203: absolute spend from this PLAN attempt's cost ledgers, in snapshot decimal format. */
   readPlanCost(job: JobRow): Promise<string | undefined>;

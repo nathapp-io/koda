@@ -10,7 +10,7 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
+  | 'config_jobs' | 'bot_review' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -91,6 +91,7 @@ function toolsMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason 
 }
 
 function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
+  if (job.command === 'REVIEW' && caps.botReview !== true) return 'bot_review';
   // Fleet S3 D470: a config job runs no agent, so only the S3 capability and the forge tools matter.
   if (isConfigKind(job.command)) return caps.configJobs === true ? toolsMisfit(job, caps) : 'config_jobs';
   // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.

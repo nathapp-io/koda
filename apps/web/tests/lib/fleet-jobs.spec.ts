@@ -150,6 +150,16 @@ describe('extractProgress', () => {
   })
 })
 
+describe('reviewPrNumber', () => {
+  test('parses only canonical positive safe-integer review features', () => {
+    expect(fleetJobs.reviewPrNumber('review-pr-42')).toBe(42)
+    expect(fleetJobs.reviewPrNumber('login')).toBeNull()
+    expect(fleetJobs.reviewPrNumber('review-pr-0')).toBeNull()
+    expect(fleetJobs.reviewPrNumber('review-pr-042')).toBeNull()
+    expect(fleetJobs.reviewPrNumber('review-pr-9007199254740992')).toBeNull()
+  })
+})
+
 describe('safePrUrl', () => {
   test('keeps https only', () => {
     expect(safePrUrl('https://github.com/acme/app/pull/7')).toBe('https://github.com/acme/app/pull/7')

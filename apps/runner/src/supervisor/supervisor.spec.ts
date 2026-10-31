@@ -278,6 +278,27 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
   test('an unknown job is rejected', async () => {
     expect(await build().supervisor.readopt('ghost', 1)).toEqual({ result: 'rejected', detail: 'unknown job' });
   });
+  test('AC-10/11 REVIEW readopt follows PLAN: watches our live process and finishes a gone process without status.json', async () => {
+    const live = build();
+    live.add({ review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }, 1, 'REVIEW');
+    live.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    live.ex.alive = true;
+    live.ex.dieAfterTicks(2);
+    expect(await live.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await live.supervisor.idle();
+    expect(live.ex.watchOptions).toHaveLength(1);
+
+    const gone = build();
+    gone.add({ review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }, 1, 'REVIEW');
+    gone.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    gone.ex.alive = false;
+    gone.ex.status = null;
+    expect(await gone.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await gone.supervisor.idle();
+    expect(gone.ex.calls).toContain('readReviewPosted:j1');
+    expect(gone.ex.watchOptions).toHaveLength(0);
+  });
+
   test('PLAN: a live process that is this job is watched; a dead or foreign one goes to the finish path (no status.json to judge by)', async () => {
     const live = build();
     running(live, { naxRunId: null }, 'PLAN');

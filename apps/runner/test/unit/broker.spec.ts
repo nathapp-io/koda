@@ -270,3 +270,38 @@ test.skipIf(isNaxSandboxed())('project code AC-13: releaseRepo closes only its s
     for (const helper of helpers) expect(await helperGet(helper)).toBe('');
   } finally { await w.broker.closeAll(); }
 });
+
+describe('CredentialBroker.currentToken (US-006: the REVIEW token file)', () => {
+  test('AC-4: returns the token the cache holds for the job id and lease epoch', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    w.grant(row, 'tok-review-9');
+    expect(w.broker.currentToken(row)).toBe('tok-review-9');
+  });
+
+  test('AC-5: returns null when the cache holds no token for the job', async () => {
+    const w = await world();
+    expect(w.broker.currentToken(w.job())).toBeNull();
+  });
+
+  test('returns null for a token cached under another lease epoch', async () => {
+    const w = await world();
+    const first = w.job(undefined, 1);
+    w.tokens.want(first.jobId, 1);
+    w.grant(first, 'tok-review-9');
+    expect(w.broker.currentToken({ ...first, leaseEpoch: 2 })).toBeNull();
+    expect(w.broker.currentToken(first)).toBe('tok-review-9');
+  });
+
+  test('returns null for an expired token and for a token error', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    w.tokens.apply([{ jobId: row.jobId, leaseEpoch: 1 }],
+      [{ jobId: row.jobId, token: 'tok-old', username: 'x-access-token', expiresAt: new Date(Date.now() - 60_000).toISOString() }], [], Date.now());
+    expect(w.broker.currentToken(row)).toBeNull();
+    w.tokens.apply([{ jobId: row.jobId, leaseEpoch: 1 }], [], [{ jobId: row.jobId, reason: 'app_not_installed' }], Date.now());
+    expect(w.broker.currentToken(row)).toBeNull();
+  });
+});

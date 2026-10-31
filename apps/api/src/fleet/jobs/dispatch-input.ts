@@ -1,6 +1,7 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PROFILE_NAME_RE } from '../common/capabilities';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
+import { REVIEW_FEATURE_PREFIX, reviewFeature } from '../common/review-jobs';
 import type { BashMode } from '../common/protocol';
 import type { NewFleetJob } from './domain/fleet-job.domain';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
@@ -24,13 +25,30 @@ function checkPlanFrom(path: string): string {
 
 /** Spec §5.1 checks the DTO decorators cannot express; returns the insertable fields. */
 export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: string): Omit<NewFleetJob, 'projectId' | 'requestedById'> {
-  if (!FEATURE_RE.test(dto.feature) || dto.feature.includes('..')) fail('feature');
-  if (dto.command === 'PLAN' && !dto.planFrom) fail('planFrom required for PLAN');
-  if (dto.command === 'RUN' && dto.planFrom !== undefined) fail('planFrom is only for PLAN');
+  let feature: string;
+  let ref: string;
+  if (dto.command === 'REVIEW') {
+    if (dto.prNumber === undefined || dto.prNumber === null) fail('prNumber required for REVIEW');
+    if (dto.feature !== undefined) fail('feature is derived for REVIEW');
+    if (dto.planFrom !== undefined) fail('planFrom is only for PLAN');
+    if (dto.ref !== undefined) fail('ref is the default branch for REVIEW');
+    if (dto.bashMode !== undefined && dto.bashMode !== 'raw') fail('bashMode must be raw for REVIEW');
+    if ((dto.ticketRefs?.length ?? 0) > 0) fail('ticketRefs is not for REVIEW');
+    feature = reviewFeature(dto.prNumber);
+    ref = defaultBranch;
+  } else {
+    if (!dto.feature) fail('feature');
+    if (dto.feature.startsWith(REVIEW_FEATURE_PREFIX)) fail('feature is reserved for REVIEW');
+    if (dto.prNumber !== undefined) fail('prNumber is only for REVIEW');
+    feature = dto.feature;
+    if (!FEATURE_RE.test(feature) || feature.includes('..')) fail('feature');
+    if (dto.command === 'PLAN' && !dto.planFrom) fail('planFrom required for PLAN');
+    if (dto.command === 'RUN' && dto.planFrom !== undefined) fail('planFrom is only for PLAN');
+    ref = dto.ref ?? defaultBranch;
+  }
   const profiles = dto.profiles ?? [];
   if (profiles.some((p) => !PROFILE_NAME_RE.test(p) || p.startsWith(RESERVED_PROFILE_PREFIX))) fail('profiles');
   if (new Set(profiles).size !== profiles.length) fail('duplicate profile');
-  const ref = dto.ref ?? defaultBranch;
   if (!GIT_REF_RE.test(ref)) fail('ref');
   const bashMode: BashMode = dto.bashMode ?? 'raw';
   if (dto.command === 'PLAN' && bashMode !== 'raw') fail('bashMode must be raw for PLAN');
@@ -38,7 +56,7 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
     repoId: dto.repoId,
     ref,
     command: dto.command,
-    feature: dto.feature,
+    feature,
     planFrom: dto.command === 'PLAN' ? checkPlanFrom(dto.planFrom as string) : null,
     profiles: [...profiles],
     maxCostUsd: String(dto.maxCostUsd),

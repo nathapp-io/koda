@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
@@ -9,8 +10,10 @@ import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
 import { configBranchName } from '../../src/executor/config-job/commit-push';
 import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
-import { isProcessAlive } from '../../src/executor/nax-process';
+import type { SpawnHandle } from '../../src/executor/job-executor';
+import { isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
 import type { ProcessInfo } from '../../src/executor/pid-registry';
+import { REVIEW_TOKEN_FILE, writeReviewToken } from '../../src/executor/review-token';
 import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
@@ -31,7 +34,7 @@ afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAK
 /** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
 const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
 
-async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
+async function world(command: 'RUN' | 'PLAN' | 'REVIEW' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -47,6 +50,15 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
+
+describe('HostExecutor review verdict (US-007)', () => {
+  test('reads the posted marker from <jobDir>/nax.stdout', async () => {
+    const w = await world('REVIEW');
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'nax.stdout'), 'nax bot review: artifact /out/bot/pr-42/r1/bot-review.json\n');
+    expect(await w.ex.readReviewPosted(w.row)).toBe(true);
+  });
+});
 
 describe('HostExecutor process lookups are injected (US-001)', () => {
   /** A registry entry for this job's clone, written where `reap` reads it. */
@@ -546,5 +558,146 @@ describe('HostExecutor workflow stash and bundle (US-003)', () => {
     expect((await w.ex.prepare(requeued)).ok).toBe(true);
     await expect(stat(join(w.row.jobDir, 'workflow'))).rejects.toThrow();
     await expect(stat(join(w.row.jobDir, 'workflow', 'result.json'))).rejects.toThrow();
+  });
+});
+
+describe('HostExecutor REVIEW token file (US-006)', () => {
+  const BOT = 'koda-fleet[bot]';
+  const TOKEN = 'tok-review-9';
+  const HANDLE: SpawnHandle = { pid: 4242, pgid: 4242 };
+  type SpawnCall = { readonly argv: readonly string[]; readonly options: SpawnNaxOptions };
+  interface Injection {
+    currentToken?: string | null;
+    omitCurrentToken?: boolean;
+    spawnError?: Error | null;
+    breakTokenFile?: boolean;
+  }
+
+  /**
+   * The file's own `world()` fixture (real origin, real temp job dir) with the two US-006 injections: a provider that
+   * hands back a fixed token, and a nax start that records its argv and env and starts no process.
+   */
+  async function injectedWorld(command: 'RUN' | 'REVIEW', over: Injection = {}) {
+    const w = await world(command, {
+      jobId: 'rjob1',
+      ...(command === 'REVIEW' ? { feature: 'review-pr-42', review: { prNumber: 42, botLogin: BOT } } : {}),
+    });
+    const calls: SpawnCall[] = [];
+    const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      ...(over.omitCurrentToken === true ? {} : { currentToken: () => (over.currentToken === undefined ? TOKEN : over.currentToken) }),
+    };
+    const spawnNax = (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => {
+      calls.push({ argv, options });
+      // "the token file cannot be removed": something `rm` refuses now sits at its path.
+      if (over.breakTokenFile === true) {
+        rmSync(tokenPath);
+        mkdirSync(join(tokenPath, 'leftover'), { recursive: true });
+      }
+      if (over.spawnError) throw over.spawnError;
+      return HANDLE;
+    };
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax,
+    });
+    await mkdir(w.row.jobDir, { recursive: true });
+    return { ...w, calls, ex, tokenPath };
+  }
+
+  test('AC-6: spawn calls spawnNax with NAX_FORGE_TOKEN_FILE at <jobDir>/forge-token for a REVIEW job', async () => {
+    const w = await injectedWorld('REVIEW');
+    const handle = await w.ex.spawn(w.row);
+    expect(handle).toEqual({ pid: 4242, pgid: 4242 });
+    expect(w.calls).toHaveLength(1);
+    expect([...(w.calls[0]?.argv ?? [])]).toEqual(expect.arrayContaining(['bot', 'review', '42']));
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(join(w.row.jobDir, 'forge-token'));
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);                       // nax reads this, then deletes it
+    expect((await stat(w.tokenPath)).mode & 0o777).toBe(0o600);
+  });
+
+  test('AC-7: spawn passes the assign\'s bot login as NAX_FORGE_LOGIN', async () => {
+    const w = await injectedWorld('REVIEW');
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe(BOT);
+  });
+
+  test('AC-8: no value in the spawned env is the token itself', async () => {
+    const w = await injectedWorld('REVIEW');
+    await w.ex.spawn(w.row);
+    const values = Object.values(w.calls[0]?.options.env ?? {});
+    expect(values).not.toContain(TOKEN);
+    expect(JSON.stringify(w.calls[0]?.options.env)).not.toContain(TOKEN);          // nor inside PATH, argv or a blob
+  });
+
+  test('AC-9: a RUN job spawns with no NAX_FORGE_TOKEN_FILE key, even when the daemon inherited one', async () => {
+    const w = await injectedWorld('RUN');
+    const inherited = process.env['NAX_FORGE_TOKEN_FILE'];                         // restore, never delete: this process is shared
+    process.env['NAX_FORGE_TOKEN_FILE'] = '/elsewhere/forge-token';
+    try {
+      await w.ex.spawn(w.row);
+    } finally {
+      if (inherited === undefined) delete process.env['NAX_FORGE_TOKEN_FILE'];
+      else process.env['NAX_FORGE_TOKEN_FILE'] = inherited;
+    }
+    expect(w.calls).toHaveLength(1);
+    expect('NAX_FORGE_TOKEN_FILE' in (w.calls[0]?.options.env ?? {})).toBe(false);
+    expect('NAX_FORGE_LOGIN' in (w.calls[0]?.options.env ?? {})).toBe(false);
+  });
+
+  test('AC-10: no current token fails the spawn with git token: none, starts nothing and writes nothing', async () => {
+    const w = await injectedWorld('REVIEW', { currentToken: null });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('git token: none');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('a provider without a token lookup cannot start a REVIEW job either', async () => {
+    const w = await injectedWorld('REVIEW', { omitCurrentToken: true });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('git token: none');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('AC-11: a start that throws leaves no token file behind', async () => {
+    const w = await injectedWorld('REVIEW', { spawnError: new Error('ENOENT nax') });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
+    expect(w.calls).toHaveLength(1);                                               // it did try to start
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('a token file that cannot be removed never replaces the start error', async () => {
+    const w = await injectedWorld('REVIEW', { spawnError: new Error('ENOENT nax'), breakTokenFile: true });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');                  // the cause, not the failed cleanup
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'review token file could not be removed' }));
+  });
+
+  test('AC-12: cleanup removes a token file that is still there', async () => {
+    const w = await injectedWorld('REVIEW');
+    const path = await writeReviewToken(w.row.jobDir, TOKEN);
+    expect(await readFile(path, 'utf8')).toBe(TOKEN);
+    await w.ex.cleanup(w.row);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('cleanup warns, and still ends, when the token file cannot be removed', async () => {
+    const w = await injectedWorld('REVIEW');
+    const path = await writeReviewToken(w.row.jobDir, TOKEN);
+    rmSync(path);
+    mkdirSync(join(path, 'leftover'), { recursive: true });
+    await expect(w.ex.cleanup(w.row)).resolves.toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'review token file could not be removed' }));
+  });
+
+  test('AC-13: the attempt wipe removes a token file an earlier attempt left, before the retry runs', async () => {
+    const w = await injectedWorld('REVIEW');
+    await writeReviewToken(w.row.jobDir, 'tok-from-the-previous-attempt');
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+    await w.ex.spawn(w.row);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);                       // only this attempt's token is there
   });
 });

@@ -119,6 +119,22 @@ describe('parseCapabilitiesCore', () => {
     });
   });
 
+  describe('botReview (fleet PR review)', () => {
+    it('keeps botReview: true and omits it for legacy reports', () => {
+      expect(parseCapabilities({ ...valid, botReview: true }).botReview).toBe(true);
+      expect(parseCapabilities(valid)).not.toHaveProperty('botReview');
+    });
+    it("rejects false with reason 'botReview'", () => {
+      try {
+        parseCapabilities({ ...valid, botReview: false });
+        throw new Error('expected validation failure');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationAppException);
+        expect((error as ValidationAppException).args).toMatchObject({ reason: 'botReview' });
+      }
+    });
+  });
+
   describe('configJobs (fleet S3 §3)', () => {
     it('keeps configJobs: true', () => {
       expect(parseCapabilitiesCore({ ...valid, configJobs: true }).configJobs).toBe(true);

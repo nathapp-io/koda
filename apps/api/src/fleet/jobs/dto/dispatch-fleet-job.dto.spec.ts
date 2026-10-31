@@ -11,6 +11,14 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ approvalTimeoutSec })));
     expect(errors.map((e) => e.property)).toContain('approvalTimeoutSec');
   });
+  it('rejects a REVIEW with null prNumber on prNumber', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'REVIEW', feature: undefined, prNumber: null })));
+    expect(errors.map((e) => e.property)).toContain('prNumber');
+  });
+  it('rejects a REVIEW with prNumber 0 on prNumber', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'REVIEW', feature: undefined, prNumber: 0 })));
+    expect(errors.map((e) => e.property)).toContain('prNumber');
+  });
   it('refuses an unknown bashMode', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ bashMode: 'yolo' })));
     expect(errors.map((e) => e.property)).toContain('bashMode');

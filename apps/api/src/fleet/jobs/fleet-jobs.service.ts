@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
-import { FleetCommandType, FleetJobState } from '../../common/enums';
+import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { addUsd } from '../budgets/money';
 import { BudgetGate } from '../budgets/budget-gate';
@@ -34,6 +34,16 @@ import { FleetJobEventDto } from './dto/fleet-job-event.dto';
 import { FleetJobTicketDto } from '../tickets/dto/ticket-fleet-job.dto';
 import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.service';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
+
+class ReviewProviderException extends ValidationAppException {
+  constructor() {
+    super({ reason: 'review is GitHub-only' }, 'fleet.dispatchInput');
+  }
+
+  override get httpStatus(): number {
+    return 422;
+  }
+}
 
 /** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
 export interface BudgetCancelResult {
@@ -67,6 +77,9 @@ export class FleetJobsService {
   async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
+    if (dto.command === FleetJobKind.REVIEW && repo.provider !== 'github') {
+      throw new ReviewProviderException();
+    }
     const input = normalizeDispatch(dto, repo.defaultBranch);
     const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
 

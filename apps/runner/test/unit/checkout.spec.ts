@@ -141,6 +141,17 @@ describe('prepareCheckout RUN: bad PRDs and refs (fixed reasons, D32)', () => {
   });
 });
 
+describe('prepareCheckout REVIEW (US-005)', () => {
+  test('AC-7/8 resolves the ref and detaches without reading a PRD', async () => {
+    const { repoDir } = await setup({ 'README.md': 'review target' });
+    const sha = await sh(repoDir, 'rev-parse', 'origin/main');
+    const result = await prepareCheckout({ git: g, repoDir, assign: assign({ command: 'REVIEW', ref: 'main', feature: 'review-pr-42', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }) });
+    expect(result).toEqual({ ok: true, branch: null, refSha: sha });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(await head(repoDir)).toBe(sha);
+  });
+});
+
 describe('prepareCheckout PLAN', () => {
   const plan = (over: Partial<AssignPayload> = {}) => assign({ command: 'PLAN', planFrom: 'docs/spec.md', ...over });
   test('checks out the ref detached', async () => {

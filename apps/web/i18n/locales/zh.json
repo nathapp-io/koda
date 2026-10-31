@@ -1076,7 +1076,8 @@
       "RUN": "运行",
       "PLAN": "规划",
       "CONFIG_EDIT": "配置修改",
-      "CONFIG_DRIFT": "漂移检查"
+      "CONFIG_DRIFT": "漂移检查",
+      "REVIEW": "PR 评审"
     },
     "misfit": {
       "disabled": "执行机已停用",
@@ -1093,7 +1094,8 @@
       "approvals_relay": "该运行器无法转发 bash 审批（需要协议 v2 和 nax 0.83 或更高版本）",
       "busy_repo": "执行机已在运行此仓库的任务",
       "capacity": "执行机已满载",
-      "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）"
+      "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）",
+      "bot_review": "此运行器上的 nax 无法执行 PR 评审"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",
