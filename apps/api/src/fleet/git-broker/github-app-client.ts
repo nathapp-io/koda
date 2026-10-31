@@ -175,6 +175,21 @@ export class GitHubAppClient {
     return pullRequests;
   }
 
+  async getRepoRole(token: string, owner: string, name: string, login: string): Promise<'admin' | 'maintain' | 'write' | 'triage' | 'read' | 'none'> {
+    const path = `${this.repoPath(owner, name)}/collaborators/${encodeURIComponent(login)}/permission`;
+    const res = await this.http.request('GET', `${this.api}${path}`, this.headers(token));
+    if (res.status === 404) return 'none';
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+
+    const body = obj(res.body);
+    const roles = ['admin', 'maintain', 'write', 'triage', 'read', 'none'] as const;
+    if (typeof body.role_name === 'string' && roles.includes(body.role_name as (typeof roles)[number])) {
+      return body.role_name as (typeof roles)[number];
+    }
+    if (body.permission === 'admin' || body.permission === 'write' || body.permission === 'read') return body.permission;
+    return 'none';
+  }
+
   private repoPath(owner: string, name: string): string {
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   }
