@@ -3,7 +3,7 @@
   "feature": "fleet-review-ingest",
   "branchName": "feat/fleet-review-ingest",
   "createdAt": "2026-11-16T00:00:00.000Z",
-  "updatedAt": "2026-10-31T14:29:57.347Z",
+  "updatedAt": "2026-10-31T14:37:44.616Z",
   "userStories": [
     {
       "id": "US-001",
@@ -388,14 +388,17 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Permission-verified automated writes combine tokens, fail-closed role checks, system/forge identity separation, durable retries and crash recovery; strict isolated security TDD."
+        "reasoning": "Permission-verified automated writes combine tokens, fail-closed role checks, system/forge identity separation, durable retries and crash recovery; strict isolated security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-event.minter.ts",
@@ -431,7 +434,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f8569a49d600226d569956f4653bff9a341664ed"
     },
     {
       "id": "US-007",
