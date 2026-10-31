@@ -8,6 +8,13 @@ const line = (callId: string, costUsd: number, schemaVersion = 8) => JSON.string
 });
 
 describe('parseBundle', () => {
+  it('AC-15 excludes invalid bot-review artifacts from partial calculation', () => {
+    const p = parseBundle({ ...empty, botReview: [{ name: 'nax-out/bot/pr-42/r1/bot-review.json', text: 'not JSON' }] }, null, { reviewPrNumber: 42 });
+    expect(p.files.botReview).toBe('invalid');
+    expect(p.botReview).toEqual({ outcome: 'invalid', reason: 'artifact-invalid' });
+    expect(p.partial).toBe(false);
+  });
+
   it('sums the ledger unrounded and uses status.json run id', () => {
     const p = parseBundle({
       ...empty,
