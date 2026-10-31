@@ -28,7 +28,7 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
   let feature: string;
   let ref: string;
   if (dto.command === 'REVIEW') {
-    if (dto.prNumber === undefined) fail('prNumber required for REVIEW');
+    if (dto.prNumber === undefined || dto.prNumber === null) fail('prNumber required for REVIEW');
     if (dto.feature !== undefined) fail('feature is derived for REVIEW');
     if (dto.planFrom !== undefined) fail('planFrom is only for PLAN');
     if (dto.ref !== undefined) fail('ref is the default branch for REVIEW');

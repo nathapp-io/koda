@@ -13,6 +13,16 @@ describe('normalizeDispatch (spec §5.1)', () => {
     });
   });
 
+  it('throws ValidationAppException with the dispatch-input key for missing REVIEW prNumber', () => {
+    try {
+      normalizeDispatch(dto({ command: 'REVIEW', feature: undefined }), 'main');
+      throw new Error('expected normalizeDispatch to reject a missing prNumber');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationAppException);
+      expect(error).toMatchObject({ prefix: 'fleet.dispatchInput', args: { reason: 'prNumber required for REVIEW' } });
+    }
+  });
+
   it('normalizes REVIEW inputs from the PR number and default branch', () => {
     expect(normalizeDispatch(dto({ command: 'REVIEW', feature: undefined, prNumber: 42 } as Partial<DispatchFleetJobDto>), 'main'))
       .toEqual(expect.objectContaining({ command: 'REVIEW', feature: 'review-pr-42', ref: 'main', planFrom: null, bashMode: 'raw' }));
@@ -20,6 +30,7 @@ describe('normalizeDispatch (spec §5.1)', () => {
 
   it.each([
     ['missing PR number', { command: 'REVIEW', feature: undefined }, 'prNumber required for REVIEW'],
+    ['null PR number', { command: 'REVIEW', feature: undefined, prNumber: null }, 'prNumber required for REVIEW'],
     ['provided feature', { command: 'REVIEW', feature: 'something', prNumber: 42 }, 'feature is derived for REVIEW'],
     ['planFrom', { command: 'REVIEW', feature: undefined, prNumber: 42, planFrom: 'docs/a.md' }, 'planFrom is only for PLAN'],
     ['ref', { command: 'REVIEW', feature: undefined, prNumber: 42, ref: 'other' }, 'ref is the default branch for REVIEW'],

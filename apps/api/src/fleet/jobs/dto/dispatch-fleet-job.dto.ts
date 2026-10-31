@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import type { BashMode } from '../../common/protocol';
 import { LABEL_PATTERN } from '../../runners/dto/create-enrollment.dto';
 
@@ -10,7 +10,7 @@ export class DispatchFleetJobDto {
   @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW'] }) @IsIn(['RUN', 'PLAN', 'REVIEW']) declare command: 'RUN' | 'PLAN' | 'REVIEW';
   @ApiPropertyOptional({ description: 'nax feature name; derived from prNumber for REVIEW' }) @IsOptional() @IsString() @MaxLength(128) feature?: string;
   @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, description: 'Pull request number, REVIEW only' })
-  @IsOptional() @IsInt() @Min(1) @Max(2147483647) prNumber?: number;
+  @ValidateIf((_object, value) => value !== undefined) @IsInt() @Min(1) @Max(2147483647) prNumber?: number;
   @ApiPropertyOptional({ description: 'Repo-relative spec path, PLAN only' }) @IsOptional() @IsString() @MaxLength(512) planFrom?: string;
   @ApiPropertyOptional({ type: [String], description: 'nax profile chain, later wins' })
   @IsOptional() @IsArray() @ArrayMaxSize(8) @IsString({ each: true }) @MaxLength(64, { each: true }) profiles?: string[];
