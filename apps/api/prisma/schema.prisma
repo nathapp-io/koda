@@ -1062,6 +1062,7 @@ model FleetJob {
   ticketLinks         TicketLink[]
   storyResults        FleetStoryResult[]
   reviewResults       FleetReviewResult[]
+  reviewEvents        FleetReviewEvent[]
   configEdit          FleetConfigEdit?
   assistantToolCalls  AssistantToolCall[]
   runOutcomes         FleetRunOutcome[]
@@ -1683,4 +1684,34 @@ model FleetApprovalAsk {
   @@index([budgetPolicyId])
   // Durable least-recently-attempted ordering for the job-end continuation.
   @@index([updatedAt, requestId])
+}
+
+/// Withdrawals stored atomically with bundle ingestion; permission checks and minting run after commit.
+model FleetReviewEvent {
+  id            String   @id @default(cuid())
+  jobId         String
+  leaseEpoch    Int
+  projectId     String
+  repoId        String
+  prNumber      Int
+  findingKey    String
+  threadId      String
+  file          String?
+  line          Int?
+  finding       String
+  reason        String
+  disagreedBy   String[]
+  trusted       Boolean
+  status        String // pending | minted | skipped
+  skipReason    String?
+  approverLogin String?
+  memoryItemId  String?
+  attempts      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, threadId])
+  @@index([status, createdAt])
 }
