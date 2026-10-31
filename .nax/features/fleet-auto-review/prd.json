@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T09:57:13.493Z",
+  "updatedAt": "2026-10-31T10:08:01.570Z",
   "userStories": [
     {
       "id": "US-001",
@@ -369,14 +369,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New ledger repository and unique claims cross schema/transaction boundaries, with security-critical principal access lookup and stale-enabler CAS authorization state."
+        "reasoning": "New ledger repository and unique claims cross schema/transaction boundaries, with security-critical principal access lookup and stale-enabler CAS authorization state.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -408,7 +411,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4e2fdbe89a3e29a4b40825ff3e0c22430659f6d4"
     },
     {
       "id": "US-006",
