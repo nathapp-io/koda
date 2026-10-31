@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T10:40:48.565Z",
+  "updatedAt": "2026-10-31T10:44:57.861Z",
   "userStories": [
     {
       "id": "US-001",
@@ -726,14 +726,17 @@
       "dependencies": [
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard Nest lifecycle/single-flight wrapper and provider registration with deterministic fake-timer tests; permission/token decisions remain in the upstream pass."
+        "reasoning": "Standard Nest lifecycle/single-flight wrapper and provider registration with deterministic fake-timer tests; permission/token decisions remain in the upstream pass.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
@@ -764,7 +767,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b8f3634c9a463a75436418b34b091edb72e5acd8"
     },
     {
       "id": "US-011",
