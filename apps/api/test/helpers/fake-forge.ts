@@ -4,6 +4,7 @@ import type { AddressInfo } from 'net';
 export interface FakeRequest {
   method: string;
   path: string;
+  query: string;
   headers: IncomingMessage['headers'];
   body: unknown;
 }
@@ -24,8 +25,11 @@ export async function startFakeForge(): Promise<FakeForge> {
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
-      const path = (req.url ?? '/').split('?')[0];
-      const fake: FakeRequest = { method: req.method ?? 'GET', path, headers: req.headers, body: raw ? JSON.parse(raw) : undefined };
+      const url = req.url ?? '/';
+      const queryStart = url.indexOf('?');
+      const path = queryStart < 0 ? url : url.slice(0, queryStart);
+      const query = queryStart < 0 ? '' : url.slice(queryStart + 1);
+      const fake: FakeRequest = { method: req.method ?? 'GET', path, query, headers: req.headers, body: raw ? JSON.parse(raw) : undefined };
       requests.push(fake);
       const handler = routes.get(`${fake.method} ${path}`);
       const reply = handler ? handler(fake) : { status: 404, body: { message: 'Not Found' } };
