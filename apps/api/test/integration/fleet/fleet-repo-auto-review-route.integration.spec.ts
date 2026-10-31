@@ -140,6 +140,29 @@ describeIntegration('fleet repo auto-review route (PG)', () => {
     expect((await stored(target.id)).autoReview).toBe(false);
   });
 
+  /**
+   * An explicit `null` in either optional field must be a validation error, not a 500: `profiles: null`
+   * used to reach `[...null]` in the service (TypeError) and `maxCostUsd: null` used to store the string
+   * `'null'` in the Decimal column. Both are checked with the switch on and off, because the DTO validates
+   * these fields whatever `enabled` is.
+   */
+  it.each([true, false])('rejects profiles: null with 400 when enabled is %s', async (enabled) => {
+    const target = await repo();
+    await patch(target.id, { enabled, profiles: null }).expect(400);
+    const row = await stored(target.id);
+    expect(row.autoReview).toBe(false);
+    expect(row.autoReviewProfiles).toEqual([]);
+  });
+
+  it.each([true, false])('rejects maxCostUsd: null with 400 when enabled is %s', async (enabled) => {
+    const target = await repo();
+    await patch(target.id, { enabled, maxCostUsd: null }).expect(400);
+    const row = await stored(target.id);
+    expect(row.autoReview).toBe(false);
+    // The stored default 1.0000 is untouched: nothing was written as the string 'null'.
+    expect(Number(row.autoReviewMaxCostUsd)).toBe(1);
+  });
+
   it('AC-8: an agent under a human-approval policy waits with 202 and changes nothing', async () => {
     const target = await repo();
     await humanPolicy();

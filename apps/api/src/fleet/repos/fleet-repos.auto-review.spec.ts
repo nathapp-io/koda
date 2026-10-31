@@ -81,4 +81,22 @@ describe('UpdateAutoReviewDto validation', () => {
     expect(errors({ enabled: false, profiles: Array(9).fill('x'), maxCostUsd: 1.00001 }).length).toBeGreaterThan(0);
     expect(errors({ enabled: true, maxCostUsd: 0.00001 }).length).toBeGreaterThan(0);
   });
+
+  it('still accepts an update that omits both optional fields', () => {
+    expect(errors({ enabled: true })).toHaveLength(0);
+    expect(errors({ enabled: false })).toHaveLength(0);
+  });
+
+  /**
+   * `@IsOptional()` skips validation for `null` too, and the service then spreads `null` as profiles
+   * (`TypeError`) or stores the string `'null'` in the Decimal column instead of answering a 400. An
+   * explicit `null` must fail validation whether the switch is being turned on or off.
+   */
+  it.each([true, false])('rejects an explicit null profiles when enabled is %s', (enabled) => {
+    expect(errors({ enabled, profiles: null as never }).map((error) => error.property)).toEqual(['profiles']);
+  });
+
+  it.each([true, false])('rejects an explicit null maxCostUsd when enabled is %s', (enabled) => {
+    expect(errors({ enabled, maxCostUsd: null as never }).map((error) => error.property)).toEqual(['maxCostUsd']);
+  });
 });

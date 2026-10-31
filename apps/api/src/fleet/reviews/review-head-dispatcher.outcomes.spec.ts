@@ -90,13 +90,17 @@ describe('ReviewHeadDispatcher dispatch outcomes', () => {
 
   it('AC-12: warns with repo id, PR number and error name, without its message', async () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    const { dispatcher } = setup([new Error('secret payload')]);
-    await run(dispatcher, [pr(7)]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('r1'));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('7'));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Error'));
-    expect(warn.mock.calls.flat().join(' ')).not.toContain('secret payload');
-    warn.mockRestore();
+    try {
+      const { dispatcher } = setup([new Error('secret payload')]);
+      await run(dispatcher, [pr(7)]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('r1'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('7'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Error'));
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('secret payload');
+    } finally {
+      // Restore even when an assertion throws, so the spy cannot leak into later tests in this file.
+      warn.mockRestore();
+    }
   });
 
   it('AC-13: continues to the next PR after a fleet.jobs conflict', async () => {
