@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T10:08:01.570Z",
+  "updatedAt": "2026-10-31T10:16:22.785Z",
   "userStories": [
     {
       "id": "US-001",
@@ -446,14 +446,17 @@
         "US-004",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Unique head claims, stale-pending recovery, attempt accounting and job/ledger writes form a new stateful dispatcher; it does not decide permissions or handle tokens, so the standard complex-story strategy is sufficient."
+        "reasoning": "Unique head claims, stale-pending recovery, attempt accounting and job/ledger writes form a new stateful dispatcher; it does not decide permissions or handle tokens, so the standard complex-story strategy is sufficient.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -486,7 +489,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "da50caf5ab8117e6139c320851caefc70d886600"
     },
     {
       "id": "US-007",
