@@ -210,6 +210,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'fleet.repo.read': ['global', 'project'],
   'fleet.repo.create': ['global'],
   'fleet.repo.check': ['global'],
+  'fleet.repo.review.configure': ['global'],
   'fleet.repo.delete': ['global'],
   'fleet.enrollment.create': ['global'],
   'fleet.enrollment.read': ['global'],

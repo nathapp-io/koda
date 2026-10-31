@@ -50,6 +50,22 @@ describe('fleet OpenAPI contract', () => {
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });
 
+  it('exposes the auto-review route, its patch body and the six repo fields (US-003)', () => {
+    // Fleet auto-review K1 part B: the settings live on the repo row, so the route answers the repo
+    // and the listing carries the same six fields.
+    const operation = spec.paths['/api/fleet/repos/{id}/auto-review']?.['patch'];
+    expect(operation).toBeDefined();
+    expect(Object.keys(spec.components.schemas['FleetRepoDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining([
+        'autoReview', 'autoReviewProfiles', 'autoReviewMaxCostUsd',
+        'autoReviewEnabledById', 'autoReviewEnabledByType', 'autoReviewEnabledAt',
+      ]));
+    expect(Object.keys(spec.components.schemas['UpdateAutoReviewDto']?.properties ?? {}).sort())
+      .toEqual(['enabled', 'maxCostUsd', 'profiles']);
+    expect(JSON.stringify(operation)).toContain('#/components/schemas/UpdateAutoReviewDto');
+    expect(JSON.stringify(operation)).toContain('#/components/schemas/FleetRepoDto');
+  });
+
   it('exposes the thread run route and its body (US-007)', () => {
     expect(spec.paths['/api/projects/{slug}/threads/{id}/run']?.['post']).toBeDefined();
     const schemas = spec.components.schemas as Record<string, unknown>;
@@ -211,6 +227,7 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/repos', 'get', 'fleet.repo.read'],
       ['/api/fleet/repos', 'post', 'fleet.repo.create'],
       ['/api/fleet/repos/{id}/check', 'post', 'fleet.repo.check'],
+      ['/api/fleet/repos/{id}/auto-review', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}', 'delete', 'fleet.repo.delete'],
       ['/api/fleet/enrollments', 'get', 'fleet.enrollment.read'],
       ['/api/fleet/enrollments', 'post', 'fleet.enrollment.create'],

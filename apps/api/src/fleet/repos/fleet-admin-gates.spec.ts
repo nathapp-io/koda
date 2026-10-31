@@ -17,10 +17,11 @@ describe('fleet admin handler gates', () => {
     { key: 'fleet.repo.create', variant: 'rest:fleet-repos.create', input: { projectSlug: 'web', provider: 'github' as const, owner: 'acme', name: 'app' }, noBody: false, call: (repos: FleetReposController) => repos.create({ projectSlug: 'web', provider: 'github', owner: 'acme', name: 'app' }) },
     { key: 'fleet.repo.delete', variant: 'rest:fleet-repos.delete', input: { id: 'r1' }, noBody: true, call: (repos: FleetReposController) => repos.remove('r1') },
     { key: 'fleet.repo.check', variant: 'rest:fleet-repos.check', input: { id: 'r1' }, noBody: false, call: (repos: FleetReposController) => repos.check('r1') },
+    { key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.auto-review', input: { id: 'r1', patch: { enabled: false } }, noBody: false, call: (repos: FleetReposController) => repos.configureAutoReview('r1', { enabled: false }) },
   ];
   for (const c of cases) {
     it(`${c.key}: global gate, pending exception and executed response`, async () => {
-      const service = { create: vi.fn(), remove: vi.fn(), check: vi.fn() };
+      const service = { create: vi.fn(), remove: vi.fn(), check: vi.fn(), configureAutoReview: vi.fn() };
       const request = { id: 'q1' };
       const run = vi.fn().mockResolvedValue({ status: 'pending', request });
       const controller = construct<FleetReposController>(FleetReposController, service as unknown as FleetReposService, { run });

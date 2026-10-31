@@ -62,10 +62,11 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  // 125 after US-010 deleted the fleet adapter's gated decide route; the openapi contract spec
-  // (`approval-openapi.contract.spec.ts`) asserts the same 125 gated operations.
-  it('AC-12 (US-007): collects exactly 125 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(125);
+  // 126 after fleet auto-review added `PATCH /fleet/repos/:id/auto-review` (US-010 deleted the fleet
+  // adapter's gated decide route before it); the openapi contract spec
+  // (`approval-openapi.contract.spec.ts`) asserts the same 126 gated operations.
+  it('AC-12 (US-007): collects exactly 126 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(126);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {

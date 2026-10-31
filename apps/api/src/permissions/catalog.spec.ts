@@ -556,6 +556,21 @@ it('cancel AC-1: cancellation is implicit, any-scope and not approvable', () => 
 });
 
 /**
+ * Fleet auto-review K1 part B (US-003): enabling or disabling auto-review for a registered repo is a
+ * global, approvable repo write — it changes what koda will push review jobs for, so an agent's write
+ * has to be able to wait for a human.
+ */
+describe('fleet.repo.review.configure', () => {
+  it('AC-11: is a global role key', () => {
+    expect(findCatalogEntry('fleet.repo.review.configure')).toMatchObject({ scope: 'global', access: 'role' });
+  });
+
+  it('AC-12: is approvable', () => {
+    expect(findCatalogEntry('fleet.repo.review.configure')?.approval.approvable).toBe(true);
+  });
+});
+
+/**
  * US-013: the three fleet approval adapter routes and the assistant fleet alias are gone, so their four
  * keys leave the catalog together with the one seed entry that named them. A stored role that still
  * names one is rewritten by the `20261111090000_retire_fleet_approval_keys` migration, because
