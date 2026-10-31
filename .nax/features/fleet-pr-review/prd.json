@@ -3,7 +3,7 @@
   "feature": "fleet-pr-review",
   "branchName": "feat/fleet-pr-review",
   "createdAt": "2026-10-01T00:00:00.000Z",
-  "updatedAt": "2026-10-31T06:39:29.365Z",
+  "updatedAt": "2026-10-31T07:03:32.529Z",
   "userStories": [
     {
       "id": "US-001",
@@ -349,14 +349,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces a narrowly scoped secret-on-disk exception spanning token cache, process environment and error/cleanup/retry lifecycles; security override requires strict isolation."
+        "reasoning": "Introduces a narrowly scoped secret-on-disk exception spanning token cache, process environment and error/cleanup/retry lifecycles; security override requires strict isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/executor/host-executor.ts",
@@ -381,7 +384,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "98250c6d71b763bdce4b3e96b92aad4e1b577908"
     },
     {
       "id": "US-007",
