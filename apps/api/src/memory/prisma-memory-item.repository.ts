@@ -30,6 +30,8 @@ export interface MemoryDedupKey {
  * supersedes nothing.
  */
 export interface MemoryUpsertOptions {
+  /** Runs inside the serializable write, before any no-op check or mutation. */
+  beforeWrite?: () => Promise<void>;
   beforeSupersede?: (existing: MemoryItem) => Promise<void>;
   /**
    * Permissions P2 US-002: what the write did, awaited after the insert and still inside the same
@@ -179,6 +181,18 @@ export class PrismaMemoryItemRepository
     return models.map((m) => this.toDomain(m));
   }
 
+  /** Durable review guards include deleted rows and all statuses; duplicate takes precedence. */
+  async reviewDecisionGuard(projectId: string, sourceId: string, subject: string, predicate: string): Promise<'duplicate' | 'retired' | null> {
+    const duplicate = await this.prisma.client.memoryItem.findFirst({
+      where: { sourceType: 'review_event', sourceId }, select: { id: true },
+    });
+    if (duplicate) return 'duplicate';
+    const retired = await this.prisma.client.memoryItem.findFirst({
+      where: { projectId, subject, predicate, sourceType: 'review_event', status: 'rejected' }, select: { id: true },
+    });
+    return retired ? 'retired' : null;
+  }
+
   async upsert(item: MemoryItemInput, options?: MemoryUpsertOptions): Promise<MemoryItem> {
     // Permissions P2 US-002: the write runs on the transaction manager rather than a bare
     // `client.$transaction`, so the callback runs in the AsyncLocalStorage the transaction manager (and
@@ -188,6 +202,7 @@ export class PrismaMemoryItemRepository
     return this.prisma.withTransaction(
       async (tx) => {
         const db = tx as unknown as PrismaClient;
+        await options?.beforeWrite?.();
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 

@@ -342,6 +342,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'system.enrollment.retention': ['system'],
   'system.schedule.dispatch': ['system'],
   'system.pr-review.dispatch': ['system'],
+  'system.review.decision': ['system'],
   'system.job.crash-silent-runner': ['system'],
   'system.ticket-link.pr-refresh': ['system'],
   'system.health.detect': ['system'],

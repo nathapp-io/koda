@@ -667,6 +667,7 @@ model MemoryItem {
   @@index([projectId, kind, subject, predicate])
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
+  @@index([sourceType, sourceId])
 }
 
 // ---------------------------------------------------------------------------

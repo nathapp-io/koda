@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { MemoryModule } from '../../memory/memory.module';
+import { ReviewEventMinter } from './review-event.minter';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { FleetReposModule } from '../repos/fleet-repos.module';
@@ -19,7 +21,7 @@ import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domai
  * Exports the review-event service for bundle ingestion; repositories stay module-private.
  */
 @Module({
-  imports: [FleetReposModule, FleetJobsModule, GitBrokerModule],
+  imports: [MemoryModule, FleetReposModule, FleetJobsModule, GitBrokerModule],
   providers: [
     PrismaFleetPrReviewRepository,
     { provide: FLEET_PR_REVIEW_REPOSITORY, useExisting: PrismaFleetPrReviewRepository },
@@ -30,6 +32,7 @@ import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domai
     FleetReviewEventRepository,
     { provide: FLEET_REVIEW_EVENT_REPOSITORY, useExisting: FleetReviewEventRepository },
     FleetReviewEventsService,
+    ReviewEventMinter,
   ],
   exports: [FleetReviewEventsService],
 })

@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { ReviewDecisionWriter } from './review-decision.writer';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { MemoryRouteCommands } from './memory-route.commands';
@@ -46,6 +47,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     // tools). It reads the repository and the global PermissionService, so it adds no import edge.
     MemoryWriteGuard,
     MemoryWriteService,
+    ReviewDecisionWriter,
     MemoryRouteCommands,
     MemoryGovernanceService,
     MemoryGovernanceProcessor,
@@ -60,6 +62,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     MemoryGovernanceService,
     ExtractionService,
     MemoryWriteService,
+    ReviewDecisionWriter,
     MemoryWriteGuard,
   ],
 })
