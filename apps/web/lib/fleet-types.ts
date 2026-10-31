@@ -147,10 +147,10 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs'
+  | 'config_jobs' | 'bot_review'
 
-/** S3 §3: RUN | PLAN, plus the two config kinds that run no nax session. */
-export type FleetJobKind = 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
+/** Fleet job kinds, including config jobs and PR reviews. */
+export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
 
 /** S3 §1: what a config job was asked to do. */
 export type ConfigEditModeDto = 'edit' | 'regenerate' | 'drift'

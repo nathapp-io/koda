@@ -20,7 +20,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 // dynamic key (fleet.state.<STATE> ...), which used-keys-exist.spec cannot see.
 const ENUMS: Record<string, string[]> = {
   'fleet.state': ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'],
-  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs'],
+  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'bot_review'],
   'fleet.repoReason': [
     'github_app_not_configured', 'github_app_key_unreadable', 'app_not_installed', 'app_permissions_insufficient',
     'repo_not_found', 'provider_unreachable', 'provider_error', 'vcs_connection_missing', 'vcs_connection_mismatch',
@@ -30,7 +30,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
   'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
-  'fleet.command': ['CONFIG_DRIFT', 'CONFIG_EDIT', 'PLAN', 'RUN'],
+  'fleet.command': ['CONFIG_DRIFT', 'CONFIG_EDIT', 'PLAN', 'REVIEW', 'RUN'],
   'fleet.config.group': ['config', 'constitution', 'context', 'profiles', 'rules'],
   'fleet.config.status': ['deleted', 'modified', 'new', 'unchanged'],
   'fleet.config.panel.mode': ['drift', 'edit', 'regenerate'],
@@ -101,6 +101,11 @@ describe('Fleet locale parity (en and zh)', () => {
   test('nav has the project fleet jobs link (slice 4c)', () => {
     expect(at(en, 'nav.fleetJobs')).toBe('Fleet jobs')
     expect(at(zh, 'nav.fleetJobs')).toBeTruthy()
+  })
+
+  test('REVIEW labels are defined in Chinese', () => {
+    expect(at(zh, 'fleet.command.REVIEW')).toBe('PR 评审')
+    expect(at(zh, 'fleet.misfit.bot_review')).toBe('此运行器上的 nax 无法执行 PR 评审')
   })
 
   test('the schedule keys the pages render exist (S1b 3b)', () => {

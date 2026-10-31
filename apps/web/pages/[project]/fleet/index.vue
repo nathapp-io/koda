@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { formatUsd, isConfigJob } from '~/lib/fleet-jobs'
+import { formatUsd, isConfigJob, reviewPrNumber } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
+import type { FleetJobDto } from '~/lib/fleet-types'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'
 
@@ -90,6 +91,13 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
 const stateChips = [{ value: ALL, label: t('fleet.jobs.filters.allStates') }, ...FLEET_JOB_STATES.map((state) => ({ value: state, label: stateLabel(state) }))]
 
 const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
+
+function featureLabel(job: FleetJobDto): string {
+  if (isConfigJob(job)) return t('fleet.jobs.configFeature')
+  if (job.command !== 'REVIEW') return job.feature
+  const prNumber = reviewPrNumber(job.feature)
+  return prNumber === null ? job.feature : `PR #${prNumber}`
+}
 </script>
 
 <template>
@@ -174,7 +182,7 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
           <TableBody>
             <TableRow v-for="job in sortedJobs" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
               <TableCell>
-                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ isConfigJob(job) ? t('fleet.jobs.configFeature') : job.feature }}</NuxtLink>
+                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ featureLabel(job) }}</NuxtLink>
               </TableCell>
               <TableCell>{{ codeLabel(t, te, 'fleet.command', job.command) }}</TableCell>
               <TableCell>{{ options.repoName(job.repoId) }}</TableCell>

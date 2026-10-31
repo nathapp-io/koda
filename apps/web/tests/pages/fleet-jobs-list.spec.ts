@@ -1,4 +1,8 @@
-import { describe, expect, test } from '@jest/globals'
+import { describe, expect, jest, test } from '@jest/globals'
+import { ref } from 'vue'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n, uiStubs } from '../helpers/fleet-harness'
+import type { FleetJobDto } from '../../lib/fleet-types'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -14,6 +18,62 @@ const liveHandlers = (source: string): string => {
 }
 
 describe('fleet jobs list', () => {
+  test('renders REVIEW as PR review and PR #42 while RUN keeps its feature text', async () => {
+    const fixture = (id: string, command: FleetJobDto['command'], feature: string): FleetJobDto => ({
+      id, projectId: 'p1', repoId: 'r1', ref: 'main', command, feature, planFrom: null, profiles: [], maxCostUsd: '1',
+      bashMode: 'raw', approvalTimeoutSec: 600, pendingApprovals: 0, selectorLabels: [], pinnedRunnerId: null,
+      runnerId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: '2026-10-01T00:00:00Z',
+      assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null,
+      naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
+      finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
+      wipPush: null, stories: null, storiesTruncated: false, postRun: null, scheduleId: null, coalescedCount: 0,
+      configEdit: null, workflow: null,
+    })
+    const jobs = ref([fixture('review', 'REVIEW', 'review-pr-42'), fixture('run', 'RUN', 'login')])
+    const noop = async (): Promise<void> => undefined
+    const mounted = mountSfc(path.join(__dirname, '../../pages/[project]/fleet/index.vue'), {
+      globals: {
+        useRoute: () => ({ params: { project: 'demo' } }),
+        useI18n: () => enI18n(), useAppToast: () => ({ error: jest.fn(), success: jest.fn() }),
+        useFleetJobs: () => ({ jobs, total: ref(2), hasNext: ref(false), load: async () => true }),
+        useFleetDispatchOptions: () => ({ repos: ref([]), runners: ref([]), repoName: () => 'repo', runnerName: () => null, load: noop }),
+        useProjectMemberNames: () => ({ members: ref([]), nameOf: () => 'Member', load: noop }),
+        useProjectPermissions: () => ({ permissions: ref({ has: () => true }) }),
+        useProjectEvents: noop,
+      },
+      components: { ...uiStubs, RepoConfigList: { template: '<div />' } },
+    })
+    try {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      const rows = mounted.find('[data-testid="fleet-job-row-review"]')
+      expect(rows).toHaveLength(1)
+      expect(mounted.textOf(rows[0])).toContain('PR #42')
+      expect(mounted.textOf(rows[0])).toContain('PR review')
+      const runRow = mounted.one('[data-testid="fleet-job-row-run"]')
+      expect(runRow).toBeDefined()
+      if (runRow) expect(mounted.textOf(runRow)).toContain('login')
+    }
+    finally {
+      mounted.unmount()
+    }
+  })
+  test('renders the bot_review placement reason in English', () => {
+    const mounted = mountSfc(webFile('components', 'fleet', 'FleetPlacementResult.vue'), {
+      props: {
+        slug: 'demo', runnerName: () => null,
+        result: { job: { id: 'j1' }, placement: { assigned: false, runnerId: null, misfits: [{ runnerId: 'r1', name: 'runner', reason: 'bot_review' }] } },
+      },
+      globals: { useI18n: () => enI18n() },
+      components: uiStubs,
+    })
+    try {
+      expect(mounted.text()).toContain('nax on this runner cannot run PR reviews')
+    }
+    finally {
+      mounted.unmount()
+    }
+  })
+
   test('loads through useFleetJobs with the four filters, sentinel for "all"', () => {
     expect(list).toContain('useFleetJobs(slug)')
     expect(list).toMatch(/state: pick\(filters\.state\)[\s\S]*repoId: pick\(filters\.repoId\)[\s\S]*runnerId: pick\(filters\.runnerId\)[\s\S]*requestedById: pick\(filters\.requestedById\)/)
@@ -90,7 +150,8 @@ describe('fleet jobs list', () => {
 
   test('S3 §6: the command column shows translated kinds and config jobs show a readable feature', () => {
     expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
-    expect(list).toContain("isConfigJob(job) ? t('fleet.jobs.configFeature') : job.feature")
+    expect(list).toContain("if (isConfigJob(job)) return t('fleet.jobs.configFeature')")
+    expect(list).toContain("if (job.command !== 'REVIEW') return job.feature")
   })
 
   test('S3 §6: the fleet page shows the Repos card from the loaded dispatch options', () => {

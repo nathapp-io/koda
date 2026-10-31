@@ -377,6 +377,20 @@ function mountEnginePage(over: EnginePageOver) {
 
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
 
+describe('review and config job headers', () => {
+  test('REVIEW header shows PR #42 and config header keeps the translated nax config label', async () => {
+    const review = mountEnginePage({ job: jobFixture({ command: 'REVIEW', feature: 'review-pr-42' }), records: [] })
+    await review.settle()
+    expect(review.app.one('[data-stub="page-header"]')?.props.title).toBe('PR #42')
+    review.app.unmount()
+
+    const config = mountEnginePage({ job: jobFixture({ command: 'CONFIG_EDIT', feature: 'nax-config' }), records: [] })
+    await config.settle()
+    expect(config.app.one('[data-stub="page-header"]')?.props.title).toBe('nax config')
+    config.app.unmount()
+  })
+})
+
 describe('job page approvals on the engine (P3b US-007)', () => {
   test('AC-1: the page asks the engine for this job\'s requests in one page of 100', async () => {
     const m = mountEnginePage({ records: [request('r1')] })
