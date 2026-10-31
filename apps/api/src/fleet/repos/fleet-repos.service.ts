@@ -110,6 +110,26 @@ export class FleetReposService {
     return this.repo.findAutoReviewPage(limit);
   }
 
+  /**
+   * The compare-and-set turn-off (auto-review spec, call 4), with its audit in the same transaction. A pass
+   * that read a stale repo list cannot turn off a repo someone else has just re-enabled: the repository only
+   * changes a row still enabled by `expectedEnablerId`, and the audit is recorded only when it did.
+   *
+   * The project the entry names is the turned-off row's own; a row that is gone by the time the claim runs is
+   * not changed at all, so no entry is written for it.
+   */
+  async disableAutoReview(id: string, reason: string, expectedEnablerId: string): Promise<boolean> {
+    return this.txManager.run(async () => {
+      if (!(await this.repo.disableAutoReviewIf(id, expectedEnablerId))) return false;
+      const row = await this.repo.findById(id);
+      await this.audit.record({
+        key: 'system.pr-review.dispatch', resourceType: 'fleet-repo', resourceId: id,
+        projectId: row?.projectId ?? null, summary: `auto-review disabled: ${reason}`,
+      });
+      return true;
+    });
+  }
+
   async list(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoDto>> {
     return remapPage(await this.repo.findPage(filters, page), FleetRepoDto.from);
   }

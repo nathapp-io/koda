@@ -38,6 +38,12 @@ export interface IFleetRepoRepository {
   findAnchor(projectId: string): Promise<FleetRepoRecord | null>;
   findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>>;
   findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]>;
+  /**
+   * The compare-and-set turn-off (auto-review spec, call 4): clears the flag and its three attribution
+   * columns only while `autoReviewEnabledById` is still `expectedEnablerId`, keeping profiles and cost.
+   * False when the row was already off or someone else re-enabled it, so a stale pass turns nothing off.
+   */
+  disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean>;
   delete(id: string): Promise<void>;
   /** Number of the repo's jobs in an active state (plan D15). */
   countUnfinishedJobs(repoId: string): Promise<number>;

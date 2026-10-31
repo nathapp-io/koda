@@ -68,6 +68,19 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     await this.db.fleetRepo.delete({ where: { id } });
   }
 
+  /**
+   * The compare-and-set turn-off (auto-review spec, call 4). One statement, so a pass that read a stale repo
+   * list cannot turn off a repo someone else has just re-enabled: the `autoReviewEnabledById` predicate fails
+   * on the re-enabled row. Profiles and cost stay, so a later re-enable keeps the enabler's settings.
+   */
+  async disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean> {
+    const changed = await this.db.fleetRepo.updateMany({
+      where: { id, autoReview: true, autoReviewEnabledById: expectedEnablerId },
+      data: { autoReview: false, autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null },
+    });
+    return changed.count === 1;
+  }
+
   countUnfinishedJobs(repoId: string): Promise<number> {
     return this.db.fleetJob.count({ where: { repoId, state: { in: [...ACTIVE_STATES] } } });
   }

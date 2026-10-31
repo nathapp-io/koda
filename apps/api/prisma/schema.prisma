@@ -786,10 +786,29 @@ model FleetRepo {
   chatThreads    ChatThread[]
   knowledgeIndex KnowledgeRepoIndex?
   knowledgeFiles KnowledgeRepoFile[]
+  prReviews      FleetPrReview[]
 
   @@unique([provider, owner, name])
   @@index([projectId])
   @@index([autoReview])
+}
+
+/// Fleet auto-review: one row per (repo, PR number, head SHA). The claim that stops two passes for the
+/// same head from both dispatching, and the record of what became of it. `outcome` is `pending`,
+/// `dispatched` (with `jobId`) or `failed:<reason>`; a dispatched or failed head is never dispatched again.
+model FleetPrReview {
+  id        String   @id @default(cuid())
+  repoId    String
+  prNumber  Int
+  headSha   String
+  jobId     String?
+  outcome   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repo FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, prNumber, headSha])
 }
 
 model KnowledgeRepoIndex {
