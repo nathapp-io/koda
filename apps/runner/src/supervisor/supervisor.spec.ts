@@ -295,7 +295,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     gone.ex.status = null;
     expect(await gone.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await gone.supervisor.idle();
-    expect(gone.ex.calls).toContain('readStatus:j1');
+    expect(gone.ex.calls).toContain('readReviewPosted:j1');
     expect(gone.ex.watchOptions).toHaveLength(0);
   });
 
