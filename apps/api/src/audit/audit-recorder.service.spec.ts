@@ -86,6 +86,12 @@ describe('AuditRecorder', () => {
     expect(record.mock.calls[0][0].metadata).toMatchObject({ summary: exact });
   });
 
+  it('US-004 AC-6: records a forge user approver unchanged', async () => {
+    const approval = { requiredMode: 'human' as const, satisfiedBy: 'human' as const, approverType: 'FORGE_USER' as const, approverId: 'github:alice' };
+    await runWithActionContext({ actor: { type: 'SYSTEM', id: 'review' }, origin: 'system', approval }, () => recorder.record(input));
+    expect(record.mock.calls[0][0].metadata.approval).toEqual(approval);
+  });
+
   it('AC-14: timestamps the record during the call', async () => {
     const before = new Date();
     await runWithActor({ type: 'USER', id: 'u1' }, () => recorder.record(input));

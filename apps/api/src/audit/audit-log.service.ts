@@ -38,7 +38,7 @@ function collectDisplayIds(records: readonly AuditEntryRecord[]): AuditDisplayId
   const runnerIds = new Set<string>();
   const projectIds = new Set<string>();
 
-  const addPrincipal = (type: ActionActorType | ActorType | null, id: string | null): void => {
+  const addPrincipal = (type: ActionActorType | ActorType | 'FORGE_USER' | null, id: string | null): void => {
     if (type === null || id === null) return;
     if (type === 'USER') userIds.add(id);
     else if (type === 'AGENT') agentIds.add(id);
@@ -64,11 +64,12 @@ function noNames(): AuditDisplayNames {
   return { users: new Map(), agents: new Map(), runners: new Map(), projects: new Map() };
 }
 
-function principalLabel(type: ActionActorType | ActorType | null, id: string | null, names: AuditDisplayNames): string | null {
+function principalLabel(type: ActionActorType | ActorType | 'FORGE_USER' | null, id: string | null, names: AuditDisplayNames): string | null {
   if (type === null || id === null) return null;
   if (type === 'USER') return names.users.get(id) ?? null;
   if (type === 'AGENT') return names.agents.get(id) ?? null;
   if (type === 'RUNNER') return names.runners.get(id) ?? null;
+  if (type === 'FORGE_USER') return id;
   return null;
 }
 

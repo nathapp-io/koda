@@ -41,7 +41,7 @@ export type ActionOrigin = 'rest' | 'mcp' | 'thread' | 'runner' | 'system';
 export interface ActionApproval {
   requiredMode: ApprovalMode;
   satisfiedBy: ApprovalMode;
-  approverType?: ActorType;
+  approverType?: ActorType | 'FORGE_USER';
   approverId?: string;
   requestId?: string;
 }
@@ -93,6 +93,13 @@ export function runWithActionContext<T>(input: ActionContextInput, fn: () => T):
   if (input.onBehalfOf !== undefined) context.onBehalfOf = input.onBehalfOf;
 
   return storage.run(context, fn);
+}
+
+/** Runs fn with a replacement approval in the current action context. */
+export function runWithApproval<T>(approval: ActionApproval, fn: () => T): T {
+  const context = storage.getStore();
+  if (context === undefined) throw new Error('no action context');
+  return storage.run({ ...context, approval }, fn);
 }
 
 /** The current context, or undefined outside any request or run. */
