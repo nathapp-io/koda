@@ -6,7 +6,7 @@ import { LanceRecord, OUTCOME_SOURCE } from '../../rag/lance-table-manager';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
-import { selectIndexableEntries } from './knowledge-allowlist';
+import { KNOWLEDGE_CAP_MESSAGE, selectIndexableEntries } from './knowledge-allowlist';
 import { knowledgePatternsKey } from './knowledge-patterns';
 import { chunkMarkdown } from './markdown-chunker';
 import { chunkDecisions } from './decisions-chunker';
@@ -102,7 +102,9 @@ export class KnowledgeRepoIndexer {
       const head = await this.github.getBranchHead(token, repo.owner, repo.name, repo.defaultBranch);
       // A row written before the feature has a null key, so its first pass re-selects as well.
       if (head === previous?.indexedSha && previousFiles.every(file => file.unembeddedCount === 0) && previous?.patternsKey === patternsKey) {
-        await finish({ status: 'idle', lastError: previous.lastError, fileCount: previous.fileCount,
+        // This pass just read the head, so only the cap message (a property of the unchanged tree) carries forward.
+        const lastError = previous.lastError === KNOWLEDGE_CAP_MESSAGE ? KNOWLEDGE_CAP_MESSAGE : null;
+        await finish({ status: 'idle', lastError, fileCount: previous.fileCount,
           chunkCount: previous.chunkCount, unembeddedCount: previous.unembeddedCount, patternsKey });
         return { status: 'unchanged' };
       }

@@ -4,6 +4,7 @@ import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { chunkMarkdown } from './markdown-chunker';
+import { KNOWLEDGE_CAP_MESSAGE } from './knowledge-allowlist';
 import { FakeEmbeddingProvider } from '../../rag/providers/fake-embedding.provider';
 import type { IKnowledgeIndexRepository, KnowledgeFileState } from './knowledge-index.domain';
 import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
@@ -138,6 +139,17 @@ describe('KnowledgeRepoIndexer', () => {
       expect(f.github.getTree).not.toHaveBeenCalled();
       expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', fileCount: 2, chunkCount: 6, skippedCount: 7 }));
     }
+  });
+
+  it.each([
+    ['clears a failure reason', 'provider_unreachable', null],
+    ['keeps the cap message', KNOWLEDGE_CAP_MESSAGE, KNOWLEDGE_CAP_MESSAGE],
+  ])('#350: an unchanged pass %s', async (_label, lastError, expected) => {
+    const f = fixture();
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 1, chunkCount: 3, unembeddedCount: 0, lastError }]);
+    f.state.listFiles.mockResolvedValue([stored('docs/a.md')]);
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'unchanged' });
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', lastError: expected }));
   });
 
   it('AC-8: stops all commits and never finishes after first failed renew', async () => {
