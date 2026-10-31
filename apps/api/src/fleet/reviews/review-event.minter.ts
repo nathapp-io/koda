@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { REVIEW_EVENTS_INGESTED, type ReviewEventsIngestedEvent } from '../common/review-events';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { runAsSystemWriter, runWithApproval } from '../../action-context/action-context';
 import { ReviewDecisionWriter, type ReviewDecisionInput, type ReviewDecisionResult } from '../../memory/review-decision.writer';
@@ -12,6 +14,7 @@ import { FleetReviewEventsService } from './fleet-review-events.service';
 @SystemWriter('system.review.decision')
 export class ReviewEventMinter {
   private readonly logger = new Logger(ReviewEventMinter.name);
+  private running = false;
 
   constructor(
     private readonly events: FleetReviewEventsService,
@@ -20,11 +23,24 @@ export class ReviewEventMinter {
     private readonly writer: ReviewDecisionWriter,
   ) {}
 
-  run(): Promise<void> {
-    return runAsSystemWriter(this, async () => {
-      const rows = await this.events.claimPending(20);
-      for (const row of rows) await this.mintOne(row);
-    });
+  @OnEvent(REVIEW_EVENTS_INGESTED)
+  onEventsIngested(_event: ReviewEventsIngestedEvent): Promise<void> {
+    return this.run();
+  }
+
+  async run(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      await runAsSystemWriter(this, async () => {
+        const rows = await this.events.claimPending(20);
+        for (const row of rows) await this.mintOne(row);
+      });
+    } catch (error) {
+      this.logger.error(`Review event mint pass failed (${error instanceof Error ? error.name : 'unknown'})`);
+    } finally {
+      this.running = false;
+    }
   }
 
   private async mintOne(row: FleetReviewEventRecord): Promise<void> {

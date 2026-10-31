@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MemoryModule } from '../../memory/memory.module';
 import { ReviewEventMinter } from './review-event.minter';
+import { ReviewEventMintPoller } from './review-event-mint.poller';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { FleetReposModule } from '../repos/fleet-repos.module';
@@ -33,6 +34,7 @@ import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domai
     { provide: FLEET_REVIEW_EVENT_REPOSITORY, useExisting: FleetReviewEventRepository },
     FleetReviewEventsService,
     ReviewEventMinter,
+    ReviewEventMintPoller,
   ],
   exports: [FleetReviewEventsService],
 })

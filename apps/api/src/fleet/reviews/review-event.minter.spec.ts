@@ -28,6 +28,23 @@ function setup(logins = ['alice']) {
 }
 
 describe('ReviewEventMinter', () => {
+  it('AC-1: overlapping run resolves without claiming another batch', async () => {
+    const s = setup();
+    let release!: () => void;
+    s.events.claimPending.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve([]); }));
+    const first = s.minter.run();
+    await Promise.resolve();
+    await s.minter.run();
+    expect(s.events.claimPending).toHaveBeenCalledExactlyOnceWith(20);
+    release();
+    await first;
+  });
+
+  it('AC-2: claim failure is logged and run resolves', async () => {
+    const s = setup();
+    s.events.claimPending.mockRejectedValueOnce(new Error('claim failed'));
+    await expect(s.minter.run()).resolves.toBeUndefined();
+  });
   it('AC-1/2/3: mints as SYSTEM/review with forge approval and marks the event id', async () => {
     const s = setup();
     s.writer.mint.mockImplementation(async () => {
