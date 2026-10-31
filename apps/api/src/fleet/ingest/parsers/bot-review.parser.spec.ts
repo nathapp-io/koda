@@ -1,5 +1,7 @@
 import type { BundleFiles } from '../bundle-reader';
 import { parseBotReview } from './bot-review.parser';
+import { FleetReviewEventsService } from '../../reviews/fleet-review-events.service';
+import { reviewDecisionObject } from '../../../memory/review-decision.writer';
 
 const event = (overrides: Record<string, unknown> = {}) => ({
   type: 'finding-withdrawn', key: 'f-12345678', threadId: 'thread-1', finding: 'finding', reason: 'reason', disagreedBy: ['alice'], ...overrides,
@@ -14,6 +16,29 @@ const files = (artifacts: Array<{ name: string; text: string }>, stdout: string 
 const run = (name: string, value: unknown = artifact()) => ({ name: `nax-out/bot/pr-42/${name}/bot-review.json`, text: JSON.stringify(value) });
 
 describe('parseBotReview', () => {
+  it.each([1, 2147483647, 2147483648, Number.MAX_SAFE_INTEGER, 1e100, 0, -1, 1.5, '12', null])(
+    'B1 keeps optional line %s within the SQL INTEGER persistence boundary', async (line) => {
+      const parse = parseBotReview(files([run('r1', artifact([event({ line })]))]), 42);
+      const insertMany = vi.fn().mockResolvedValue(1);
+      const service = new FleetReviewEventsService({ insertMany } as never);
+      await expect(service.recordForJob({ id: 'job', projectId: 'project', repoId: 'repo', feature: 'review-pr-42' }, 1, parse))
+        .resolves.toEqual({ pending: 1 });
+      const expected = line === 1 || line === 2147483647 ? line : null;
+      expect(insertMany).toHaveBeenCalledWith([expect.objectContaining({ line: expected, status: 'pending' })]);
+      if (parse.outcome !== 'done') throw new Error('expected valid artifact');
+      if (expected === null) expect(parse.events[0]).not.toHaveProperty('line');
+    },
+  );
+  it('B2 sanitizes and bounds file before composing the decision object', () => {
+    const file = 'src/a.ts\n## forged section\t\u0000\u0007\u007f\u0085' + 'x'.repeat(1100);
+    const parse = parseBotReview(files([run('r1', artifact([event({ file, line: 12 })]))]), 42);
+    if (parse.outcome !== 'done') throw new Error('expected valid artifact');
+    const expectedFile = ('src/a.ts ## forged section     ' + 'x'.repeat(1100)).slice(0, 1000);
+    expect(parse.events[0].file).toBe(expectedFile);
+    const decision = reviewDecisionObject(parse.events[0]);
+    expect(decision).toBe(`Not a defect: finding. Reason: reason (${expectedFile}:12)`);
+    expect(decision).not.toMatch(/\p{Cc}/u);
+  });
   it('AC-3 rejects non-nax finding keys', () => expect(parseBotReview(files([run('r1', artifact([event({ key: 'review-pr-1' })]))]), 42)).toMatchObject({ outcome: 'done', events: [] }));
   it('AC-4 replaces every control character before clipping', () => expect(parseBotReview(files([run('r1', artifact([event({ finding: 'a\nb\u0007c' })]))]), 42)).toMatchObject({ events: [{ finding: 'a b c' }] }));
   it('AC-5 parses one valid artifact', () => expect(parseBotReview(files([run('r1')]), 42)).toEqual({ outcome: 'done', trusted: true, events: [{ key: 'f-12345678', threadId: 'thread-1', finding: 'finding', reason: 'reason', disagreedBy: ['alice'] }] }));

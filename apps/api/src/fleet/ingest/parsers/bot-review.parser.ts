@@ -35,8 +35,9 @@ function parseEvent(value: unknown): WithdrawnEvent | null {
     reason: clean(event.reason),
     disagreedBy,
   };
-  if (typeof event.file === 'string') parsed.file = event.file;
-  if (typeof event.line === 'number' && Number.isInteger(event.line) && event.line > 0) parsed.line = event.line;
+  if (typeof event.file === 'string') parsed.file = clean(event.file);
+  // FleetReviewEvent.line is a PostgreSQL INTEGER; invalid optional locations must not abort ingest.
+  if (typeof event.line === 'number' && Number.isInteger(event.line) && event.line > 0 && event.line <= 2147483647) parsed.line = event.line;
   return parsed;
 }
 
