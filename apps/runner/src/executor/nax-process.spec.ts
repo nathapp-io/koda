@@ -22,6 +22,12 @@ describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
       ['bun', '/x/fake.ts', 'plan', '--from', 'docs/spec.md', '-f', 'feat', '--profile', 'koda-job-cj1'],
     );
   });
+  test('AC-9 REVIEW: bot review receives PR number and validated profile chain', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'REVIEW', jobId: 'j1', profiles: ['native-ds'], review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }))).toEqual(['nax', 'bot', 'review', '42', '--profile', 'native-ds,koda-job-j1']);
+  });
+  test('AC-12 RUN preserves its exact argv', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'RUN', jobId: 'j1', feature: 'auth-flow', profiles: ['native-ds'], maxCostUsd: '5' }))).toEqual(['nax', 'run', '--headless', '--json', '-f', 'auth-flow', '--profile', 'native-ds,koda-job-j1', '--max-cost', '5']);
+  });
   test.each([
     ['a feature with a slash', { feature: 'a/b' }],
     ['a profile with a comma', { profiles: ['a,b'] }],

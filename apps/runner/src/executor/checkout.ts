@@ -39,6 +39,10 @@ export async function prepareCheckout(input: CheckoutInput): Promise<CheckoutRes
     await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
     return { ok: true, branch: null, refSha };
   }
+  if (assign.command === 'REVIEW') {
+    await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
+    return { ok: true, branch: null, refSha };
+  }
   const feature = assertFeature(assign.feature);
   const prdText = await git.run(['show', `${refSha}:.nax/features/${feature}/prd.json`], { cwd: repoDir });
   if (prdText.code !== 0) return { ok: false, reason: 'checkout: no prd.json at ref' };

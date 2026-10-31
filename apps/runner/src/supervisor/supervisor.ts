@@ -180,7 +180,7 @@ export class Supervisor {
     if (isConfigKind(row.command)) return this.reject(row, 'config job interrupted by a runner restart');
     if (row.pid === null) return this.reject(row, 'no process recorded');
     const alive = this.deps.executor.isAlive(row.pid);
-    if (row.command === 'PLAN') {
+    if (row.command === 'PLAN' || row.command === 'REVIEW') {
       const ours = alive && (await this.deps.executor.matchesProcess(row));
       this.begin(row, ours ? 'watch' : 'finish');
       return OK;

@@ -17,6 +17,10 @@ export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayloa
   if (assign.command === 'PLAN') {
     return [...naxCommand, 'plan', '--from', assertRelativePath('planFrom', assign.planFrom), '-f', feature, '--profile', chain];
   }
+  if (assign.command === 'REVIEW') {
+    if (!assign.review || !Number.isSafeInteger(assign.review.prNumber) || assign.review.prNumber <= 0 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(assign.review.botLogin)) throw new PathError('invalid review');
+    return [...naxCommand, 'bot', 'review', String(assign.review.prNumber), '--profile', chain];
+  }
   if (!COST_RE.test(assign.maxCostUsd)) throw new PathError('invalid maxCostUsd');
   return [...naxCommand, 'run', '--headless', '--json', '-f', feature, '--profile', chain, '--max-cost', assign.maxCostUsd];
 }
