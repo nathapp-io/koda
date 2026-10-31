@@ -3,7 +3,7 @@
   "feature": "fleet-pr-review",
   "branchName": "feat/fleet-pr-review",
   "createdAt": "2026-10-01T00:00:00.000Z",
-  "updatedAt": "2026-10-31T07:03:32.529Z",
+  "updatedAt": "2026-10-31T07:16:10.224Z",
   "userStories": [
     {
       "id": "US-001",
@@ -416,14 +416,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A pure stdout-marker reader, one executor method and a PLAN-shaped judge branch reuse the existing lifecycle and ledger reader; there is no new state machine, credential handling or asynchronous orchestration."
+        "reasoning": "A pure stdout-marker reader, one executor method and a PLAN-shaped judge branch reuse the existing lifecycle and ledger reader; there is no new state machine, credential handling or asynchronous orchestration.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/job-run.ts",
@@ -451,7 +454,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c2b8b699b0e07bf8f4cf8b2bf46bfd2318e0f7cb"
     },
     {
       "id": "US-008",
