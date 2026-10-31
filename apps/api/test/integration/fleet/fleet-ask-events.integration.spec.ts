@@ -1,7 +1,7 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
- * Permissions P3 US-009 — a settled ask's fleet outputs (activity row, `fleet.approval.resolved` webhook and
- * `fleet_approval` live event) are recorded by the one durable outbox consumer, once per engine status, after the
+ * Permissions P3 US-009 — a settled ask's fleet activity is
+ * recorded by the one durable outbox consumer, once per engine status, after the
  * deciding or expiring transaction committed.
  *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ask-events.integration.spec.ts
@@ -51,12 +51,6 @@ integration('fleet ask events recorded from the engine (PG)', () => {
     }
   };
   const activity = (id: string) => db.fleetActivity.findMany({ where: { entityType: 'approval', entityId: id } });
-  const resolvedWebhooks = async (): Promise<Array<{ event: string; payload: Record<string, unknown> }>> => {
-    const rows = await db.outboxEvent.findMany({ where: { type: 'webhook_delivery' }, orderBy: { createdAt: 'asc' } });
-    return rows
-      .map((row) => JSON.parse(row.payload) as { event: string; payload: Record<string, unknown> })
-      .filter((body) => body.event === 'fleet.approval.resolved');
-  };
   const decide = (decision: 'approve' | 'reject', at = now) =>
     withTestActor({ type: 'USER', id: userId }, () => decisions.decide(requestId, decision, null, at));
 
@@ -82,10 +76,9 @@ integration('fleet ask events recorded from the engine (PG)', () => {
     await grantKeys(db, { type: 'USER', id: userId }, ['fleet.job.shell.escalate', 'approval.decide@fleet.job.shell.escalate'], projectId);
     await db.agent.create({ data: { id: agentId, name: 'Ask decider', slug: 'ask-decider-agent', apiKeyHash: 'ask-agent-key-hash' } });
     await grantKeys(db, { type: 'AGENT', id: agentId }, ['fleet.job.shell.escalate', 'approval.decide@fleet.job.shell.escalate'], projectId);
-    // A subscription is what turns a `fleet.approval.resolved` dispatch into a webhook outbox row.
     await db.webhook.create({ data: {
       projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32),
-      events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']),
+      events: JSON.stringify(['approval.requested', 'approval.resolved']),
     } });
     decisions = app.get(ApprovalDecisionService, { strict: false });
     sweeper = app.get(ApprovalRequestExpirySweeper, { strict: false });
@@ -139,24 +132,14 @@ integration('fleet ask events recorded from the engine (PG)', () => {
     ]);
   });
 
-  it('AC-4: the rejected change dispatches fleet.approval.resolved with status rejected', async () => {
-    await decide('reject');
-
-    await relay();
-
-    const delivered = await resolvedWebhooks();
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0]?.payload).toMatchObject({ approvalId: requestId, status: 'rejected', decision: 'deny', projectId });
-  });
-
-  it('AC-6: relaying the same change twice records the outputs once', async () => {
-    await decide('approve');
+  it('retired live AC-3: relaying the same executed change twice records approval.decided once', async () => {
+    expect(await decide('approve')).toMatchObject({ status: 'executed' });
 
     await relay();
     await relay();
 
+    expect(await activity(requestId)).toMatchObject([{ action: 'approval.decided', entityId: requestId }]);
     expect(await activity(requestId)).toHaveLength(1);
-    expect(await resolvedWebhooks()).toHaveLength(1);
     expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
   });
 

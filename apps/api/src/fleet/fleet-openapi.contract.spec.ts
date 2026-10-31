@@ -108,18 +108,15 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.paths).filter((path) => path.includes('test-hooks'))).toEqual([]);
   });
 
-  it('exposes the approval routes, the counts route and the approval schemas (S1.5 §2.3)', () => {
-    for (const base of ['/api/fleet/approvals', '/api/projects/{slug}/fleet/approvals']) {
-      expect(spec.paths[base]?.['get']).toBeDefined();
-      expect(spec.paths[`${base}/{id}`]?.['get']).toBeDefined();
-      expect(spec.paths[`${base}/{id}/decide`]?.['post']).toBeDefined();
+  it('AC-2: removes the retired fleet approval adapter routes and schemas (US-010)', () => {
+    expect(Object.keys(spec.paths).filter((path) =>
+      path.startsWith('/api/fleet/approvals') ||
+      path.startsWith('/api/projects/{slug}/fleet/approvals') ||
+      path.startsWith('/api/fleet/approval-counts'),
+    )).toEqual([]);
+    for (const name of ['FleetApprovalDto', 'DecideApprovalDto', 'ApprovalCountsDto', 'ProjectApprovalCountDto', 'RequeueCandidateDto']) {
+      expect(spec.components.schemas).not.toHaveProperty(name);
     }
-    expect(spec.paths['/api/fleet/approval-counts']?.['get']).toBeDefined();
-    expect(Object.keys(spec.components.schemas['FleetApprovalDto']?.properties ?? {}))
-      .toEqual(expect.arrayContaining(['type', 'status', 'payload', 'outcome', 'decision', 'resolvedBy', 'requeueCandidates']));
-    expect(Object.keys(spec.components.schemas['DecideApprovalDto']?.properties ?? {}).sort())
-      .toEqual(['amountUsd', 'comment', 'decision', 'requeueJobIds']);
-    expect(Object.keys(spec.components.schemas['ApprovalCountsDto']?.properties ?? {}).sort()).toEqual(['projects', 'total', 'unscoped']);
   });
 
   it('exposes the log read routes and their schemas (S2a §3)', () => {

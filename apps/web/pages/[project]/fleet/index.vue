@@ -78,8 +78,7 @@ const liveReload = createDebouncer(() => { void reload(); void banner.value?.ref
 onBeforeUnmount(() => liveReload.cancel())
 useProjectEvents(slug, {
   onFleetJob: () => liveReload.trigger(),
-  onFleetApproval: () => liveReload.trigger(),
-  // P3b US-007: engine requests reload the page (and the banner's links) too; 7c drops onFleetApproval.
+  // P3b US-007: engine requests reload the page (and the banner's links) too.
   onApprovalRequest: () => liveReload.trigger(),
   onResync: () => liveReload.trigger(),
 })

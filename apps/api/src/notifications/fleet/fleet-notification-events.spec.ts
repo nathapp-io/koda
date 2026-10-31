@@ -1,6 +1,6 @@
 import {
   budgetIncidentId, budgetScopeLabel, buildJobOutcomePayload, jobOutcomeOf,
-  parseApprovalRequestedPayload, parseBudgetIncidentPayload, parseHealthAlertPayload, parseJobOutcomePayload,
+  parseBudgetIncidentPayload, parseHealthAlertPayload, parseJobOutcomePayload,
 } from './fleet-notification-events';
 
 describe('jobOutcomeOf (S4a §2.4)', () => {
@@ -70,11 +70,5 @@ describe('payload parsers', () => {
     expect(parseHealthAlertPayload(offline)).toEqual(offline);
     expect(parseHealthAlertPayload(cred)).toEqual(cred);
     expect(parseHealthAlertPayload({ ...offline, kind: 'disk_full' })).toBeNull();
-  });
-
-  it('reads the #236 approval payload and ignores its other fields', () => {
-    const raw = { approvalId: 'ap1', type: 'nax_bash_escalate', status: 'pending', decision: null, resolvedBy: null, projectId: 'p1', jobId: 'j1', policyId: null, expiresAt: null, path: '/web/fleet/approvals?id=ap1' };
-    expect(parseApprovalRequestedPayload(raw)).toEqual({ approvalId: 'ap1', type: 'nax_bash_escalate', projectId: 'p1', jobId: 'j1', policyId: null });
-    expect(parseApprovalRequestedPayload({ ...raw, approvalId: 7 })).toBeNull();
   });
 });

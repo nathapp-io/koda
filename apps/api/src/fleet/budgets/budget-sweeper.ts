@@ -3,11 +3,9 @@ import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { runAsSystemWriter } from '../../action-context/action-context';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCloser, systemActor } from '../approvals/approval-closer';
-import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
 import { BudgetEvaluator } from './budget-evaluator';
 import { budgetActivityPayload } from './budget-payloads';
@@ -40,7 +38,6 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
     private readonly approvals: ApprovalCloser,
-    private readonly approvalLive: ApprovalLivePublisher,
     private readonly audit: AuditRecorder,
   ) {}
 
@@ -84,26 +81,22 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
 
   /** S1b §2.1: a policy whose scope row is gone is deleted with its incidents; S1.5 closes its pending approval. */
   private async deleteOrphan(id: string, now: Date): Promise<boolean> {
-    const { deleted, live } = await this.txManager.run(async () => {
-      const none: LiveFleetApprovalEvent[] = [];
+    return this.txManager.run(async () => {
       const policy = await this.repo.lockById(id);
-      if (!policy || (await this.repo.scopeExists(policy))) return { deleted: false, live: none };
-      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, now);
+      if (!policy || (await this.repo.scopeExists(policy))) return false;
+      await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, now);
       await this.repo.delete(id);
       await this.record('budget.deleted', policy, { reason: 'scope_gone' });
       await this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: 'deleted: scope gone' });
-      return { deleted: true, live: closed.live };
+      return true;
     });
-    this.approvalLive.publish(live);
-    return deleted;
   }
 
   /** B8: clear a monthly pause from an earlier window and record the rollover; S1.5 closes its pending approval. */
   private async resetWindow(id: string, now: Date): Promise<boolean> {
-    const { reset, live } = await this.txManager.run(async () => {
-      const none: LiveFleetApprovalEvent[] = [];
+    return this.txManager.run(async () => {
       const policy = await this.repo.lockById(id);
-      if (!policy || !isStaleMonthlyPause(policy, now)) return { reset: false, live: none };
+      if (!policy || !isStaleMonthlyPause(policy, now)) return false;
       const start = windowStart(policy.windowKind, now);
       const spent = await this.repo.windowSpend(policy, start);
       const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'window_reset', actor: systemActor(policy) }, now);
@@ -111,10 +104,8 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
       await this.repo.insertIncident({ policyId: id, kind: 'window_reset', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId: closed.approval?.id ?? null });
       await this.record('budget.window_reset', policy, { spentUsd: spent, windowStart: start.toISOString() });
       await this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: 'window reset' });
-      return { reset: true, live: closed.live };
+      return true;
     });
-    this.approvalLive.publish(live);
-    return reset;
   }
 
   private record(action: string, policy: BudgetPolicyRecord, extra: Record<string, unknown>): Promise<void> {

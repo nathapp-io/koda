@@ -1,4 +1,5 @@
 import { describe, expect, jest, test } from '@jest/globals'
+import * as streamModule from '~/lib/project-event-stream'
 import {
   createProjectEventStream,
   parseApprovalRequestEvent,
@@ -83,18 +84,23 @@ describe('createProjectEventStream with onApprovalRequest (P3b US-001)', () => {
   })
 
   test('a page that did not ask for them never listens', () => {
-    const source = open({ onFleetApproval: jest.fn(), onResync: () => undefined })
+    const source = open({ onResync: () => undefined })
     expect(source.listenerTypes()).not.toContain('approval_request')
   })
+})
 
-  test('the fleet approval notice is untouched beside it', () => {
-    const onApprovalRequest = jest.fn()
-    const onFleetApproval = jest.fn()
-    const source = open({ onApprovalRequest, onFleetApproval, onResync: () => undefined })
+// US-007 AC-1: the fleet approval adapter is retired, so nothing opens a listener for its notice any more.
+describe('US-007 AC-1: the stream no longer listens for fleet_approval', () => {
+  test('AC-1: given only onApprovalRequest and onResync, it adds no fleet_approval listener', () => {
+    const source = open({ onApprovalRequest: jest.fn(), onResync: () => undefined })
 
-    source.emit('fleet_approval', { id: 'e2', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'pending', at: 'x' })
+    // The listener the subscriber asked for is there, so the assertion below is not vacuous...
+    expect(source.listenerTypes()).toContain('approval_request')
+    // ...and the retired one is not.
+    expect(source.listenerTypes()).not.toContain('fleet_approval')
+  })
 
-    expect(onFleetApproval).toHaveBeenCalledTimes(1)
-    expect(onApprovalRequest).not.toHaveBeenCalled()
+  test('AC-1: the retired notice parser is gone, so no fleet_approval frame can be routed either', () => {
+    expect(streamModule).not.toHaveProperty('parseFleetApprovalEvent')
   })
 })

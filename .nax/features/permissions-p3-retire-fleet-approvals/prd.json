@@ -1,0 +1,1238 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-retire-fleet-approvals",
+  "branchName": "feat/permissions-p3-retire-fleet-approvals",
+  "createdAt": "2026-10-30T00:00:00.000Z",
+  "updatedAt": "2026-10-30T20:09:34.457Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The engine notifies the fleet asks",
+      "description": "**Goal** — Let ApprovalRequestedSubscriber notify pending bash and budget asks through the approval engine.\n\n**Motivation** — A fleet ask still notifies every global admin through `FleetApprovalRequestedSubscriber`, linking to `/admin/fleet/approvals`, while the engine notification (which reaches users holding `approval.decide` in the project and links to `/approvals`) skips the two fleet keys.\n\n**Approach** — Removes the fleet-key early return from `ApprovalRequestedSubscriber`. The recipients stay the subscriber's own: users holding `approval.decide` in the request's project (every global admin for a request with no project), filtered by `decideEligibility`. A fleet ask opens with `approverMustHoldAction: true`, so a project user also needs the ask's key (`fleet.job.shell.escalate` or `fleet.budget.override`). The notification is kind `approval_request` with link `/approvals?id=<requestId>`.\n\nFleet asks notify the engine's deciders, not the requester (US-001 AC-5). `principalIdsWithKey(..., 'approval.decide')` leaves out holders of only the scoped entry `approval.decide@fleet.job.shell.escalate`, which is the seeded Developer grant, so a developer who requested the job is not notified of its bash ask. Before this feature the fleet path notified only global admins, so nobody loses a notification they had.\n\nDelete the early-return comment and ASK_KEYS_BY_COMPONENT import. Replace the two suppression unit cases with eligible-delivery cases; retain non-fleet, missing-source, cancelled-source and database-retry regressions. Integration AC-1 and AC-2 enter through the runner relay route and a budget hard stop, never by calling the handler directly. Update the existing relay and budget-notification integrations to assert one engine notification per admin, filtered by kind while the fleet path still exists.\n\n**Scope** — In: engine subscriber and its unit/HTTP notification assertions. Out: deletion of the fleet subscriber/outbox producer belongs to US-002; no requester-based recipient expansion.\n\n**Interface** — `ApprovalRequestedSubscriber.handle`; `decideEligibility(request, principal, keys)`; `NotificationWriter.deliver`. A fleet ask's request gone or no longer pending when handled delivers nothing, preserving existing behavior.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: When a bash ask opens pending in project A through the runner relay, every global admin receives one notification of kind approval_request with link /approvals?id=<requestId> and params.key fleet.job.shell.escalate.",
+        "AC-2 [integration]: When a budget hard stop opens a pending fleet.budget.override ask in project A, every global admin receives one approval_request notification for that request.",
+        "AC-3 [integration]: When a bash ask opens in project A, a user holding the Approver role plus a role granting fleet.job.shell.escalate in A receives its approval_request notification.",
+        "AC-4 [integration]: When a bash ask opens in project A, a user holding only the Approver role in A receives no notification for it.",
+        "AC-5 [integration]: When a bash ask opens in project A, a project Developer in A holding approval.decide@fleet.job.shell.escalate but not approval.decide receives no notification for it.",
+        "AC-6 [integration]: When a bash ask opens in project A, a user holding approval.decide and fleet.job.shell.escalate only in project B receives no notification for it.",
+        "AC-7 [unit]: Given a pending payload with permissionKey fleet.job.shell.escalate and one eligible user, ApprovalRequestedSubscriber's handler calls NotificationWriter.deliver once with one draft for that user.",
+        "AC-8 [unit]: Given a pending payload with permissionKey fleet.budget.override for a request with projectId null, the handler reads candidates through NotificationEligibility.findGlobalAdminIds and delivers one draft per eligible admin.",
+        "AC-9 [unit]: Given a payload with status executed and permissionKey fleet.job.shell.escalate, the handler calls NotificationWriter.deliver zero times.",
+        "AC-10 [unit; failure handling]: Given a pending fleet-ask payload whose source request is gone, the handler delivers nothing, preserving the existing missing sources stop quietly behavior.",
+        "AC-11 [unit; failure handling]: Given a pending fleet-ask payload whose source request is no longer pending, the handler delivers nothing, preserving the existing ignores sources already cancelled behavior."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "notifications",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Deletes one subscriber early return and extends existing relay/hard-stop fixtures without new abstractions; recipient eligibility and project isolation still require the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+        "apps/api/src/notifications/approvals/approval-request-drafts.ts",
+        "apps/api/src/approvals/approval-eligibility.ts",
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.spec.ts",
+        "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+          "reason": "the early return for the fleet ask keys, its comment and the now-unused `ASK_KEYS_BY_COMPONENT` import are deleted."
+        },
+        {
+          "path": "apps/api/src/notifications/approvals/approval-requested.subscriber.spec.ts",
+          "reason": "\"AC-6: a pending fleet bash ask notifies nobody through the engine\" and \"AC-7: a pending fleet budget ask notifies nobody through the engine\" become: each delivers one `approval_request` draft per eligible user, as \"AC-8: a pending payload for a non-fleet key with one eligible user still delivers once\" asserts for a non-fleet key."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+          "reason": "\"US-011 AC-14: the outbox relay tells every global admin once, through the fleet approval only\" becomes: every global admin has exactly one `approval_request` notification for the request (and, until US-002, one fleet one; the case filters by `kind`)."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts",
+          "reason": "\"hard stop: the override ask reaches every global admin while pending, and a settled ask notifies nobody\" also asserts one `approval_request` notification per global admin (filtered by `kind`) while pending, and still none for a settled ask."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b91a155cd87ed6b63cecc928e834604bd42a80fe"
+    },
+    {
+      "id": "US-002",
+      "title": "Delete the fleet_approval_requested notification path",
+      "description": "**Goal** — Remove the duplicate fleet notification producer/consumer and let legacy unhandled outbox rows drain.\n\n**Motivation** — Two notification paths duplicate every fleet ask after the unified inbox shipped.\n\n**Approach** — Deletion only:\n- `ApprovalCloser.enqueueRequested`, its two calls, and the closer's `outbox` constructor parameter (its only use);\n- `FleetApprovalRequestedSubscriber` and its registration in `NotificationsModule`;\n- `FLEET_APPROVAL_REQUESTED`, `FleetApprovalRequestedPayload` and `parseApprovalRequestedPayload`;\n- `approvalDrafts`, and `FleetNotificationReader.approvalContext`;\n- the `approvalConsumerReady` claim gate in `PrismaOutboxStore.claimBatch`, and the store's `publisher` constructor parameter (its only use).\n\nOutbox rows of type `fleet_approval_requested` left from before US-002: The relay claims them, finds no handler and marks them done.\n\nRemove only obsolete unit cases for these symbols and the obsolete outbox hold-until-consumer case; keep other fleet notification subscribers, malformed-payload handling and action-context assertions. Update positional constructors in closer/store specs and memory/outbox-envelope integration. Remove the deleted subscriber's system-writer metadata row. Update relay and budget notification integrations from US-001 to assert exactly one notification per global admin of kind approval_request, not one per family.\n\n**Scope** — In: duplicate notification path and exclusive claim gate. Out: webhook deletion is US-005; live publication is US-006; thread action_requested notifications and NotificationSourceType fleet_approval stay. Do not delete existing approval_requested Notification rows.\n\n**Interface** — after US-002 the constructor has no `outbox`; after US-005 no `webhooks`; after US-006 it is `(store, askService, activity, audit)`. This story removes only outbox and shifts later positional arguments accordingly. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/api`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: When a pending bash ask opens through the runner relay, it records no outbox event of type fleet_approval_requested and every global admin has exactly one notification for the request, of kind approval_request.",
+        "AC-2 [integration]: Given a due pending outbox row of type fleet_approval_requested left from before the change, PrismaOutboxStore.claimBatch claims it and the relay marks it done with no notification written."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "notifications",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Multi-module deletion includes outbox backlog lifecycle and DI construction changes while retaining other notification paths.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+        "apps/api/src/notifications/fleet/fleet-notification.reader.ts",
+        "apps/api/src/outbox/prisma-outbox.store.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`enqueueRequested`, its two calls and the `outbox` constructor parameter are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "\"enqueues a fleet_approval_requested outbox event for every fresh project budget ask (#208)\" and \"enqueues a fleet_approval_requested outbox event for every fresh project bash ask (#208)\" are deleted; \"AC-19 (S5b US-001): a fresh escalated ask still enqueues exactly approvalWebhookPayload, with no action extras\" keeps only its webhook-dispatch assertion; the closer is constructed without the outbox argument, so every later positional argument moves up one."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.module.ts",
+          "reason": "drops `FleetApprovalRequestedSubscriber` from `providers` and its import."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+          "reason": "drops `FLEET_APPROVAL_REQUESTED`, `FleetApprovalRequestedPayload` and `parseApprovalRequestedPayload`."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+          "reason": "the cases on `parseApprovalRequestedPayload` are deleted."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-drafts.ts",
+          "reason": "drops `approvalDrafts`."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-drafts.spec.ts",
+          "reason": "the cases on `approvalDrafts` are deleted."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification.reader.ts",
+          "reason": "drops `approvalContext`."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification.reader.spec.ts",
+          "reason": "the cases on `approvalContext` are deleted."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-subscribers.spec.ts",
+          "reason": "the `FleetApprovalRequestedSubscriber` construction and the cases \"bash approval ask -> every global admin, labelled with the repo\" and \"AC-12: a nax_bash_escalate ask still delivers one draft per admin id findGlobalAdminIds answers\" are deleted; the budget-incident and malformed-payload cases of the other subscribers stay."
+        },
+        {
+          "path": "apps/api/src/outbox/prisma-outbox.store.ts",
+          "reason": "`claimBatch` drops `approvalConsumerReady` and its `fleet_approval_requested` condition; the `publisher` constructor parameter is deleted."
+        },
+        {
+          "path": "apps/api/src/outbox/prisma-outbox.store.spec.ts",
+          "reason": "the store is constructed without the `FanOutPublisher` argument."
+        },
+        {
+          "path": "apps/api/test/integration/memory/outbox-envelope.integration.spec.ts",
+          "reason": "`new PrismaOutboxStore(prismaService, publisher)` becomes `new PrismaOutboxStore(prismaService)`; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the `FleetApprovalRequestedSubscriber` import and its `[FleetApprovalRequestedSubscriber, 'system.notification.fleet']` row are deleted; the other writers' rows stay."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/fleet-ask-notifications.integration.spec.ts",
+          "reason": "\"US-011 AC-12: a pending bash ask answers pending with the job repo as owner/name\", \"US-011 AC-13: a pending budget ask answers pending with no repo\" and \"answers the engine status of a settled ask, and null for a request that is gone\" are deleted (they test `approvalContext`); \"writes need an action context\" stays."
+        },
+        {
+          "path": "apps/api/test/integration/outbox/prisma-outbox-store.integration.spec.ts",
+          "reason": "\"holds unhandled approval notifications without blocking other events, then releases them when a consumer registers\" is deleted."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+          "reason": "\"AC-12: the pending open records one fleet_approval_requested outbox event keyed by the request id\" is deleted; the US-001 version of \"US-011 AC-14\" drops its fleet-notification half and asserts exactly one notification per global admin, of kind `approval_request`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts",
+          "reason": "\"AC-10: a global policy asks with no project and records no fleet_approval_requested event\" keeps the no-project ask and drops the outbox-event half."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts",
+          "reason": "the hard-stop case asserts only the `approval_request` notification per global admin."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b3fa10e6ba310866bf4ca5d7192dedad7e6ca05a"
+    },
+    {
+      "id": "US-003",
+      "title": "Dismiss approval toasts on a successful zero-count refresh",
+      "description": "**Goal** — Fix #356 by dismissing active approval notices when the current successful counts snapshot is zero.\n\n**Motivation** — The web keeps an approval toast on screen forever once the last pending request is settled elsewhere, on any page that does not receive the project settlement event.\n\n**Approach** — `useApprovalRequestNotifications().refresh` (`apps/web/composables/useApprovalRequestNotifications.ts`)\n- Baseline: `if (!snapshot || snapshot.total <= 0 || !userId || !current()) return` before reconciling.\n- Target: when the snapshot is non-null with `total <= 0`, the user is signed in and the refresh is current, every active notice is dismissed through `dismiss(id)` and the refresh returns without listing.\n\nThe counts snapshot is null (never loaded or failed): The notices stay; #356 must not read a failure as zero.\n\nReuse dismiss so both the toast id and associated browser Notification are closed. Preserve user/generation/mounted guards and per-user announced history; update the refresh doc comment to describe zero reconciliation. Extend the existing shared-ref Jest harness, retaining its no-list-for-zero case; use a constructible Notification double with close spies for the hidden-tab case.\n\n**Scope** — In: refresh reconciliation and regression tests. Out: web stream/DTO/redirect retirement is US-007; the browser-notification permission prompt and the announce history are unchanged.\n\n**Interface** — `async function refresh(): Promise<void>`; `function dismiss(id: string): void`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: Given one shared counts ref, after a refresh with counts { total: 1 } raises a toast for request r1, a refresh with counts { total: 0 } dismisses the toast whose id is r1's toast id.",
+        "AC-2 [unit]: When that zero-count refresh runs, it makes no GET /approvals request; the list call count stays at the one from the first refresh.",
+        "AC-3 [unit]: Given browser notifications enabled, document.visibilityState hidden and a constructible Notification double whose instances carry a close spy, after r1 raises a browser notification the zero-count refresh calls that instance's close().",
+        "AC-4 [unit]: When the counts value is null, refresh leaves the r1 toast undismissed.",
+        "AC-5 [unit]: When auth.user is null, a zero-count refresh dismisses nothing through refresh.",
+        "AC-6 [unit]: After a zero-count refresh dismisses r1, a later refresh with counts { total: 1 } listing r1 again raises no new toast for r1."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "web",
+        "bugfix",
+        "notifications"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One refresh branch reuses existing dismiss and current-user/generation guards; its existing Jest harness supplies all collaborators without a new abstraction.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useApprovalRequestNotifications.ts",
+        "apps/web/tests/composables/useApprovalRequestNotifications.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useApprovalRequestNotifications.ts",
+          "reason": "`refresh` dismisses every active notice on a non-null zero-count snapshot before returning; its doc comment says so."
+        },
+        {
+          "path": "apps/web/tests/composables/useApprovalRequestNotifications.spec.ts",
+          "reason": "\"AC-1: counts total 0 makes no GET /approvals request\" keeps its assertion; the new #356 cases are added to this file."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "544dee409a6718fe35f2df70781e4cb747ebae1c"
+    },
+    {
+      "id": "US-004",
+      "title": "Read engine approvals from the assistant and retire the MCP alias",
+      "description": "**Goal** — Move the assistant list tool onto ApprovalRequestQueries and remove the fleet MCP alias without replacing the engine MCP tool.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — `koda_list_approvals` (assistant) is gated by `project.read`. It reads `ApprovalRequestQueries.list` for the tool context's actor with `projectId: ctx.projectId`. The engine's visibility already limits rows to the caller's own requests and the ones it may decide, so no approval-specific read key is needed. One line per row: `<id> <permissionKey> <status> <createdAt ISO>`. The status filter is `APPROVAL_REQUEST_STATUSES` (`apps/api/src/approvals/dto/list-approval-requests.query.ts`), default `pending`, in both `parse` and the descriptor. The principal is `{ type: isAgentPrincipal(ctx.actor) ? 'AGENT' : 'USER', id: ctx.actor.id }`, as `action-tools.ts` builds it.\n\nMCP keeps one `koda_list_approvals`: the engine's (`ApprovalMcpTools`). `mcpToolDescriptors()` leaves the assistant descriptor `koda_list_approvals` out instead of renaming it, and `assistantToolName` (the alias map back) is deleted. MCP clients lose `koda_list_fleet_approvals`.\n\n`listApprovalsTool` (`apps/api/src/fleet/assistant/tools/fleet-tools.ts`)\n- Baseline: `listApprovalsTool(approvals: ApprovalsService)`, key `fleet.approval.read`.\n- Target: `listApprovalsTool(queries: ApprovalRequestQueries)`, key `project.read`; `FleetTools` injects `ApprovalRequestQueries` in place of `ApprovalsService`.\n\nUse engine statuses pending, approved, rejected, expired, cancelled, executed, failed. Keep page size 20, default page 1, no approvals empty output and the existing next-page line. Update descriptor wording to approval requests. Delete ApprovalsService/ApprovalRoute imports and the alias call in mcp-server.factory; MCP names otherwise pass unchanged. Update fleet-tools/origin-tools unit assertions for USER and AGENT principals and project filter, catalog/factory alias cases, and HTTP runner tool plus MCP tools/list integrations.\n\n**Scope** — In: assistant list tool, descriptor, injection, MCP catalog/dispatch alias removal. Out: ApprovalsService/routes are deleted in US-010; a project filter on the engine MCP tool koda_list_approvals is unchanged.\n\n**Interface** — `ApprovalRequestQueries.list(principal: PrincipalRef, filter: ApprovalRequestFilter, page: IPageOption): Promise<IPageResult<ApprovalRequestRecord>>`; `ApprovalRequestFilter` has `status`, `projectId`, `permissionKey`, `jobId`, `mine`. `ApprovalEngineModule` exports `ApprovalRequestQueries`. Integration enters `POST /api/fleet/runner/jobs/:id/tools/koda_list_approvals`, not a direct executor-only surrogate.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: In a PROJECT thread of project A, POST /api/fleet/runner/jobs/:id/tools/koda_list_approvals with {} answers one line per pending request of A that the thread's actor may see, each starting with the request id followed by its permissionKey.",
+        "AC-2 [integration]: Given a pending request of project B that the same actor may decide, that request does not appear in the project A tool answer.",
+        "AC-3 [unit]: listApprovalsTool(queries).execute(ctx, { status: 'pending', page: 2 }) with a user actor calls queries.list once with principal { type: 'USER', id: <the user id> }, filter { status: 'pending', projectId: ctx.projectId } and page { current: 2, size: 20 }.",
+        "AC-4 [unit]: listApprovalsTool(queries).execute(ctx, { status: 'pending', page: 2 }) with an agent actor calls queries.list with principal { type: 'AGENT', id: ctx.actor.id }, filter { status: 'pending', projectId: ctx.projectId } and page { current: 2, size: 20 }, matching the user-actor call except for the principal type and id.",
+        "AC-5 [unit]: listApprovalsTool(queries).key returns project.read.",
+        "AC-6 [unit]: The tool's parse({}) returns { status: 'pending', page: 1 }, and parse({ status: 'executed' }) returns status executed.",
+        "AC-7 [unit]: listApprovalsTool(queries).parse({ status: 'decided' }) throws ToolInputError('status'), the invalid-input error the other fleet tools throw for a value outside an enum.",
+        "AC-8 [unit]: When queries.list answers an empty page, the tool answers no approvals.",
+        "AC-9 [unit]: When queries.list answers a page with hasNext true and current 1, the tool's last line is more: call koda_list_approvals with page 2.",
+        "AC-10 [unit]: mcpToolDescriptors() holds no descriptor named koda_list_approvals and none named koda_list_fleet_approvals.",
+        "AC-11 [integration]: An MCP tools/list call through POST /api/mcp answers exactly one tool named koda_list_approvals, whose description is the ApprovalMcpTools one."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "assistant",
+        "mcp",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Changes the tool permission key and principal/project-aware visibility across assistant and MCP boundaries; access-control override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/tools/fleet-tools.ts",
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/approvals/approval-request.queries.ts",
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/tools/fleet-tools.ts",
+          "reason": "`listApprovalsTool` takes `ApprovalRequestQueries`, parses `status` against `APPROVAL_REQUEST_STATUSES` (default `pending`), builds the principal with `isAgentPrincipal`, its key becomes `project.read`, and its lines become `<id> <permissionKey> <status> <createdAt ISO>`; `FleetTools` injects `ApprovalRequestQueries` instead of `ApprovalsService`; the `ApprovalsService` and `ApprovalRoute` import is deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+          "reason": "`KODA_LIST_APPROVALS`'s `status` enum becomes `APPROVAL_REQUEST_STATUSES` (`pending`, `approved`, `rejected`, `expired`, `cancelled`, `executed`, `failed`) and its description says \"approval requests\"."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+          "reason": "`mcpToolDescriptors` filters the descriptor `koda_list_approvals` out instead of renaming it; `assistantToolName` is deleted and its callers pass the MCP name unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts",
+          "reason": "stops calling `assistantToolName`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/fleet-tools.spec.ts",
+          "reason": "\"every fleet tool declares its own read key\" maps `koda_list_approvals` to `project.read`; \"koda_list_approvals parse defaults to pending and refuses a status outside the enum\" uses the engine statuses; \"AC-8 (US-004): koda_list_approvals reads the project route with the project id only and reports the ids\" asserts the `ApprovalRequestQueries.list` call of US-004 AC-3 instead of the project route."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/origin-tools.spec.ts",
+          "reason": "\"AC-12: approvals use the project id only, for an agent and for a user actor\" asserts `ApprovalRequestQueries.list` called with the actor's principal and `projectId` for both actors, instead of `ApprovalsService.list`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts",
+          "reason": "the `mcpName` helper is deleted; \"US-012: reserves the approval inbox name for the MCP-only tool, leaving thread descriptors intact\" asserts `koda_list_approvals` and `koda_list_fleet_approvals` are both absent from `mcpToolDescriptors()` and `koda_list_approvals` still present in `KODA_TOOL_DESCRIPTORS`; \"AC-8: rewrites the sentence once, leaving the rest of the description as the catalog spells it\" looks descriptors up by their own name."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-server.factory.spec.ts",
+          "reason": "\"keeps the legacy fleet inbox visible under an alias and dispatches to its existing executor\" is deleted."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4e6f7fd8d56d032d76aaf25d9755c2988f5b8c78"
+    },
+    {
+      "id": "US-005",
+      "title": "Delete the fleet.approval webhook family",
+      "description": "**Goal** — Stop sending fleet.approval.requested/resolved, leaving the engine webhook family as the only approval webhook output.\n\n**Motivation** — Every fleet ask sends `fleet.approval.*` beside the engine's `approval.requested`/`approval.resolved` (7a).\n\n**Approach** — Deletion only: `ApprovalCloser.dispatch`, its three calls and the `webhooks` constructor parameter; `approvalWebhookPayload` and `approvalPath` in `approval-payloads.ts`.\n\n`ApprovalRequestEvents.record` (`apps/api/src/approvals/approval-request-events.ts`) dispatches `approval.requested`/`approval.resolved` (7a); unchanged.\n\nRemove the dispatch-only assertions/double from closer specs and later positional argument adjustment; retain approvalActivityPayload and its secret-check assertion. Remove payload webhook/path cases and the old resolved-only event integration case. Update fleet-ask-events subscriber comment, fleet-ask-events subscription, relay and budget wiring assertions, recorder delivery counts and approval-request-webhooks integration. Recorder counts follow the engine: one approval.resolved per non-pending status the engine records. A subscription listing only the old requested event receives no delivery. The webhook rename (`fleet.approval.*` to `approval.*`, every key) is a contract change, accepted in 7a.\n\n**Scope** — In: legacy webhook producers/payload helper and their obsolete tests. Out: live publication removal is US-006; deleting existing Webhook subscriptions that list fleet.approval.requested or fleet.approval.resolved is out of scope because events is free text.\n\n**Interface** — `ApprovalCloser` loses only its webhooks parameter at this step; `approvalActivityPayload` stays. No replacement dispatcher or payload contract is introduced. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/api`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Given a project webhook subscribed to fleet.approval.requested, fleet.approval.resolved, approval.requested and approval.resolved, a bash ask opened through the runner relay records one webhook_delivery outbox row for approval.requested and none for fleet.approval.requested.",
+        "AC-2 [integration]: Given a pending bash ask and a project webhook subscribed to fleet.approval.requested, fleet.approval.resolved, approval.requested and approval.resolved, rejecting the ask through POST /api/approvals/:id/decisions records an approval.resolved delivery and none for fleet.approval.resolved."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "webhooks",
+        "breaking-change"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Removes dispatch from the closer and its payload helper using an already-working engine webhook producer; integration changes assert delivery names/counts without a new transport or transaction design.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/fleet/approvals/approval-payloads.ts",
+        "apps/api/test/integration/fleet/fleet-ask-events.integration.spec.ts",
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`dispatch`, its three calls and the `webhooks` constructor parameter are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "the `webhooks` double and every `webhooks.dispatch` expectation are deleted (in \"opens the ask on the engine as fleet.budget.override for the stop snapshot, then links it and announces the view\", \"opens a global policy ask with no project, and sends no webhook, outbox row or live event\", \"closes the pending ask of a policy on the engine and stamps the link, or answers nothing when there is none\", \"a manual resume closes the ask cancelled on the engine and reports approved through the link, with the resumer in the outcome\", \"opens the ask on the engine as fleet.job.shell.escalate for the job requester, then links and announces it\", \"a re-reported ask answers the stored view and writes nothing\", \"an ask the policy resolves to none is answered allow at once, with no request and no link\"); \"AC-19 (S5b US-001): a fresh escalated ask still enqueues exactly approvalWebhookPayload, with no action extras\" is deleted; later positional constructor arguments move up one."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-payloads.ts",
+          "reason": "`approvalWebhookPayload` and `approvalPath` are deleted; `approvalActivityPayload` stays."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-payloads.spec.ts",
+          "reason": "\"builds the inbox path\" and \"webhook body carries ids and state, never the payload (A8)\" are deleted; \"activity payload keys never trip the secret check\" stays."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts",
+          "reason": "the class comment no longer lists the `fleet.approval.resolved` webhook."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-ask-events.integration.spec.ts",
+          "reason": "\"AC-4: the rejected change dispatches fleet.approval.resolved with status rejected\" is deleted; the webhook subscription in its setup lists `approval.requested` and `approval.resolved`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+          "reason": "\"AC-11: the pending open dispatches fleet.approval.requested to the project webhook with the request id\" becomes US-005 AC-1."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts",
+          "reason": "\"AC-1: a hard stop opens one engine budget ask for the system component, linked to its policy\" asserts `hooks('approval.requested')` is 1 instead of `fleet.approval.requested`; \"AC-10\" asserts `hooks('approval.requested')` is 0."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-recorder.integration.spec.ts",
+          "reason": "`resolvedWebhooks` counts `approval.resolved` deliveries, and the subscription lists the engine events; each case's expected count is the engine's (one `approval.resolved` per non-pending status the engine records)."
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-request-webhooks.integration.spec.ts",
+          "reason": "\"AC-4: runner relay retains fleet requested and adds engine requested subscriptions\" becomes: a subscription to `fleet.approval.requested` alone receives no delivery for a relayed ask, and one to `approval.requested` receives one."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2707366fa6b7f9c0b14b9411626e0e8aa7e7b47c"
+    },
+    {
+      "id": "US-006",
+      "title": "Delete API fleet approval live events and publication markers",
+      "description": "**Goal** — Remove fleet_approval live publication and its persisted acknowledgement while preserving engine events and once-only fleet activity.\n\n**Motivation** — Every fleet ask change publishes `fleet_approval` beside the engine's `approval_request`, threaded through about fifteen fleet files.\n\n**Approach** — `FleetApprovalAsk.publishedStatus` is dropped (US-006, migration `20261110090000_fleet_ask_drop_published_status`). It only acknowledged `fleet_approval` frames. `recordedStatus` stays: it keeps the activity row once-only.\n\n`ApprovalChange.live` goes, and the closer stops answering frames. `closeForJob` and `recordResolved` answer `Promise<void>`; `JobTransitionsService.apply` loses `approvalLive`; `CommandAckProcessor.process` and `JobReportProcessor` lose their `approvalLive` lists.\n\nDeletion only:\n- `ApprovalLivePublisher` and its spec, `LiveFleetApprovalEvent` and its member of the `LiveEvent` union;\n- `ApprovalChange.live`, every `approvalLive` list, field and publish call in jobs, sync, budgets and the two approval sweepers;\n- the publication half of `FleetAskEventsSubscriber` (`liveFrameId`, the `publish` flag, `setPublishedStatus`), the store and repository `setPublishedStatus`, and the domain field `publishedStatus`;\n- the column `FleetApprovalAsk.publishedStatus` (schema plus migration `20261110090000_fleet_ask_drop_published_status`).\n\n`ApprovalCloser`: after US-002 the constructor has no outbox; after US-005 no webhooks; after US-006 it is `(store, askService, activity, audit)`, `ApprovalChange` is `{ approval, answer? }`, and `closeForJob` and `recordResolved` answer `Promise<void>`. FleetAskEventsSubscriber.record returns nothing and runs only when recordedStatus differs; keep link locking, marker/activity atomicity and actor attribution. Preserve bounded job/policy close algorithms, held-request skipping, persisted first-close intent, runner APPROVAL_ANSWER and existing job live/wakeup committed effects.\n\n`ApprovalRequestLiveSubscriber` (`apps/api/src/live/approval-request-live.subscriber.ts`) publishes `approval_request` for every `APPROVAL_REQUEST_CHANGED` with a project; it becomes the only approval live event.\n\nRemove publisher DI registration/exports and update all affected constructor doubles/return shapes, including job transitions, command ack/report/sync/sweeper, budget evaluator/sweeper/service/command and both close sweepers. Replace frame-count assertions in bounded-close tests with engine close calls; preserve rollback and activity/recordedStatus assertions in recorder/repository/job-end integrations. Delete only old publication retry/acknowledgement tests.\n\n**Scope** — In: API live plumbing, persisted publication marker, schema migration and dependent tests. Out: web handler removal is US-007; adapter routes are US-010; FleetApprovalAsk.recordedStatus and fleet activity rows remain unchanged; no replacement fleet live event.\n\n**Interface** — `ApprovalChange` is `{ approval, answer? }`; `closeForJob` and `recordResolved` answer `Promise<void>`. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/api`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: When a bash ask opens through the runner relay and is then rejected through POST /api/approvals/:id/decisions, with dispatchPendingBatch after each step, ProjectEventBus publishes approval_request events with statuses pending then rejected and no event of type fleet_approval.",
+        "AC-2 [integration]: When a RUNNING job with a pending bash ask moves to CANCELLED and the outbox relay runs, ProjectEventBus publishes an approval_request event with status cancelled for that request and no fleet_approval event.",
+        "AC-3 [integration]: When the same approval_request_changed outbox event of an executed fleet ask is relayed twice, its approval.decided activity row is written once.",
+        "AC-4 [integration]: After migrations run, the FleetApprovalAsk table has no column named publishedStatus."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "live-events",
+        "migration"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-cutting transaction/result/DI changes across jobs, sync, budgets and durable activity idempotence plus a schema migration create high regression risk.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts",
+        "apps/api/src/fleet/approvals/approval-live.publisher.ts",
+        "apps/api/src/live/approval-request-live.subscriber.ts",
+        "apps/api/src/fleet/jobs/job-transitions.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261110090000_fleet_ask_drop_published_status/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/live/live-event.ts",
+          "reason": "`LiveFleetApprovalEvent` and its member of the union are deleted; the header comment drops `fleet_approval`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-live.publisher.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-live.publisher.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.ts",
+          "reason": "drops `ApprovalLivePublisher` from `providers` and `exports`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.spec.ts",
+          "reason": "\"compiles and resolves the closer and the live publisher\" and \"AC-12: a consumer still injects the closer and the live publisher\" resolve the closer only."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`ApprovalChange.live`, the `livePublisher` constructor parameter and every frame list are deleted; `closeForJob` and `recordResolved` answer `Promise<void>`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "every expectation on `live` frames is deleted, including \"supersedes the stray pending ask on the engine before opening the new one and carries both live frames\" (it keeps the stray-close assertion); \"closeForJob cancels every pending ask job_ended on the engine and reports each resolution\" asserts the engine closes and activity rows instead of returned frames; \"closeForJob answers [] when the job has no pending ask\" asserts no engine close; \"US-006 AC-13 (F1 round 3): one call closes at most MAX_ASKS_CLOSED_PER_CALL asks, and repeated calls drain the job\", \"US-006 AC-14 (F1): a held ask is skipped and the sweep still reaches every ask past it\" and \"US-006 AC-13 (F1 round 3): repeated bounded calls drain a job far beyond one page\" count engine close calls instead of returned frames; the live publisher double is removed from the constructor."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts",
+          "reason": "the `ApprovalLivePublisher` parameter, `liveFrameId`, the `publish` flag, the publish and acknowledge calls, and `setPublishedStatus` are deleted; `record` returns nothing and runs only when `recordedStatus` differs."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.spec.ts",
+          "reason": "\"AC-5: publishes one fleet_approval event with the mapped status, after the transaction commits\", \"acknowledges the delivered ids only after the publication marker commits\", \"a failed listener rejects, keeps the frame owed and releases nothing until the retry succeeds\", \"gives the frame a durable id, so a republished retry is the same frame\", \"republishes an undelivered frame under a separate acknowledgement, without repeating the outputs\", \"publishes nothing for a frame the link already acknowledged\" and \"records a projectless ask but publishes no frame, as a live channel is per project\" are deleted; the other cases drop their live-publisher double and frame assertions."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+          "reason": "`setPublishedStatus` is deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts",
+          "reason": "`setPublishedStatus` and the `publishedStatus` mapping are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/domain/fleet-approval-ask.domain.ts",
+          "reason": "`publishedStatus` and `setPublishedStatus` are deleted from the record and the repository interface."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetApprovalAsk.publishedStatus` is deleted, and the model's comment no longer names a later story that removes the table."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-job-end.sweeper.ts",
+          "reason": "the `ApprovalLivePublisher` parameter and its publish call are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/policy-ask-close.sweeper.ts",
+          "reason": "the `ApprovalLivePublisher` parameter and its publish call are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+          "reason": "the `ApprovalLivePublisher` parameter and its `committedEffect` publish are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.spec.ts",
+          "reason": "the live publisher double and its publish expectations are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/job-transitions.service.ts",
+          "reason": "`approvalLive` is deleted from `apply`'s result; `leaveRunning` awaits `closeForJob` and answers nothing."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/job-transitions.service.spec.ts",
+          "reason": "`APPROVAL_LIVE` and every `r.approvalLive` expectation are deleted (\"RUNNING -> %s closes the asks and withdraws unsent answers\" keeps its `closeForJob` and `withdrawPendingCommands` expectations; \"a move that does not leave RUNNING touches no approvals\" asserts `closeForJob` is not called)."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.ts",
+          "reason": "`approvalLive` is deleted from `Applied` and from `process`'s result."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.spec.ts",
+          "reason": "every `approvalLive` field in doubles and expectations is deleted (\"an ok ASSIGN ack returns no job and no approval events\", \"a rejected READOPT on a RUNNING job returns both live lists (plan D263)\" (now one list), \"AC-9: an ok THREAD_PUBLISH ack is routed to the thread effects and returns no live events\")."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.ts",
+          "reason": "`approvalLive` is deleted from `ReportOutcome` and `applyOne`."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.spec.ts",
+          "reason": "\"opens a bash approval for an approval_request on a RUNNING job and returns its live event\" asserts the opened approval instead of a frame; the `approvalLive` expectation in \"US-006 AC-8: an ask the policy resolves to none is answered with an APPROVAL_ANSWER command in the report transaction\" and the `approvalLive: []` in doubles are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "the `ApprovalLivePublisher` parameter, the `approvalLive` list and its publish are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+          "reason": "the `CommandAckProcessor` double answers `{ live: [] }` and the service is constructed without the live publisher."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.ts",
+          "reason": "the `ApprovalLivePublisher` parameter and its publish are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.spec.ts",
+          "reason": "\"crashes a silent runner-held job and publishes both live lists (plan D263)\" publishes the job list only; the approval publisher double is removed from the constructor."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-evaluator.ts",
+          "reason": "the `ApprovalLivePublisher` parameter, `approvalLive` and its publish are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-sweeper.ts",
+          "reason": "the `ApprovalLivePublisher` parameter and its two publishes are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budgets.service.ts",
+          "reason": "the `ApprovalLivePublisher` parameter, its two `committedEffect` publishes and the `live` fields of its local `{ approval: null, live: [] }` results are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-committed-effects.spec.ts",
+          "reason": "\"${action}: external effects follow owning approval transaction ${outcome}\" drops the live publisher double and its publish expectations, and its `closeForPolicy` double answers `{ approval: null }`; its remaining committed-effect expectations stay."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-job-end.sweeper.spec.ts",
+          "reason": "the sweeper is constructed without the live publisher argument (later positional arguments move up one); its publish expectations are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/policy-ask-close.sweeper.spec.ts",
+          "reason": "the sweeper is constructed without the live publisher argument; its publish expectations are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-ask-details.spec.ts",
+          "reason": "`new FleetBudgetOverrideCommand(` drops the live publisher argument; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-evaluator.spec.ts",
+          "reason": "the evaluator is constructed without the approval live publisher argument; `approvalLive` expectations are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-sweeper.spec.ts",
+          "reason": "every construction drops the approval live publisher argument; its publish expectations are deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budgets.service.spec.ts",
+          "reason": "every construction drops the `{ publish: vi.fn() }` live argument, and `closeForPolicy` doubles answer `{ approval: null }`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-ask.repository.integration.spec.ts",
+          "reason": "the `setPublishedStatus` call and the `publishedStatus` assertions are deleted."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/approval-job-end.sweeper.integration.spec.ts",
+          "reason": "\"F2: a failed close audit rolls back request, link, activity and outbox, publishes nothing, and retries\" drops the `ApprovalLivePublisher` spy and constructor argument; its rollback assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-recorder.integration.spec.ts",
+          "reason": "\"US-009 fix round 2: a failed listener fails the relay, and the retry re-delivers only to it\" and \"US-009 fix round 1: an unacknowledged frame stays owed and reaches a listener that missed it\" are deleted; \"F6 round 4: an executed job_ended ask announces the cancelled fleet view, and a linkless ask emits nothing\" and the other cases drop frame and `publishedStatus` assertions and keep their activity and `recordedStatus` assertions."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e734780e21946452ddb9395e590a3437173d6426"
+    },
+    {
+      "id": "US-007",
+      "title": "Retire web fleet approval streams, DTOs and redirect pages",
+      "description": "**Goal** — Remove the web's obsolete fleet approval adapter contracts, stream handlers and temporary redirects.\n\n**Motivation** — Every fleet ask change publishes `fleet_approval` beside the engine's `approval_request`, threaded through about fifteen fleet files.\n\n**Approach** — Deletion only:\n- the `fleet_approval` parse and listener in `lib/project-event-stream.ts`, and `onFleetApproval` in `lib/project-event-hub.ts`, `pages/[project]/fleet/index.vue` and `pages/[project]/fleet/jobs/[id]/index.vue`;\n- `FleetApprovalDto`, `ApprovalCountsDto`, `RequeueCandidateDto` and `DecideApprovalBody` in `lib/fleet-types.ts`; the helpers in `lib/fleet-approvals.ts` that took `Pick<FleetApprovalDto, ...>` take structural types instead;\n- the `/fleet/approvals` breadcrumb in `layouts/default.vue`, and the pages `pages/admin/fleet/approvals.vue` and `pages/[project]/fleet/approvals.vue`.\n\n`budgetPayload`, `bashPayload` and `deliveryView` take structural parameter types (`{ type: string; payload: unknown }`, `{ type: string; resolvedBy: string | null; outcome: unknown }`) instead of `Pick<FleetApprovalDto, ...>`. AC-2 is authoritative about the plain-object discriminator budget_override: accept that discriminator and return the same BudgetApprovalPayload fields. Also retain budget_override_required, which the existing budgetAskOf caller in lib/approval-request-fleet.ts passes, so the engine budget panel does not regress. This narrowly scoped discriminator compatibility is the exception to removal-only work; do not rename callers or resurrect an adapter DTO. Narrow unknown values safely rather than retaining obsolete wire DTOs.\n\nThe 7b redirect pages `/admin/fleet/approvals` and `/[project]/fleet/approvals` are deleted; old links 404 (US-013 rewrites stored notification links). Delete the redirect test and fleet-only stream/hub cases; retain fleet_log and approval_request cases and the negative fleet_approval row in the approval-request parser test. Fleet list/detail reloads follow onApprovalRequest only, and detail handler tests assert no onFleetApproval key. Plain-object helper fixtures replace FleetApprovalDto fixtures. Preserve layout nav order and follow the redesign master plan guidance when removing the breadcrumb.\n\n**Scope** — In: web legacy stream/parser/type/redirect deletion, structural helper/test updates and the narrow budgetPayload discriminator compatibility required by AC-2. Out: API event plumbing is US-006; zero-count notification refresh is US-003; stored notification link rewrite is US-013. The nav tests passing fleet.approval.read as an arbitrary key remain unchanged. No replacement live event.\n\n**Interface** — `{ type: string; payload: unknown }`; `{ type: string; resolvedBy: string | null; outcome: unknown }`; `openProjectEventStream` retains `onApprovalRequest` and `onResync`. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/web`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: Given only onApprovalRequest and onResync handlers, openProjectEventStream adds no fleet_approval listener to its EventSource.",
+        "AC-2 [unit]: Given payload { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: '2026-11-01T00:00:00.000Z', spentUsd: '12.0000', amountUsd: '10.0000' }, budgetPayload({ type: 'budget_override', payload }) returns those same six fields as a BudgetApprovalPayload, preserving the BudgetApprovalPayload it answered before the type change."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "web",
+        "live-events",
+        "breaking-change"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Removes an event contract across shared stream/hub/page consumers and redirects while keeping structural helper behavior and existing engine reloads.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/lib/project-event-stream.ts",
+        "apps/web/lib/project-event-hub.ts",
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/layouts/default.vue"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/project-event-stream.ts",
+          "reason": "`LiveFleetApprovalEvent`, `parseFleetApprovalEvent`, its parse branch, the `onFleetApproval` handler field and its `fleet_approval` listener are deleted."
+        },
+        {
+          "path": "apps/web/lib/project-event-hub.ts",
+          "reason": "the `onFleetApproval` fan-out is deleted."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/index.vue",
+          "reason": "the `onFleetApproval` handler and its comment are deleted."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "the `onFleetApproval` handler and its comment are deleted."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`FleetApprovalDto`, `ApprovalCountsDto`, `RequeueCandidateDto` and `DecideApprovalBody` are deleted (nothing else in the web uses them)."
+        },
+        {
+          "path": "apps/web/lib/fleet-approvals.ts",
+          "reason": "`budgetPayload`, `bashPayload` and `deliveryView` take structural parameter types (`{ type: string; payload: unknown }`, `{ type: string; resolvedBy: string | null; outcome: unknown }`) instead of `Pick<FleetApprovalDto, ...>`; their behaviour is unchanged."
+        },
+        {
+          "path": "apps/web/layouts/default.vue",
+          "reason": "the \"/${project}/fleet/approvals\" breadcrumb line is deleted."
+        },
+        {
+          "path": "apps/web/pages/admin/fleet/approvals.vue",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/web/pages/[project]/fleet/approvals.vue",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-approvals-redirects.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream-fleet.spec.ts",
+          "reason": "the `fleet_approval notices (S1.5 1b)` describe (\"parses a notice and accepts any non-empty status (D253)\", \"rejects other shapes\", \"delivers fleet_approval events once each, only when a handler is given\") and the `approvalEvent` helper are deleted; the `fleet_log` cases stay."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream-approval-request.spec.ts",
+          "reason": "the `a fleet_approval event` row of the not-an-approval-request table stays (it still parses to null); the cases that pass `onFleetApproval` drop it and keep their `onApprovalRequest` assertions."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-hub.spec.ts",
+          "reason": "the `fleet_approval` fan-out cases (the `approval` fixture and the `onFleetApproval` expectations) are deleted or re-pointed at `approval_request` and `onApprovalRequest`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+          "reason": "\"the list reloads on an approval_request event as well as fleet_approval (P3b US-007)\" asserts the `onApprovalRequest` reload only; \"a job with pending approvals is marked next to its state, and the list reloads on fleet_approval (spec §5)\" asserts the marker and the `onApprovalRequest` reload; the \"/${SLUG}/fleet/approvals\" entry in its link list is deleted."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "\"P3b US-007: live reloads follow both approval notices; onFleetApproval stays until 7c\" asserts `onApprovalRequest` reloads and no `onFleetApproval` key."
+        },
+        {
+          "path": "apps/web/tests/layouts/fleet-jobs-nav.spec.ts",
+          "reason": "the expectation that the layout holds the \"/${project}/fleet/approvals\" breadcrumb line is deleted."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-approvals.spec.ts",
+          "reason": "its fixtures stop importing `FleetApprovalDto` and build plain objects; its cases are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "936614b9dd4a8f706bdd26d79cacf9de2e1b0ebe"
+    },
+    {
+      "id": "US-008",
+      "title": "Move fleet approval integration callers onto engine routes",
+      "description": "**Goal** — Retarget the existing fleet HTTP decision/list/count integration callers before deleting their adapter routes.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — The fleet-route integration tests move first (US-008, test-only). About forty cases decide, list or count through the routes US-010 deletes. They are re-pointed at `GET /approvals`, `GET /approvals/:id`, `POST /approvals/:id/decisions` and `GET /approvals/counts` while both route families exist, so US-010 is a pure deletion. A case that only asserts the adapter's own translation is deleted, not re-pointed: fleet error prefixes (`fleet.approvalNotPending`, `fleet.approvalSelfDecide`, `fleet.approvalInput`, `fleet.approvalDecisionInvalid`), the removed `assistant_action` filter, and the gate on the deleted decide route.\n\nFleet decision vocabulary on the engine route (US-008, US-009). Bash: `allow` and `allow_for_job` become `{ decision: 'approve', params: { choice } }`; `deny` becomes `{ decision: 'reject' }`. Budget: `keep_paused` becomes `{ decision: 'reject' }`; `raise_budget_and_resume` becomes `{ decision: 'approve', params: { amountUsd, requeueJobIds } }`, with `amountUsd` a number.\n\nMigrate fleet-approvals-api and fleet-approvals-decide, permissions/enforce-fleet-approvals-budgets and membership-fleet-consumers, fleet-approval-recorder/relay and audit/audit-fleet-approvals integration helpers. Read engine enrichment from details, use projectId list filters, and assert engine visibility: own requests or requests one may decide, no rows for roster-only agents with no decision authority, invisible get 404, counts include soft-deleted project requests. Preserve pause/resume, partial requeue, candidate refusal results, actors/audits, expired/ended/repeated asks, action-context, binding fixtures, concurrency/deadlock and no-P2034 assertions. Missing amount is 400 and remains pending; a noncandidate refusal is the engine's recorded result rather than a recreated adapter error. In-process concurrent decide uses ApprovalDecisionService.decide. Delete gated-fleet-approval-decide-route.integration.spec.ts and only the project fleet decide approval lifecycle describe in endpoint.e2e.spec.ts; keep unrelated describes unchanged.\n\n**Scope** — In: explicitly bound test-only HTTP caller migration. Out: production engine query/decision semantics remain unchanged; actual adapter deletion and OpenAPI regeneration belong to US-010. Do not replace engine eligibility with old membership visibility.\n\n**Interface** — `GET /api/approvals?projectId=` or `?status=`; `GET /api/approvals/:id` reading `details`; `POST /api/approvals/:id/decisions` with `params`; `GET /api/approvals/counts`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: Approving a pending fleet.budget.override request through POST /api/approvals/:id/decisions with params { amountUsd: <above spend>, requeueJobIds: [<a candidate>] } lifts the policy's pause and re-queues that job.",
+        "AC-2 [integration]: Given a pending fleet.budget.override request, approving it through POST /api/approvals/:id/decisions with params {} and no amount answers 400 and the request stays pending.",
+        "AC-3 [integration]: Approving a pending bash request through POST /api/approvals/:id/decisions with params { choice: 'allow_for_job' } writes one APPROVAL_ANSWER command for the job with choice allow_for_job.",
+        "AC-4 [integration]: GET /api/approvals/counts for a user whose only binding in project p1 is a developer binding answers a projects row for p1 and none for another project."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "integration",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Binding spec declares a test-only migration covering role visibility, principal decisions, audit and concurrent budget workflows; access-control override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts",
+        "apps/api/test/integration/fleet/fleet-approvals-decide.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "the `PROJECT` and `ADMIN` route constants, the \"/api/fleet/approval-counts\" calls and the `ApprovalsService` import go; every route case is re-pointed at the engine route (list: \"GET /api/approvals?projectId=\" or `?status=`; get: \"GET /api/approvals/:id\" reading `details`; decide: \"POST /api/approvals/:id/decisions\" with `params`; counts: \"GET /api/approvals/counts\") keeping its state assertions (pause lifted, jobs re-queued, 403/404 for outsiders): \"members list and get; outsiders get 403; candidates on a pending budget approval\", \"an authenticated project agent reads approvals (%s)\", \"an authenticated project agent cannot decide a budget override\", \"an authenticated project agent allows a bash approval of a user's job\", \"an authenticated project agent reads approval counts\", \"a developer cannot decide a budget override; a project admin can keep it paused\", \"raise and resume lifts the pause and re-queues the selected candidates, including a placement-cancelled job\", \"partial re-queue: an active duplicate fails alone, the resume stands (review focus 2)\", \"admin prefix on a project policy resumes it (review focus 5)\", \"decide after the policy was deleted is 409 (review focus 3)\", \"concurrent evaluate and decide over HTTP: no deadlock (review focus 1)\", \"counts pending over memberships; unscoped for a global admin only\", \"a global policy approval is on the admin routes only\" (becomes: visible to a global admin through \"GET /api/approvals\", not to a project member) and the \"US-011 AC-1\" to \"AC-5\" cases; \"refuses a missing amount, an amount not above spend, and a non-candidate id\" asserts the engine's answers (400 for a missing amount; the engine's recorded refusal for a non-candidate id); \"concurrent in-process decide and evaluate: no deadlock, and never a P2034 (review focus 1)\" calls `ApprovalDecisionService.decide` instead of `ApprovalsService.decide`, keeping its deadlock assertions; \"writes need an action context\" and \"fixtures grant through bindings only\" stay. The same engine-visibility rule as the enforce spec applies."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-decide.integration.spec.ts",
+          "reason": "the route constants and helper call \"POST /api/approvals/:id/decisions\"; cases \"AC-1\" to \"AC-15\" and \"allow_for_job reaches the bash command as the fleet choice, not as nax's option name\" keep their state assertions on the engine route; a case whose only assertion is a fleet error prefix (`fleet.approvalNotPending`, `fleet.approvalSelfDecide`, `fleet.approvalInput`, `fleet.approvalDecisionInvalid`, `fleet.budgetAmountNotAboveSpend`, `fleet.budgetNotPaused`) asserts the engine's status code and error instead, or is deleted when the engine has no equivalent refusal; the header comment names the engine route."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/gated-fleet-approval-decide-route.integration.spec.ts",
+          "reason": "deleted (it tests the gate on the deleted project decide route; the engine decide route is covered by the engine's own specs)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts",
+          "reason": "\"US-012 AC-1: a project member with fleet.approval.read cannot filter by assistant_action (400)\" is deleted; every other case that reaches a fleet approval route (\"AC-1\" to \"AC-12\", \"AC-14\" to \"AC-18\", \"AC-26\", \"AC-27\") uses the engine route for the same setup. Where the engine answers differently, the expectation follows the engine: a principal sees a request it opened or may decide (a roster-only agent that may decide nothing lists none); counts include requests of soft-deleted projects (7a); an admin-prefix case becomes the same decide on the engine route; a refused decide answers the engine's 403."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-fleet-consumers.integration.spec.ts",
+          "reason": "\"AC-2: a user whose only source in p1 is a developer binding counts p1's pending approvals only\" reads \"GET /api/approvals/counts\" and asserts the `projects` row for p1."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-recorder.integration.spec.ts",
+          "reason": "its `decide` helper posts the engine decision with the fleet vocabulary mapped (see Designer's calls); every case using it keeps its assertions."
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-approvals.integration.spec.ts",
+          "reason": "every case deciding through a fleet route (\"AC-1/2: records keep-paused with actor, resource, summary and project; global scope is null\", \"AC-5/7: refused budget and unauthorized bash decisions do not record\", \"AC-6/8/9/11: records a valid bash decision only; ended, expired and repeated asks add none\") posts the engine decision with the fleet vocabulary mapped and keeps its audit assertions; \"AC-3/4: raise-and-resume writes the engine decision, the command entry and the requeued job entry\" decides through \"POST /api/approvals/:id/decisions\" with `params: { amountUsd, requeueJobIds }`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+          "reason": "\"US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok\" allows through \"POST /api/approvals/:id/decisions\" with `params: { choice: 'allow' }`, and its read-back uses \"GET /api/approvals/:id\", asserting `status` `executed` and `details.outcome.delivery.result` `ok`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the describe \"project fleet decide approval lifecycle\" is deleted: it tests the wait-policy gate on the deleted project decide route (`seedWaitPolicy` on `fleet.approval.decide.bash`, the 202 outer request, fleet error prefixes); the other describes are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a3ee5e045eed94a844de9586274b58b5514df24d"
+    },
+    {
+      "id": "US-009",
+      "title": "Move runner harness approval reads and decisions to engine routes",
+      "description": "**Goal** — Preserve the runner harness World API while moving its approval HTTP calls off the retired fleet routes.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — The runner's integration harness moves too (US-009). `apps/runner/test/integration/harness/world.ts` lists and decides asks through `/fleet/approvals`. The two calls move into a new helper module `apps/runner/test/integration/harness/approval-routes.ts` exporting `listJobApprovals(http, jobId)` and `decideApproval(http, id, choice)`, where `http` is the harness's request function passed in, so a unit spec can stub it; `world.ts` delegates to them. `listJobApprovals` reads `GET /approvals?jobId=` and then `GET /approvals/:id` per row, mapping `details.resolvedBy` and `details.outcome`; `decide(id, choice)` posts `POST /approvals/:id/decisions` (`allow` and `allow_for_job` as `approve` with `params: { choice }`, `deny` as `reject`).\n\nFleet decision vocabulary on the engine route (US-008, US-009). Bash: `allow` and `allow_for_job` become `{ decision: 'approve', params: { choice } }`; `deny` becomes `{ decision: 'reject' }`. Budget: `keep_paused` becomes `{ decision: 'reject' }`; `raise_budget_and_resume` becomes `{ decision: 'approve', params: { amountUsd, requeueJobIds } }`, with `amountUsd` a number. This harness helper exposes only its existing bash choice union; do not add budget APIs.\n\nKeep World's approvals and decide signatures/answers unchanged, including numeric decision HTTP status and row status from the list. Delegate using the existing authenticated harness request function, preserving its /api prefix and envelope semantics. The helper is unit-tested from test/unit/approval-routes.spec.ts; approval-relay.integration.spec.ts exercises world.ts against a live API and is unchanged.\n\n**Scope** — In: test-only helper, injected-http unit spec and two World delegations. Out: production runner src, fleet-protocol, nax relay and API route deletion (US-010).\n\n**Interface** — `listJobApprovals(http, jobId)`; `decideApproval(http, id, choice)`; `world.ts` keeps `approvals(jobId)` and `decide(id, choice)`.",
+      "acceptanceCriteria": [
+        "AC-1 [unit]: decideApproval(http, 'a1', 'deny') with a stubbed http sends POST /approvals/a1/decisions with body { decision: 'reject' }.",
+        "AC-2 [unit]: decideApproval(http, 'a1', 'allow_for_job') with a stubbed http sends POST /approvals/a1/decisions with body { decision: 'approve', params: { choice: 'allow_for_job' } }.",
+        "AC-3 [unit]: Given stubbed GET /approvals?jobId=j1 returning row a1 with status executed and GET /approvals/a1 returning details { resolvedBy: 'user', outcome: { delivery: { result: 'ok' } } }, listJobApprovals(http, 'j1') returns [{ id: 'a1', status: 'executed', resolvedBy: 'user', outcome: { delivery: { result: 'ok' } } }], preserving the status from the list row.",
+        "Audit-N1 [unit; negative-path hardening]: Given injected http returns { status: 403, body: { message: 'forbidden' } } for POST /approvals/a1/decisions, decideApproval(http, 'a1', 'allow') returns 403, preserving World's existing numeric HTTP status answer rather than translating refusal into success."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "runner",
+        "integration-harness"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small test-only injected-HTTP adapter with deterministic body/detail mapping, no production runner or authorization-policy changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/runner/test/integration/harness/world.ts",
+        "apps/runner/test/integration/approval-relay.integration.spec.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/test/integration/harness/approval-routes.ts",
+        "apps/runner/test/unit/approval-routes.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/integration/harness/world.ts",
+          "reason": "approvals(jobId) and decide(id, choice) delegate to listJobApprovals and decideApproval with the harness's own request function; their signatures and answers are unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "943afe66117673c5ffe0d0597a526976d321e3df"
+    },
+    {
+      "id": "US-010",
+      "title": "Delete fleet approval adapter routes and export the reduced API contract",
+      "description": "**Goal** — Delete the unused fleet approval route/service/DTO surface while keeping fleet engine commands registered.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — Deletion only: `FleetApprovalsController`, `ProjectFleetApprovalsController`, `FleetApprovalCountsController`, `FleetApprovalRouteCommands`, `ApprovalsService`, and the DTO files `fleet-approval.dto.ts`, `approval-counts.dto.ts`, `list-approvals.query.ts` and `decide-approval.dto.ts`. `ApprovalsModule` keeps the two sweepers, `FleetAskEventsSubscriber` and the two commands, and exports nothing. Regenerates `openapi.json` (`bun run api:export-spec` from the repo root).\n\n`fleet-approval-view.ts` stays. `PrismaFleetApprovalAskRepository` imports `fleetStatusWhere`, `toFleetApproval` and `FleetAskRow` from it; only the adapter DTOs go.\n\nUS-008, US-009 → US-010: US-010 deletes routes only after US-008 (api tests) and US-009 (runner harness) moved every caller off them.\n\nDelete the adapter controllers/service/route commands' dedicated specs, remove their exclusive module imports, and rewrite the module compilation case to resolve both commands/registry without DB. Retain onModuleInit registration, ApprovalJobEndSweeper, PolicyAskCloseSweeper and FleetAskEventsSubscriber. Reword the budget command's obsolete DecideApprovalDto comment. Remove old fleet OpenAPI route/schema case and the project fleet decide entry in engine gated-route expectations. Exported OpenAPI loses all adapter paths and FleetApprovalDto, DecideApprovalDto, ApprovalCountsDto, ProjectApprovalCountDto and RequeueCandidateDto. Keep binding apps/api workdir although root openapi.json is a generated output modification.\n\n**Scope** — In: adapter deletion, module/contract assertions and root OpenAPI regeneration. Out: CLI command/client deletion is US-012; key retirement/data cleanup is US-013; read-model store methods/count constants and fleet-ask-read-model.integration.spec.ts remain for later cleanup.\n\n**Interface** — `/fleet/approvals`, `/projects/:slug/fleet/approvals` and `/fleet/approval-counts` are removed; `ApprovalCommandRegistry` retains `fleet.job.shell.escalate` and `fleet.budget.override`. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/api`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: GET /api/fleet/approvals, GET /api/projects/:slug/fleet/approvals and GET /api/fleet/approval-counts each answer 404 for a global admin.",
+        "AC-2 [unit; regeneration check]: The committed OpenAPI document has no path starting with /api/fleet/approvals, /api/projects/{slug}/fleet/approvals or /api/fleet/approval-counts, and no schema named FleetApprovalDto or ApprovalCountsDto, as the existing *-openapi.contract.spec.ts checks do.",
+        "AC-3 [unit]: Compiling ApprovalsModule and running its initialization hooks resolves FleetShellEscalateCommand and FleetBudgetOverrideCommand, and ApprovalCommandRegistry holds a command for fleet.job.shell.escalate and one for fleet.budget.override."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "openapi",
+        "breaking-change",
+        "security"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-006",
+        "US-008",
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Upstream stories already remove callers, leaving adapter deletion, standard module wiring and spec export; deletion of permission-gated HTTP commands retains the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.module.ts",
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-route.commands.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-view.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approvals.controller.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/project-fleet-approvals.controller.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-counts.controller.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-route.commands.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-route.commands.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/dto/fleet-approval.dto.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/dto/approval-counts.dto.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/dto/list-approvals.query.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/dto/decide-approval.dto.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "drops the three controllers, `FleetApprovalRouteCommands`, `ApprovalsService` and the `exports`; drops imports used only by them."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.spec.ts",
+          "reason": "\"compiles and resolves the service\" resolves the two registered commands instead of `ApprovalsService`."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+          "reason": "the comment naming `DecideApprovalDto` is reworded."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "\"exposes the approval routes, the counts route and the approval schemas (S1.5 §2.3)\" is deleted."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "the \"['post', '/api/projects/{slug}/fleet/approvals/{id}/decide']\" entry of the expected gated routes is deleted."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: the fleet approval paths and the `FleetApprovalDto`, `DecideApprovalDto`, `ApprovalCountsDto`, `ProjectApprovalCountDto` and `RequeueCandidateDto` schemas are gone."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e6d8b9eb7a188ceb676c611d08466f73fe916daa"
+    },
+    {
+      "id": "US-011",
+      "title": "Add bash choice and budget decision params to koda approval approve",
+      "description": "**Goal** — Let the unified approval CLI express the decisions currently available only through the fleet command.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — The CLI gains decision params before the fleet command goes (US-011). `koda fleet approval decide` is today the only CLI path that can approve a budget ask (the engine requires `params.amountUsd`) or answer `allow_for_job`. `koda approval approve` gains `--choice <allow|allow_for_job>`, `--amount <usd>` and `--requeue <all|ids>`, sent as the decide body's `params`. `--amount` is sent as a JSON number (the budget command's `isRaiseAmount` refuses a string), validated with the rule of `parseBudgetUsd` (`apps/cli/src/utils/parse-usd.ts`: more than 0, at most 1,000,000, at most 4 decimals). `--requeue all` reads `details.requeueCandidates` from `GET /approvals/:id` and refuses when `details.requeueCandidatesTruncated` is true. Every option check runs inside the action, not as a Commander option parser: a failed check calls `handleApiError(err, { validationError: true })` (exit 3) and returns, as `approval policy set` does, so no decide request follows under the spec harness's no-op `process.exit`.\n\n`registerDecision` (`apps/cli/src/commands/approval.ts`)\n- Baseline: `approve <id>` and `reject <id>` take `--comment` and `--json`.\n- Target: `approve <id>` also takes `--choice`, `--amount` and `--requeue`.\n\nReject --requeue without --amount; reject --choice with either --amount or --requeue; accept only allow/allow_for_job for --choice. Refuse requeue all if details has no requeueCandidates, including null details; truncated candidates must print a stderr message naming koda approval show <id>. Explicit ids are split on commas and sent unchanged; only all needs the GET. Keep existing approve/reject behavior, comments and JSON output. Without any new option omit params entirely. Normal API failures still use the existing error handler behavior.\n\n**Scope** — In: unified approve options and generated-boundary command tests. Out: deleting fleet CLI/client is US-012. The CLI does not read request keys to reject bash/budget option mismatches; the API answers 400. Duplicate ids, empty entries, whitespace, all mixed with ids and server candidate limits remain API-owned. --choice deny on approve remains invalid; use koda approval reject.\n\n**Interface** — `approvalRequestsControllerGet` and `approvalRequestsControllerDecide` (`apps/cli/src/generated/sdk.gen.ts`); the decide body already has `params?: Record<string, unknown>`. `params` is `{ choice }` or `{ amountUsd, requeueJobIds? }`.",
+      "acceptanceCriteria": [
+        "AC-1 [cli]: koda approval approve r1 --choice allow_for_job calls approvalRequestsControllerDecide once with path { id: 'r1' } and body { decision: 'approve', params: { choice: 'allow_for_job' } }.",
+        "AC-2 [cli]: koda approval approve r1 --amount 80 sends body.params { amountUsd: 80 }, with 80 a JSON number.",
+        "AC-3 [cli]: koda approval approve r1 --amount 80.25 --requeue j1,j2 sends body.params { amountUsd: 80.25, requeueJobIds: ['j1', 'j2'] }.",
+        "AC-4 [cli]: Given approvalRequestsControllerGet returns details.requeueCandidates [{ jobId: 'j1' }, { jobId: 'j3' }] and details.requeueCandidatesTruncated false, koda approval approve r1 --amount 80 --requeue all sends requeueJobIds ['j1', 'j3'].",
+        "AC-5 [cli]: Given details.requeueCandidatesTruncated true, koda approval approve r1 --amount 80 --requeue all exits 3 with a message on stderr, observed through console.error, naming koda approval show r1, and no decide request is sent.",
+        "AC-6 [cli]: Given approvalRequestsControllerGet returns details null or details without requeueCandidates, koda approval approve r1 --amount 80 --requeue all exits 3 and no decide request is sent.",
+        "AC-7 [cli]: koda approval approve r1 --amount 0, or another amount not more than 0, exits 3 and no decide request is sent.",
+        "AC-8 [cli]: koda approval approve r1 --amount 1.23456, or another amount with more than 4 decimals, exits 3 and no decide request is sent.",
+        "AC-9 [cli]: koda approval approve r1 --choice deny, or another choice other than allow or allow_for_job, exits 3 and no decide request is sent.",
+        "AC-10 [cli]: koda approval approve r1 --requeue j1 without --amount exits 3 and no decide request is sent.",
+        "AC-11 [cli]: koda approval approve r1 --choice allow --amount 80 exits 3 and no decide request is sent.",
+        "AC-12 [cli]: koda approval approve r1 --amount 1000001, or another amount above 1000000, exits 3 and no decide request is sent.",
+        "AC-13 [cli]: koda approval approve r1 --choice allow --requeue j1 exits 3 and no decide request is sent.",
+        "AC-14 [cli]: koda approval approve r1 with none of the new options sends a body with no params key."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "cli",
+        "approvals",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Command options and validation reuse existing generated API boundaries; authorization and business decision eligibility remain unchanged on the server.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/approval.ts",
+        "apps/cli/src/commands/fleet-approval.ts",
+        "apps/cli/src/commands/approval.spec.ts",
+        "apps/cli/src/utils/parse-usd.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/approval.ts",
+          "reason": "`approve` gains `--choice`, `--amount` and `--requeue`, builds `params`, and for `--requeue all` reads the request through `approvalRequestsControllerGet` first."
+        },
+        {
+          "path": "apps/cli/src/commands/approval.spec.ts",
+          "reason": "the new US-011 cases are added; the existing approve and reject cases are unchanged."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e4beb034c628e116c581b0108e2905c6644bb87c"
+    },
+    {
+      "id": "US-012",
+      "title": "Delete koda fleet approval and regenerate the CLI client",
+      "description": "**Goal** — Remove the legacy fleet approval CLI surface after unified approve can express its decisions.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — Deletion only: `src/commands/fleet-approval.ts`, its spec and its registration in `src/commands/fleet.ts`, and the generated client regenerated from the US-010 OpenAPI document (`bun run generate:cli` from the repo root).\n\nUS-011 → US-012: `koda approval approve` with params replaces `koda fleet approval decide` before it is deleted.\n\nDelete registerFleetApproval import/call and the group comment/description's approvals (S1.5 §2.5) wording; update fleet.spec.ts's expected subcommand set without altering other groups. Regenerate sdk.gen.ts and types.gen.ts together; never hand-edit generated files. The CLI `koda fleet approval` command is deleted, not kept as a compatibility alias.\n\n**Scope** — In: old command/spec/registration deletion and generated client refresh. Out: API route/OpenAPI deletion is US-010; new approve option behavior is US-011; docs/deployment/runner.md is edited by hand at merge, not by this story.\n\n**Interface** — `fleetCommand(program)` retains analytics, budget, dispatch, drift-check, ingest, job, nax-files, repo, runner, schedule and status; generated client follows the committed root OpenAPI document. Removals are verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/cli`.",
+      "acceptanceCriteria": [
+        "AC-1 [cli]: fleetCommand(program) registers subcommands analytics, budget, dispatch, drift-check, ingest, job, nax-files, repo, runner, schedule and status, and no approval.",
+        "Audit-N1 [cli; negative-path hardening]: With program.exitOverride() enabled and fleetCommand(program) registered, parsing ['node', 'koda', 'fleet', 'approval'] rejects with CommanderError.code commander.unknownCommand rather than dispatching an approval command."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "cli",
+        "openapi",
+        "breaking-change"
+      ],
+      "dependencies": [
+        "US-010",
+        "US-011"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Straightforward public command removal plus deterministic client regeneration after upstream contract changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet.ts",
+        "apps/cli/src/commands/fleet.spec.ts",
+        "apps/cli/src/commands/approval.ts",
+        "apps/cli/src/commands/fleet-approval.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/fleet-approval.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet-approval.spec.ts",
+          "reason": "deleted."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet.ts",
+          "reason": "the `registerFleetApproval` import and call are deleted; the group description drops \"approvals (S1.5 §2.5)\"."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet.spec.ts",
+          "reason": "\"registers the fleet group with runner, repo, config, dispatch, ingest, job, budget, schedule, approval, analytics and status\" expects the list without `approval`."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "regenerated from the US-010 OpenAPI document (`bun run generate:cli` from the repo root); never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated together with the SDK file; never hand-edited."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "380f7961f444a84941b7a4710e03dc5ef8d554f4"
+    },
+    {
+      "id": "US-013",
+      "title": "Retire fleet approval permission keys and migrate stored data",
+      "description": "**Goal** — Remove obsolete fleet.approval permission keys without invalidating stored roles or leaving unexecutable legacy requests pending.\n\n**Motivation** — Three adapter routes and a CLI command read the engine through a fleet-shaped DTO, gated by four permission keys nothing else uses.\n\n**Approach** — The key migration (US-013, `20261111090000_retire_fleet_approval_keys`):\n- strips every entry containing the text `fleet.approval.` (exact keys, `.*` patterns, negations and `approval.decide@fleet.approval.*` scopes) from every `Role.permissions`. It must run before the new code serves: the unlocked `developer` system role still stores `fleet.approval.decide.bash`, the seeder never rewrites an unlocked role, and `PermissionService` drops a whole role (logging `invalid permission entry`) when one stored entry names a key the catalog no longer has;\n- deletes `ApprovalPolicy` rows whose `permissionPattern` starts with `fleet.approval.`;\n- sets `status = 'cancelled'` and `settledAt = NOW()` on `ApprovalRequest` rows whose `permissionKey` starts with `fleet.approval.` and whose status is `pending` or `approved` (their route commands no longer exist, so they can never execute);\n- rewrites `Notification.link` `/admin/fleet/approvals` to `/approvals` (the redirect pages are deleted in US-007).\n- The SQL holds no literal `;` inside a statement and no `DO $$` block (the migration test helper `migrationStatements` splits on `;`); the role rewrite is `COALESCE((SELECT jsonb_agg(e ORDER BY ord) FROM jsonb_array_elements(\"permissions\") WITH ORDINALITY AS t(e, ord) WHERE position('fleet.approval.' in e #>> '{}') = 0), '[]'::jsonb)`, so the remaining entries keep their order and a role left with none stores `[]`, never NULL. Its test seeds pre-migration rows with `scratchSchemaBefore(url, schema, '20261111090000_retire_fleet_approval_keys')`, as `developer-bash-decide-migration.integration.spec.ts` does.\n\nThe inventory TSV follows the catalog (US-013). `catalog.spec.ts` asserts the catalog equals the keys of `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` plus the new-key list, so the TSV loses the seven `fleet/approvals` route rows and its `koda_list_approvals` row is re-keyed to `project.read`.\n\nRemove fleet.approval.read, fleet.approval.decide.budget, fleet.approval.decide.bash and fleet.approval.decide.assistant from INVENTORY_SCOPE_ROWS and the assistant entry from PENDING_SURFACE_KEYS. Remove fleet.approval.decide.bash from the developer seed in the same change because seeder validates every seed at bootstrap; retain approval.decide@fleet.job.shell.escalate. Regenerate role-matrix snapshot through its spec update mode. Remove obsolete entry-matcher/pending permission-contract assertions, hard-code historical pre-migration developer permissions in developer-bash-decide-migration.integration.spec.ts rather than deriving them from the changed seed, and drop fleet.approval.read from APPROVAL_READER_ROLE in permissions-assistant-tools integration (it already holds project.read). Add the new scratch-schema data-migration integration spec and verify role creation rejects a retired key. Keep binding apps/api workdir while editing the root inventory TSV.\n\n**Scope** — In: catalog/seed/inventory/snapshot changes and stored role/policy/request/notification migration. Out: route deletion is US-010; redirect deletion is US-007. Existing Notification rows are not deleted, existing webhook subscriptions remain, and recordedStatus/activity rows are unchanged.\n\n**Interface** — migration `20261111090000_retire_fleet_approval_keys`; `PERMISSION_CATALOG`; `SYSTEM_ROLES`; `scratchSchemaBefore(url, schema, '20261111090000_retire_fleet_approval_keys')`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration]: After migrations run, a Role stored with permissions [\"*.read\", \"fleet.approval.decide.bash\", \"!fleet.approval.read\", \"fleet.approval.*\", \"approval.decide@fleet.approval.decide.bash\", \"label.create\"] holds [\"*.read\", \"label.create\"].",
+        "AC-2 [integration]: After migrations run, a Role stored with permissions [\"fleet.approval.read\", \"fleet.approval.decide.bash\"] holds [].",
+        "AC-3 [integration]: After migrations run, an ApprovalPolicy with permissionPattern fleet.approval.decide.bash is gone and one with label.create remains.",
+        "AC-4 [integration]: After migrations run, an ApprovalRequest with permissionKey fleet.approval.decide.budget and status pending has status cancelled and a non-null settledAt.",
+        "AC-5 [integration]: After migrations run, an ApprovalRequest with permissionKey fleet.approval.decide.bash and status executed keeps status executed.",
+        "AC-6 [integration]: After migrations run, a Notification with link /admin/fleet/approvals has link /approvals and one with link /admin/fleet/budgets is unchanged.",
+        "AC-7 [unit]: PERMISSION_CATALOG holds no key starting with 'fleet.approval.'.",
+        "AC-8 [unit]: The developer entry of SYSTEM_ROLES holds approval.decide@fleet.job.shell.escalate and no entry starting with 'fleet.approval.'.",
+        "AC-9 [integration]: POST /api/roles with permissions [\"fleet.approval.read\"] answers 400."
+      ],
+      "tags": [
+        "permissions-p3-retire-fleet-approvals",
+        "api",
+        "permissions",
+        "migration",
+        "security"
+      ],
+      "dependencies": [
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Catalog/seed/inventory and four-table cleanup cross module boundaries but use a specified SQL algorithm and existing scratch-schema harness; role integrity and grant removal require strict security isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/system-roles.ts",
+        "apps/api/src/permissions/system-role.seeder.ts",
+        "apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql",
+        "apps/api/test/integration/permissions/developer-bash-decide-migration.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261111090000_retire_fleet_approval_keys/migration.sql",
+        "apps/api/test/integration/permissions/retire-fleet-approval-keys-migration.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "`fleet.approval.read`, `fleet.approval.decide.budget`, `fleet.approval.decide.bash` and `fleet.approval.decide.assistant` are deleted from `INVENTORY_SCOPE_ROWS`, and `fleet.approval.decide.assistant` from `PENDING_SURFACE_KEYS`."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "the seven \"fleet/approvals\" route rows are deleted and the `koda_list_approvals` tool row's key becomes `project.read`, so \"catalog.spec.ts\" (catalog equals inventory keys plus new keys) stays green."
+        },
+        {
+          "path": "apps/api/src/permissions/system-roles.ts",
+          "reason": "`fleet.approval.decide.bash` is deleted from the `developer` seed; `approval.decide@fleet.job.shell.escalate` stays."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated by the role-matrix spec's update mode; the four key rows are gone from every role block."
+        },
+        {
+          "path": "apps/api/src/permissions/entry-matcher.spec.ts",
+          "reason": "in \"AC-1/2/3: Developer can decide the narrowed fleet shell escalation ask\" the assertion that `developer.permissions` contains `fleet.approval.decide.bash` is deleted; the `approval.decide@` assertions stay."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`fleet.approval.decide.assistant` is deleted from the `expectedPending` set."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/developer-bash-decide-migration.integration.spec.ts",
+          "reason": "`oldDeveloperPermissions` becomes a hard-coded pre-migration list holding `fleet.approval.decide.bash`, because it can no longer be derived from `SYSTEM_ROLES`; cases \"AC-4\" to \"AC-7\" are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-assistant-tools.integration.spec.ts",
+          "reason": "`APPROVAL_READER_ROLE`'s `customRole` drops `fleet.approval.read` (it already holds `project.read`); the cases' assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2fc96882e73cc4d455d3c84fb60b36816f864f86"
+    }
+  ],
+  "analysis": "Purpose and baseline: this is the final P3 feature 7c, closing #356 after API #354 and unified web inbox #355. It is a retirement/refactoring feature, not a new approval engine. Done means fleet bash and budget asks use the existing engine notification, query, decision, webhook and live-event surfaces; zero-count refreshes dismiss notices; legacy routes, CLI, MCP alias and catalog keys are gone; stored data is migrated safely. The 13 story IDs, workdirs and dependency edges are binding, including the two test-only stories. No runtime code was changed during PRD drafting. Navigation: codebase-memory MCP is unavailable in this tool session; findings use direct reads and scoped searches. Citations below refer to the inspected baseline, not future line numbers.\n\nArchitecture and conventions: the detected Express/Next.js labels are incorrect. The app guidance identifies NestJS 12/Fastify/Prisma 7 for the API (.nax/mono/apps/api/context.md:15), Nuxt 4 SSR for web (.nax/mono/apps/web/context.md:22), Commander/generated OpenAPI client/Jest for CLI (.nax/mono/apps/cli/context.md:21), and Bun-only ESM for runner (.nax/mono/apps/runner/context.md:15). API owns permissions, persistence and workflow. Before implementing Nest code read the nathapp-nestjs-patterns skill; use Nathapp transaction, action-context, envelope and repository conventions. Do not edit generated AGENTS or CLI generated files manually. No runner src, protocol or relay changes are authorized. US-010 and US-013 keep their explicitly bound apps/api workdir even though they respectively regenerate root openapi.json and edit the root inventory TSV; US-012 runs root client generation while scoped to apps/cli.\n\nUS-001 notification seam: ApprovalRequestedSubscriber registers on approval_request_changed (apps/api/src/notifications/approvals/approval-requested.subscriber.ts:26), suppresses both ask keys at :37, then checks pending payload and source at :38-40. Candidate enumeration is deliberately broader-key-only: project candidates come from principalIdsWithKey('USER', projectId, 'approval.decide'), unscoped candidates from findGlobalAdminIds (:42-48). Keep this and decideEligibility, rather than broadening candidates to narrowed Developer grants or requesters. decideEligibility enforces action possession and contributed approval tier (apps/api/src/approvals/approval-eligibility.ts:90-120). Replace only the early return/comment/import. Update the two fleet suppression unit cases at approval-requested.subscriber.spec.ts:82-91 while keeping the non-fleet regression at :92 and missing/cancelled source cases at :104 and :131. HTTP integration enters the runner relay and real budget hard stop, with real project-role bindings; extend fleet-approval-relay.integration.spec.ts and notifications/fleet-budget-approval-notifications.integration.spec.ts. Until US-002, filter engine assertions by kind because the fleet notification still exists.\n\nUS-002 retirement: ApprovalCloser currently injects store, askService, activity, webhooks, livePublisher, outbox, audit (apps/api/src/fleet/approvals/approval-closer.ts:117-125), calls enqueueRequested on both opens (:158, :279), and emits fleet_approval_requested only for project asks (:345-355). Remove this producer and the FleetApprovalRequestedSubscriber provider; remove FLEET_APPROVAL_REQUESTED, FleetApprovalRequestedPayload, parseApprovalRequestedPayload, approvalDrafts and reader approvalContext with only their dependent tests. Keep other fleet notifications and thread action_requested notifications/sourceType fleet_approval. PrismaOutboxStore currently depends on FanOutPublisher solely for a claim gate (apps/api/src/outbox/prisma-outbox.store.ts:33-36, :62-77). Remove that dependency and condition without altering SKIP LOCKED, ordering, owner fencing or retries. Old unhandled rows must drain, not stay pending forever. Adjust store construction in its unit spec and memory/outbox-envelope.integration.spec.ts; remove the old hold-until-consumer outbox integration case and subscriber writer metadata row. Retain action-context assertions and malformed/budget-incident subscriber cases.\n\nUS-003 bug: refresh captures mounted/generation/user identity, then returns before reconciling a zero snapshot (apps/web/composables/useApprovalRequestNotifications.ts:137-144). dismiss already closes browser notices, removes active entries and dismisses the recorded toast (:64-70); reuse it for every active id only after non-null snapshot, signed-in user and current-refresh guards pass. Do not list for zero, clear announce history, prompt for permissions or interpret null as zero. Announce history is shared per user (:40-43, :120-125); preserve it so r1 is not re-announced after dismissal. Existing Jest harness supplies refs, toast recorder and storage (apps/web/tests/composables/useApprovalRequestNotifications.spec.ts:25-49, :83); browser-close coverage needs a constructible Notification class rather than the existing nonconstructible permission object (:48).\n\nUS-004 tool/MCP: the assistant currently imports ApprovalsService and fleet statuses (apps/api/src/fleet/assistant/tools/fleet-tools.ts:4-5), queries an adapter route at :240-259 and injects it in FleetTools at :331-350. Replace only this tool's service, status type and output with ApprovalRequestQueries; retain other tool read keys and pagination conventions. Queries.list already implements principal-aware engine visibility and accepts projectId/jobId filters (apps/api/src/approvals/approval-request.queries.ts:12-20, :33-36), so no new visibility algorithm belongs in the assistant. It emits Date records, thus use createdAt.toISOString(). Inject the exported queries through existing ApprovalEngineModule wiring; inspect assistant module imports when replacing the dependency. mcpToolDescriptors currently renames the assistant inbox at apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:84-92, and assistantToolName maps it back at :111-114. Filter that descriptor out, delete the alias mapper and update mcp-server.factory callers; ApprovalMcpTools remains the sole MCP inbox. Update fleet-tools.spec.ts, origin-tools.spec.ts, mcp-tool-catalog.spec.ts and mcp-server.factory.spec.ts; HTTP runner-tool integration must verify both actor visibility and project isolation, and MCP tools/list must expose exactly one engine inbox.\n\nUS-005 webhooks: approval-payloads.ts:3 and :11-16 supply the old path/body; ApprovalCloser dispatch at :332-335 sends the old event family. Delete those producers and the three calls; leave approvalActivityPayload (:6-8). ApprovalRequestEvents.record already records durable approval_request_changed and dispatches approval.requested/resolved for project requests (apps/api/src/approvals/approval-request-events.ts:75-98); do not add a replacement dispatcher. Its safe allowlist at :48-61 excludes frozen input/results. Update fleet-ask-events, fleet-approval-relay, fleet-approval-budget-wiring, fleet-approval-recorder and approvals/approval-request-webhooks integration expectations to engine counts. Recorder counts can exceed one per lifecycle: every non-pending status the engine records has an approval.resolved delivery. Keep subscriptions with old free-text names; they simply receive no old-family deliveries.\n\nUS-006 cross-cutting live deletion is the largest technical risk. ApprovalChange.live is threaded through closer opens, policy closes and job closes (apps/api/src/fleet/approvals/approval-closer.ts:29-33, :181-235, :294-331). Remove the list plumbing, not the engine close calls, bounded paging, held-row skipping, persisted first-writer-wins policy close intent, audit or command answers. closeForJob remains bounded by MAX_ASKS_CLOSED_PER_CALL=100 (:102); sweepers still drain leftovers. FleetAskEventsSubscriber currently records and publishes under independent recordedStatus/publishedStatus markers (apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts:24-41, :70-115). Remove publication/acknowledgement, keep transaction and link lock, skip when recordedStatus already equals status, and retain source validation and actor attribution. Change record to return nothing and keep activity plus its marker atomic. Remove ApprovalLivePublisher provider/export/spec, LiveFleetApprovalEvent and union member, domain/store/repository setPublishedStatus/mapping, and Prisma column via 20261110090000_fleet_ask_drop_published_status. Search confirmed consumers in approval-store.module.ts:22-25, approval-job-end.sweeper.ts:41, policy-ask-close.sweeper.ts:43, commands/fleet-budget-override.command.ts:63, jobs/job-transitions.service.ts:49-76, sync/{command-ack.processor,job-report.processor,sync.service,fleet-sweeper}.ts and budgets/{budget-evaluator,budget-sweeper,budgets.service}.ts. Update all constructor doubles and returned shapes in their colocated unit specs, sync-token-fence.spec.ts, budget-committed-effects.spec.ts and fleet-ask-details.spec.ts. Preserve remaining job live events, runner wakeups and committed effects. Repository, recorder and job-end rollback integrations retain activity/rollback assertions while dropping old frame-only cases. ApprovalRequestLiveSubscriber is already the engine's content-free project event producer (apps/api/src/live/approval-request-live.subscriber.ts:19-27); it is unchanged and becomes the only approval event.\n\nUS-007 web retirement: searches show fleet_approval type/handler/parser/listener in apps/web/lib/project-event-stream.ts:43, :91, :154, :268-272 and hub fan-out in project-event-hub.ts:29. Remove these plus handlers in fleet list/job detail, but retain onApprovalRequest and fleet_log behavior. Remove four adapter wire DTOs from fleet-types.ts:455 onward, not the shared budget/bash helper types. fleet-approvals.ts imports FleetApprovalDto at :9 and types budgetPayload/bashPayload/deliveryView with Pick at :27, :66 and :130; use structural unknown payload/outcome types and safe narrowing. Existing helper behavior must remain for actual callers, including engine fleet panels. Delete both 7b redirect pages and their redirect spec and remove only the fleet approvals breadcrumb from layouts/default.vue; keep navigation ordering pinned by layout tests and consult docs/ux/redesign/MASTER-PLAN.md before that edit, updating its Status/Decisions as required by app guidance without adding a story. Retarget stream/hub/list/detail/nav tests to approval_request and preserve the negative fleet_approval parser row. Spec discrepancy: US-007 AC-2 uses type budget_override, but inspected budgetPayload currently returns null unless type is budget_override_required (fleet-approvals.ts:28). The AC remains authoritative: accept budget_override for its plain-object fixture while retaining budget_override_required for existing engine-panel callers. apps/web/lib/approval-request-fleet.ts:105 passes budget_override_required to budgetPayload, so renaming that discriminator would regress the unified inbox. This is a narrow compatibility exception to the otherwise removal-only story, not permission to recreate adapter routes/DTOs.\n\nUS-008 test-only route migration must land while both families exist. Engine routes and envelopes are defined at apps/api/src/approvals/approval-requests.controller.ts:28, :57-60, :73-74, :89-92, :109-121. List/get/counts visibility belongs to the query service, not membership alone; invisible get is 404, roster-only agents may list zero, soft-deleted project requests still count per 7a. Current fleet API test imports ApprovalsService (apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts:17), has a flat adapter response type (:30) and PROJECT/ADMIN constants (:69-70); migrate bodies and detail assertions, not just URLs. GET engine detail puts resolvedBy/outcome/candidates under details. Bash allow/allow_for_job => approve+params.choice, deny => reject; budget keep_paused => reject, raise_budget_and_resume => approve+numeric amountUsd+requeueJobIds. Missing amount is rejected during parse before settlement (fleet-budget-override.command.ts:108-114); invalid candidates are recorded refusals and budget resume can stand (:129-146). Bash defaults absent params to allow, maps allow_for_job through checkBashDecision (fleet-shell-escalate.command.ts:42-56) and writes the fenced APPROVAL_ANSWER (:81-84). Preserve deadlock, audit, idempotence, pause, partial requeue, action-context and binding-only fixtures. In-process concurrency calls ApprovalDecisionService.decide rather than deleted ApprovalsService.decide. Retarget fleet-approvals-api, fleet-approvals-decide, permissions/enforce-fleet-approvals-budgets, permissions/membership-fleet-consumers, fleet-approval-recorder, audit/audit-fleet-approvals and fleet-approval-relay integrations. Delete gated-fleet-approval-decide-route.integration.spec.ts, removed assistant_action filter test and only the project fleet decide lifecycle describe in test/e2e/api-endpoint/endpoint.e2e.spec.ts. Remove assertions solely about adapter error prefixes or gates rather than recreating them on the engine.\n\nUS-009 harness seam: World publicly returns approval rows and numeric decision HTTP status (apps/runner/test/integration/harness/world.ts:89-90); the request function adds /api and unwraps only to {status,body} (:147-155). Current adapter calls are :245-250. New approval-routes.ts accepts that request function, so world can pass an admin-authenticated wrapper without exporting tokens or booting an API in unit tests. List summaries then fetch detail per id to map row status and details.resolvedBy/outcome into the existing World answer. Keep approval-relay.integration.spec.ts unchanged and use new test/unit/approval-routes.spec.ts with injected http for deterministic routing/body assertions. No production runner/protocol change.\n\nUS-010 deletion: ApprovalsModule currently registers three controllers, service and route commands and exports ApprovalsService (apps/api/src/fleet/approvals/approvals.module.ts:26-36); its onModuleInit registers both engine commands (:44-47), which must survive with both sweepers and FleetAskEventsSubscriber. Delete adapter controller/service/route-command sources and their own specs plus four DTO files; update module unit spec to resolve/register commands without DB. Remove old gated-route OpenAPI expectation in approvals/approval-openapi.contract.spec.ts and old fleet contract case in fleet/fleet-openapi.contract.spec.ts. Regenerate root openapi.json with bun run api:export-spec, removing all adapter paths and five named adapter schemas. Keep fleet-approval-view.ts: PrismaFleetApprovalAskRepository still imports fleetStatusWhere, toFleetApproval and FleetAskRow (apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:17). Also keep orphaned read-model store methods/constants and their integration spec as explicitly deferred. Dependencies prevent deleting routes while assistant/API tests/runner harness still call them.\n\nUS-011/012 CLI: registerDecision currently posts only decision/comment (apps/cli/src/commands/approval.ts:86-96). Add options to approve only and validate within the action with explicit return after validationError handling because tests stub process.exit. Follow policy set's guard pattern at :140-141. parseBudgetUsd yields a number with strict decimal syntax, >0, <=1000000 and <=4 decimals (apps/cli/src/utils/parse-usd.ts:3-10, :23-24); catch parser errors as validation failures inside action, not Commander option callbacks. Use generated approvalRequestsControllerGet for requeue all, unwrap details and require untruncated candidate array. Keep approve-without-options body without params; reject/comment/JSON and normal API errors remain as before. Existing approval.spec.ts mocks the generated boundary and must retain old cases. fleet.ts imports and registers legacy approval at :3 and :24; US-012 deletes that source/spec/registration only after the unified command can express decisions and API spec is regenerated. Run bun run generate:cli at root; never hand-edit generated SDK/types.\n\nUS-013 access-control migration: catalog still names four keys at apps/api/src/permissions/catalog.ts:182-185 and pending assistant key at :65; developer seed still grants fleet.approval.decide.bash at system-roles.ts:84. Remove seed/catalog entries in one change and retain narrowed engine grant. SystemRoleSeeder validates every seed before any write (:16, :39-46) but deliberately preserves unlocked permissions (:97-98); relying on reseeding leaves Developer unusable. PermissionService derives authority from bindings, with narrowed approval scopes (apps/api/src/permissions/permission.service.ts:42-46, :89). Apply 20261111090000_retire_fleet_approval_keys before new code serves: remove any role entry containing fleet.approval. while preserving order and [] for empty, delete prefix policies, cancel pending AND approved legacy route requests with settledAt NOW(), retain terminal history, rewrite only exact old admin notification link. Keep SQL semicolon-splittable with no DO block. Existing migration integration captures developer permissions from today's seed (apps/api/test/integration/permissions/developer-bash-decide-migration.integration.spec.ts:12-14); hard-code its historical permissions so old migration assertions remain meaningful. Mirror scratchSchemaBefore/migrationStatements setup (:17-24) for the new migration; current-schema db push cannot prove data upgrade correctness. Catalog spec re-derives entries from root TSV (apps/api/src/permissions/catalog.spec.ts:16-30), so remove seven fleet route inventory rows and rekey assistant row to project.read. role-matrix.spec.ts:11-18 documents update-mode regeneration; review snapshot diff rather than hand-editing. Update entry-matcher and pending permission-contract assertions and assistant-tools integration fixture.\n\nRisk, rollout and validation: deletions intentionally break old HTTP routes, fleet CLI command, MCP alias, webhook family and old redirect links; do not add compatibility aliases. Engine inbox/command/live/webhook implementations are read-only integration points for this feature. Notify engine recipients before deleting fleet notifications, remove webhook outputs before live plumbing, move HTTP callers before route deletion, enable CLI decision params before CLI deletion, and migrate stored permissions before serving reduced catalog. Keep recordedStatus idempotence, transactional outbox writes, action contexts, job locking/fencing, budget Decimal arithmetic, fair bounded sweeps, audit attribution and after-commit job effects unchanged. API integration ACs require test Postgres through HTTP unless explicitly unit/migration/in-process; use canRunDbTests and KODA_DB_TESTS=1 outside NAX_SANDBOXED, run scoped DB suites serially because setup resets the DB, and use a private container in a second checkout. Skips are not verification. Module DI tests belong beside modules and mock collaborators without DB. API uses Vitest vi.*, web/CLI Jest, runner bun:test. Preserve generated acceptance files untouched and run only the matching story AC filters through app acceptance commands. Removal-only stories still have observable integration/unit ACs; type-check/lint/build are pipeline gates, not acceptance criteria. No test/build/generation commands were executed while drafting because this session exposes file tools rather than an execution shell.\n\nRefine-pass adversarial audit: all 70 numbered spec ACs remain in their original stories; none was deleted or reassigned. Enumeration checked against acceptanceCriteria: US-001 AC-1 relay/admin/link/key, AC-2 hard-stop budget/admin, AC-3 Approver plus action recipient, AC-4 Approver-only exclusion, AC-5 narrowed Developer exclusion, AC-6 project-B exclusion, AC-7 bash unit delivery, AC-8 projectless budget/admin enumeration, AC-9 executed payload ignored. US-002 AC-1 no legacy outbox/one engine notification, AC-2 old unhandled row drained. US-003 AC-1 toast dismissal, AC-2 no second list call, AC-3 browser close, AC-4 null counts preserve toast, AC-5 absent user no dismissal through refresh, AC-6 announced r1 never re-raised. US-004 AC-1 runner-tool output, AC-2 cross-project exclusion, AC-3 USER query/filter/page, AC-4 AGENT query/filter/page, AC-5 project.read key, AC-6 parse defaults/executed, AC-7 invalid decided throws, AC-8 empty output, AC-9 pagination line, AC-10 neither assistant inbox name in MCP descriptor projection, AC-11 exactly one engine MCP inbox. US-005 AC-1 engine requested delivery/no old requested, AC-2 engine resolved/no old resolved. US-006 AC-1 pending/rejected engine events/no old events, AC-2 job cancellation engine event/no old event, AC-3 duplicate outbox activity once, AC-4 column absent after migration. US-007 AC-1 no legacy listener, AC-2 plain-object budget payload preserving the prior BudgetApprovalPayload. US-008 AC-1 budget resume/requeue, AC-2 missing amount stays pending/400, AC-3 allow_for_job command, AC-4 Developer-only project counts. US-009 AC-1 deny-to-reject POST, AC-2 allow_for_job-to-approve POST, AC-3 summary status plus detail resolution/outcome mapping. US-010 AC-1 removed endpoints 404, AC-2 committed OpenAPI paths/schemas absent using the existing contract-test regeneration convention, AC-3 module command resolution/registration. US-011 AC-1 choice body, AC-2 numeric amount body, AC-3 explicit requeue ids, AC-4 all candidates, AC-5 truncated all refusal/show hint, AC-6 null details refusal, AC-7 zero amount refusal, AC-8 five-decimal refusal, AC-9 deny choice refusal, AC-10 requeue without amount refusal, AC-11 choice plus amount refusal, AC-12 above-limit amount refusal, AC-13 choice plus requeue refusal, AC-14 no options means no params. US-012 AC-1 remaining full command set/no approval. US-013 AC-1 ordered role filtering, AC-2 empty role array, AC-3 retired policy deletion/unrelated retention, AC-4 pending cancellation/settledAt, AC-5 executed history unchanged, AC-6 old notification link rewrite/unrelated link unchanged, AC-7 catalog absence, AC-8 narrowed Developer grant retained/old keys absent, AC-9 role creation rejects removed key. Qualifiers retained include US-003's unchanged list call count and no dismissal through refresh, US-004's other fleet tools' invalid-input convention and engine MCP description identity, US-007's before-the-type-change payload regression anchor, US-009's status taken from the list row, US-010's existing OpenAPI contract-test convention, and US-013's unchanged executed request and unrelated notification link. No deprecated file/grep tags or pipeline gates were converted into behavioral ACs.\n\nFailure-mode audit: every row of the spec's table is represented: gone or no-longer-pending source in US-001 AC-10/11, null snapshot in US-003 AC-4, truncated requeue all in US-011 AC-5, invalid amount bounds/precision in US-011 AC-7/8/12, requeue without amount in AC-10, choice mixed with amount/requeue in AC-11/13, no candidate details in AC-6, invalid choice in AC-9, and legacy unhandled outbox rows in US-002 AC-2. The broader invalid-value wording supplements rather than replaces every original CLI example. Per-story negative paths already exist in US-001 excluded/nonpending recipients, US-002 no-handler backlog, US-003 null/absent identity, US-004 invalid enum/foreign project, US-005 obsolete-event subscriptions receiving no obsolete deliveries, US-006 duplicate replay with no duplicate activity, US-007 unsupported legacy listener not registered, US-008 invalid decision params, US-010 nonexistent retired endpoints, US-011 validation refusals and US-013 invalid retired key. The two gaps were US-009 and US-012: supplemental Audit-N1 acceptance criteria now protect refused HTTP status passthrough and Commander unknown-command rejection respectively, as this refine request explicitly requires; they are marked audit hardening, not numbered spec ACs. US-001's additional AC-10/11 are the earlier failure-table assertions. These additions create no new production API or story.\n\nCodebase-fit audit corrections: restored all five explicitly recommended US-002 context files (closer, fleet subscriber, fleet event payloads, fleet reader, outbox store), and added the omitted US-005 fleet-ask-events integration context. Other stories already include every listed spec Context File within the five-file limit; none lists its own output as context. Only the five spec-declared new files remain in expectedFiles. Re-read evidence confirms notification source type fleet_approval must stay (apps/api/src/notifications/notification.types.ts:27-28), legacy subscriber's provider/reader path is real (apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts:32-46), request envelopes are {status,body} with /api added by the harness (apps/runner/test/integration/harness/world.ts:141-149), the unchanged runner approval integration only depends on pending status and details/outcome for successful delivery (:27-31, :50-51), Commander tests construct real Command objects (apps/cli/src/commands/fleet.spec.ts:13-17), and existing approval tests use exitOverride and no-op process.exit (approval.spec.ts:29-33). US-009's new refusal assertion therefore returns the existing numeric 403, not a fabricated engine-specific exception. For US-010 registry checks, initialize the compiled module as existing approvals.module.spec.ts:14-18 and :24-28 do; compile alone does not run onModuleInit. US-004 invalid-input wording now names the actual ToolInputError('status') behavior. US-007 AC-2 now supplies concrete valid payload fields, retaining its original discriminator and regression qualifier; the description explicitly preserves the existing budget_override_required caller while accepting the AC's budget_override discriminator.\n\nRouting/scope/dependency audit: lowered US-001 to medium with security override, US-003 to simple/tdd-simple, US-005 to medium/tdd-simple, US-010 to medium with security override, and US-013 to complex with security override. Larger cross-module removals keep their justified routing, especially the durable publication-marker/transaction fan-out removal in US-006. All 13 workdirs and dependency arrays exactly match Binding Story Structure; every referenced id exists and there are no extra edges. Existing regression anchors protect normal notification delivery, unchanged announcement history, engine event delivery, once-only activity, payload fields, budget/bash decision effects, numeric harness/status mapping, surviving engine registrations, default CLI bodies, remaining fleet commands and retained migration history. All 15 feature Out of Scope bullets remain verbatim, plus the before-Stories NotificationSourceType exclusion; there is no story-local Out of Scope block hoisted into the feature array. Nearby story Scope Out text reiterates the relevant exclusions, and US-007 Scope In now explicitly includes its narrow discriminator compatibility so description and AC-2 agree.",
+  "outOfScope": [
+    "`docs/deployment/runner.md` still describes `koda fleet approval` and `/<project>/fleet/approvals`; it is edited by hand when the feature merges, not by a story.",
+    "Renaming or deleting the thread pending-action notifications (`action_requested`, `sourceType: 'fleet_approval'`): they are not fleet approvals and stay.",
+    "Deleting existing `Notification` rows of kind `approval_requested`: they stay; US-013 only rewrites their link.",
+    "Deleting existing `Webhook` subscriptions that list `fleet.approval.requested` or `fleet.approval.resolved`: the events are never sent again, and a subscription's `events` column is free text.",
+    "Any change to runner source (`apps/runner/src`), `packages/fleet-protocol` or the nax bash relay; only the runner's integration harness changes (US-009).",
+    "US-011 only: `--amount` or `--requeue` on a bash request and `--choice` on a budget request: the CLI does not read the request's key first, and the API answers 400 (`ApprovalDecisionParamsInvalidError`).",
+    "US-011 only: duplicate ids in `--requeue`: the budget command de-duplicates them in order.",
+    "US-011 only: `--requeue` values with empty entries (`j1,,j2`, `\"\"`), whitespace around ids, `all` mixed with ids, or more ids or longer ids than the budget command accepts: the CLI splits on commas and sends the rest; the API answers 400 for what the command refuses.",
+    "The fleet read-model store methods and constants that lose their last production caller with `ApprovalsService` (`countPendingAllProjects`, the list and count methods of `FleetApprovalAskStore`, `MAX_COUNTED_PROJECTS`) and their `fleet-ask-read-model.integration.spec.ts`: they stay; a later cleanup removes them.",
+    "`FleetApprovalAsk.recordedStatus` and the fleet activity rows (`approval.requested`, `approval.decided`, `approval.cancelled`, `approval.expired`): unchanged.",
+    "A replacement for the fleet live event: the engine's `approval_request` event is the only approval live event.",
+    "`apps/web/tests/layouts/default-permission-nav.spec.ts` passing the key string `fleet.approval.read` to the nav: the web does not validate keys against the catalog, so the cases stay green and unchanged.",
+    "US-004 only: a project filter on the engine MCP tool `koda_list_approvals`: unchanged.",
+    "US-011 only: `--choice deny` on `approve`: a bash deny is `koda approval reject`.",
+    "US-003 only: the browser-notification permission prompt and the announce history: unchanged.",
+    "`NotificationSourceType` keeps `'fleet_approval'`. Thread pending-action notifications (`action_requested`) still use it."
+  ],
+  "routingProfile": "native-codex-ds"
+}

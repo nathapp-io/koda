@@ -19,7 +19,6 @@ describe('expandEntries', () => {
     const developer = SYSTEM_ROLES.find((role) => role.key === 'developer');
     expect(developer).toBeDefined();
     expect(developer?.permissions).toContain('approval.decide@fleet.job.shell.escalate');
-    expect(developer?.permissions).toContain('fleet.approval.decide.bash');
     expect(() => expandEntries(developer?.permissions ?? [], 'PROJECT')).not.toThrow();
     expect(expandEntries(developer?.permissions ?? [], 'PROJECT').has(
       'approval.decide@fleet.job.shell.escalate',

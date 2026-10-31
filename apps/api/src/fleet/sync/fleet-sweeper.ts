@@ -5,7 +5,6 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystemWriter } from '../../action-context/action-context';
 import { FleetJobState } from '../../common/enums';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
-import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { RUNNER_HELD_STATES } from '../jobs/job-state';
 import { JobTransitionsService, SYSTEM_ACTOR } from '../jobs/job-transitions.service';
@@ -32,7 +31,6 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'jobCrashSec'>,
     private readonly attribution: PrAttributionService,
-    private readonly approvalLive: ApprovalLivePublisher,
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly audit: AuditRecorder,
   ) {}
@@ -70,7 +68,6 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
       });
       if (result) {
         this.live.publish([result.live]);
-        this.approvalLive.publish(result.approvalLive);
         void this.attribution.attribute(id); // fire-and-forget; never throws
         void this.ticketEffects.onTerminal([id]); // C9 §3.2; never throws
         crashed += 1;

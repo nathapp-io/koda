@@ -25,17 +25,6 @@ export function jobOutcomeDraft(p: FleetJobOutcomePayload, slug: string): Notifi
   });
 }
 
-export function approvalDrafts(
-  adminIds: readonly string[],
-  a: { approvalId: string; projectId: string | null; kindLabel: string; repo: string },
-): NotificationDraft[] {
-  return adminIds.map((userId) => fleetDraft({
-    userId, projectId: a.projectId, category: 'FLEET_NEEDS_YOU', kind: 'approval_requested',
-    title: `Approval needed: ${a.kindLabel} on ${a.repo}`, link: '/admin/fleet/approvals',
-    params: { repo: a.repo, kind: a.kindLabel }, sourceType: 'fleet_approval', sourceId: a.approvalId,
-  }));
-}
-
 export function budgetDrafts(adminIds: readonly string[], p: FleetBudgetIncidentPayload): NotificationDraft[] {
   const spentUsd = usd(p.spentUsd);
   const amountUsd = usd(p.amountUsd);

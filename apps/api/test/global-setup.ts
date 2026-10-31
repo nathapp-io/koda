@@ -20,6 +20,8 @@ import { resolve } from 'path';
 import { execSync } from 'child_process';
 import { assertSafeTestDatabaseUrl } from './helpers/test-database-url';
 import { rememberTestDatabase, resolveTestDatabase } from './helpers/test-database';
+import { acquireProcessDbRunLock, releaseRememberedDbRunLock, rememberDbRunLock } from './helpers/db-run-lock';
+import { prepareSchemaOnce } from './helpers/schema-once';
 import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
 import { createTestPrismaClient } from './helpers/test-prisma';
 import { canRunDbTests } from './helpers/test-environment';
@@ -39,10 +41,24 @@ export default async function globalSetup(): Promise<void> {
   const composeUrl = parse(readFileSync(ENV_TEST_PATH))['DATABASE_URL'];
   const database = await resolveTestDatabase(process.env, composeUrl);
   rememberTestDatabase(database);
+  // Fix round 1 (F1): one DB-mode run at a time per test database. `prepareSchema` force-resets the schema and every
+  // suite truncates, so a second run started at the same time destroys this one (a register that commits and is
+  // truncated before its own re-read answers 401, and suites fail in `beforeAll` with nothing structured to report).
+  // The lock is taken before the reset and released by globalTeardown. Acquisition fails closed: when another run holds
+  // the database (or the lock session cannot be opened) this setup throws instead of resetting a database it cannot
+  // lock. `KODA_DB_RUN_LOCK=off` is the only way to run unserialised, for a database nobody else uses.
   try {
-    await prepareSchema(database.databaseUrl);
+    if (process.env['KODA_DB_RUN_LOCK'] !== 'off') {
+      rememberDbRunLock(await acquireProcessDbRunLock(database.databaseUrl, {
+        log: (message) => process.stderr.write(`${message}\n`),
+      }));
+    }
+    // Once per process, not once per Vitest project: the second reset would wipe the rows the first project's files are
+    // already using, which is what made early suites answer 401 intermittently (fix round 1, F1).
+    await prepareSchemaOnce(database.databaseUrl, () => prepareSchema(database.databaseUrl));
   } catch (error) {
-    // globalTeardown does not run when globalSetup throws: stop a container we started here.
+    // globalTeardown does not run when globalSetup throws: release what this setup took, stop a container it started.
+    await releaseRememberedDbRunLock();
     await database.stop();
     throw error;
   }

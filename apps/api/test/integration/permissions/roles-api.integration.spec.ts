@@ -220,6 +220,34 @@ describeIntegration('roles API (US-005)', () => {
     });
   });
 
+  it('US-013 AC-9: a retired fleet approval key is no longer a catalog entry, so POST /roles answers 400', async () => {
+    const res = await postRole(ownerToken, {
+      key: 'retired-fleet-key',
+      name: 'Retired fleet key',
+      scope: 'PROJECT',
+      permissions: ['fleet.approval.read'],
+    });
+
+    expectRefusal(res, {
+      status: 400,
+      code: CODE.validation,
+      key: 'unknownEntry',
+      args: { entry: 'fleet.approval.read' },
+    });
+    // The refusal is decided before the write, so no role carries the key either.
+    expect(await storedRole('retired-fleet-key')).toBeNull();
+
+    // Control: the same route with a key the catalog still holds creates the role, so the 400 above is the
+    // retired key and not a route that refuses every write.
+    const live = await postRole(ownerToken, {
+      key: 'live-key-control',
+      name: 'Live key control',
+      scope: 'PROJECT',
+      permissions: ['label.create'],
+    });
+    expect(live.status).toBe(201);
+  });
+
   it('AC-5: a global key inside a PROJECT role answers 400 permissions.scopeMismatch', async () => {
     const res = await postRole(ownerToken, {
       key: 'scope-mismatch',

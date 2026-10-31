@@ -202,7 +202,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     // what refuses the call.
     await customRole(NO_COMMENT_ROLE, ['project.read', 'thread.message.send.own', 'thread.read', 'ticket.read']);
     await customRole(UPDATER_ROLE, ['project.read', 'ticket.read', 'ticket.update', 'thread.read', 'thread.message.send.own']);
-    await customRole(APPROVAL_READER_ROLE, ['project.read', 'thread.read', 'ticket.read', 'fleet.approval.read']);
+    await customRole(APPROVAL_READER_ROLE, ['project.read', 'thread.read', 'ticket.read']);
 
     // AC-2, AC-4, AC-11: one PROJECT-scope binding each, and no `ProjectMember` row anywhere.
     await createUserWithBinding('viewerBind', 'viewer');
@@ -388,7 +388,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     const action = await findThreadAction(prisma, { jobId, toolCallId: 'ac11' });
     const commentsBefore = await prisma.comment.count({ where: { ticketId: p1TicketId } });
 
-    // The creator's only source in p1 becomes a custom role with thread.read, ticket.read and fleet.approval.read.
+    // The creator's only source in p1 becomes a custom role with thread.read and ticket.read, and no comment.create.
     await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: ids.demoted, projectId: p1Id } });
     await bind({ type: 'USER', id: ids.demoted }, APPROVAL_READER_ROLE, p1Id);
     await membership.invalidatePermissions();

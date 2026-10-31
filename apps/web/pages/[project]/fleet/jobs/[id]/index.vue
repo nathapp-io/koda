@@ -195,8 +195,7 @@ useProjectEvents(slug, {
   onFleetJob: (event) => {
     if (event.jobId === jobId) liveReload.trigger()
   },
-  onFleetApproval: () => liveReload.trigger(),
-  // P3b US-007: a request of this project decided elsewhere changes the rows; 7c drops onFleetApproval.
+  // P3b US-007: a request of this project decided elsewhere changes the rows.
   onApprovalRequest: () => liveReload.trigger(),
   // A new attempt's first bytes add its "Full log" row; growth of a known stream changes nothing here.
   onFleetLog: (event) => {

@@ -81,7 +81,6 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'fleet.schedule.delete.own',
       'fleet.repo.drift.check',
       'fleet.ticket-job.*',
-      'fleet.approval.decide.bash',
       'approval.decide@fleet.job.shell.escalate',
       'fleet.knowledge.repo.reindex',
       'thread.create',

@@ -214,11 +214,6 @@ export class PrismaFleetApprovalAskRepository
     `;
   }
 
-  async setPublishedStatus(requestId: string, publishedStatus: string): Promise<FleetApprovalAskRecord> {
-    const row = await this.db.fleetApprovalAsk.update({ where: { requestId }, data: { publishedStatus } });
-    return this.toDomain(row);
-  }
-
   async setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
     const row = await this.db.fleetApprovalAsk.update({ where: { requestId }, data: { recordedStatus } });
     return this.toDomain(row);

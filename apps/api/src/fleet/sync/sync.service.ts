@@ -3,11 +3,10 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuthException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { parseCapabilities } from '../common/capabilities';
 import { isSupportedProtocolVersion } from '../common/protocol';
 import type { FleetCommandOut, GitToken, GitTokenError, JobAck, SyncResponse } from '../common/protocol';
-import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
@@ -41,7 +40,6 @@ export class SyncService {
     private readonly acks: CommandAckProcessor,
     private readonly placement: PlacementService,
     private readonly live: FleetJobLivePublisher,
-    private readonly approvalLive: ApprovalLivePublisher,
     private readonly notifier: RunnerNotifier,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'syncWaitMs'>,
     private readonly broker: GitTokenBroker,
@@ -64,9 +62,8 @@ export class SyncService {
     }));
     if (!seen) throw new AuthException({}, 'fleet.runnerAuth');
 
-    const { live: ackLive, approvalLive: ackApprovalLive } = await this.acks.process(runnerId, req.bootId, req.commandAcks, now);
+    const { live: ackLive } = await this.acks.process(runnerId, req.bootId, req.commandAcks, now);
     const live: LiveFleetJobEvent[] = [...ackLive];
-    const approvalLive: LiveFleetApprovalEvent[] = [...ackApprovalLive];
     const jobAcks: JobAck[] = [];
     const unknownJobIds: string[] = [];
     for (const report of req.jobs) {
@@ -76,7 +73,6 @@ export class SyncService {
         if (outcome.ack) jobAcks.push(outcome.ack);
         if (outcome.unknown) unknownJobIds.push(report.jobId);
         live.push(...outcome.live);
-        approvalLive.push(...outcome.approvalLive);
       } catch (error) {
         this.logger.error(`Sync: job ${report.jobId} from runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
       }
@@ -90,7 +86,6 @@ export class SyncService {
       this.logger.error(`Sync: boot reconcile for runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
     }
     this.live.publish(live);
-    this.approvalLive.publish(approvalLive);
     if (req.freeSlots > 0) await this.placement.fillRunner(runnerId, req.freeSlots, now);
     if (req.protocolVersion >= 4) await this.placement.fillRunnerThreads(runnerId, now);
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));

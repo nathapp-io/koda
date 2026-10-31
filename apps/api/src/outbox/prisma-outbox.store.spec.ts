@@ -1,7 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { currentContext } from '../action-context/action-context';
 import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
-import { FanOutPublisher } from './fan-out-publisher';
 import { PrismaOutboxStore } from './prisma-outbox.store';
 
 type LazyResult = PromiseLike<{ count: number }>;
@@ -25,7 +24,7 @@ describe('PrismaOutboxStore system context', () => {
   beforeEach(() => {
     observed = [];
     const client = { outboxEvent: { updateMany: vi.fn(() => lazyUpdateMany(observed)) } };
-    store = new PrismaOutboxStore({ client } as unknown as PrismaService, {} as FanOutPublisher);
+    store = new PrismaOutboxStore({ client } as unknown as PrismaService);
   });
 
   it('AC-1: awaits markPublished update in SYSTEM/outbox context', async () => {

@@ -29,7 +29,6 @@ import { KbTicketLifecycleSubscriber } from '../rag/kb-ticket-lifecycle.subscrib
 import { EntityGraphOutboxSubscriber } from '../entity-graph/entity-graph-outbox.subscriber';
 import { CodeIntelOutboxSubscriber } from '../code-intel/code-intel-outbox.subscriber';
 import { TicketNotificationSubscriber } from '../notifications/ticket-notification.subscriber';
-import { FleetApprovalRequestedSubscriber } from '../notifications/fleet/fleet-approval-requested.subscriber';
 import { FleetBudgetIncidentSubscriber } from '../notifications/fleet/fleet-budget-incident.subscriber';
 import { FleetHealthAlertSubscriber } from '../notifications/fleet/fleet-health-alert.subscriber';
 import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outcome.subscriber';
@@ -67,7 +66,6 @@ const writers = new Map<Function, string>([
   [EntityGraphOutboxSubscriber, 'system.entity-graph.write'],
   [CodeIntelOutboxSubscriber, 'system.codeintel.index-commit'],
   [TicketNotificationSubscriber, 'system.notification.ticket'],
-  [FleetApprovalRequestedSubscriber, 'system.notification.fleet'],
   [FleetBudgetIncidentSubscriber, 'system.notification.fleet'],
   [FleetHealthAlertSubscriber, 'system.notification.fleet'],
   [FleetJobOutcomeSubscriber, 'system.notification.fleet'],
@@ -98,7 +96,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(35);
+    expect(writers).toHaveLength(34);
     expect(actual).toEqual(expected);
   });
 

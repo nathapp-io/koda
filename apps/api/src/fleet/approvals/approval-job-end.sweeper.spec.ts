@@ -12,8 +12,7 @@ function build(batch: JobEndAsk[] = [ask()], sweepEnabled = false) {
   const store = { claimEndedJobAsks: vi.fn(async (_limit: number) => batch) };
   const jobs = { findById: vi.fn(async (_id: string): Promise<typeof job | null> => job) };
   const closer = { closeJobAsk: vi.fn(async (_job: unknown, _requestId: string, _now: Date) =>
-    ({ approval: { id: 'a1' } as { id: string } | null, live: [{ approvalId: 'a1' }] })) };
-  const live = { publish: vi.fn(() => { expect(active).toBe(false); }) };
+    ({ approval: { id: 'a1' } as { id: string } | null })) };
   const audit = { record: vi.fn(async (_entry: AuditRecordInput) => { expect(active).toBe(true); }) };
   const tx = { run: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
     expect(active).toBe(false);
@@ -21,14 +20,14 @@ function build(batch: JobEndAsk[] = [ask()], sweepEnabled = false) {
     try { return await fn(); } finally { active = false; }
   }) };
   const sweeper = new ApprovalJobEndSweeper(
-    store as never, jobs as never, closer as never, live as never, tx as never,
+    store as never, jobs as never, closer as never, tx as never,
     { sweepEnabled, approvalSweepMs: 15_000 }, audit as never,
   );
-  return { sweeper, store, jobs, closer, live, tx, audit };
+  return { sweeper, store, jobs, closer, tx, audit };
 }
 
 describe('ApprovalJobEndSweeper (fair durable continuation)', () => {
-  it('schedules one bounded batch, closes exact asks in separate audited transactions, publishes after commit', async () => {
+  it('schedules one bounded batch, closes exact asks in separate audited transactions', async () => {
     const b = build([ask(), ask('a2', 'j2')]);
     expect(await b.sweeper.tick(NOW)).toEqual({ jobs: 2, closed: 2, failed: 0 });
     expect(b.store.claimEndedJobAsks).toHaveBeenCalledExactlyOnceWith(MAX_ASKS_PER_TICK);
@@ -37,12 +36,11 @@ describe('ApprovalJobEndSweeper (fair durable continuation)', () => {
     expect(b.audit.record.mock.calls.map(([entry]) => entry.summary)).toEqual([
       'job-end close scheduled', 'job-end close scheduled', 'job-ended close: 1 ask', 'job-ended close: 1 ask',
     ]);
-    expect(b.live.publish).toHaveBeenCalledTimes(2);
   });
 
   it('advances to the next selected ask even if the first is held, without restarting a job page', async () => {
     const b = build([ask(), ask('a2')]);
-    b.closer.closeJobAsk.mockResolvedValueOnce({ approval: null, live: [] });
+    b.closer.closeJobAsk.mockResolvedValueOnce({ approval: null });
     expect(await b.sweeper.tick(NOW)).toEqual({ jobs: 1, closed: 1, failed: 0 });
     expect(b.closer.closeJobAsk).toHaveBeenCalledTimes(2);
     expect(b.audit.record).toHaveBeenCalledTimes(3); // two attempts + one close
@@ -52,24 +50,21 @@ describe('ApprovalJobEndSweeper (fair durable continuation)', () => {
     const b = build([ask(), ask('a2')]);
     b.closer.closeJobAsk.mockRejectedValueOnce(new Error('boom'));
     expect(await b.sweeper.tick(NOW)).toEqual({ jobs: 1, closed: 1, failed: 1 });
-    expect(b.live.publish).toHaveBeenCalledTimes(1);
   });
 
-  it('does not publish a close whose transaction fails on audit', async () => {
+  it('does not count a close whose transaction fails on audit', async () => {
     const b = build();
     b.audit.record.mockImplementation(async (entry) => {
       if (entry.summary?.startsWith('job-ended close:')) throw new Error('audit unavailable');
     });
     expect(await b.sweeper.tick(NOW)).toEqual({ jobs: 0, closed: 0, failed: 1 });
-    expect(b.live.publish).not.toHaveBeenCalled();
   });
 
-  it('counts and audits a closed ask even when it has no live channel', async () => {
+  it('counts and audits a closed ask without a publication step', async () => {
     const b = build();
-    b.closer.closeJobAsk.mockResolvedValueOnce({ approval: { id: 'a1' }, live: [] });
+    b.closer.closeJobAsk.mockResolvedValueOnce({ approval: { id: 'a1' } });
     expect(await b.sweeper.tick(NOW)).toEqual({ jobs: 1, closed: 1, failed: 0 });
     expect(b.audit.record).toHaveBeenCalledTimes(2);
-    expect(b.live.publish).not.toHaveBeenCalled();
   });
 
   it('skips a job row that is gone or running again', async () => {

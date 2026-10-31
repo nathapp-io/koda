@@ -9,7 +9,7 @@ describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
     evaluateScope = vi.spyOn(evaluator, 'evaluateScope').mockResolvedValue(undefined);
   });
   afterEach(() => {

@@ -21,6 +21,10 @@ import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
+import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
+import { ProjectEventBus } from '../../../src/live/project-event-bus';
+import type { LiveEvent } from '../../../src/live/live-event';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -186,6 +190,46 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await prisma.fleetJob.updateMany({ where: { id: { in: active.map((job) => job.id) } }, data: { state: 'CANCELLED' } });
   });
 
+  it('retired live AC-1: relay open and engine rejection publish only approval_request', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('engine-live-reject');
+    const seen: LiveEvent[] = [];
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, event => seen.push(event));
+    try {
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-000000e1') }] }] });
+      const [opened] = await requestsOf(jobId);
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      await decide(opened.id, world.tokens.root, { decision: 'reject' }).expect(200);
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      expect(seen.filter(e => e.type === 'approval_request' && e.requestId === opened.id).map(e => e.status)).toEqual(['pending', 'rejected']);
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
+      await finish(jobId, leaseEpoch, 3);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('retired live AC-2: cancelling a running job relays the engine cancellation only', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('engine-live-cancel');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-000000e2') }] }] });
+    const [opened] = await requestsOf(jobId);
+    await app.get(OutboxRelay).dispatchPendingBatch();
+    const seen: LiveEvent[] = [];
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, event => seen.push(event));
+    try {
+      // The runner reports CANCELLED after the server requests cancellation, taking RUNNING -> CANCELLED.
+      await request(server).post(`/api/projects/web/fleet/jobs/${jobId}/cancel`).set(auth(world.tokens.dev)).expect(200);
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 3, type: 'state', payload: { to: 'CANCELLED' } }] }] });
+      expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('CANCELLED');
+      await app.get(OutboxRelay).dispatchPendingBatch();
+      expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId: opened.id, status: 'cancelled' }));
+      expect(seen.map(e => e.type)).not.toContain('fleet_approval');
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
@@ -342,12 +386,12 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await finish(jobId, leaseEpoch, 3);
   });
 
-  it('AC-11: the pending open dispatches fleet.approval.requested to the project webhook with the request id', async () => {
+  it('US-005 AC-1: the pending open delivers approval.requested, not the retired fleet event', async () => {
     await enableRelay();
     // Only this case needs a subscription: every other relay here would otherwise queue a delivery to an
     // unreachable host, which is noise (and outbox work) the rest of the file does not read.
     const webhook = await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved', 'approval.requested', 'approval.resolved']) },
     });
     try {
       const { jobId, leaseEpoch } = await startRunning('webhook');
@@ -357,11 +401,12 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
       const deliveries = await prisma.outboxEvent.findMany({
         where: {
           type: 'webhook_delivery',
-          AND: [{ payload: { contains: '"event":"fleet.approval.requested"' } }, { payload: { contains: `"jobId":"${jobId}"` } }],
+          AND: [{ payload: { contains: '"event":"approval.requested"' } }, { payload: { contains: '"permissionKey":"fleet.job.shell.escalate"' } }],
         },
       });
       expect(deliveries).toHaveLength(1);
-      expect(deliveries[0]!.payload).toContain(`"approvalId":"${link!.requestId}"`);
+      expect(deliveries[0]!.payload).toContain(`"requestId":"${link!.requestId}"`);
+      expect(await prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: '"event":"fleet.approval.requested"' } } })).toBe(0);
       // A8: the webhook never carries the command text.
       expect(deliveries[0]!.payload).not.toContain('bun run test');
 
@@ -371,17 +416,82 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     }
   });
 
-  it('AC-12: the pending open records one fleet_approval_requested outbox event keyed by the request id', async () => {
+  /**
+   * Permissions P3 7c US-002 (AC-1): the fleet's own announcement is gone, so a relayed ask reaches the inbox
+   * through the approval engine only — one `approval_request` per global admin, never a second `approval_requested`
+   * row from the deleted `fleet_approval_requested` path.
+   */
+  it('US-002 AC-1: a relayed bash ask records no fleet_approval_requested event and notifies every global admin once', async () => {
     await enableRelay();
+    const secondAdmin = await prisma.user.create({ data: { email: 'outbox-admin2@koda.test', passwordHash: 'x' } });
+    await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
+    await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+    // Only this ask's events should be leased below: earlier cases of this file leave pending rows behind.
+    await prisma.outboxEvent.updateMany({ where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() } });
+
     const { jobId, leaseEpoch } = await startRunning('outbox');
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000015') }] }] });
     const [link] = await linksOf(jobId);
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'fleet_approval_requested', eventId: link!.requestId } });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ projectId: world.projectId, eventId: link!.requestId });
+    // The deleted producer wrote one row of the fleet's own type per fresh ask, keyed by the request id.
+    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested', eventId: link!.requestId } })).toBe(0);
+    const opened = await prisma.outboxEvent.findMany({
+      where: { eventId: { startsWith: `${link!.requestId}:` } }, select: { id: true, type: true },
+    });
+    expect(opened.map((e) => e.type)).toEqual(['approval_request_changed']);
+
+    const relay = app.get(OutboxRelay, { strict: false });
+    const settled = () => prisma.outboxEvent.count({ where: { id: { in: opened.map((e) => e.id) }, status: 'published' } });
+    for (let pass = 0; pass < 10 && (await settled()) < opened.length; pass += 1) await relay.dispatchPendingBatch();
+
+    for (const adminId of [world.ids.root, secondAdmin.id]) {
+      expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId } })).toEqual([
+        expect.objectContaining({
+          kind: 'approval_request', sourceType: 'approval_request', link: `/approvals?id=${link!.requestId}`,
+          params: { key: 'fleet.job.shell.escalate' },
+        }),
+      ]);
+    }
+    // Nothing of the fleet family is left anywhere: not for the admins, not for anyone else.
+    expect(await prisma.notification.count({ where: { sourceId: link!.requestId, kind: 'approval_requested' } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
+  });
+
+  /**
+   * Permissions P3 7c US-002 (AC-2): rows the deleted producer wrote before this change must drain. No handler is
+   * registered for the type any more, so `claimBatch` claims a due row and the relay marks it done — without writing
+   * the `approval_requested` notification the deleted subscriber used to deliver for the same ask.
+   */
+  it('US-002 AC-2: a due legacy fleet_approval_requested row is claimed, marked done, and notifies nobody', async () => {
+    // A real pending ask, so the deleted consumer would have had something to deliver for this row.
+    const { requestId } = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.projectId,
+      input: { jobId: 'legacy-job', leaseEpoch: 1, naxAskId: 'ask-legacy01', payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId: 'legacy-job', leaseEpoch: 1, naxAskId: 'ask-legacy01' },
+    });
+    // The row the deleted `ApprovalCloser.enqueueRequested` wrote: the approval webhook payload, keyed by the request id.
+    const legacy = await prisma.outboxEvent.create({
+      data: {
+        projectId: world.projectId, type: 'fleet_approval_requested', eventId: requestId,
+        payload: JSON.stringify({
+          approvalId: requestId, type: 'nax_bash_escalate', status: 'pending', decision: null, resolvedBy: null,
+          projectId: world.projectId, jobId: 'legacy-job', policyId: null, expiresAt: null,
+          path: `/web/fleet/approvals?id=${requestId}`,
+        }),
+        nextAttemptAt: new Date(Date.now() - 60_000), createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    // The claim gate that held rows of this type until a consumer registered is gone: a due row is claimed as-is.
+    const store = app.get(PrismaOutboxStore, { strict: false });
+    const claimed = await store.claimBatch(50, 1, new Date(Date.now() - 1_000), 'legacy-claim');
+    expect(claimed.map((r) => r.id)).toContain(legacy.id);
+
+    // Publishing it finds no handler: the relay records success and the row is done.
+    await app.get(OutboxRelay, { strict: false }).dispatchPendingBatch();
+    expect(await prisma.outboxEvent.findUniqueOrThrow({ where: { id: legacy.id } })).toMatchObject({ status: 'published', attempts: 0 });
+    expect(await prisma.notification.count({ where: { sourceId: requestId } })).toBe(0);
   });
 
   it('AC-13: a report moving the job to COMPLETED settles its pending ask cancelled/job_ended and stamps the link', async () => {
@@ -500,30 +610,32 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
 
   /**
    * Permissions P3 US-012 AC-1 (regression pin): the deletion of `FleetApproval` must leave the whole fleet loop
-   * intact — relay opens the ask, the fleet decide adapter allows it, the runner acks the answer, and the fleet GET
-   * reports the request and the stored delivery. The pin runs over the fleet routes, not the engine's, so it also
-   * covers the adapters the deletion touches.
+   * intact — relay opens the ask, the engine's decide route allows it, the runner acks the answer, and the engine GET
+   * reports the request and the stored delivery. Since US-008 the pin reads the engine routes, which are the only
+   * ones left once the fleet adapters go.
    */
-  it('US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok', async () => {
+  it('US-012 AC-1: a relayed ask allowed on the engine route and acked ok reads back approved with delivery ok', async () => {
     await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('fleet-pin');
     // A nax ask id of its own: US-011 AC-14 relays `ask-0000001b` on its own job (fix round 1).
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000020') }] }] });
     const [link] = await linksOf(jobId);
 
-    const decided = data<{ id: string; status: string; decision: string }>(await request(server)
-      .post(`/api/projects/web/fleet/approvals/${link!.requestId}/decide`)
-      .set(auth(world.tokens.dev)).send({ decision: 'allow' }).expect(200));
-    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'approved', decision: 'allow' }));
+    const decided = data<{ id: string; status: string; decisions: Array<{ decision: string }> }>(await request(server)
+      .post(`/api/approvals/${link!.requestId}/decisions`)
+      .set(auth(world.tokens.dev)).send({ decision: 'approve', params: { choice: 'allow' } }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'executed' }));
+    expect(decided.decisions).toEqual([expect.objectContaining({ decision: 'approve' })]);
 
     const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
     expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000020', choice: 'allow' });
     await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
 
-    const read = data<{ status: string; outcome: { delivery: { result: string } } }>(await request(server)
-      .get(`/api/projects/web/fleet/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
-    expect(read.status).toBe('approved');
-    expect(read.outcome.delivery.result).toBe('ok');
+    // US-008: the engine's detail route carries the ask's enrichment in `details`.
+    const read = data<{ status: string; details: { resolvedBy: string | null; outcome: { delivery: { result: string } } } }>(await request(server)
+      .get(`/api/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
+    expect(read.status).toBe('executed');
+    expect(read.details.outcome.delivery.result).toBe('ok');
 
     await finish(jobId, leaseEpoch, 3);
   });
@@ -545,50 +657,73 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   });
 
   /**
-   * Permissions P3 US-011 (AC-14): the relayed ask reaches every global admin through the fleet's notification, and
-   * the *relay* — not a hand-picked event — carries both events of the ask: the fleet's announcement and the engine's
-   * `approval_request_changed`. The engine subscriber must skip the fleet keys (US-001), so an admin holds exactly one
-   * notification for the ask; a duplicate from the engine path would be a second row with the same source id.
+   * Permissions P3 US-011 (AC-14): the relayed ask reaches every global admin through the approval engine, and the
+   * *relay* — not a hand-picked event — carries the ask's `approval_request_changed`. Permissions P3 7c US-002: the
+   * fleet's own announcement is deleted, so that engine event is the only one of the ask and an admin holds exactly
+   * one notification for it, of kind `approval_request`.
    *
    * The earlier cases of this file never run the relay, so their pending events are marked published first: the batch
-   * this test leases then holds only the ask's own two events (a stale webhook delivery would otherwise retry here).
+   * this test leases then holds only the ask's own event (a stale webhook delivery would otherwise retry here).
    */
-  it('US-011 AC-14: the outbox relay tells every global admin once, through the fleet approval only', async () => {
+  it('US-011 AC-14: the outbox relay tells every global admin once, through the approval engine only', async () => {
     await enableRelay();
     const secondAdmin = await prisma.user.create({ data: { email: 'relay-admin2@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
     await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+
+    // Persisted role bindings exercise project-scoped candidate and action-key resolution.
+    const recipients = await Promise.all(['both', 'approver-only', 'foreign-project'].map((name) =>
+      prisma.user.create({ data: { email: `relay-${name}@koda.test`, passwordHash: 'x' } })));
+    const [both, approverOnly, foreignProject] = recipients;
+    const actionRole = await prisma.role.create({
+      data: { key: 'relay-shell-asker', name: 'Relay shell asker', scope: 'PROJECT', permissions: ['fleet.job.shell.escalate'] },
+    });
+    for (const recipient of recipients) await grantBaseline(prisma, { type: 'USER', id: recipient.id });
+    await grantRole(prisma, { type: 'USER', id: both.id }, 'reviewer', world.projectId);
+    await grantRole(prisma, { type: 'USER', id: both.id }, actionRole.key, world.projectId);
+    await grantRole(prisma, { type: 'USER', id: approverOnly.id }, 'reviewer', world.projectId);
+    await grantRole(prisma, { type: 'USER', id: foreignProject.id }, 'reviewer', world.opsProjectId);
+    await grantRole(prisma, { type: 'USER', id: foreignProject.id }, actionRole.key, world.opsProjectId);
     await prisma.outboxEvent.updateMany({ where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() } });
 
     const { jobId, leaseEpoch } = await startRunning('notify');
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
     const [link] = await linksOf(jobId);
 
-    // Both events of this ask are in the outbox: the engine's change (keyed `<requestId>:<status>`) and the fleet's
-    // announcement (keyed by the request id).
+    // The only event of this ask is the engine's change, keyed `<requestId>:<status>`; US-002 deleted the fleet's
+    // own announcement, which was keyed by the bare request id.
     const events = await prisma.outboxEvent.findMany({
       where: { OR: [{ eventId: link!.requestId }, { eventId: { startsWith: `${link!.requestId}:` } }] },
       select: { id: true, type: true },
     });
-    expect(events.map((e) => e.type).sort()).toEqual(['approval_request_changed', 'fleet_approval_requested']);
+    expect(events.map((e) => e.type)).toEqual(['approval_request_changed']);
 
     // The real relay: it leases pending rows and runs every registered handler for them.
     const relay = app.get(OutboxRelay, { strict: false });
     const settled = async () => prisma.outboxEvent.count({ where: { id: { in: events.map((e) => e.id) }, status: { in: ['published', 'dead'] } } });
     for (let pass = 0; pass < 10 && (await settled()) < events.length; pass += 1) await relay.dispatchPendingBatch();
     expect(await prisma.outboxEvent.findMany({ where: { id: { in: events.map((e) => e.id) } }, select: { status: true } }))
-      .toEqual([{ status: 'published' }, { status: 'published' }]);
+      .toEqual([{ status: 'published' }]);
 
     for (const adminId of [world.ids.root, secondAdmin.id]) {
-      // One row per admin for this ask, whichever subscriber wrote it: the fleet's.
+      // One notification per eligible admin, from the engine: the fleet family's second row is gone with US-002.
       expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId } })).toEqual([
-        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', link: '/admin/fleet/approvals' }),
+        expect.objectContaining({
+          kind: 'approval_request', sourceType: 'approval_request', link: `/approvals?id=${link!.requestId}`,
+          params: { key: 'fleet.job.shell.escalate' },
+        }),
       ]);
     }
-    // No engine approval notification for a fleet ask (it would be `sourceType: 'approval_request'`), and the job's
-    // requester is not an approver.
-    expect(await prisma.notification.count({ where: { sourceType: 'approval_request', sourceId: link!.requestId } })).toBe(0);
-    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId } })).toBe(0);
+    // AC-3: a persisted project Approver plus an action grant receives the engine notification.
+    expect(await prisma.notification.findMany({ where: { userId: both.id, sourceId: link!.requestId, kind: 'approval_request' } })).toEqual([
+      expect.objectContaining({ link: `/approvals?id=${link!.requestId}`, params: { key: 'fleet.job.shell.escalate' } }),
+    ]);
+    // AC-4: an Approver without the action key is not eligible.
+    expect(await prisma.notification.count({ where: { userId: approverOnly.id, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
+    // AC-6: both keys bound only in project B cannot decide or receive a project A ask.
+    expect(await prisma.notification.count({ where: { userId: foreignProject.id, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
+    // AC-5: fleet asks notify deciders, not the requester, who holds only the scoped developer grant.
+    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId, kind: 'approval_request' } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
   });

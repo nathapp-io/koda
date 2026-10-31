@@ -3,31 +3,62 @@ import {
   badgeText, bashChoices, bashPayload, budgetPayload, commandPreview, countdownText, deliveryView,
   raiseAmountError, requeueFailure, secondsLeft,
 } from '../../lib/fleet-approvals'
-import type { FleetApprovalDto } from '../../lib/fleet-types'
 
 /**
  * The fleet approval helpers the fleet surfaces still read: the job page, the header badge, the notification
  * bell, the thread action card and the engine's fleet panels. US-010 deleted the fleet inbox and the helpers only
  * it used (query building, sorting, the viewer keys, the raise/keep-paused/bash/action bodies, thread paths, keyboard
  * decisions, summary lines, the raise schema and its comment limit); the cases for those went with them.
+ *
+ * US-007 deleted the fleet approval wire DTO, so the fixtures below are plain objects: the helpers take structural
+ * types now (`{ type: string; payload: unknown }` and `{ type: string; resolvedBy: string | null; outcome: unknown }`).
+ * The fields no helper reads are optional, kept only because the older cases still set them.
  */
+interface AskFixture {
+  id: string
+  type: string
+  payload: Record<string, unknown>
+  resolvedBy: string | null
+  outcome: Record<string, unknown> | null
+  status?: string
+  decision?: string | null
+  policyId?: string | null
+  jobId?: string | null
+  expiresAt?: string | null
+}
 
 const budget = { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: '2026-10-01T00:00:00.000Z', spentUsd: '0.6000', amountUsd: '0.5000' }
 
-const approval = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprovalDto => ({
-  id, type: 'budget_override_required', status: 'pending', projectId: 'p1', jobId: null, policyId: 'pol1',
-  payload: { ...budget }, outcome: null, requestedAt: '2026-10-03T10:00:00.000Z', expiresAt: null, decision: null,
-  decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...over,
+const approval = (id: string, over: Partial<AskFixture> = {}): AskFixture => ({
+  id, type: 'budget_override_required', payload: { ...budget }, resolvedBy: null, outcome: null, ...over,
 })
 
 describe('budgetPayload', () => {
   test('reads a budget payload', () => {
     expect(budgetPayload(approval('a'))).toEqual(budget)
   })
+  // US-007 AC-2: the engine freezes the ask input under the plain-object discriminator `budget_override`, so the
+  // helper reads that one too — it answers the same BudgetApprovalPayload it answered before the type change.
+  test('AC-2: reads a plain-object budget_override input', () => {
+    const payload = {
+      scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc',
+      windowStart: '2026-11-01T00:00:00.000Z', spentUsd: '12.0000', amountUsd: '10.0000',
+    }
+    expect(budgetPayload({ type: 'budget_override', payload })).toEqual({
+      scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc',
+      windowStart: '2026-11-01T00:00:00.000Z', spentUsd: '12.0000', amountUsd: '10.0000',
+    })
+  })
   test('null for a bash approval and for a malformed budget payload (Review Focus 5)', () => {
     expect(budgetPayload(approval('a', { type: 'nax_bash_escalate', payload: { command: 'ls' } }))).toBeNull()
     expect(budgetPayload(approval('a', { payload: { ...budget, spentUsd: 0.6 } }))).toBeNull()
     expect(budgetPayload(approval('a', { payload: { ...budget, scopeType: 'galaxy' } }))).toBeNull()
+  })
+  test('a payload that is not an object reads as no ask, never as a throw (US-007 narrowing)', () => {
+    expect(budgetPayload({ type: 'budget_override', payload: null })).toBeNull()
+    expect(budgetPayload({ type: 'budget_override_required', payload: ['p1'] })).toBeNull()
+    expect(bashPayload({ type: 'nax_bash_escalate', payload: 'nope' })).toBeNull()
+    expect(deliveryView({ type: 'nax_bash_escalate', resolvedBy: 'user', outcome: 'ok' })).toEqual({ state: 'waiting' })
   })
   test('a missing scopeId reads as null', () => {
     const withoutScopeId = { scopeType: 'global', windowKind: budget.windowKind, windowStart: budget.windowStart, spentUsd: budget.spentUsd, amountUsd: budget.amountUsd }
@@ -71,7 +102,7 @@ const bashFields = (over: Record<string, unknown> = {}): Record<string, unknown>
   storyId: 'US-001', featureName: 'login', reason: 'not covered by the stage grants', options: ['allow', 'allow-remember', 'deny'],
   ...over,
 })
-const bashRow = (over: Partial<FleetApprovalDto> = {}, payload: Record<string, unknown> = {}): FleetApprovalDto =>
+const bashRow = (over: Partial<AskFixture> = {}, payload: Record<string, unknown> = {}): AskFixture =>
   approval('b1', { type: 'nax_bash_escalate', policyId: null, jobId: 'j1', payload: bashFields(payload), expiresAt: '2026-10-03T10:10:00.000Z', ...over })
 
 describe('bashPayload (D289, Review Focus 1)', () => {
@@ -142,7 +173,7 @@ describe('countdown (D292)', () => {
 })
 
 describe('deliveryView (D294, Review Focus 3)', () => {
-  const decided = (outcome: Record<string, unknown> | null, resolvedBy: FleetApprovalDto['resolvedBy'] = 'user') =>
+  const decided = (outcome: Record<string, unknown> | null, resolvedBy: AskFixture['resolvedBy'] = 'user') =>
     bashRow({ status: 'approved', decision: 'allow', resolvedBy, outcome })
   test('no ack yet reads as waiting', () => {
     expect(deliveryView(decided(null))).toEqual({ state: 'waiting' })

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
+import type { AgentPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { ApprovalGate } from '../../../src/approvals/approval-gate.service';
 import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command.registry';
+import { ApprovalMcpTools } from '../../../src/approvals/mcp/approval-mcp-tools';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { configurableTestCommand } from '../../../src/approvals/test-helpers/test-approval-command';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
@@ -56,6 +58,24 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(answer.result.tools.slice(-2).map((tool: { name: string }) => tool.name)).toEqual(['koda_list_approvals', 'koda_decide_approval']);
     expect(new Set(answer.result.tools.map((tool: { name: string }) => tool.name)).size).toBe(answer.result.tools.length);
     expect(answer.result.tools.filter((tool: { name: string }) => tool.name === 'koda_list_approvals')).toHaveLength(1);
+  });
+  it('AC-11 (US-004): tools/list answers exactly one koda_list_approvals, described by the approval MCP tool', async () => {
+    // The agent holds the key the tool is gated by, so neither an alias nor a second descriptor of the same name
+    // can appear. US-013 retired `fleet.approval.read`: a role still naming it is dropped whole, so holding it here
+    // would deny the agent `project.read` too.
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read'], projectId);
+    await app.get(PermissionCache, { strict: false }).invalidate();
+
+    const listed = (await rpc('tools/list')).result.tools as Array<{ name: string; description: string }>;
+
+    expect(listed.filter((tool) => tool.name === 'koda_list_approvals')).toHaveLength(1);
+    // Permissions P3 US-004: the fleet alias is gone; the name belongs to the approval engine alone.
+    expect(listed.map((tool) => tool.name)).not.toContain('koda_list_fleet_approvals');
+    const engine = app.get(ApprovalMcpTools, { strict: false })
+      .registrations({ id: agent.id } as AgentPrincipal)
+      .find((registration) => registration.name === 'koda_list_approvals');
+    expect(engine?.description).toBeDefined();
+    expect(listed.find((tool) => tool.name === 'koda_list_approvals')?.description).toBe(engine?.description);
   });
   it('AC-13: the opener reads its own P request through tools/call', async () => {
     const opened = await withTestActor({ type: 'AGENT', id: agent.id }, () => app.get(ApprovalGate, { strict: false })

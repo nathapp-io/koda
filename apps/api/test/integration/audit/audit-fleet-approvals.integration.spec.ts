@@ -27,8 +27,10 @@ describeIntegration('fleet approval audit rows (PG)', () => {
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
-  const project = '/api/projects/web/fleet/approvals';
-  const admin = '/api/fleet/approvals';
+  /** Permissions P3 7c US-008: the engine's decide route, with the fleet vocabulary mapped onto it. */
+  const decisions = '/api/approvals';
+  const decide = (id: string, token: string, body: Record<string, unknown>) =>
+    request(server).post(`${decisions}/${id}/decisions`).set(as(token)).send(body);
   const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
     data: { projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: `audit-ap-${++n}`, profiles: [], maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED', firstStartedAt: new Date(), ...over },
   });
@@ -83,7 +85,8 @@ describeIntegration('fleet approval audit rows (PG)', () => {
 
   it('AC-1/2: records keep-paused with actor, resource, summary and project; global scope is null', async () => {
     const { requestId } = await startPendingBudget();
-    await request(server).post(`${project}/${requestId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(200);
+    // `keep_paused` is the engine's `reject` (permissions P3 7c US-008).
+    await decide(requestId, padmin, { decision: 'reject' }).expect(200);
     const [entry] = await entries(requestId, 'approval.decide');
     expect(entry).toMatchObject({
       key: 'approval.decide', resourceType: 'approval-request', resourceId: requestId, actorType: 'USER', actorId: padminId,
@@ -91,14 +94,15 @@ describeIntegration('fleet approval audit rows (PG)', () => {
     });
 
     const global = await startPendingBudget('global');
-    await request(server).post(`${admin}/${global.requestId}/decide`).set(tok('root')).send({ decision: 'keep_paused' }).expect(200);
+    await decide(global.requestId, world.tokens.root, { decision: 'reject' }).expect(200);
     expect(await entries(global.requestId, 'approval.decide')).toHaveLength(1);
     expect((await entries(global.requestId, 'approval.decide'))[0]).toMatchObject({ projectId: null, summary: 'rejected fleet.budget.override' });
   });
 
   it('AC-3/4: raise-and-resume writes the engine decision, the command entry and the requeued job entry', async () => {
     const { requestId, queued } = await startPendingBudget();
-    await request(server).post(`${project}/${requestId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] }).expect(200);
+    // `raise_budget_and_resume` is the engine's approve with `{ amountUsd, requeueJobIds }` in `params`.
+    await decide(requestId, padmin, { decision: 'approve', params: { amountUsd: 25, requeueJobIds: [queued.id] } }).expect(200);
     expect(await entries(requestId, 'approval.decide')).toMatchObject([{ summary: 'approved fleet.budget.override' }]);
     expect(await entries(requestId, 'fleet.budget.override')).toMatchObject([{ summary: 'raised to 25 and resumed', projectId: world.projectId }]);
     expect(await entries(queued.id, 'fleet.job.requeue')).toHaveLength(1);
@@ -106,36 +110,40 @@ describeIntegration('fleet approval audit rows (PG)', () => {
     expect(await entries(requestId, 'fleet.approval.decide.budget')).toHaveLength(0);
   });
 
-  it('AC-5/7: refused budget and unauthorized bash decisions do not record', async () => {
+  it('AC-5/7: a refused repeat and an invisible bash ask record nothing', async () => {
     const { requestId } = await startPendingBudget();
-    await request(server).post(`${project}/${requestId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(200);
-    await request(server).post(`${project}/${requestId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(409);
+    await decide(requestId, padmin, { decision: 'reject' }).expect(200);
+    // The engine's not-pending refusal is `approvals.notPending` (409), not the adapter's error code.
+    await decide(requestId, padmin, { decision: 'reject' }).expect(409);
     expect(await entries(requestId, 'approval.decide')).toHaveLength(1);
 
     const { approvalId: bash } = await bashApproval();
-    await request(server).post(`${project}/${bash}/decide`).set(tok('viewer')).send({ decision: 'deny' }).expect(403);
+    // The engine answers a request the caller may neither see nor decide as missing (404), not as the adapter's 403.
+    await decide(bash, world.tokens.viewer, { decision: 'reject' }).expect(404);
     expect(await entries(bash, 'approval.decide')).toHaveLength(0);
     expect(await entries(bash, 'fleet.job.shell.escalate')).toHaveLength(0);
   });
 
-  it('AC-6/8/9/11: records a valid bash decision only; ended, expired and repeated asks add none', async () => {
+  it('AC-6/8/9/11: records each decision once; ended and expired asks answer nothing', async () => {
     const { approvalId: valid } = await bashApproval();
-    await request(server).post(`${project}/${valid}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(200);
+    await decide(valid, padmin, { decision: 'reject' }).expect(200);
     expect(await entries(valid, 'approval.decide')).toHaveLength(1);
     expect(await entries(valid, 'fleet.job.shell.escalate')).toMatchObject([{ summary: 'answered deny', projectId: world.projectId }]);
-    await request(server).post(`${project}/${valid}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(409);
+    await decide(valid, padmin, { decision: 'reject' }).expect(409);
     expect(await entries(valid, 'approval.decide')).toHaveLength(1);
 
-    // The engine records the decision, but the job had ended: the command answers nothing, so no answer audit.
+    // The engine records the decision (200, the request settles `rejected`), but the job had ended: the command
+    // answers nothing, so there is no answer audit and the link says why.
     const { approvalId: ended, running: endedJob } = await bashApproval();
     await prisma.fleetJob.update({ where: { id: endedJob.id }, data: { state: 'UPLOADING' } });
-    await request(server).post(`${project}/${ended}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(409);
+    await decide(ended, padmin, { decision: 'reject' }).expect(200);
+    expect(await entries(ended, 'approval.decide')).toHaveLength(1);
     expect(await entries(ended, 'fleet.job.shell.escalate')).toHaveLength(0);
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: ended } })).resolvedBy).toBe('job_ended');
 
     // An ask that expired before the decide wrote nothing at all: the decision never reached the engine.
     const { approvalId: expired } = await bashApproval({ expiresAt: new Date(Date.now() - 1_000) });
-    await request(server).post(`${project}/${expired}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(409);
+    await decide(expired, padmin, { decision: 'reject' }).expect(409);
     expect(await entries(expired, 'approval.decide')).toHaveLength(0);
     expect(await entries(expired, 'fleet.job.shell.escalate')).toHaveLength(0);
   });

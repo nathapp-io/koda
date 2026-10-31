@@ -1,19 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
-import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import type { ApprovalDecisionRecord } from '../../approvals/domain/approval.domain';
 import type { FleetActorType } from '../../common/enums';
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
-import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import type { ApprovalOption } from '../common/protocol';
 import { responsibleUserOf } from '../common/responsible-user';
 import { SYSTEM_ACTOR } from '../common/system-actor';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
-import { ApprovalLivePublisher } from './approval-live.publisher';
-import { approvalActivityPayload, approvalWebhookPayload } from './approval-payloads';
+import { approvalActivityPayload } from './approval-payloads';
 import { checkBashDecision } from './bash-decision';
 import {
   ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord,
@@ -29,7 +25,6 @@ export interface ApprovalActor { type: FleetActorType; id: string; responsibleUs
  */
 export interface ApprovalChange {
   approval: FleetApprovalRecord | null;
-  live: LiveFleetApprovalEvent[];
   answer?: { naxAskId: string; choice: ApprovalOption };
 }
 export interface PolicyClose {
@@ -118,15 +113,12 @@ export class ApprovalCloser {
     private readonly store: FleetApprovalAskStore,
     private readonly askService: ApprovalAskService,
     private readonly activity: FleetActivityService,
-    private readonly webhooks: WebhookDispatcherService,
-    private readonly livePublisher: ApprovalLivePublisher,
-    private readonly outbox: OutboxService,
     private readonly audit: AuditRecorder,
   ) {}
 
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
     const system = systemActor(policy);
-    const stray = await this.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: system }, now);
+    await this.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: system }, now);
     // Permissions P3 US-007: the ask is the engine's, so it expires with the policy timeout (24 h without one) and a
     // decider works the policy through the registered `fleet.budget.override` command.
     const outcome = await this.askService.open({
@@ -152,9 +144,7 @@ export class ApprovalCloser {
     const view = await this.store.findApproval(requestId);
     if (view === null) throw new Error(`fleet budget ask ${requestId} has no ask link`);
     await this.record(view, system, 'approval.requested');
-    await this.dispatch(view, 'fleet.approval.requested');
-    await this.enqueueRequested(view);
-    return { approval: view, live: [...stray.live, ...this.livePublisher.event(view)] };
+    return { approval: view };
   }
 
   /**
@@ -178,41 +168,39 @@ export class ApprovalCloser {
    * the reason of whichever policy action ran last.
    */
   async closeForPolicy(policyId: string, close: PolicyClose, now: Date, limit = MAX_ASKS_CLOSED_PER_CALL): Promise<ApprovalChange> {
-    const live: LiveFleetApprovalEvent[] = [];
     let first: FleetApprovalRecord | null = null;
     // The whole close, not just its reason: a leftover must keep the actor (attribution) and the outcome (a resume's
     // amount, its re-queues and the resumer) that this action chose.
     const pending = await this.store.markPendingPolicyAsks(policyId, persistedClose(close));
-    if (pending === 0) return { approval: null, live };
+    if (pending === 0) return { approval: null };
 
     let after: string | undefined;
     let processed = 0;
     while (processed < limit) {
       const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
       const links = await this.store.findPendingForPolicyPage(policyId, after, take);
-      if (links.length === 0) return { approval: first, live };
+      if (links.length === 0) return { approval: first };
       for (const link of links) {
         const closed = await this.closePolicyAsk(link.requestId, owedClose(link, close), now);
         if (closed.approval === null) continue;
         first ??= closed.approval;
-        live.push(...closed.live);
       }
       processed += links.length;
       const next = links.at(-1);
-      if (links.length < take || next === undefined) return { approval: first, live };
+      if (links.length < take || next === undefined) return { approval: first };
       after = next.requestId;
     }
     this.logger.warn(`Policy ${policyId}: close stopped at ${limit} asks; the continuation sweeper drains the rest`);
-    return { approval: first, live };
+    return { approval: first };
   }
 
   /**
-   * One policy ask, in the caller's transaction. Answers `{ approval: null, live: [] }` when the engine skipped it
+   * One policy ask, in the caller's transaction. Answers `{ approval: null }` when the engine skipped it
    * (the request is held); the intent stamped by `closeForPolicy` keeps it in the sweeper's queue.
    */
   async closePolicyAsk(requestId: string, close: PolicyClose, now: Date): Promise<ApprovalChange> {
     const closed = await this.askService.close(requestId, { status: 'cancelled', reason: close.resolvedBy }, now);
-    if (closed === null) return { approval: null, live: [] };
+    if (closed === null) return { approval: null };
 
     await this.store.setResolvedBy(requestId, close.resolvedBy);
     if (close.outcome !== undefined) {
@@ -224,13 +212,12 @@ export class ApprovalCloser {
     }
     const view = await this.store.findApproval(requestId);
     if (view === null) throw new Error(`Fleet ask ${requestId} closed ${close.resolvedBy} but has no view`);
-    return { approval: view, live: await this.recordResolved(view, close.actor) };
+    await this.recordResolved(view, close.actor);
+    return { approval: view };
   }
 
-  async recordResolved(approval: FleetApprovalRecord, actor: ApprovalActor): Promise<LiveFleetApprovalEvent[]> {
+  async recordResolved(approval: FleetApprovalRecord, actor: ApprovalActor): Promise<void> {
     await this.record(approval, actor, closedAction(approval));
-    await this.dispatch(approval, 'fleet.approval.resolved');
-    return this.livePublisher.event(approval);
   }
 
   /**
@@ -240,12 +227,12 @@ export class ApprovalCloser {
    */
   async openBash(job: BashJob, ask: BashAsk, runnerId: string, now: Date): Promise<ApprovalChange> {
     const existing = await this.store.findByAsk(job.id, job.leaseEpoch, ask.naxAskId);
-    if (existing) return { approval: await this.store.findApproval(existing.ask.requestId), live: [] };
+    if (existing) return { approval: await this.store.findApproval(existing.ask.requestId) };
 
     const reason = notOpenedReason(job, ask, now);
     if (reason !== null) {
       await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `bash ask not opened: ${reason}` });
-      return { approval: null, live: [] };
+      return { approval: null };
     }
 
     // Plan D263 / P3: the engine's own timeout never outlasts nax's deadline. A policy with a shorter `timeoutSec`
@@ -264,7 +251,7 @@ export class ApprovalCloser {
     if (outcome.status === 'not-needed') {
       const choice: ApprovalOption = checkBashDecision(ask.payload, 'allow').ok ? 'allow' : 'deny';
       await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `bash ask answered ${choice}: no approval needed` });
-      return { approval: null, live: [], answer: { naxAskId: ask.naxAskId, choice } };
+      return { approval: null, answer: { naxAskId: ask.naxAskId, choice } };
     }
 
     const requestId = outcome.request.id;
@@ -275,9 +262,7 @@ export class ApprovalCloser {
     if (view === null) throw new Error(`fleet bash ask ${requestId} has no ask link`);
     await this.record(view, runnerActor(runnerId, job), 'approval.requested');
     await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: view.id, projectId: view.projectId, summary: 'bash ask opened, pending' });
-    await this.dispatch(view, 'fleet.approval.requested');
-    await this.enqueueRequested(view);
-    return { approval: view, live: this.livePublisher.event(view) };
+    return { approval: view };
   }
 
   /**
@@ -295,22 +280,20 @@ export class ApprovalCloser {
     job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>,
     now: Date,
     limit = MAX_ASKS_CLOSED_PER_CALL,
-  ): Promise<LiveFleetApprovalEvent[]> {
-    const live: LiveFleetApprovalEvent[] = [];
+  ): Promise<void> {
     let after: string | undefined;
     let processed = 0;
     while (processed < limit) {
       const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
       const links = await this.store.findPendingForJobPage(job.id, after, take);
-      if (links.length === 0) return live;
-      for (const link of links) live.push(...(await this.closeJobAsk(job, link.requestId, now)).live);
+      if (links.length === 0) return;
+      for (const link of links) await this.closeJobAsk(job, link.requestId, now);
       processed += links.length;
       const next = links.at(-1);
-      if (links.length < take || next === undefined) return live;
+      if (links.length < take || next === undefined) return;
       after = next.requestId;
     }
     this.logger.warn(`Job ${job.id}: job-end close stopped at ${limit} asks; the rest is drained by the job-end sweeper`);
-    return live;
   }
 
   /** One job-end cancellation, in the caller's transaction; also used by the durable fair continuation. */
@@ -320,38 +303,18 @@ export class ApprovalCloser {
     now: Date,
   ): Promise<ApprovalChange> {
     const closed = await this.askService.close(requestId, { status: 'cancelled', reason: 'job_ended' }, now);
-    if (closed === null) return { approval: null, live: [] };
+    if (closed === null) return { approval: null };
     await this.store.setResolvedBy(requestId, 'job_ended');
     const view = await this.store.findApproval(requestId);
     if (view === null) throw new Error(`Fleet ask ${requestId} closed job_ended but has no view`);
-    return { approval: view, live: await this.recordResolved(view, jobSystemActor(job)) };
+    await this.recordResolved(view, jobSystemActor(job));
+    return { approval: view };
   }
 
   private record(approval: FleetApprovalRecord, actor: ApprovalActor, action: string, extra: Record<string, unknown> = {}): Promise<void> {
     return this.activity.record({
       actorType: actor.type, actorId: actor.id, action, entityType: 'approval', entityId: approval.id, jobId: approval.jobId,
       projectId: approval.projectId, responsibleUserId: actor.responsibleUserId, payload: approvalActivityPayload(approval, extra),
-    });
-  }
-
-  private async dispatch(approval: FleetApprovalRecord, event: string): Promise<void> {
-    if (!approval.projectId) return;
-    const slug = await this.store.findProjectSlug(approval.projectId);
-    if (slug) await this.webhooks.dispatch(approval.projectId, event, approvalWebhookPayload(approval, slug));
-  }
-
-  /**
-   * Enqueue every fresh project ask in the caller's transaction. Project live listeners may not
-   * have permission to decide this approval; notification consumers own recipient eligibility.
-   */
-  private async enqueueRequested(approval: FleetApprovalRecord): Promise<void> {
-    if (!approval.projectId) return;
-    const slug = await this.store.findProjectSlug(approval.projectId);
-    if (!slug) return;
-    await this.outbox.record({
-      type: 'fleet_approval_requested',
-      payload: approvalWebhookPayload(approval, slug),
-      metadata: { projectId: approval.projectId, eventId: approval.id },
     });
   }
 }

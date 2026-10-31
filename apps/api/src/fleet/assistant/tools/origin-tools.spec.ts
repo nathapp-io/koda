@@ -3,7 +3,7 @@ import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
 import type { ExtractionService } from '../../../memory/extraction.service';
 import type { MemoryWriteGuard } from '../../../memory/memory-write.guard';
-import type { ApprovalsService } from '../../approvals/approvals.service';
+import type { ApprovalRequestQueries } from '../../../approvals/approval-request.queries';
 import type { ToolContext } from '../assistant-tool.types';
 import { getActionTool } from './action-tools';
 import { addMemoryTool } from './add-memory-tool';
@@ -46,13 +46,21 @@ describe('origin-aware tools', () => {
       expect.objectContaining({ beforeSupersede: expect.any(Function) }),
     );
   });
-  it('AC-12: approvals use the project id only, for an agent and for a user actor', async () => {
+  it('AC-12: approvals read the engine as the actor principal, filtered to the thread project', async () => {
     const list = vi.fn(async () => ({ records: [], hasNext: false }));
-    const tool = listApprovalsTool({ list } as unknown as ApprovalsService);
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
     await tool.execute(context(), tool.parse({}));
-    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1' }, { status: 'pending' }, { current: 1, size: 20 });
-    const user = { id: 'u1' } as UserPrincipal;
+    expect(list).toHaveBeenLastCalledWith(
+      { type: 'AGENT', id: 'claude' },
+      { status: 'pending', projectId: 'p1' },
+      { current: 1, size: 20 },
+    );
+    const user = { actorType: 'user', id: 'u1' } as UserPrincipal;
     await tool.execute(context({ actor: user }), tool.parse({}));
-    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1' }, { status: 'pending' }, { current: 1, size: 20 });
+    expect(list).toHaveBeenLastCalledWith(
+      { type: 'USER', id: 'u1' },
+      { status: 'pending', projectId: 'p1' },
+      { current: 1, size: 20 },
+    );
   });
 });

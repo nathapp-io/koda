@@ -124,9 +124,9 @@ describe('job detail', () => {
     expect(timeline).toContain("case 'approval':")
   })
 
-  test('P3b US-007: live reloads follow both approval notices; onFleetApproval stays until 7c', () => {
-    expect(liveHandlers(detail)).toContain('onFleetApproval: () => liveReload.trigger()')
+  test('P3b US-007: live reloads follow the engine approval notice; the fleet one is retired in 7c', () => {
     expect(liveHandlers(detail)).toContain('onApprovalRequest: () => liveReload.trigger()')
+    expect(liveHandlers(detail)).not.toContain('onFleetApproval')
   })
 
   test('S2a §4.2: Logs link, expired bundle, timeline log rows, and a list reload for a new attempt (D357)', () => {

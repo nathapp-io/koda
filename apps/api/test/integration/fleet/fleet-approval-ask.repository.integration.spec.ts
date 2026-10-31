@@ -33,6 +33,7 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     // later migrations add to ApprovalRequest too.
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
     await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
+    await applyMigration(scratch.db, '20261110090000_fleet_ask_drop_published_status');
     db = scratch.db;
     // The repository reads `prisma.client`, the transaction-aware proxy: route it through the real
     // transaction manager so `FOR UPDATE` runs inside a real PG transaction.
@@ -55,16 +56,11 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     expect(rows.map((r) => r.column_name)).toEqual(['pendingClose', 'recordedStatus']);
   });
 
-  it('F5 round 4: the shipped publication marker persists independently of recorded outputs', async () => {
+  it('persists the activity marker without a publication acknowledgement', async () => {
     const requestId = await request();
-    await repository.insert(ask(requestId, { naxAskId: 'published-marker' }));
-    await repository.setPublishedStatus(requestId, 'executed');
-    expect(await repository.findByRequest(requestId)).toMatchObject({ publishedStatus: 'executed', recordedStatus: null });
-    const indexes = await db.$queryRaw<Array<{ indexdef: string }>>`
-      SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'FleetApproval_updatedAt_id_idx'
-    `;
-    expect(indexes).toHaveLength(1);
-    expect(indexes[0]?.indexdef).toContain('USING btree ("updatedAt", id)');
+    await repository.insert(ask(requestId, { naxAskId: 'recorded-marker' }));
+    await repository.setRecordedStatus(requestId, 'executed');
+    expect(await repository.findByRequest(requestId)).toMatchObject({ recordedStatus: 'executed' });
   });
 
   it('F1 round 4: the shipped migration indexes the durable attempt order and unique tie-breaker', async () => {

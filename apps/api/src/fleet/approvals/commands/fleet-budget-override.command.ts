@@ -4,14 +4,12 @@ import { currentContext } from '../../../action-context/action-context';
 import type { ApprovalRequestRecord } from '../../../approvals/domain/approval.domain';
 import type { ApprovalCommand } from '../../../approvals/approval-command.registry';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
-import { committedEffect } from '../../../common/committed-effects';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { BudgetsService } from '../../budgets/budgets.service';
 import { BUDGET_REPOSITORY, type IBudgetRepository } from '../../budgets/domain/budget.domain';
 import { MAX_BUDGET_USD } from '../../budgets/dto/create-budget-policy.dto';
 import { FleetJobsService } from '../../jobs/fleet-jobs.service';
 import { ApprovalCloser, userActor } from '../approval-closer';
-import { ApprovalLivePublisher } from '../approval-live.publisher';
 import { MAX_REQUEUE_CANDIDATES, type RequeueCandidate } from '../domain/approval.domain';
 import { FleetApprovalAskStore } from '../fleet-approval-ask.store';
 import { budgetRouteOf, errorText } from '../fleet-ask-helpers';
@@ -47,8 +45,7 @@ const MAX_REQUEUE_ID_LENGTH = 64;
  * Permissions P3 US-005: approving a budget ask raises the policy and resumes it, then re-queues the
  * cancelled jobs the decider named. Registration lives in `ApprovalsModule.onModuleInit`.
  *
- * The supersede step (closing the policy's other pending ask) belongs to US-007, once the engine owns
- * `closeForPolicy`; `closer` and `live` are injected now so that story adds no constructor argument.
+ * The closer supersedes the policy's other pending asks on the engine in the execution transaction.
  */
 @Injectable()
 export class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInput, BudgetResult, BudgetDecision> {
@@ -60,7 +57,6 @@ export class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInpu
     private readonly jobs: FleetJobsService,
     private readonly asks: FleetApprovalAskStore,
     private readonly closer: ApprovalCloser,
-    private readonly live: ApprovalLivePublisher,
     private readonly audit: AuditRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
@@ -132,10 +128,9 @@ export class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInpu
     // Permissions P3 US-007: a hard stop that landed while this approve was executing opened a newer ask (its close
     // of the executing request was skipped by the lock rule). The raise answers the policy, so that ask is moot.
     // The executing request is `approved` by now, so it is never the one closed.
-    const closed = await this.closer.closeForPolicy(policy.id, {
+    await this.closer.closeForPolicy(policy.id, {
       status: 'cancelled', resolvedBy: 'superseded', actor: userActor(approverId),
     }, now);
-    committedEffect(() => this.live.publish(closed.live));
     await this.asks.setOutcome(requestId, { resumedAmountUsd, requeueResults: refusedResults(refused) });
     await this.audit.record({
       key: this.key, resourceType: 'fleet-approval', resourceId: requestId, projectId: policy.projectId,
@@ -195,7 +190,7 @@ function isDateText(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(new Date(value).getTime());
 }
 
-/** DTO parity (`decide-approval.dto.ts`): a finite amount above zero, at most `MAX_BUDGET_USD`, 4 dp. */
+/** A finite amount above zero, at most `MAX_BUDGET_USD`, with four decimal places of precision. */
 function isRaiseAmount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= MAX_BUDGET_USD &&
     Number(value.toFixed(4)) === value;

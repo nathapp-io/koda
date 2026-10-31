@@ -1,8 +1,9 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
+import type { AgentPrincipal, UserPrincipal } from '../../../auth/principal/koda-principal.types';
 import { FleetJobState } from '../../../common/enums';
+import { ApprovalRequestQueries } from '../../../approvals/approval-request.queries';
 import { AnalyticsService } from '../../analytics/analytics.service';
-import { ApprovalsService } from '../../approvals/approvals.service';
 import { FleetJobsService } from '../../jobs/fleet-jobs.service';
 import { LogReadService } from '../../logs/log-read.service';
 import { toEntry } from '../../logs/log-entry';
@@ -10,7 +11,7 @@ import { FleetLogExpiredException } from '../../logs/log-read.exceptions';
 import { RunnersService } from '../../runners/runners.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { ToolInputError, type ToolContext } from '../assistant-tool.types';
-import { KODA_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
+import { KODA_LIST_APPROVALS, KODA_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
 import {
   FleetTools, fleetSpendTool, getJobTool, jobLogExcerptTool, listApprovalsTool, listJobsTool, runnerStatusTool,
 } from './fleet-tools';
@@ -22,7 +23,7 @@ const TOOL_NAMES = [
 /** The parsers never touch a service, so the stubs only satisfy the DI graph. */
 const stubJobs = {} as FleetJobsService;
 const stubAnalytics = {} as AnalyticsService;
-const stubApprovals = {} as ApprovalsService;
+const stubQueries = {} as ApprovalRequestQueries;
 const stubRunners = {} as RunnersService;
 const stubLogs = {} as LogReadService;
 
@@ -44,7 +45,7 @@ function reasonOf(run: () => unknown): string {
 const jobs = () => listJobsTool(stubJobs);
 const getJob = () => getJobTool(stubJobs);
 const spend = () => fleetSpendTool(stubAnalytics);
-const approvals = () => listApprovalsTool(stubApprovals);
+const approvals = () => listApprovalsTool(stubQueries);
 const runners = () => runnerStatusTool(stubRunners);
 const logs = () => jobLogExcerptTool(stubLogs);
 
@@ -60,7 +61,7 @@ describe('fleet read tools (US-004)', () => {
         AssistantToolRegistry,
         { provide: FleetJobsService, useValue: stubJobs },
         { provide: AnalyticsService, useValue: stubAnalytics },
-        { provide: ApprovalsService, useValue: stubApprovals },
+        { provide: ApprovalRequestQueries, useValue: stubQueries },
         { provide: RunnersService, useValue: stubRunners },
         { provide: LogReadService, useValue: stubLogs },
       ],
@@ -109,7 +110,7 @@ describe('fleet read tools (US-004)', () => {
       koda_list_jobs: 'fleet.job.read',
       koda_get_job: 'fleet.job.read',
       koda_fleet_spend: 'fleet.analytics.read',
-      koda_list_approvals: 'fleet.approval.read',
+      koda_list_approvals: 'project.read',
       koda_runner_status: 'fleet.runner.read',
       koda_job_log_excerpt: 'fleet.job.logs.read',
     };
@@ -146,12 +147,31 @@ describe('fleet read tools (US-004)', () => {
     expect(reasonOf(() => spend().parse({ days: 3.5 }))).toBe('days');
   });
 
-  it('koda_list_approvals parse defaults to pending and refuses a status outside the enum', () => {
+  it('AC-5 (US-004): koda_list_approvals is gated by project.read, not the retired fleet approval read key', () => {
+    expect(approvals().key).toBe('project.read');
+  });
+
+  it('AC-6: koda_list_approvals parse defaults to pending and accepts every engine status', () => {
     expect(approvals().parse({})).toEqual({ status: 'pending', page: 1 });
+    expect(approvals().parse({ status: 'executed' })).toEqual({ status: 'executed', page: 1 });
     expect(approvals().parse({ status: 'approved', page: 3 })).toEqual({ status: 'approved', page: 3 });
-    for (const status of ['expired', 'cancelled', 'rejected']) expect(approvals().parse({ status })).toMatchObject({ status });
-    expect(reasonOf(() => approvals().parse({ status: 'open' }))).toBe('status');
+    for (const status of ['rejected', 'expired', 'cancelled', 'failed']) {
+      expect(approvals().parse({ status })).toMatchObject({ status });
+    }
     expect(reasonOf(() => approvals().parse({ page: 0 }))).toBe('page');
+  });
+
+  it('AC-7: koda_list_approvals parse refuses a status outside the engine enum with reason status', () => {
+    expect(reasonOf(() => approvals().parse({ status: 'decided' }))).toBe('status');
+    expect(reasonOf(() => approvals().parse({ status: 'open' }))).toBe('status');
+  });
+
+  it('AC-6 (descriptor): the descriptor advertises exactly the engine statuses and defaults to pending', () => {
+    const schema = KODA_LIST_APPROVALS.inputSchema as { properties?: Record<string, { enum?: string[] }> };
+    expect(schema.properties?.['status']?.enum).toEqual([
+      'pending', 'approved', 'rejected', 'expired', 'cancelled', 'executed', 'failed',
+    ]);
+    expect(KODA_LIST_APPROVALS.description).toContain('approval requests');
   });
 
   it('koda_runner_status parse takes no input', () => {
@@ -293,21 +313,80 @@ describe('fleet read tools execute (US-004)', () => {
     expect(content).toContain('totals.medianJobCostUsd: 0.7500');
   });
 
-  it('AC-8 (US-004): koda_list_approvals reads the project route with the project id only and reports the ids', async () => {
+  it('AC-3: koda_list_approvals runs a user actor as USER with the project filter and page 2', async () => {
+    const list = vi.fn(async () => ({ records: [], hasNext: false }));
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
+    const user = { actorType: 'user', id: 'user-1', name: 'dev', email: 'dev@koda.test' } as UserPrincipal;
+
+    await tool.execute(ctx({ actor: user }), tool.parse({ status: 'pending', page: 2 }));
+
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledWith(
+      { type: 'USER', id: 'user-1' },
+      { status: 'pending', projectId: 'project-1' },
+      { current: 2, size: 20 },
+    );
+  });
+
+  it('AC-4: koda_list_approvals runs an agent actor as AGENT, differing from the user call only in the principal', async () => {
+    const list = vi.fn(async () => ({ records: [], hasNext: false }));
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
+    const user = { actorType: 'user', id: 'user-1' } as UserPrincipal;
+    const agent = { actorType: 'agent', id: 'agent-1', slug: 'claude' } as AgentPrincipal;
+
+    await tool.execute(ctx({ actor: user }), tool.parse({ status: 'pending', page: 2 }));
+    await tool.execute(ctx({ actor: agent }), tool.parse({ status: 'pending', page: 2 }));
+
+    const [userCall, agentCall] = list.mock.calls as unknown as [unknown[], unknown[]];
+    expect(agentCall?.[0]).toEqual({ type: 'AGENT', id: 'agent-1' });
+    // The filter and the page are the user call's, untouched: only the principal type and id differ.
+    expect(agentCall?.slice(1)).toEqual(userCall?.slice(1));
+  });
+
+  it('AC-8: koda_list_approvals answers a line per request as id, permission key, status and createdAt', async () => {
     const list = vi.fn(async () => ({
-      records: [{ id: 'approval-1', type: 'nax_bash_escalate', status: 'pending', jobId: 'job-1', requestedAt: '2026-10-14T00:00:00.000Z' }],
+      records: [
+        { id: 'req-1', permissionKey: 'fleet.job.shell.escalate', status: 'pending', createdAt: new Date('2026-10-14T00:00:00.000Z') },
+        { id: 'req-2', permissionKey: 'ticket.delete', status: 'pending', createdAt: new Date('2026-10-13T00:00:00.000Z') },
+      ],
+      hasNext: false,
+    }));
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
+
+    const content = await tool.execute(ctx(), tool.parse({}));
+
+    expect(content.split('\n')).toEqual([
+      'req-1 fleet.job.shell.escalate pending 2026-10-14T00:00:00.000Z',
+      'req-2 ticket.delete pending 2026-10-13T00:00:00.000Z',
+    ]);
+  });
+
+  it('AC-8: koda_list_approvals answers no approvals for an empty page', async () => {
+    const tool = listApprovalsTool({ list: vi.fn(async () => ({ records: [], hasNext: false })) } as unknown as ApprovalRequestQueries);
+
+    expect(await tool.execute(ctx(), tool.parse({}))).toBe('no approvals');
+  });
+
+  it('AC-9: koda_list_approvals ends a full first page with the next-page line for page 2', async () => {
+    const list = vi.fn(async () => ({
+      records: [{ id: 'req-1', permissionKey: 'ticket.delete', status: 'pending', createdAt: new Date('2026-10-14T00:00:00.000Z') }],
       hasNext: true,
     }));
-    const tool = listApprovalsTool({ list } as unknown as ApprovalsService);
-    // A user actor that still carries a legacy projectRole: the route must not copy it.
-    const user = { actorType: 'user', id: 'dev-1', projectRole: 'DEVELOPER' } as ToolContext['actor'];
-    const content = await tool.execute(ctx({ actor: user }), tool.parse({}));
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
 
-    expect(list).toHaveBeenCalledWith({ kind: 'project', projectId: 'project-1' }, { status: 'pending' }, { current: 1, size: 20 });
-    // Exactly two fields: a route that happens to carry a role as well would pass the call assertion above.
-    expect(Object.keys(list.mock.calls[0]?.[0] as object).sort()).toEqual(['kind', 'projectId']);
-    expect(content).toContain('approval-1 nax_bash_escalate pending job-1 2026-10-14T00:00:00.000Z');
+    const content = await tool.execute(ctx(), tool.parse({}));
+
     expect(content.split('\n').at(-1)).toBe('more: call koda_list_approvals with page 2');
+  });
+
+  it('AC-9: koda_list_approvals adds no next-page line on the last page', async () => {
+    const list = vi.fn(async () => ({
+      records: [{ id: 'req-1', permissionKey: 'ticket.delete', status: 'pending', createdAt: new Date('2026-10-14T00:00:00.000Z') }],
+      hasNext: false,
+    }));
+    const tool = listApprovalsTool({ list } as unknown as ApprovalRequestQueries);
+
+    expect(await tool.execute(ctx(), tool.parse({ page: 3 }))).not.toContain('more: call');
   });
 
   it('koda_runner_status reads the first 50 and fences the runner-supplied name and labels', async () => {

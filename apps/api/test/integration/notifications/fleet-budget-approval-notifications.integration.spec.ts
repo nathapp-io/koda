@@ -12,8 +12,10 @@ import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -26,6 +28,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   let world: FleetHttpWorld;
   let evaluator: BudgetEvaluator;
   let publisher: FanOutPublisher;
+  let relay: OutboxRelay;
   let n = 0;
 
   const policy = (over: Partial<Prisma.BudgetPolicyUncheckedCreateInput> = {}) => prisma.budgetPolicy.create({
@@ -58,6 +61,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     // whose `system.budget.window-reset` key makes the budget component the actor.
     evaluator = asTestActor(app.get(BudgetEvaluator), { type: 'SYSTEM', id: 'budget' });
     publisher = app.get(FanOutPublisher);
+    relay = app.get(OutboxRelay, { strict: false });
   });
   afterAll(async () => {
     await app.close();
@@ -110,25 +114,52 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     expect(await events('fleet_approval_requested')).toHaveLength(0);
   });
 
-  it('hard stop: the override ask reaches every global admin while pending, and a settled ask notifies nobody', async () => {
+  it('hard stop: the override ask reaches every global admin through the engine, and a settled ask notifies nobody', async () => {
     const p = await policy({ hardStop: true });
     await spent(12);
     await evaluator.evaluate(p.id);
 
     // Permissions P3 US-007: the ask is an `ApprovalRequest`, and the announcement is keyed by its id.
-    const [row] = await events('fleet_approval_requested');
-    const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: row.eventId } });
+    const secondAdmin = await prisma.user.create({ data: { email: 'budget-admin2@koda.test', passwordHash: 'x' } });
+    await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
+    await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+    // Permissions P3 7c US-002: the fleet's own `fleet_approval_requested` announcement is deleted, so the engine's
+    // `approval_request_changed` is the only event of the ask.
+    const link = await prisma.fleetApprovalAsk.findFirstOrThrow({ where: { budgetPolicyId: p.id } });
+    const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: link.requestId } });
+    expect(await events('fleet_approval_requested')).toEqual([]);
     expect(ask).toMatchObject({ permissionKey: 'fleet.budget.override', status: 'pending', projectId: world.projectId });
-    expect(row.projectId).toBe(world.projectId);
 
-    await deliver('fleet_approval_requested');
-    const pendingNote = (await notes(world.ids.root)).find((x) => x.kind === 'approval_requested');
-    expect(pendingNote).toMatchObject({ category: 'FLEET_NEEDS_YOU', link: '/admin/fleet/approvals', title: 'Approval needed: budget override on project WEB' });
+    // Leave only this approval event pending so the real outbox relay exercises its registered subscriber.
+    await prisma.outboxEvent.updateMany({
+      where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() },
+    });
+    const approvalEvent = await prisma.outboxEvent.findFirstOrThrow({
+      where: { type: 'approval_request_changed', eventId: { startsWith: ask.id } },
+    });
+    await prisma.outboxEvent.update({ where: { id: approvalEvent.id }, data: { status: 'pending', publishedAt: null } });
+    await relay.dispatchPendingBatch();
+    expect(await prisma.outboxEvent.findUniqueOrThrow({ where: { id: approvalEvent.id } })).toMatchObject({ status: 'published' });
+
+    // Exactly one notification per global admin: not one per notification family.
+    const engineNotes = await prisma.notification.findMany({
+      where: { sourceId: ask.id },
+    });
+    expect(engineNotes).toHaveLength(2);
+    expect(engineNotes.map((note) => [note.userId, note.kind]).sort()).toEqual(
+      [[world.ids.root, 'approval_request'], [secondAdmin.id, 'approval_request']].sort(),
+    );
+    expect(engineNotes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ link: `/approvals?id=${ask.id}`, params: { key: 'fleet.budget.override' } }),
+      expect.objectContaining({ link: `/approvals?id=${ask.id}`, params: { key: 'fleet.budget.override' } }),
+    ]));
 
     // An answered ask notifies nobody: the delivery re-reads the ask and acts only while it is pending.
     await prisma.notification.deleteMany();
     await prisma.approvalRequest.update({ where: { id: ask.id }, data: { status: 'executed', settledAt: new Date() } });
-    await deliver('fleet_approval_requested');
+    await prisma.outboxEvent.update({ where: { id: approvalEvent.id }, data: { status: 'pending', publishedAt: null } });
+    await relay.dispatchPendingBatch();
     expect(await notes(world.ids.root)).toEqual([]);
+    expect(await notes(secondAdmin.id)).toEqual([]);
   });
 });

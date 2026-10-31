@@ -79,14 +79,27 @@ describe('ApprovalRequestedSubscriber', () => {
     expect(findById).not.toHaveBeenCalled();
     expect(deliver).not.toHaveBeenCalled();
   });
-  it('AC-6: a pending fleet bash ask notifies nobody through the engine', async () => {
+  it('AC-7: a pending fleet bash ask notifies an eligible project decider', async () => {
+    findById.mockResolvedValue({ ...request, permissionKey: 'fleet.job.shell.escalate' });
+    principalIdsWithKey.mockResolvedValue(['u1']);
+    effectiveKeys.mockResolvedValue(new Set(['approval.decide', 'fleet.job.shell.escalate']));
     await handler({ ...payload, permissionKey: 'fleet.job.shell.escalate' });
-    expect(findById).not.toHaveBeenCalled();
-    expect(deliver).not.toHaveBeenCalled();
+    expect(findById).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(deliver).toHaveBeenCalledExactlyOnceWith([{
+      ...draft, title: 'Approval needed: fleet.job.shell.escalate', params: { key: 'fleet.job.shell.escalate' },
+    }]);
   });
-  it('AC-7: a pending fleet budget ask notifies nobody through the engine', async () => {
-    await handler({ ...payload, permissionKey: 'fleet.budget.override' });
-    expect(findById).not.toHaveBeenCalled();
+  it('AC-8: a pending global budget ask notifies eligible global admins', async () => {
+    findById.mockResolvedValue({ ...request, projectId: null, permissionKey: 'fleet.budget.override' });
+    effectiveKeys.mockResolvedValue(new Set(['approval.decide', 'fleet.budget.override']));
+    await handler({ ...payload, projectId: null, permissionKey: 'fleet.budget.override' });
+    expect(findGlobalAdminIds).toHaveBeenCalledExactlyOnceWith();
+    expect(deliver).toHaveBeenCalledExactlyOnceWith([{
+      ...draft, projectId: null, title: 'Approval needed: fleet.budget.override', params: { key: 'fleet.budget.override' },
+    }]);
+  });
+  it('AC-9: executed fleet ask payloads do not deliver', async () => {
+    await handler({ ...payload, status: 'executed', permissionKey: 'fleet.job.shell.escalate' });
     expect(deliver).not.toHaveBeenCalled();
   });
   it('AC-8: a pending payload for a non-fleet key with one eligible user still delivers once', async () => {

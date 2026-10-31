@@ -28,10 +28,11 @@ interface Delivery { webhookId: string; event: string; payload: Record<string, u
   } });
   const deliveries = async (webhookId: string, requestId?: string) => {
     const rows = await db.outboxEvent.findMany({ where: { type: 'webhook_delivery', projectId: world.projectId }, orderBy: { createdAt: 'asc' } });
-    return rows.map(row => JSON.parse(row.payload) as Delivery).filter(body => body.webhookId === webhookId && (requestId === undefined || body.payload.requestId === requestId));
+    return rows.map(row => JSON.parse(row.payload) as Delivery).filter(body => body.webhookId === webhookId && (requestId === undefined || body.payload.requestId === requestId || body.payload.approvalId === requestId));
   };
-  const approve = (id: string, status = 200) => request(server()).post(`/api/approvals/${id}/decisions`)
-    .auth(world.tokens.root, { type: 'bearer' }).send({ decision: 'approve' }).expect(status);
+  const decide = (id: string, decision: 'approve' | 'reject' = 'approve', status = 200) => request(server()).post(`/api/approvals/${id}/decisions`)
+    .auth(world.tokens.root, { type: 'bearer' }).send({ decision }).expect(status);
+  const approve = (id: string, status = 200) => decide(id, 'approve', status);
   const waitPolicy = async (key: string) => {
     const policy = await seedWaitPolicy(db, key, world.projectId);
     await db.approvalPolicy.update({ where: { id: policy.id }, data: { mode: 'human' } });
@@ -100,9 +101,8 @@ interface Delivery { webhookId: string; event: string; payload: Record<string, u
     expect((await deliveries(hook.id, opened.id)).map(row => row.payload.status)).toEqual(['approved', 'executed']);
   });
 
-  it('AC-4: runner relay retains fleet requested and adds engine requested subscriptions', async () => {
-    const oldHook = await subscribe(['fleet.approval.requested']);
-    const hook = await subscribe(['approval.requested']);
+  it('US-005 AC-1: runner relay delivers approval.requested only, not fleet.approval.requested', async () => {
+    const hook = await subscribe(['fleet.approval.requested', 'fleet.approval.resolved', 'approval.requested', 'approval.resolved']);
     const runner = await enrollRunner(server(), world.tokens.root, `hooks-${randomUUID()}`);
     const sync = async (over: Partial<SyncRequest>) => data<SyncResponse>(await request(server()).post('/api/fleet/runner/sync')
       .auth(runner.apiKey, { type: 'bearer' }).send(syncBody({ protocolVersion: 2, ...over })).expect(200));
@@ -123,7 +123,35 @@ interface Delivery { webhookId: string; event: string; payload: Record<string, u
       const opened = await db.approvalRequest.findUniqueOrThrow({ where: { id: link.requestId } });
       expect(opened.status).toBe('pending');
       expect(await deliveries(hook.id, opened.id)).toEqual([expect.objectContaining({ event: 'approval.requested', payload: expect.objectContaining({ permissionKey: 'fleet.job.shell.escalate', status: 'pending' }) })]);
-      expect(await deliveries(oldHook.id)).toEqual([expect.objectContaining({ event: 'fleet.approval.requested' })]);
+    } finally {
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 3, type: 'state', payload: { to: 'UPLOADING' } }, { seq: 4, type: 'state', payload: { to: 'COMPLETED' } }] }] });
+    }
+  });
+
+  it('US-005 AC-2: rejecting a relayed bash ask delivers approval.resolved only, not fleet.approval.resolved', async () => {
+    const hook = await subscribe(['fleet.approval.requested', 'fleet.approval.resolved', 'approval.requested', 'approval.resolved']);
+    const runner = await enrollRunner(server(), world.tokens.root, `hooks-reject-${randomUUID()}`);
+    const sync = async (over: Partial<SyncRequest>) => data<SyncResponse>(await request(server()).post('/api/fleet/runner/sync')
+      .auth(runner.apiKey, { type: 'bearer' }).send(syncBody({ protocolVersion: 2, ...over })).expect(200));
+    await sync({ capabilities: { ...FLEET_CAPS, approvals: { relay: true } } });
+    const jobId = data<{ job: { id: string } }>(await request(server()).post('/api/projects/web/fleet/jobs').auth(world.tokens.dev, { type: 'bearer' })
+      .send({ repoId: world.repoId, command: 'RUN', feature: 'approval-webhooks-reject', maxCostUsd: 5, bashMode: 'escalate', pinnedRunnerId: runner.runnerId }).expect(201)).job.id;
+    const assign = (await sync({ freeSlots: 1 })).commands.find(command => command.type === 'ASSIGN' && command.jobId === jobId);
+    expect(assign).toBeDefined();
+    if (!assign) throw new Error('expected ASSIGN');
+    const leaseEpoch = assign.leaseEpoch;
+    try {
+      await sync({ commandAcks: [{ commandId: assign.commandId, leaseEpoch, result: 'ok' }], jobs: [{ jobId, leaseEpoch, events: [{ seq: 1, type: 'state', payload: { to: 'RUNNING' } }] }] });
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: {
+        naxAskId: 'ask-004b', deadlineAt: new Date(Date.now() + 300_000).toISOString(), command: 'bun run test', commandTruncated: false,
+        maskedCount: 0, root: '/work/repo', stage: 'execution', storyId: 'story', featureName: 'hooks', reason: 'ask rule', options: ['allow', 'deny'],
+      } }] }] });
+      const link = await db.fleetApprovalAsk.findFirstOrThrow({ where: { jobId } });
+      await decide(link.requestId, 'reject');
+      expect(await deliveries(hook.id, link.requestId)).toEqual([
+        expect.objectContaining({ event: 'approval.requested' }),
+        expect.objectContaining({ event: 'approval.resolved', payload: expect.objectContaining({ status: 'rejected' }) }),
+      ]);
     } finally {
       await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 3, type: 'state', payload: { to: 'UPLOADING' } }, { seq: 4, type: 'state', payload: { to: 'COMPLETED' } }] }] });
     }

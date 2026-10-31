@@ -2,11 +2,10 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCloser } from '../approvals/approval-closer';
-import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
@@ -26,7 +25,7 @@ export interface EvaluationResult {
 }
 
 const NOTHING = Object.freeze({
-  result: { warned: false, stopped: false }, live: [] as LiveFleetJobEvent[], approvalLive: [] as LiveFleetApprovalEvent[], wake: [] as string[],
+  result: { warned: false, stopped: false }, live: [] as LiveFleetJobEvent[], wake: [] as string[],
 });
 
 /**
@@ -47,7 +46,6 @@ export class BudgetEvaluator implements OnModuleDestroy {
     private readonly notifier: RunnerNotifier,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly approvals: ApprovalCloser,
-    private readonly approvalLive: ApprovalLivePublisher,
     private readonly incidents: BudgetIncidentRecorder,
     private readonly audit: AuditRecorder,
   ) {}
@@ -77,7 +75,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
 
   /** One policy under its row lock: a debounced signal and the sweep can run at once. */
   async evaluate(policyId: string, now = new Date()): Promise<EvaluationResult> {
-    const { result, live, approvalLive, wake } = await this.txManager.run(async () => {
+    const { result, live, wake } = await this.txManager.run(async () => {
       const policy = await this.repo.lockById(policyId);
       // A policy whose scope row is gone is ignored; the sweep deletes it (S1b §2.1).
       if (!policy || !(await this.repo.scopeExists(policy))) return NOTHING;
@@ -91,7 +89,6 @@ export class BudgetEvaluator implements OnModuleDestroy {
       return { result: { warned, stopped: true }, ...stop };
     });
     this.live.publish(live);
-    this.approvalLive.publish(approvalLive);
     for (const runnerId of new Set(wake)) this.notifier.notify(runnerId);
     return result;
   }
@@ -108,7 +105,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
 
   /** S1.5 plan D227: the approval is opened first so the incident carries its id. */
   private async hardStop(policy: BudgetPolicyRecord, start: Date, spent: string, now: Date)
-    : Promise<{ live: LiveFleetJobEvent[]; approvalLive: LiveFleetApprovalEvent[]; wake: string[] }> {
+    : Promise<{ live: LiveFleetJobEvent[]; wake: string[] }> {
     await this.repo.update(policy.id, { pausedAt: now, pausedWindowStart: start });
     const opened = await this.approvals.openBudget(policy, { windowStart: start, spentUsd: spent }, now);
     const approvalId = opened.approval?.id ?? null;
@@ -122,7 +119,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     await this.record('budget.hard_stop', policy, { spentUsd: spent, cancelledJobIds: cancel.cancelled, cancelRequestedJobIds: cancel.requested, approvalId });
     await runAsSystem('budget', () => this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: `hard stop: ${cancel.cancelled.length} cancelled, ${cancel.requested.length} cancel requested` }));
     if (inserted && policy.projectId) await this.webhooks.dispatch(policy.projectId, 'fleet.budget.hard_stop', budgetWebhookPayload(policy, spent, start));
-    return { live: cancel.live, approvalLive: opened.live, wake: cancel.wake };
+    return { live: cancel.live, wake: cancel.wake };
   }
 
   private record(action: string, policy: BudgetPolicyRecord, extra: Record<string, unknown>): Promise<void> {

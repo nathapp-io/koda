@@ -7,7 +7,6 @@ import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-re
 import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
 import { ApprovalCloser } from '../../../src/fleet/approvals/approval-closer';
 import { ApprovalJobEndSweeper, MAX_ASKS_PER_TICK } from '../../../src/fleet/approvals/approval-job-end.sweeper';
-import { ApprovalLivePublisher } from '../../../src/fleet/approvals/approval-live.publisher';
 import { FleetApprovalAskStore } from '../../../src/fleet/approvals/fleet-approval-ask.store';
 import { FLEET_JOB_REPOSITORY } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { fixtureDb } from '../../helpers/action-context';
@@ -198,7 +197,7 @@ describeDb('job-end continuation, expiry coordination and atomic audit (PG)', ()
     expect(await expiry().tick(due)).toEqual({ expired: 0, approved: 0, failed: 0 });
     // A new instance has no in-memory cursor; the database must carry the rotation past failed attempts.
     const restarted = new ApprovalJobEndSweeper(
-      get(FleetApprovalAskStore), get(FLEET_JOB_REPOSITORY), get(ApprovalCloser), get(ApprovalLivePublisher),
+      get(FleetApprovalAskStore), get(FLEET_JOB_REPOSITORY), get(ApprovalCloser),
       get(TRANSACTION_MANAGER), { sweepEnabled: false, approvalSweepMs: 15_000 }, audit,
     );
     await restarted.tick();
@@ -210,11 +209,10 @@ describeDb('job-end continuation, expiry coordination and atomic audit (PG)', ()
     expect(all.every((row) => row.status === 'cancelled' && (row.result as { closedBy?: string })?.closedBy === 'job_ended')).toBe(true);
   }, 120_000);
 
-  it('F2: a failed close audit rolls back request, link, activity and outbox, publishes nothing, and retries', async () => {
+  it('F2: a failed close audit rolls back request, link, activity and outbox, and retries', async () => {
     const { jobId, ids } = await pending(1);
     const audit = get<AuditRecorder>(AuditRecorder);
     const original = audit.record.bind(audit);
-    const publish = vi.spyOn(get<ApprovalLivePublisher>(ApprovalLivePublisher), 'publish');
     const failure = vi.spyOn(audit, 'record').mockImplementation(async (entry) => {
       if (entry.summary?.startsWith('job-ended close:')) throw new Error('audit unavailable');
       return original(entry);
@@ -225,12 +223,10 @@ describeDb('job-end continuation, expiry coordination and atomic audit (PG)', ()
     expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: ids[0] } })).resolvedBy).toBeNull();
     expect(await db.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(0);
     expect(await db.outboxEvent.count()).toBe(outboxBefore);
-    expect(publish).not.toHaveBeenCalled();
     failure.mockRestore();
     await sweeper().tick();
     expect((await status(ids))[0]?.status).toBe('cancelled');
     expect(await db.auditEntry.count({ where: { resourceId: jobId, summary: { startsWith: 'job-ended close:' } } })).toBe(1);
     expect(await db.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(1);
-    expect(publish).toHaveBeenCalledTimes(1);
   });
 });

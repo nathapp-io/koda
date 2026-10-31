@@ -1,11 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
-import { LiveModule } from '../../live/live.module';
-import { WebhookModule } from '../../webhook/webhook.module';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { ApprovalCloser } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FLEET_APPROVAL_ASK_REPOSITORY } from './domain/fleet-approval-ask.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 import { PrismaFleetApprovalAskRepository } from './prisma-fleet-approval-ask.repository';
@@ -16,12 +13,12 @@ import { PrismaFleetApprovalAskRepository } from './prisma-fleet-approval-ask.re
  * `ApprovalEngineModule` for `ApprovalAskService`; the legacy `FleetApproval` repository and its token are gone.
  */
 @Module({
-  imports: [PrismaModule, ApprovalEngineModule, LiveModule, FleetActivityModule, WebhookModule],
+  imports: [PrismaModule, ApprovalEngineModule, FleetActivityModule],
   providers: [
     PrismaFleetApprovalAskRepository, { provide: FLEET_APPROVAL_ASK_REPOSITORY, useExisting: PrismaFleetApprovalAskRepository },
-    ApprovalLivePublisher, ApprovalCloser, FleetApprovalAskStore,
+    ApprovalCloser, FleetApprovalAskStore,
   ],
   // Repositories stay module-private: the ask link table is published as the store service only.
-  exports: [FleetApprovalAskStore, ApprovalLivePublisher, ApprovalCloser],
+  exports: [FleetApprovalAskStore, ApprovalCloser],
 })
 export class ApprovalStoreModule {}

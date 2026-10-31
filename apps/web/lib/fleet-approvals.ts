@@ -6,7 +6,7 @@
  */
 import { isAboveSpend, parseAmount } from '~/lib/fleet-budgets'
 import { BUDGET_SCOPE_TYPES, BUDGET_WINDOW_KINDS } from '~/lib/fleet-types'
-import type { BudgetScopeType, BudgetWindowKind, FleetApprovalDto } from '~/lib/fleet-types'
+import type { BudgetScopeType, BudgetWindowKind } from '~/lib/fleet-types'
 
 /** Above this the header badge reads `99+`. */
 export const BADGE_CAP = 99
@@ -23,10 +23,22 @@ export interface BudgetApprovalPayload {
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 
+/** A payload arrives from the wire, so every reader narrows it here instead of trusting an obsolete DTO. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * The discriminators a budget ask is reached under: the retired fleet adapter's own type, which the engine budget
+ * panel still passes for its frozen input (`budgetAskOf`), and the engine's plain-object `budget_override` (US-007
+ * AC-2). Both carry the same six fields.
+ */
+const BUDGET_ASK_TYPES: readonly string[] = ['budget_override_required', 'budget_override']
+
 /** The budget payload, or null for another type or a payload that does not have the shape (Review Focus 5). */
-export function budgetPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): BudgetApprovalPayload | null {
-  if (a.type !== 'budget_override_required') return null
+export function budgetPayload(a: { type: string; payload: unknown }): BudgetApprovalPayload | null {
+  if (!BUDGET_ASK_TYPES.includes(a.type)) return null
   const p = a.payload
+  if (!isRecord(p)) return null
   const scopeId = p.scopeId ?? null
   if (!(BUDGET_SCOPE_TYPES as readonly unknown[]).includes(p.scopeType)) return null
   if (!(BUDGET_WINDOW_KINDS as readonly unknown[]).includes(p.windowKind)) return null
@@ -63,9 +75,10 @@ export interface BashApprovalPayload {
 const isOption = (value: unknown): value is ApprovalOption => (APPROVAL_OPTIONS as readonly unknown[]).includes(value)
 
 /** D289: the bash payload, or null for another type or a payload without the shape (only Deny is then offered). */
-export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): BashApprovalPayload | null {
+export function bashPayload(a: { type: string; payload: unknown }): BashApprovalPayload | null {
   if (a.type !== 'nax_bash_escalate') return null
   const p = a.payload
+  if (!isRecord(p)) return null
   const storyId = p.storyId ?? null
   const rawDetail = p.rawDetail ?? null
   if (!isString(p.command) || typeof p.commandTruncated !== 'boolean') return null
@@ -127,9 +140,11 @@ export type DeliveryView = { state: 'delivered' } | { state: 'failed'; detail: s
  * D294 (2a D268): the runner's ack of the answer, for a bash ask a user decided. Null where nothing was sent (a
  * timeout or job-end close, or a budget approval). An unknown stored shape reads as failed: never a false "delivered".
  */
-export function deliveryView(a: Pick<FleetApprovalDto, 'type' | 'resolvedBy' | 'outcome'>): DeliveryView | null {
+export function deliveryView(
+  a: { type: string; resolvedBy: string | null; outcome: unknown },
+): DeliveryView | null {
   if (a.type !== 'nax_bash_escalate' || a.resolvedBy !== 'user') return null
-  const raw = a.outcome?.delivery
+  const raw = isRecord(a.outcome) ? a.outcome.delivery : undefined
   if (raw === undefined || raw === null) return { state: 'waiting' }
   if (typeof raw !== 'object') return { state: 'failed', detail: null }
   const { result, detail } = raw as { result?: unknown; detail?: unknown }

@@ -30,8 +30,10 @@ describe('fleet jobs navigation', () => {
     expect(layout.indexOf('/fleet/schedules/`)')).toBeLessThan(layout.indexOf('if (path.startsWith(`/${project}/fleet/`)) {'))
   })
 
-  test('the approvals inbox has its own breadcrumb leaf (S1.5 1b D239)', () => {
-    expect(layout).toContain('if (path === `/${project}/fleet/approvals`) return t(\'fleet.approvals.title\')')
+  test('US-007: the retired /fleet/approvals page has no breadcrumb leaf left (S1.5 1b D239)', () => {
+    // The page is deleted, so the leaf would only dress up a 404: nothing names it any more.
+    expect(layout).not.toContain('/${project}/fleet/approvals')
+    expect(layout).not.toContain("t('fleet.approvals.title')")
   })
 
   test('a project link to /:project/fleet/analytics with BarChart3 for every member, and its breadcrumb leaf (S2b D399)', () => {

@@ -10,6 +10,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
@@ -120,7 +121,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     project.projectId = world.projectId;
     app.get(ProjectEventBus).subscribe(world.projectId, (e) => seen.push(e));
     await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['approval.requested', 'approval.resolved']) },
     });
   });
   afterAll(async () => {
@@ -163,9 +164,13 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     });
     // The pending open still announces the ask exactly as it did on the legacy row.
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: request.id, action: 'approval.requested', actorType: 'SYSTEM' } })).toBe(1);
-    expect(await hooks('fleet.approval.requested')).toBe(1);
-    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested', eventId: request.id } })).toBe(1);
-    expect(seen).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'fleet_approval', approvalId: request.id, status: 'pending' })]));
+    expect(await hooks('approval.requested')).toBe(1);
+    // Permissions P3 7c US-002: the fleet's own `fleet_approval_requested` announcement is gone; the engine's
+    // `approval_request_changed` (enqueued by `ApprovalRequestEvents.record`) is the only event of the ask.
+    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
+    await app.get(OutboxRelay).dispatchPendingBatch();
+    expect(seen).toContainEqual(expect.objectContaining({ type: 'approval_request', requestId: request.id, status: 'pending' }));
+    expect(seen.map(e => e.type)).not.toContain('fleet_approval');
   });
 
   it('AC-2: that hard stop stamps its incident with the request id', async () => {
@@ -287,7 +292,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(ask.id);
   });
 
-  it('AC-10: a global policy asks with no project and records no fleet_approval_requested event', async () => {
+  it('AC-10: a global policy asks with no project and records no announcement, webhook or live event', async () => {
     const policy = await globalPolicy();
     await job({ costSpentUsd: 10 });
 
@@ -297,7 +302,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect(request.projectId).toBeNull();
     expect(link.projectId).toBeNull();
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_approval_requested' } })).toBe(0);
-    expect(await hooks('fleet.approval.requested')).toBe(0);
+    expect(await hooks('approval.requested')).toBe(0);
     expect(seen).toEqual([]);
   });
 
@@ -325,7 +330,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
       withTestActor({ type: 'USER', id: world.ids.root }, () =>
         txManager.run(() => closer.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(world.ids.root) }, new Date()))));
 
-    expect(closed).toEqual({ approval: null, live: [] });
+    expect(closed).toEqual({ approval: null });
     expect(await requestOf(ask.id)).toMatchObject({ status: 'pending', result: null });
     expect((await linkOf(ask.id)).resolvedBy).toBeNull();
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: ask.id, action: 'approval.cancelled' } })).toBe(0);

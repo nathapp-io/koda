@@ -37,8 +37,6 @@ function build(action: Action, outcome: Outcome) {
   let committed = false;
   const observations: boolean[] = [];
   const evaluator = { signal: vi.fn(() => { observations.push(committed); }) };
-  const publisher = { publish: vi.fn(() => { observations.push(committed); }) };
-  const live = [{ id: 'event1', type: 'fleet_approval', projectId: 'p1', approvalId: 'f1', status: 'approved', at: now.toISOString() }];
   const repo = {
     create: vi.fn().mockResolvedValue(policy), lockById: vi.fn().mockResolvedValue(policy),
     update: vi.fn().mockResolvedValue({ ...policy, pausedAt: null }), delete: vi.fn().mockResolvedValue(undefined),
@@ -58,8 +56,8 @@ function build(action: Action, outcome: Outcome) {
   };
   const budgets = new BudgetsService(
     repo as never, evaluator as never, { record: vi.fn() } as never, tx as never,
-    { closeForPolicy: vi.fn().mockResolvedValue({ approval: null, live }) } as never,
-    publisher as never, { record: vi.fn() } as never,
+    { closeForPolicy: vi.fn().mockResolvedValue({ approval: null }) } as never,
+    { record: vi.fn() } as never,
   );
   const registry = new ApprovalCommandRegistry();
   new BudgetRouteCommands(registry, budgets, { forContext: vi.fn().mockResolvedValue(principal) } as never).onModuleInit();
@@ -75,7 +73,7 @@ function build(action: Action, outcome: Outcome) {
     { effectiveKeys: vi.fn().mockResolvedValue(new Set([request.permissionKey])) } as never,
     registry, { record: vi.fn() } as never, new AfterCommitService(),
   );
-  return { execution, evaluator, publisher, observations, repo, live, budgets };
+  return { execution, evaluator, observations, repo, budgets };
 }
 
 describe('budget command committed effects', () => {
@@ -93,22 +91,19 @@ describe('budget command committed effects', () => {
         // Prove the actual budget write ran before the simulated settlement/commit failure.
         expect(s.repo[action === 'resume' ? 'update' : action]).toHaveBeenCalledTimes(1);
         if (outcome === 'commit') {
-          expect(s.observations).toEqual([true]);
+          expect(s.observations).toEqual(action === 'create' || action === 'update' ? [true] : []);
           if (action === 'create' || action === 'update') {
             expect(s.evaluator.signal).toHaveBeenCalledExactlyOnceWith(['project:p1']);
-            expect(s.publisher.publish).not.toHaveBeenCalled();
           } else {
-            expect(s.publisher.publish).toHaveBeenCalledExactlyOnceWith(s.live);
             expect(s.evaluator.signal).not.toHaveBeenCalled();
           }
         } else {
           expect(s.observations).toEqual([]);
           expect(s.evaluator.signal).not.toHaveBeenCalled();
-          expect(s.publisher.publish).not.toHaveBeenCalled();
         }
       });
     }
-    it(`${action}: standalone service calls still publish after their own transaction`, async () => {
+    it(`${action}: standalone service effects follow their own transaction`, async () => {
       const s = build(action, 'commit');
       const route = { kind: 'project' as const, projectId: 'p1' };
       switch (action) {
@@ -117,7 +112,7 @@ describe('budget command committed effects', () => {
         case 'delete': await s.budgets.remove('a1', route, 'b1'); break;
         case 'resume': await s.budgets.resume('a1', route, 'b1', undefined); break;
       }
-      expect(s.observations).toEqual([true]);
+      expect(s.observations).toEqual(action === 'create' || action === 'update' ? [true] : []);
     });
   }
 });

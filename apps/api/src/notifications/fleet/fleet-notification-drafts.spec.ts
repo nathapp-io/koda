@@ -1,4 +1,4 @@
-import { approvalDrafts, budgetDrafts, healthDrafts, jobOutcomeDraft } from './fleet-notification-drafts';
+import { budgetDrafts, healthDrafts, jobOutcomeDraft } from './fleet-notification-drafts';
 
 describe('fleet notification drafts (S4a contract: kinds, links, params)', () => {
   const outcome = { jobId: 'j1', leaseEpoch: 2, projectId: 'p1', requestedById: 'u1', outcome: 'escalated' as const, repo: 'acme/app', feature: 'add', resultPrUrl: null };
@@ -20,15 +20,6 @@ describe('fleet notification drafts (S4a contract: kinds, links, params)', () =>
     const d = jobOutcomeDraft({ ...outcome, repo: `acme/${'x'.repeat(400)}` }, 'web');
     expect(d.title.length).toBeLessThanOrEqual(200);
     expect(d.title.endsWith('…')).toBe(true);
-  });
-
-  it('approval ask -> one draft per admin', () => {
-    const ds = approvalDrafts(['a1', 'a2'], { approvalId: 'ap1', projectId: 'p1', kindLabel: 'bash', repo: 'acme/app' });
-    expect(ds.map((d) => d.userId)).toEqual(['a1', 'a2']);
-    expect(ds[0]).toEqual({
-      userId: 'a1', projectId: 'p1', category: 'FLEET_NEEDS_YOU', kind: 'approval_requested', title: 'Approval needed: bash on acme/app',
-      body: null, link: '/admin/fleet/approvals', params: { repo: 'acme/app', kind: 'bash' }, sourceType: 'fleet_approval', sourceId: 'ap1', actorId: null,
-    });
   });
 
   it('budget incidents -> FLEET_HEALTH for admins, money shown with 2 decimals', () => {

@@ -84,6 +84,83 @@ describe('koda approval request commands', () => {
     await run('reject', 'r1');
     expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'reject' } });
   });
+  it('AC-1: approve choice sends engine params', async () => {
+    (approvalRequestsControllerDecide as jest.Mock).mockResolvedValue(ok(req()));
+    await run('approve', 'r1', '--choice', 'allow_for_job');
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledTimes(1);
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'approve', params: { choice: 'allow_for_job' } } });
+  });
+  it('AC-2: amount is sent as a JSON number', async () => {
+    (approvalRequestsControllerDecide as jest.Mock).mockResolvedValue(ok(req()));
+    await run('approve', 'r1', '--amount', '80');
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'approve', params: { amountUsd: 80 } } });
+  });
+  it('AC-3: amount and explicit requeue ids are sent in params', async () => {
+    (approvalRequestsControllerDecide as jest.Mock).mockResolvedValue(ok(req()));
+    await run('approve', 'r1', '--amount', '80.25', '--requeue', 'j1,j2');
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'approve', params: { amountUsd: 80.25, requeueJobIds: ['j1', 'j2'] } } });
+  });
+  it('AC-4: requeue all resolves candidates from approval details', async () => {
+    (approvalRequestsControllerGet as jest.Mock).mockResolvedValue(ok({ details: { requeueCandidates: [{ jobId: 'j1' }, { jobId: 'j3' }], requeueCandidatesTruncated: false } }));
+    (approvalRequestsControllerDecide as jest.Mock).mockResolvedValue(ok(req()));
+    await run('approve', 'r1', '--amount', '80', '--requeue', 'all');
+    expect(approvalRequestsControllerGet).toHaveBeenCalledWith({ path: { id: 'r1' } });
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'approve', params: { amountUsd: 80, requeueJobIds: ['j1', 'j3'] } } });
+  });
+  it('AC-5: truncated requeue all fails with show hint and does not decide', async () => {
+    (approvalRequestsControllerGet as jest.Mock).mockResolvedValue(ok({ details: { requeueCandidates: [], requeueCandidatesTruncated: true } }));
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await run('approve', 'r1', '--amount', '80', '--requeue', 'all');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(error.mock.calls.flat().join(' ')).toContain('koda approval show r1');
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it.each([null, {}])('AC-6: missing details candidates are rejected (%p)', async (details) => {
+    (approvalRequestsControllerGet as jest.Mock).mockResolvedValue(ok({ details }));
+    await run('approve', 'r1', '--amount', '80', '--requeue', 'all');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it.each(['0', '-1'])('AC-7: non-positive amount %s is rejected', async (amount) => {
+    await run('approve', 'r1', '--amount', amount);
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-8: amount with excess decimals is rejected', async () => {
+    await run('approve', 'r1', '--amount', '1.23456');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-9: unsupported choice is rejected', async () => {
+    await run('approve', 'r1', '--choice', 'deny');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-10: requeue without amount is rejected', async () => {
+    await run('approve', 'r1', '--requeue', 'j1');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-11: choice and amount cannot be combined', async () => {
+    await run('approve', 'r1', '--choice', 'allow', '--amount', '80');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-12: amount over the supported maximum is rejected', async () => {
+    await run('approve', 'r1', '--amount', '1000001');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-13: choice and requeue cannot be combined', async () => {
+    await run('approve', 'r1', '--choice', 'allow', '--requeue', 'j1');
+    expect(process.exit).toHaveBeenCalledWith(3);
+    expect(approvalRequestsControllerDecide).not.toHaveBeenCalled();
+  });
+  it('AC-14: approve without decision params omits params', async () => {
+    (approvalRequestsControllerDecide as jest.Mock).mockResolvedValue(ok(req()));
+    await run('approve', 'r1');
+    expect(approvalRequestsControllerDecide).toHaveBeenCalledWith({ path: { id: 'r1' }, body: { decision: 'approve' } });
+  });
   it('AC-12/13: cancel request and print status', async () => {
     (approvalRequestsControllerCancel as jest.Mock).mockResolvedValue(ok({ ...req(), status: 'cancelled' }));
     await run('cancel', 'r1');

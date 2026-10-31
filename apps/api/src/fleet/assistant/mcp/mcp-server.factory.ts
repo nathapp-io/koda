@@ -5,7 +5,7 @@ import { findCatalogEntry } from '../../../permissions/catalog';
 import type { PermissionService } from '../../../permissions/permission.service';
 import type { AssistantToolExecutor } from '../assistant-tool.executor';
 import type { AssistantToolRegistry } from '../assistant-tool.registry';
-import { assistantToolName, mcpToolDescriptors, toMcpToolResult } from './mcp-tool-catalog';
+import { mcpToolDescriptors, toMcpToolResult } from './mcp-tool-catalog';
 
 const logger = new Logger('McpServerFactory');
 
@@ -54,7 +54,7 @@ export async function visibleMcpToolNames(
   principal: AgentPrincipal,
 ): Promise<ReadonlySet<string>> {
   const descriptors = mcpToolDescriptors();
-  const tools = descriptors.map((descriptor) => deps.registry.get(assistantToolName(descriptor.name)));
+  const tools = descriptors.map((descriptor) => deps.registry.get(descriptor.name));
   const keys = [
     ...new Set(
       tools.flatMap((tool) =>
@@ -110,7 +110,7 @@ export function kodaMcpToolRegistrations(
         try {
           const result = await executor.executeFor(
             { principal, origin: { kind: 'mcp' }, disabled: false },
-            { name: assistantToolName(descriptor.name), input },
+            { name: descriptor.name, input },
           );
           return toMcpToolResult(result);
         } catch (error) {

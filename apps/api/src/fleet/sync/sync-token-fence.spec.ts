@@ -42,8 +42,8 @@ function harness() {
     inTransaction = true;
     try { return await fn(); } finally { inTransaction = false; }
   } });
-  const service = new SyncService(repo, createMock(), createMock<CommandAckProcessor>({ process: async () => ({ live: [], approvalLive: [] }) }),
-    createMock(), createMock(), createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
+  const service = new SyncService(repo, createMock(), createMock<CommandAckProcessor>({ process: async () => ({ live: [] }) }),
+    createMock(), createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
     createMock(), createMock(), tx, createMock(), createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }));
   const sync = (requests: unknown[] = [request]) => service.sync('runner1', { ...base, tokenRequests: requests });
   return { repo, job, r1, broker, token, fence, sync };

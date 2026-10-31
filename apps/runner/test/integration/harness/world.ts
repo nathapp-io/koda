@@ -21,6 +21,7 @@ import { startApi, type RunningApi } from './api-process';
 import { assertPartialIndex, prepareDatabase, runnerTestDatabaseUrl } from './database';
 import { startGitFront, type PushHold } from './git-front';
 import { HARNESS_TOKEN, startForge, type Forge } from './forge';
+import { decideApproval, listJobApprovals } from './approval-routes';
 
 const PASSWORD = 'Admin1234!Aa';
 /** The admin `createWorld` registers; S2a slice 2's live check prints it for a manual look at the web viewer. */
@@ -243,11 +244,10 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
       if (res.status !== 200) throw new Error(`cancel failed: ${JSON.stringify(res.body)}`);
     },
     async approvals(jobId) {
-      const res = await http('GET', `/fleet/approvals?jobId=${encodeURIComponent(jobId)}`, { token: admin });
-      return (res.body as { data: { records: Array<{ id: string; status: string; resolvedBy: string | null; outcome: Record<string, unknown> | null }> } }).data.records;
+      return listJobApprovals((method, path, options) => http(method, path, { ...options, token: admin }), jobId);
     },
     async decide(approvalId, decision) {
-      return (await http('POST', `/fleet/approvals/${approvalId}/decide`, { token: admin, body: { decision } })).status;
+      return decideApproval((method, path, options) => http(method, path, { ...options, token: admin }), approvalId, decision);
     },
     async downloadBundle(id) {
       const res = await fetch(`${api.url}/api/projects/web/fleet/jobs/${id}/bundle`, { headers: { authorization: `Bearer ${admin}` } });
