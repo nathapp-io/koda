@@ -44,10 +44,13 @@ and the approver as separate fields; the reviewer never writes memory itself.
 3. **Artifact checks.** The PR number comes from `prNumberOfReviewFeature(job.feature)`. The artifact must parse
    as JSON with `version` 1, 2 or 3, `pr.number` equal to that PR number, and a boolean `trusted`; otherwise it
    is `invalid` (reason `artifact-invalid`) and no rows are written. A missing `events` field means no events.
-   Events whose `type` is not `finding-withdrawn` are ignored. A `finding-withdrawn` event needs string `key`
-   (1..200 chars), `threadId` (1..200 chars), `finding`, `reason`, and a `disagreedBy` array of strings; an event
+   Events whose `type` is not `finding-withdrawn` are ignored. A `finding-withdrawn` event needs a `key` matching
+   nax's finding-key format `^f-[0-9a-f]{8,64}$` (nax `findingKey`: `f-` plus a sha256 hex prefix), `threadId`
+   (1..200 chars), `finding`, `reason`, and a `disagreedBy` array of strings; an event
    missing one is dropped. `file` (string) and `line` (positive integer) are optional; a wrongly typed optional
-   field is treated as absent. `finding` and `reason` are clipped to 1000 characters each. Logins that do not
+   field is treated as absent. In `finding` and `reason`, every control character (Unicode category Cc, which
+   includes newlines and tabs) becomes a space, then each is clipped to 1000 characters, so the text cannot fake
+   structure in a later review's decisions block. Logins that do not
    match `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$` are dropped, and `disagreedBy` keeps its first 10
    valid logins. At most 50 events per artifact are kept (the first 50).
 4. **When the ingest reads it.** Only for a `REVIEW` job whose state is `COMPLETED` at ingest time **and** whose
@@ -520,10 +523,10 @@ Workdir: apps/cli. Depends on US-008.
 
 ### US-001 — Read and parse the review artifact
 
-- `[unit]` `slotOf('nax-out/bot/pr-42/r1/bot-review.json')` returns `botReview`.
-- `[unit]` `slotOf('nax.stdout')` returns `naxStdout`.
-- `[unit]` `readBundleFiles` given a bundle whose `nax.stdout` is larger than `INGEST_LIMITS.fileBytes` returns an `oversized` list without `nax.stdout`.
-- `[unit]` `readBundleFiles` given a bundle whose `bot-review.json` is larger than `INGEST_LIMITS.fileBytes` returns an `oversized` list without that file.
+- `[unit]` `slotOf` maps `nax-out/bot/pr-42/r1/bot-review.json` to `botReview` and `nax.stdout` to `naxStdout`.
+- `[unit]` `readBundleFiles` given a bundle whose `nax.stdout` and `bot-review.json` are both larger than `INGEST_LIMITS.fileBytes` returns an empty `oversized` list.
+- `[unit]` `parseBotReview` given a `finding-withdrawn` event whose `key` is `review-pr-1` drops that event.
+- `[unit]` `parseBotReview` given a `finding-withdrawn` event whose `finding` is `a\nb\u0007c` returns that event with `finding` `a b c`.
 - `[unit]` `parseBotReview` given one `bot-review.json` for PR 42 with `version: 3`, `trusted: true` and one valid `finding-withdrawn` event returns `{ outcome: 'done', trusted: true, events: [<that event>] }`.
 - `[unit]` `parseBotReview` given `bot-review.json` files for runs `r1` and `r2` and a `nax.stdout` line `nax bot review: artifact /x/out/bot/pr-42/r2/bot-review.json` returns the events of run `r2`.
 - `[unit]` `parseBotReview` given two `bot-review.json` files and a `nax.stdout` without the success line returns `{ outcome: 'invalid', reason: 'artifact-ambiguous' }`.
