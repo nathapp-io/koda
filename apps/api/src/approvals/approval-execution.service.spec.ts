@@ -301,7 +301,7 @@ describe('ApprovalExecutionService', () => {
       return { owner: 'acme', name: 'app', defaultBranch: 'main', installationId: 1n };
     }) };
     const service = new FleetReposService(repo as never, github as never, {} as never, {} as never,
-      { record: vi.fn() } as never, s.tx as never, { record: vi.fn() } as never);
+      { record: vi.fn() } as never, s.tx as never, { record: vi.fn() } as never, { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
     new FleetRepoRouteCommands(s.registry, service, { forContext: async () => ({ id: 'a1' }) } as never).onModuleInit();
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
     expect(repo.create).toHaveBeenCalledTimes(operation === 'create' ? 1 : 0);

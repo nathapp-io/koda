@@ -21,11 +21,16 @@ export interface FleetRepoRecord {
   autoReviewEnabledAt: Date | null;
 }
 
+export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
+  'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'
+>>;
+
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
   create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
+  updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>;
   /**
    * The project's anchor repo (fleet S5b-R13): the smallest `createdAt`, ties broken by the smallest `id`; null when
    * the project has no fleet repo. A PROJECT thread uses it as bookkeeping only — no checkout, no git token.

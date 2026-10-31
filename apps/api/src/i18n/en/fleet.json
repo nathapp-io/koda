@@ -8,6 +8,7 @@
   "runnerBusy": { "409": "The runner has unfinished or pinned jobs; disable it instead" },
   "repoBusy": { "409": "The repository has unfinished jobs" },
   "repoCheck": { "422": "Repository check failed: {reason}" },
+  "autoReview": { "422": "Auto-review cannot be configured: {reason}." },
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "configRequeue": { "409": "This config edit failed with {outcome}; reopen the edits instead of requeueing" },

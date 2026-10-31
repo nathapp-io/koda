@@ -11,7 +11,7 @@ describe('FleetReposService', () => {
   const gitlabTokens = { resolve: vi.fn() };
   const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder);
+  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder, { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
 
   const created = (over = {}) => ({
     id: 'fr1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk',
