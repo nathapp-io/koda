@@ -3,7 +3,7 @@
   "feature": "fleet-pr-review",
   "branchName": "feat/fleet-pr-review",
   "createdAt": "2026-10-01T00:00:00.000Z",
-  "updatedAt": "2026-10-31T06:25:44.501Z",
+  "updatedAt": "2026-10-31T06:31:17.814Z",
   "userStories": [
     {
       "id": "US-001",
@@ -221,14 +221,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A central environment list, one per-call option and two bounded probe calls extend existing abstractions; credential sanitation and explicit identity overlays require strict security TDD despite the modest implementation scope."
+        "reasoning": "A central environment list, one per-call option and two bounded probe calls extend existing abstractions; credential sanitation and explicit identity overlays require strict security TDD despite the modest implementation scope.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/credentials/credential-env.ts",
@@ -252,7 +255,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ab53036574a39901b70a188cfa78b42096a2125b"
     },
     {
       "id": "US-005",
