@@ -17498,14 +17498,21 @@
           "command": {
             "enum": [
               "RUN",
-              "PLAN"
+              "PLAN",
+              "REVIEW"
             ],
             "type": "string"
           },
           "feature": {
             "type": "string",
             "maxLength": 128,
-            "description": "nax feature name"
+            "description": "nax feature name; derived from prNumber for REVIEW"
+          },
+          "prNumber": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "description": "Pull request number, REVIEW only"
           },
           "planFrom": {
             "type": "string",
@@ -17573,7 +17580,6 @@
         "required": [
           "repoId",
           "command",
-          "feature",
           "maxCostUsd"
         ]
       },

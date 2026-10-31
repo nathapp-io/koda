@@ -7,8 +7,10 @@ export class DispatchFleetJobDto {
   @ApiProperty() @IsString() @Length(1, 64) declare repoId: string;
   @ApiPropertyOptional({ description: 'Git ref to check out detached; defaults to the repo default branch' })
   @IsOptional() @IsString() @MaxLength(255) ref?: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN'] }) @IsIn(['RUN', 'PLAN']) declare command: 'RUN' | 'PLAN';
-  @ApiProperty({ description: 'nax feature name' }) @IsString() @MaxLength(128) declare feature: string;
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW'] }) @IsIn(['RUN', 'PLAN', 'REVIEW']) declare command: 'RUN' | 'PLAN' | 'REVIEW';
+  @ApiPropertyOptional({ description: 'nax feature name; derived from prNumber for REVIEW' }) @IsOptional() @IsString() @MaxLength(128) feature?: string;
+  @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, description: 'Pull request number, REVIEW only' })
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647) prNumber?: number;
   @ApiPropertyOptional({ description: 'Repo-relative spec path, PLAN only' }) @IsOptional() @IsString() @MaxLength(512) planFrom?: string;
   @ApiPropertyOptional({ type: [String], description: 'nax profile chain, later wins' })
   @IsOptional() @IsArray() @ArrayMaxSize(8) @IsString({ each: true }) @MaxLength(64, { each: true }) profiles?: string[];

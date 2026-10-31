@@ -13,6 +13,26 @@ describe('normalizeDispatch (spec §5.1)', () => {
     });
   });
 
+  it('normalizes REVIEW inputs from the PR number and default branch', () => {
+    expect(normalizeDispatch(dto({ command: 'REVIEW', feature: undefined, prNumber: 42 } as Partial<DispatchFleetJobDto>), 'main'))
+      .toEqual(expect.objectContaining({ command: 'REVIEW', feature: 'review-pr-42', ref: 'main', planFrom: null, bashMode: 'raw' }));
+  });
+
+  it.each([
+    ['missing PR number', { command: 'REVIEW', feature: undefined }, 'prNumber required for REVIEW'],
+    ['provided feature', { command: 'REVIEW', feature: 'something', prNumber: 42 }, 'feature is derived for REVIEW'],
+    ['planFrom', { command: 'REVIEW', feature: undefined, prNumber: 42, planFrom: 'docs/a.md' }, 'planFrom is only for PLAN'],
+    ['ref', { command: 'REVIEW', feature: undefined, prNumber: 42, ref: 'other' }, 'ref is the default branch for REVIEW'],
+    ['bash mode', { command: 'REVIEW', feature: undefined, prNumber: 42, bashMode: 'escalate' }, 'bashMode must be raw for REVIEW'],
+    ['ticket refs', { command: 'REVIEW', feature: undefined, prNumber: 42, ticketRefs: ['KD-1'] }, 'ticketRefs is not for REVIEW'],
+    ['missing RUN feature', { command: 'RUN', feature: undefined }, 'feature'],
+    ['reserved feature', { command: 'RUN', feature: 'review-pr-5' }, 'feature is reserved for REVIEW'],
+    ['PR number on RUN', { command: 'RUN', prNumber: 3 }, 'prNumber is only for REVIEW'],
+  ])('rejects %s', (_label, input, reason) => {
+    expect(() => normalizeDispatch(dto(input as Partial<DispatchFleetJobDto>), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason } }));
+  });
+
   it('keeps profile order and sorts/dedups labels', () => {
     const out = normalizeDispatch(dto({ profiles: ['b', 'a'], selectorLabels: ['linux', 'gpu', 'linux'] }), 'main');
     expect(out.profiles).toEqual(['b', 'a']);
