@@ -86,6 +86,8 @@ export interface RunnerCapabilities {
   projectCode?: true;
   /** Fleet S5b 1d: the runner hosts WORKSPACE threads with no checkout. Absent on older runners. */
   workspaceThreads?: true;
+  /** Fleet PR review: nax supports injected bot forge identity and `nax bot review`. */
+  botReview?: true;
 }
 
 export interface EnrollRequest {
@@ -118,7 +120,7 @@ export interface RunnerIdentity {
 export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
-export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD';
+export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD' | 'REVIEW';
 export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER' | ThreadCommandType;
 export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
@@ -253,6 +255,8 @@ export interface AssignPayload {
   gitIdentity: GitIdentity;
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
+  /** Fleet PR review: present only for REVIEW jobs. */
+  review?: { prNumber: number; botLogin: string };
   /** PLAN only: the branch the PRD must name (a thread PLAN). */
   expectBranch?: string;
 }

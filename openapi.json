@@ -17815,7 +17815,8 @@
               "PLAN",
               "CONFIG_EDIT",
               "CONFIG_DRIFT",
-              "THREAD"
+              "THREAD",
+              "REVIEW"
             ],
             "type": "string"
           },
@@ -18085,7 +18086,8 @@
               "threads_disabled",
               "thread_write",
               "project_threads",
-              "workspace_threads"
+              "workspace_threads",
+              "bot_review"
             ],
             "type": "string"
           }
@@ -20083,7 +20085,8 @@
               "threads_disabled",
               "thread_write",
               "project_threads",
-              "workspace_threads"
+              "workspace_threads",
+              "bot_review"
             ],
             "type": "string"
           }
@@ -20732,7 +20735,8 @@
               "threads_disabled",
               "thread_write",
               "project_threads",
-              "workspace_threads"
+              "workspace_threads",
+              "bot_review"
             ],
             "type": "string"
           }

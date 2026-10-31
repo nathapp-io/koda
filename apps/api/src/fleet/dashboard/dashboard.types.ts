@@ -109,7 +109,7 @@ export type CredentialWhy = (typeof CREDENTIAL_WHY)[number];
 export const MISFIT_REASONS: readonly MisfitReason[] = [
   'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox',
   'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write',
-  'project_threads', 'workspace_threads',
+  'project_threads', 'workspace_threads', 'bot_review',
 ];
 
 export interface AttentionReason {

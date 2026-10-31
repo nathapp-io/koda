@@ -1,4 +1,5 @@
 import type { ProfileNeeds, RunnerCapabilities } from '../common/protocol';
+import { MISFIT_REASONS } from '../dashboard/dashboard.types';
 import {
   EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob,
@@ -27,6 +28,15 @@ const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURE
 const brokenFast = { fast: { protocol: 'native' as const, providers: ['deepseek'], sandbox: true, interaction: TG_FAILED } };
 
 describe('placement rules (spec §4)', () => {
+  it('requires botReview first for REVIEW jobs, but fits a capable matching runner', () => {
+    const review = job({ command: 'REVIEW' });
+    expect(misfit(review, runner())).toBe('bot_review');
+    expect(misfit(review, runner({ capabilities: caps({ botReview: true, profiles: {} }) }))).toBeNull();
+    expect(misfit(review, runner({ capabilities: caps({ profiles: {} }) }))).toBe('bot_review');
+    expect(PERMANENT_MISFITS.has('bot_review')).toBe(false);
+    expect(MISFIT_REASONS).toContain('bot_review');
+  });
+
   it('fits a matching runner', () => {
     expect(misfit(job(), runner())).toBeNull();
   });

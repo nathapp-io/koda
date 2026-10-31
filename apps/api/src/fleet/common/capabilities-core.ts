@@ -118,7 +118,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads, botReview } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -145,6 +145,8 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (projectCode !== undefined && projectCode !== true) fail('projectCode');
   // Fleet S5b 1d §2: strict like projectThreads; only exactly `true` is meaningful (WORKSPACE thread placement).
   if (workspaceThreads !== undefined && workspaceThreads !== true) fail('workspaceThreads');
+  // Fleet PR review: strict capability flag, absent on older runners.
+  if (botReview !== undefined && botReview !== true) fail('botReview');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -168,5 +170,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(kodaTools === true ? { kodaTools: true as const } : {}),
     ...(projectCode === true ? { projectCode: true as const } : {}),
     ...(workspaceThreads === true ? { workspaceThreads: true as const } : {}),
+    ...(botReview === true ? { botReview: true as const } : {}),
   };
 }
