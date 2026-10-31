@@ -23,6 +23,7 @@ import { PrismaCanonicalStateRepository } from './prisma-canonical-state.reposit
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
+import { MemoryMcpTools } from './mcp/memory-mcp-tools';
 
 @Module({
   // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
@@ -53,6 +54,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     MemoryGovernanceProcessor,
     ExtractionService,
     MemoryOutboxSubscriber,
+    MemoryMcpTools,
   ],
   exports: [
     TimelineService,
@@ -64,6 +66,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     MemoryWriteService,
     ReviewDecisionWriter,
     MemoryWriteGuard,
+    MemoryMcpTools,
   ],
 })
 export class MemoryModule {}
