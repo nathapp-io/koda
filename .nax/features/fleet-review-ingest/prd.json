@@ -3,7 +3,7 @@
   "feature": "fleet-review-ingest",
   "branchName": "feat/fleet-review-ingest",
   "createdAt": "2026-11-16T00:00:00.000Z",
-  "updatedAt": "2026-10-31T14:37:44.616Z",
+  "updatedAt": "2026-10-31T14:47:34.207Z",
   "userStories": [
     {
       "id": "US-001",
@@ -460,14 +460,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Reuses the existing OnEvent, interval lifecycle and single-flight patterns in the minter, poller and config; fake timers and a deferred promise cover overlap without new authorization or queue abstractions."
+        "reasoning": "Reuses the existing OnEvent, interval lifecycle and single-flight patterns in the minter, poller and config; fake timers and a deferred promise cover overlap without new authorization or queue abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-event.minter.ts",
@@ -495,7 +498,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "00c21d46d17b48c885c837dc3d9f915dd00bab62"
     },
     {
       "id": "US-008",
