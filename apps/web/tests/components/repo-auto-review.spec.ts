@@ -2,7 +2,8 @@ import { describe, test, expect, jest } from '@jest/globals'
 import * as Vue from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs } from '../helpers/fleet-harness'
-import { ref } from 'vue'
+import { h, ref } from 'vue'
+import { useField } from 'vee-validate'
 import enLocale from '../../i18n/locales/en.json'
 import zhLocale from '../../i18n/locales/zh.json'
 import type { FleetRepo } from '../../lib/fleet-types'
@@ -12,11 +13,22 @@ const repo = (over: Partial<FleetRepo> = {}): FleetRepo => ({
   githubInstallationId: '7', autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000',
   autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null, createdAt: '', ...over,
 })
+const fieldStub = {
+  props: ['name'],
+  setup(props: { name: string }, { slots }: { slots: Record<string, ((arg: unknown) => unknown) | undefined> }) {
+    const field = useField(props.name)
+    return () => h('div', [
+      slots.default?.({ componentField: { name: props.name, modelValue: field.value.value, 'onUpdate:modelValue': field.handleChange, onBlur: field.handleBlur } }) as never,
+      field.errorMessage.value ? h('span', field.errorMessage.value) : null,
+    ])
+  },
+}
+
 const mounted = (options: { saved?: boolean; permitted?: boolean; fail?: unknown; current?: FleetRepo } = {}) => {
   const patch = jest.fn(async () => { if (options.fail) throw options.fail; return options.saved ? { ...repo(), autoReview: true } : { permissionKey: 'fleet.repo.review.configure' } })
   const api = { patch }
   const app = mountSfc(webFile('components', 'fleet', 'RepoAutoReview.vue'), {
-    components: uiStubs, props: { repo: options.current ?? repo() },
+    components: { ...uiStubs, FormField: fieldStub }, props: { repo: options.current ?? repo() },
     globals: {
       ref, computed: Vue.computed, useI18n: () => ({ t: (key: string) => key }),
       useGlobalPermissions: () => ({ permissions: { value: { has: () => options.permitted ?? true } } }),
@@ -47,7 +59,34 @@ describe('FleetRepoAutoReview', () => {
     const button = edit.app.find('[data-stub="button"]')[0]
     ;(button.props.onClick as () => void)(); await Vue.nextTick()
     expect(edit.app.text()).toContain('fleet.repos.autoReview.title')
+    expect(edit.app.find('[data-stub="input"]').map((input) => input.props.modelValue)).toEqual(['native-ds', '2.5'])
     edit.app.unmount()
+  })
+  test('submits trimmed custom profiles and numeric max cost (AC-5)', async () => {
+    const { app, patch } = mounted({ saved: true })
+    ;(app.one('[data-stub="switch"]')?.props['onUpdate:checked'] as (value: boolean) => void)(true)
+    await Vue.nextTick()
+    const inputs = app.find('[data-stub="input"]')
+    ;(inputs[0].props['onUpdate:modelValue'] as (value: string) => void)('native-ds, review')
+    ;(inputs[1].props['onUpdate:modelValue'] as (value: string) => void)('2.5')
+    await Vue.nextTick()
+    const form = app.one('form')
+    await (form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: () => undefined })
+    expect(patch).toHaveBeenCalledWith('/fleet/repos/r1/auto-review', { enabled: true, profiles: ['native-ds', 'review'], maxCostUsd: 2.5 })
+    app.unmount()
+  })
+  test('rejects zero max cost without calling API (AC-6)', async () => {
+    const { app, patch } = mounted()
+    ;(app.one('[data-stub="switch"]')?.props['onUpdate:checked'] as (value: boolean) => void)(true)
+    await Vue.nextTick()
+    const inputs = app.find('[data-stub="input"]')
+    ;(inputs[1].props['onUpdate:modelValue'] as (value: string) => void)('0')
+    await Vue.nextTick()
+    const form = app.one('form')
+    await (form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: () => undefined })
+    expect(patch).not.toHaveBeenCalled()
+    expect(app.text()).toContain('fleet.repos.autoReview.maxCostInvalid')
+    app.unmount()
   })
   test('enable gesture opens dialog without patching; pending off retains persisted checked prop and notice (AC-11)', async () => {
     const enabling = mounted()
