@@ -5,22 +5,29 @@ import { FleetReposService } from './fleet-repos.service';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 describe('FleetReposService', () => {
-  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), findAutoReviewPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
   const github = { verifyRepo: vi.fn() };
   const gitlab = { verifyRepo: vi.fn() };
   const gitlabTokens = { resolve: vi.fn() };
   const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder);
+  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder, { canHoldKey: vi.fn().mockResolvedValue(true) } as never);
 
   const created = (over = {}) => ({
     id: 'fr1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk',
-    githubInstallationId: BigInt(77), createdById: 'u1', createdAt: new Date(0), ...over,
+    githubInstallationId: BigInt(77), createdById: 'u1', createdAt: new Date(0), autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000', autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null, ...over,
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
     repo.findProject.mockResolvedValue({ id: 'p1', slug: 'p' });
+  });
+
+  it('delegates the auto-review repo limit to the repository', async () => {
+    const records = [created()];
+    repo.findAutoReviewPage.mockResolvedValue(records);
+    await expect(make().listAutoReviewRepos(50)).resolves.toBe(records);
+    expect(repo.findAutoReviewPage).toHaveBeenCalledWith(50);
   });
 
   it('prepared checks refuse a target changed during HTTP without calling the forge again', async () => {

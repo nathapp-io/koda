@@ -4,6 +4,10 @@ import { extractApiError } from '~/composables/useApi'
 import { mapLimit } from '~/lib/map-limit'
 import { FLEET_LIST_SIZE } from '~/lib/fleet-types'
 import type { FleetPage, FleetRepo, FleetRepoCheck, NewFleetRepo } from '~/lib/fleet-types'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+
+export type AutoReviewBody = { enabled: false } | { enabled: true; profiles?: string[]; maxCostUsd?: number }
+export type AutoReviewResult = { kind: 'saved'; repo: FleetRepo } | { kind: 'pending'; request: ApprovalRequestSummary }
 
 export type RepoCheckState =
   | { status: 'checking' }
@@ -73,6 +77,13 @@ export function useFleetRepos() {
     return created
   }
 
+  async function setAutoReview(id: string, body: AutoReviewBody): Promise<AutoReviewResult> {
+    const data = await $api.patch<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/auto-review`, body)
+    if ('permissionKey' in data) return { kind: 'pending', request: data }
+    repos.value = repos.value.map((repo) => repo.id === id ? data : repo)
+    return { kind: 'saved', repo: data }
+  }
+
   async function remove(id: string): Promise<void> {
     await $api.delete(apiPath`/fleet/repos/${id}`)
     removed = new Set([...removed, id])
@@ -80,5 +91,5 @@ export function useFleetRepos() {
     checks.value = Object.fromEntries(Object.entries(checks.value).filter(([key]) => key !== id))
   }
 
-  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, remove }
+  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, remove }
 }

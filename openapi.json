@@ -7940,6 +7940,79 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/auto-review": {
+      "patch": {
+        "operationId": "FleetReposController_configureAutoReview",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAutoReviewDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.review.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          },
+          "422": {
+            "description": "Auto-review cannot be configured: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Configure auto-review for a registered repo (fleet.repo.review.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -18587,6 +18660,34 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "autoReview": {
+            "type": "boolean"
+          },
+          "autoReviewProfiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "autoReviewMaxCostUsd": {
+            "type": "string"
+          },
+          "autoReviewEnabledById": {
+            "type": "string",
+            "nullable": true
+          },
+          "autoReviewEnabledByType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string",
+            "nullable": true
+          },
+          "autoReviewEnabledAt": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -18596,7 +18697,10 @@
           "owner",
           "name",
           "defaultBranch",
-          "createdAt"
+          "createdAt",
+          "autoReview",
+          "autoReviewProfiles",
+          "autoReviewMaxCostUsd"
         ]
       },
       "RepoCheckResultDto": {
@@ -18636,6 +18740,31 @@
           "reachable",
           "reason",
           "checkedAt"
+        ]
+      },
+      "UpdateAutoReviewDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "profiles": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "USD, at most 4 decimals"
+          }
+        },
+        "required": [
+          "enabled"
         ]
       },
       "NaxFileEntryDto": {

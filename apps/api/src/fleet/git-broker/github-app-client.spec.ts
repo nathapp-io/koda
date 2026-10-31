@@ -2,6 +2,7 @@ import { createVerify, generateKeyPairSync } from 'crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { Logger } from '@nestjs/common';
 import { GitHubAppClient } from './github-app-client';
 import { FleetHttpClient } from './fleet-http-client';
 import { RepoCheckException } from './repo-check.exception';
@@ -164,6 +165,65 @@ describe('GitHubAppClient', () => {
       forge.routes.set(PR, () => reply);
       await expect(client.getPullRequest('t', 'acme', 'app', 9)).rejects.toMatchObject({ reason: 'provider_error' });
     });
+  });
+
+  describe('listOpenPullRequests (US-004)', () => {
+    const path = '/repos/o/n/pulls';
+    const pr = { number: 7, draft: false, updated_at: '2026-11-02T00:00:00Z', head: { sha: 'aaa', repo: { full_name: 'o/n' } } };
+
+    it('AC-1/2: requests one open-PR page with the bearer token', async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: [] }));
+      await client.listOpenPullRequests('tok', 'o', 'n');
+      expect(forge.requests[0]).toMatchObject({ method: 'GET', path, query: 'state=open&per_page=100', headers: { authorization: 'Bearer tok' } });
+    });
+
+    it('AC-3/4: maps PR fields and a missing head repository', async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: [pr, { ...pr, number: 8, head: { sha: 'bbb', repo: null } }] }));
+      await expect(client.listOpenPullRequests('tok', 'o', 'n')).resolves.toEqual([
+        { number: 7, headSha: 'aaa', draft: false, headRepoFullName: 'o/n', updatedAt: new Date('2026-11-02T00:00:00Z') },
+        { number: 8, headSha: 'bbb', draft: false, headRepoFullName: null, updatedAt: new Date('2026-11-02T00:00:00Z') },
+      ]);
+    });
+
+    it('AC-5/6/7: rejects provider errors and malformed response shapes', async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 500, body: {} }));
+      await expect(client.listOpenPullRequests('tok', 'o', 'n')).rejects.toMatchObject({ reason: 'provider_error' });
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: {} }));
+      await expect(client.listOpenPullRequests('tok', 'o', 'n')).rejects.toMatchObject({ reason: 'provider_error' });
+      const malformed = [
+        { ...pr, number: '7' },
+        { ...pr, head: { repo: { full_name: 'o/n' } } },
+        { ...pr, draft: 'false' },
+        { ...pr, updated_at: 7 },
+      ];
+      for (const item of malformed) {
+        forge.routes.set(`GET ${path}`, () => ({ status: 200, body: [item] }));
+        await expect(client.listOpenPullRequests('tok', 'o', 'n')).rejects.toMatchObject({ reason: 'provider_error' });
+      }
+    });
+
+    it('AC-8: warns on a full page but not a shorter page', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: Array.from({ length: 99 }, (_, i) => ({ ...pr, number: i + 1 })) }));
+      await client.listOpenPullRequests('tok', 'o', 'n');
+      expect(warn).not.toHaveBeenCalled();
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: Array.from({ length: 100 }, (_, i) => ({ ...pr, number: i + 1 })) }));
+      await client.listOpenPullRequests('tok', 'o', 'n');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('o/n'));
+      warn.mockRestore();
+    });
+  });
+
+  it('AC-9: fake forge retains path-only routing and exposes the raw query', async () => {
+    forge.routes.set('POST /probe', (req) => {
+      if (req.query === 'x=1') expect(req).toMatchObject({ method: 'POST', path: '/probe', query: 'x=1', headers: { authorization: 'Bearer tok' }, body: { value: 7 } });
+      return { status: 200, body: {} };
+    });
+    await fetch(`${forge.url}/probe?x=1`, { method: 'POST', headers: { authorization: 'Bearer tok', 'content-type': 'application/json' }, body: JSON.stringify({ value: 7 }) });
+    expect(forge.requests[0]).toMatchObject({ method: 'POST', path: '/probe', query: 'x=1', headers: { authorization: 'Bearer tok' }, body: { value: 7 } });
+    await fetch(`${forge.url}/probe`, { method: 'POST' });
+    expect(forge.requests[1].query).toBe('');
   });
 
   describe('.nax reads (fleet S3 §4.1)', () => {

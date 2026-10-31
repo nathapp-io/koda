@@ -36,6 +36,9 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     threadsEnabled: false,
     knowledgeIndexEnabled: false,
     knowledgePollMs: 1_800_000,
+    prReviewEnabled: false,
+    prReviewPollMs: 300_000,
+    prReviewMaxDispatch: 10,
     ...overrides,
   };
 }

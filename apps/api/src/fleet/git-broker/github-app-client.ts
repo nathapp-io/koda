@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { createSign } from 'crypto';
 import { readFileSync } from 'fs';
 import { FLEET_CFG, IFleetConfig, isGitHubAppConfigured } from '../../config/fleet.config';
@@ -16,12 +16,21 @@ export interface CanonicalRepo {
   defaultBranch: string;
 }
 
+export interface OpenPullRequest {
+  number: number;
+  headSha: string;
+  draft: boolean;
+  headRepoFullName: string | null;
+  updatedAt: Date;
+}
+
 const b64url = (value: string | Buffer) => Buffer.from(value).toString('base64url');
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (typeof v === 'object' && v !== null ? (v as Obj) : {});
 
 @Injectable()
 export class GitHubAppClient {
+  private readonly logger = new Logger(GitHubAppClient.name);
   private privateKey: string | undefined;
 
   constructor(
@@ -138,6 +147,32 @@ export class GitHubAppClient {
       url: b.html_url,
       title: typeof b.title === 'string' ? b.title : '',
     };
+  }
+
+  async listOpenPullRequests(token: string, owner: string, name: string): Promise<OpenPullRequest[]> {
+    const repo = `${owner}/${name}`;
+    const path = `${this.repoPath(owner, name)}/pulls?state=open&per_page=100`;
+    const response = await this.http.request('GET', `${this.api}${path}`, this.headers(token));
+    if (response.status !== 200 || !Array.isArray(response.body)) throw new RepoCheckException('provider_error');
+
+    const pullRequests = response.body.map((raw): OpenPullRequest => {
+      const item = obj(raw);
+      const head = obj(item.head);
+      if (typeof item.number !== 'number' || typeof head.sha !== 'string' || typeof item.draft !== 'boolean' || typeof item.updated_at !== 'string') {
+        throw new RepoCheckException('provider_error');
+      }
+      const headRepo = obj(head.repo).full_name;
+      return {
+        number: item.number,
+        headSha: head.sha,
+        draft: item.draft,
+        headRepoFullName: typeof headRepo === 'string' ? headRepo : null,
+        updatedAt: new Date(item.updated_at),
+      };
+    });
+
+    if (pullRequests.length === 100) this.logger.warn(`Open pull-request page limit reached for ${repo}; additional pull requests are not visible`);
+    return pullRequests;
   }
 
   private repoPath(owner: string, name: string): string {

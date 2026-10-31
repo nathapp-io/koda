@@ -1,6 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { PROFILE_NAME_RE } from '../common/capabilities';
+import { RESERVED_PROFILE_PREFIX } from '../jobs/dispatch-input';
+import { AutoReviewException } from './auto-review.exception';
+import type { AutoReviewPatch } from './domain/fleet-repo.domain';
+import { PermissionService } from '../../permissions/permission.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -12,8 +18,10 @@ import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
+import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
+import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
@@ -27,6 +35,7 @@ export class FleetReposService {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
+    private readonly permissions: PermissionService,
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
@@ -65,6 +74,60 @@ export class FleetReposService {
 
   private async verifyGitLab(projectId: string, owner: string, name: string) {
     return this.gitlab.verifyRepo(owner, name, await this.gitlabTokens.resolve(projectId, owner, name));
+  }
+
+  async configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto> {
+    return this.txManager.run(async () => {
+      const row = await this.repo.findById(id);
+      if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      const patch: AutoReviewPatch = dto.enabled
+        ? { autoReview: true }
+        : { autoReview: false, autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null };
+
+      if (dto.enabled) {
+        if (row.provider !== 'github' || row.githubInstallationId === null) throw new AutoReviewException('github app required');
+        const profiles = dto.profiles ?? [];
+        if (profiles.some((profile) => !PROFILE_NAME_RE.test(profile) || profile.startsWith(RESERVED_PROFILE_PREFIX))) throw new AutoReviewException('profiles');
+        if (new Set(profiles).size !== profiles.length) throw new AutoReviewException('duplicate profile');
+        const caller = { type: principal.actorType === 'user' ? 'USER' as const : 'AGENT' as const, id: principal.id };
+        if (!(await this.permissions.canHoldKey(caller, 'fleet.job.dispatch', { projectId: row.projectId }))) {
+          throw new AutoReviewException('caller cannot dispatch in this project');
+        }
+        if (dto.profiles !== undefined) patch.autoReviewProfiles = [...dto.profiles];
+        if (dto.maxCostUsd !== undefined) patch.autoReviewMaxCostUsd = String(dto.maxCostUsd);
+        patch.autoReviewEnabledById = principal.id;
+        patch.autoReviewEnabledByType = caller.type;
+        patch.autoReviewEnabledAt = row.autoReview ? row.autoReviewEnabledAt : new Date();
+      }
+
+      const updated = await this.repo.updateAutoReview(id, patch);
+      await this.audit.record({ key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId, summary: dto.enabled ? 'enabled' : 'disabled' });
+      return FleetRepoDto.from(updated);
+    });
+  }
+
+  async listAutoReviewRepos(limit: number): Promise<FleetRepoRecord[]> {
+    return this.repo.findAutoReviewPage(limit);
+  }
+
+  /**
+   * The compare-and-set turn-off (auto-review spec, call 4), with its audit in the same transaction. A pass
+   * that read a stale repo list cannot turn off a repo someone else has just re-enabled: the repository only
+   * changes a row still enabled by `expectedEnablerId`, and the audit is recorded only when it did.
+   *
+   * The project the entry names is the turned-off row's own; a row that is gone by the time the claim runs is
+   * not changed at all, so no entry is written for it.
+   */
+  async disableAutoReview(id: string, reason: string, expectedEnablerId: string): Promise<boolean> {
+    return this.txManager.run(async () => {
+      if (!(await this.repo.disableAutoReviewIf(id, expectedEnablerId))) return false;
+      const row = await this.repo.findById(id);
+      await this.audit.record({
+        key: 'system.pr-review.dispatch', resourceType: 'fleet-repo', resourceId: id,
+        projectId: row?.projectId ?? null, summary: `auto-review disabled: ${reason}`,
+      });
+      return true;
+    });
   }
 
   async list(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoDto>> {

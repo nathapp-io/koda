@@ -95,6 +95,22 @@ describe('useFleetRepos', () => {
     expect(fleet.checks.value).toEqual({})
   })
 
+  test('setAutoReview returns pending approval summaries and saved repo results', async () => {
+    const approval = { id: 'ap1', permissionKey: 'fleet.repo.review.configure' }
+    const saved = { ...repo('a'), autoReview: true }
+    const patch = jest.fn().mockResolvedValueOnce(approval).mockResolvedValueOnce(saved)
+    withApi({ get: jest.fn(async () => pageOf([repo('a')])), patch })
+    const { useFleetRepos } = await import(composablePath)
+    const fleet = useFleetRepos()
+    await fleet.load()
+    const pending = await fleet.setAutoReview('a', { enabled: true, profiles: ['native-ds'], maxCostUsd: 2.5 })
+    const result = await fleet.setAutoReview('a', { enabled: false })
+    expect(pending).toEqual({ kind: 'pending', request: approval })
+    expect(result).toEqual({ kind: 'saved', repo: saved })
+    expect(patch).toHaveBeenNthCalledWith(1, '/fleet/repos/a/auto-review', { enabled: true, profiles: ['native-ds'], maxCostUsd: 2.5 })
+    expect(fleet.repos.value[0]).toEqual(saved)
+  })
+
   test('create posts the body and appends; remove deletes, drops the row and its check', async () => {
     const post = jest.fn()
       .mockImplementationOnce(async () => repo('b'))

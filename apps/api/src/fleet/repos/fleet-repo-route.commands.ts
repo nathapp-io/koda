@@ -8,12 +8,20 @@ import { FleetReposService } from './fleet-repos.service';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
+import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 
 export const FLEET_REPO_ROUTE_VARIANTS = {
   create: 'rest:fleet-repos.create',
   delete: 'rest:fleet-repos.delete',
   check: 'rest:fleet-repos.check',
+  autoReview: 'rest:fleet-repos.auto-review',
 } as const;
+
+/** The `{ id, patch }` input the auto-review route freezes: an id-addressed write with a body. */
+interface AutoReviewInput {
+  id: string;
+  patch: UpdateAutoReviewDto;
+}
 
 @Injectable()
 export class FleetRepoRouteCommands implements OnModuleInit {
@@ -44,6 +52,15 @@ export class FleetRepoRouteCommands implements OnModuleInit {
       parse: (input) => parseRouteInput(input, ['id']),
       prepare: (_principal, input) => this.repos.prepareCheck(input.id),
       run: (_principal, input) => this.repos.check(input.id),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<AutoReviewInput, FleetRepoDto>({
+      key: 'fleet.repo.review.configure', variant: FLEET_REPO_ROUTE_VARIANTS.autoReview,
+      parse: (input) => {
+        const { id } = parseRouteInput(input, ['id']);
+        return { id, patch: parseBody(UpdateAutoReviewDto, (input as { patch?: unknown }).patch) };
+      },
+      run: (principal, input) => this.repos.configureAutoReview(principal, input.id, input.patch),
       toResult: (result) => result,
     }, this.loader));
   }

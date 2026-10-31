@@ -24,6 +24,13 @@ interface DispatchOptions {
 }
 
 /**
+ * The generated `DispatchFleetJobDto` marks `feature` optional because a REVIEW derives it from
+ * `prNumber`, but this command only ever sends PLAN or RUN and always requires `--feature`. The narrow
+ * type says so, so the conflict lookup can pass `feature` where a string is required.
+ */
+type DispatchRunBody = DispatchFleetJobDto & { feature: string };
+
+/**
  * The active job behind a dispatch 409 (overview D121): the partial unique index allows at most one active
  * job per (repo, feature), and the list is newest first.
  */
@@ -37,7 +44,7 @@ function invalid(message: string): null {
   return handleFleetValidation(message);
 }
 
-async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFleetJobDto | null> {
+async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchRunBody | null> {
   const bashProblem = bashFlagProblem(o);
   if (bashProblem) return invalid(bashProblem);
   if (o.pin && o.label.length > 0) return invalid('Use --label or --pin, not both: a pinned job ignores labels');
@@ -59,7 +66,7 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFlee
 }
 
 /** A 409 on dispatch names the active job (D133, overview D121); any other error, or a failed lookup, reports as-is. */
-async function explainConflict(err: unknown, slug: string, body: DispatchFleetJobDto): Promise<void> {
+async function explainConflict(err: unknown, slug: string, body: DispatchRunBody): Promise<void> {
   if (apiErrorCode(err) !== 409) return handleApiError(err);
   let active: FleetJobDto | null = null;
   try {
@@ -89,7 +96,7 @@ export function registerFleetDispatch(fleet: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
     .action(async (options: DispatchOptions) => {
-      let body: DispatchFleetJobDto | null = null;
+      let body: DispatchRunBody | null = null;
       let slug = '';
       try {
         const ctx = await withContext({ projectSlug: options.project });

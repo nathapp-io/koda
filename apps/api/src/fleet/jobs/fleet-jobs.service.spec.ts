@@ -91,6 +91,57 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   });
 });
 
+describe('fleet jobs service dispatch audit key', () => {
+  const queued: FleetJobRecord = {
+    id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+    maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
+    runnerId: null, runnerBootId: null, leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u1',
+    queuedAt: new Date('2026-10-01T00:00:00.000Z'), assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
+    naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
+    costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null,
+    coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null, finishResult: null, escalationReason: null,
+    exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null,
+    stories: null, storiesTruncated: false, postRun: null, configResult: null, workflow: null, eventSeq: 0,
+    ackedRunnerSeq: 0, attributedAt: null, threadId: null, updatedAt: new Date('2026-10-01T00:00:00.000Z'),
+  } as FleetJobRecord;
+
+  const service = (): FleetJobsService => new FleetJobsService(
+    {
+      findRepo: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', provider: 'github', defaultBranch: 'main' }),
+      createJob: vi.fn().mockResolvedValue(queued),
+      appendEvent: vi.fn(),
+      findById: vi.fn().mockResolvedValue(queued),
+    } as never,
+    { placeJob: vi.fn().mockResolvedValue({ assigned: false, runnerId: null, misfits: [] }) } as never,
+    { record: vi.fn() } as never,
+    { publish: vi.fn(), event: vi.fn() } as never,
+    {} as never,
+    { notify: vi.fn() } as never,
+    { assertNotPaused: vi.fn() } as never,
+    { run: vi.fn((fn: () => Promise<unknown>) => fn()) } as never,
+    { countPendingByJob: vi.fn().mockResolvedValue(new Map()) } as never,
+    { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn(), forJob: vi.fn().mockResolvedValue([]) } as never,
+    {} as never,
+    {} as never,
+    mockAuditRecorder,
+  );
+
+  const dto = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
+
+  beforeEach(() => {
+    (mockAuditRecorder.record as unknown as Mock).mockClear();
+  });
+
+  it('AC-15: a dispatch call without opts.auditKey still records fleet.job.dispatch', async () => {
+    await service().dispatch('u1', 'p1', dto);
+
+    expect(mockAuditRecorder.record).toHaveBeenCalledTimes(1);
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+      key: 'fleet.job.dispatch', resourceType: 'fleet-job', resourceId: 'j1', projectId: 'p1', summary: 'RUN on repo r1',
+    });
+  });
+});
+
 describe('fleet jobs service dispatch open-PR guard (#231)', () => {
   const repoRecord = { id: 'r', projectId: 'p', defaultBranch: 'main' };
   const tickets = [{ id: 't1', ref: 'KODA-1', title: 'x', status: 'CREATED' }];

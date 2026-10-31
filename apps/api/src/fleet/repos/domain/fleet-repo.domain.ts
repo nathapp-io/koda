@@ -13,19 +13,37 @@ export interface FleetRepoRecord {
   githubInstallationId: bigint | null;
   createdById: string;
   createdAt: Date;
+  autoReview: boolean;
+  autoReviewProfiles: string[];
+  autoReviewMaxCostUsd: string;
+  autoReviewEnabledById: string | null;
+  autoReviewEnabledByType: 'USER' | 'AGENT' | null;
+  autoReviewEnabledAt: Date | null;
 }
+
+export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
+  'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'
+>>;
 
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
-  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt'>): Promise<FleetRepoRecord>;
+  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
+  updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>;
   /**
    * The project's anchor repo (fleet S5b-R13): the smallest `createdAt`, ties broken by the smallest `id`; null when
    * the project has no fleet repo. A PROJECT thread uses it as bookkeeping only — no checkout, no git token.
    */
   findAnchor(projectId: string): Promise<FleetRepoRecord | null>;
   findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>>;
+  findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]>;
+  /**
+   * The compare-and-set turn-off (auto-review spec, call 4): clears the flag and its three attribution
+   * columns only while `autoReviewEnabledById` is still `expectedEnablerId`, keeping profiles and cost.
+   * False when the row was already off or someone else re-enabled it, so a stale pass turns nothing off.
+   */
+  disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean>;
   delete(id: string): Promise<void>;
   /** Number of the repo's jobs in an active state (plan D15). */
   countUnfinishedJobs(repoId: string): Promise<number>;

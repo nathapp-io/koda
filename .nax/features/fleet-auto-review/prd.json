@@ -1,0 +1,898 @@
+{
+  "project": "koda",
+  "feature": "fleet-auto-review",
+  "branchName": "feat/fleet-auto-review",
+  "createdAt": "2026-11-12T00:00:00.000Z",
+  "updatedAt": "2026-10-31T10:59:56.693Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "API auto-review columns, repo listing and config",
+      "description": "**Goal** — Persist opt-in auto-review settings, expose them on repo records/DTOs, list eligible repos and resolve bounded poller configuration.\n\n**Motivation** — Nothing in koda notices a new PR or a new push today.\n\n**Approach** — `FleetRepo` gains:\n\n| Column | Type | Default |\n|:--|:--|:--|\n| `autoReview` | `Boolean` | `false` |\n| `autoReviewProfiles` | `String[]` | `[]` |\n| `autoReviewMaxCostUsd` | `Decimal(10,4)` | `1.0000` |\n| `autoReviewEnabledById` | `String?` | null |\n| `autoReviewEnabledByType` | `String?` (`USER` or `AGENT`) | null |\n| `autoReviewEnabledAt` | `DateTime?` | null |\n\nplus `@@index([autoReview])`.\n\n`FleetRepoDto` gains:\n- `autoReview: boolean`;\n- `autoReviewProfiles: string[]`;\n- `autoReviewMaxCostUsd: string` (4 places, e.g. `1.0000`);\n- `autoReviewEnabledById: string | null`;\n- `autoReviewEnabledByType: 'USER' | 'AGENT' | null`;\n- `autoReviewEnabledAt: string | null` (ISO).\n\nThe Prisma repository's shared row mapping (used by `create`, `findById`, `findAnchor`, `findPage` and the new methods) maps `autoReviewMaxCostUsd` to a 4-place string and `autoReviewEnabledByType` to the union.\n\n`FleetRepoRecord` (`fleet/repos/domain/fleet-repo.domain.ts:6`):\n- Baseline: 9 fields.\n- Target: adds `autoReview: boolean`, `autoReviewProfiles: string[]`, `autoReviewMaxCostUsd: string`, `autoReviewEnabledById: string | null`, `autoReviewEnabledByType: 'USER' | 'AGENT' | null` and `autoReviewEnabledAt: Date | null`.\n- `IFleetRepoRepository.create` keeps its input free of these six fields, and the database defaults fill them.\n\n`FleetReposService.listAutoReviewRepos(50)`: repos with `autoReview` true, provider `github`, a non-null `githubInstallationId` and a project with `deletedAt` null, ordered by `id`, at most 50. The service delegates the supplied limit to findAutoReviewPage; the full-page warning belongs to US-009.\n\nSoft-deleted projects are skipped. `FleetJobsService.dispatch` does not check `Project.deletedAt`, so the repo query used by the poller excludes repos whose project is soft-deleted.\n\nConfig (`IFleetConfig`; `FleetConfigSchema` in `fleet.config.ts`; `env.validation.ts`):\n\n| Field | Env | Default | Validation |\n|:--|:--|:--|:--|\n| `prReviewEnabled` | `FLEET_PR_REVIEW_ENABLED` | `true`; `false` (any case) turns it off | `Joi.string().pattern(/^(true|false)$/i)` optional, like the other boolean flags |\n| `prReviewPollMs` | `FLEET_PR_REVIEW_POLL_MS` | `300000` | integer 60000..86400000 |\n| `prReviewMaxDispatch` | `FLEET_PR_REVIEW_MAX_DISPATCH` | `10` | integer 1..100 |\n\nGlobal switch defaults on. `FLEET_PR_REVIEW_ENABLED` defaults to `true`, because every repo's `autoReview` defaults to `false`. The timer starts only when `sweepEnabled` is also true. Timer implementation is US-010. Add migration `20261112090000_fleet_auto_review` with matching Prisma schema. Introduce the shared mapping because the current repository returns raw rows. Update the full repoRecord fixture in threads/project-brief.service.spec.ts with false, [], '1.0000' and three nulls; update common/test-helpers/fleet-config.ts with prReviewEnabled false, prReviewPollMs 300000, prReviewMaxDispatch 10. Also add the same six repo defaults to the created() fixture in fleet-repos.service.spec.ts and the mocked repo.create result in approvals/approval-execution.service.spec.ts: the new FleetRepoDto.from decimal/date mapping receives these mocks too. Keep every existing assertion unchanged and leave constructor-parameter additions to US-002. Do not add production fallbacks for incomplete test records. Extend existing fleet.config.spec.ts, env.validation.spec.ts and repo service unit specs, with real repository round-trips in test/integration/fleet/fleet-repo-auto-review.integration.spec.ts.\n\n**Scope** — In: schema/migration, read mapping/DTOs, eligible page query/delegation and config. Out: configuration writes and DTO validation (US-002), route/catalog/generation (US-003), review-head ledger (US-005), pass/module/poller (US-009/010).\n\n**Interface** — `findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]>`; `FleetReposService.listAutoReviewRepos(limit)`; new FleetRepoRecord and FleetRepoDto fields above.",
+      "acceptanceCriteria": [
+        "[integration] A repo created through IFleetRepoRepository.create using the existing registration input without any of the six auto-review fields reads back with autoReview false, preserving existing registration callers.",
+        "[integration] A repo created through IFleetRepoRepository.create reads back with autoReviewProfiles [] and autoReviewMaxCostUsd '1.0000'.",
+        "[unit] FleetRepoDto.from of a record with autoReviewEnabledAt 2026-11-01T00:00:00.000Z returns autoReviewEnabledAt '2026-11-01T00:00:00.000Z'.",
+        "[unit] FleetRepoDto.from of a record with autoReviewMaxCostUsd '2.5' returns autoReviewMaxCostUsd '2.5000'.",
+        "[unit] FleetRepoDto.from copies autoReview, autoReviewProfiles, autoReviewEnabledById and autoReviewEnabledByType from the record.",
+        "[integration] findAutoReviewPage(50) returns a repo with autoReview true, provider github and an installation id.",
+        "[integration] findAutoReviewPage(50) omits an enabled repo whose project has deletedAt set.",
+        "[integration] findAutoReviewPage(50) omits a repo with autoReview false.",
+        "[integration] findAutoReviewPage(50) omits an enabled repo whose githubInstallationId is null.",
+        "[integration] findAutoReviewPage(2) over three enabled repos returns the two with the lowest ids, in id order.",
+        "[unit] FleetReposService.listAutoReviewRepos(50) returns what findAutoReviewPage(50) returns.",
+        "[unit] Resolving the fleet config with FLEET_PR_REVIEW_ENABLED, FLEET_PR_REVIEW_POLL_MS and FLEET_PR_REVIEW_MAX_DISPATCH unset gives prReviewEnabled true, prReviewPollMs 300000 and prReviewMaxDispatch 10.",
+        "[unit] Resolving the fleet config with FLEET_PR_REVIEW_ENABLED=FALSE gives prReviewEnabled false.",
+        "[unit] Env validation refuses FLEET_PR_REVIEW_POLL_MS=59999.",
+        "[unit] Env validation refuses FLEET_PR_REVIEW_MAX_DISPATCH=0."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "prisma",
+        "configuration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Schema defaults, decimal/DTO mapping, an eligible-repo query and config fields follow existing Prisma/config patterns without a new runtime abstraction; unit and DB round-trip tests can drive this additive change in one session.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/domain/fleet-repo.domain.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/fleet/repos/dto/fleet-repo.dto.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/config/env.validation.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261112090000_fleet_auto_review/migration.sql",
+        "apps/api/test/integration/fleet/fleet-repo-auto-review.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "findAutoReviewPage(50) omits an enabled GitLab repo even if its githubInstallationId is populated.",
+        "FleetRepoDto.from returns autoReviewEnabledAt null when the record's enabled timestamp is null.",
+        "Env validation refuses FLEET_PR_REVIEW_POLL_MS=86400001.",
+        "Env validation refuses FLEET_PR_REVIEW_MAX_DISPATCH=101."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "the FleetRepo model gains the six auto-review columns and the autoReview index, matching the US-001 migration."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/project-brief.service.spec.ts",
+          "reason": "the repoRecord helper (lines 27-37) builds a full FleetRepoRecord literal; it gains the six auto-review fields (autoReview false, autoReviewProfiles empty, autoReviewMaxCostUsd '1.0000', three nulls) so it type-checks; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-config.ts",
+          "reason": "testFleetConfig builds a full IFleetConfig literal; it gains prReviewEnabled false, prReviewPollMs 300000 and prReviewMaxDispatch 10."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "the created() fixture: its fixture gains the six auto-review defaults (autoReview false, autoReviewProfiles empty, autoReviewMaxCostUsd 1.0000, three nulls) so FleetRepoDto.from type-checks and maps; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "the repo.create mock result: its fixture gains the six auto-review defaults (autoReview false, autoReviewProfiles empty, autoReviewMaxCostUsd 1.0000, three nulls) so FleetRepoDto.from type-checks and maps; no assertion changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9ddd56251cd1541528266def53a847e45cd15a23"
+    },
+    {
+      "id": "US-002",
+      "title": "API auto-review settings rules",
+      "description": "**Goal** — Add validated, transactional auto-review configuration with requester attribution and project dispatch authorization.\n\n**Motivation** — `FleetRepo` has no review settings.\n\n**Approach** — `PATCH /fleet/repos/:id/auto-review` takes the body `UpdateAutoReviewDto`: `{ enabled: boolean; profiles?: string[]; maxCostUsd?: number }`.\n- `profiles` uses the `DispatchFleetJobDto.profiles` decorators: an array of at most 8 strings, each at most 64 characters.\n- `maxCostUsd` is a number from 0.0001 to 10000 with at most 4 decimals.\n\nThe DTO validates both fields whatever `enabled` is.\n\n`FleetReposService.configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto>` maps `principal.actorType` `'user'` to `USER` and `'agent'` to `AGENT`, then applies the rules in this order:\n\n1. An unknown id throws `NotFoundAppException({}, 'fleet.repos')` (404).\n2. With `enabled: true`, each of these throws `AutoReviewException(<reason>)` (422, key `fleet.autoReview`):\n   - a repo that is not `github`, or that has no `githubInstallationId`: reason `github app required`;\n   - a profile that does not match `PROFILE_NAME_RE` or that starts with `RESERVED_PROFILE_PREFIX`: reason `profiles`;\n   - duplicate profiles: reason `duplicate profile`;\n   - a caller for whom `PermissionService.canHoldKey(<caller ref>, 'fleet.job.dispatch', { projectId: repo.projectId })` is false: reason `caller cannot dispatch in this project`.\n3. `enabled: true` sets:\n   - `autoReview` to true;\n   - `profiles` and `maxCostUsd` when given. An omitted field keeps its stored value, and `profiles: []` stores `[]`;\n   - `autoReviewEnabledById` and `autoReviewEnabledByType` to the caller;\n   - `autoReviewEnabledAt` to now, only when `autoReview` was false before. Re-saving an enabled repo keeps the original time.\n4. `enabled: false` sets `autoReview` false and the three `autoReviewEnabled*` columns to null. It ignores `profiles` and `maxCostUsd` and keeps the stored values.\n5. It records the audit entry and returns the repo's `FleetRepoDto`.\n\nThe read, the update and the audit run in one `txManager.run`.\n\n`FleetReposService` gains `PermissionService` as a new last constructor parameter (`PermissionsModule` is global).\n\n`IFleetRepoRepository` adds:\n- `updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>`, where `AutoReviewPatch` is a partial of the six fields.\n\nAdd `AutoReviewException` with {reason}, HTTP 422 and key fleet.autoReview, following RepoCheckException; add en message `Auto-review cannot be configured: {reason}.` and a zh translation carrying {reason}. Persist cost as Decimal and read it through US-001's four-place mapping. Append a PermissionService stub to every direct FleetReposService construction in fleet-repos.service.spec.ts and approvals/approval-execution.service.spec.ts; no existing assertions change. Cover service rules with fleet-repos.auto-review.spec.ts and DTO boundaries without needing a database.\n\n**Scope** — In: DTO/exception/i18n, repository update patch and service transaction/permission/audit behavior. Out: route gate, route variants and catalog/generation (US-003), automatic CAS turn-off (US-005), timer-driven dispatch (US-006 onward). A PATCH that turns auto-review off while a pass is running; that pass can still dispatch reviews for the repo.\n\n**Interface** — `FleetReposService.configureAutoReview(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateAutoReviewDto): Promise<FleetRepoDto>`; `updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>`; `{ enabled: boolean; profiles?: string[]; maxCostUsd?: number }`.",
+      "acceptanceCriteria": [
+        "[unit] configureAutoReview by user principal u1 with { enabled: true, profiles: ['native-ds'], maxCostUsd: 2.5 } on a GitHub repo with an installation id calls updateAutoReview with autoReview true and autoReviewProfiles ['native-ds'].",
+        "[unit] That configureAutoReview call stores autoReviewEnabledById u1 and autoReviewEnabledByType USER.",
+        "[unit] configureAutoReview by agent principal a1 stores autoReviewEnabledByType AGENT.",
+        "[unit] configureAutoReview with enabled: true on a repo whose autoReview was false sets autoReviewEnabledAt to the current time.",
+        "[unit] configureAutoReview with enabled: true on a repo already enabled at 2026-11-01T00:00:00Z keeps autoReviewEnabledAt at that time.",
+        "[unit] configureAutoReview with { enabled: true } and no profiles or maxCostUsd keeps the stored autoReviewProfiles and autoReviewMaxCostUsd.",
+        "[unit] configureAutoReview with { enabled: false, profiles: ['x'] } stores autoReview false with autoReviewEnabledById, autoReviewEnabledByType and autoReviewEnabledAt all null.",
+        "[unit] configureAutoReview with { enabled: false, profiles: ['x'] } does not change autoReviewProfiles.",
+        "[unit] configureAutoReview with enabled: true on a GitLab repo throws AutoReviewException with status 422 and reason github app required.",
+        "[unit] configureAutoReview with enabled: true on a GitHub repo whose githubInstallationId is null throws reason github app required.",
+        "[unit] configureAutoReview with enabled: true and profiles: ['koda-job-x'] throws reason profiles.",
+        "[unit] configureAutoReview with enabled: true and profiles: ['a', 'a'] throws reason duplicate profile.",
+        "[unit] For a user principal mapped to callerRef { type: 'USER', id: 'u1' } or an agent principal mapped to { type: 'AGENT', id: 'a1' }, configureAutoReview with enabled: true throws reason caller cannot dispatch in this project when canHoldKey(callerRef, 'fleet.job.dispatch', { projectId: repo.projectId }) returns false.",
+        "[unit] configureAutoReview for an unknown id throws NotFoundAppException with key fleet.repos.",
+        "[unit] configureAutoReview records an audit entry with key fleet.repo.review.configure and the repo id inside the same txManager.run as updateAutoReview."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "security",
+        "permissions",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The DTO, repository patch and transactional service follow existing repo patterns with explicit validation rules; project dispatch authorization and user/agent attribution still require the strict security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/jobs/dispatch-input.ts",
+        "apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts",
+        "apps/api/src/permissions/permission.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/repos/dto/update-auto-review.dto.ts",
+        "apps/api/src/fleet/repos/auto-review.exception.ts",
+        "apps/api/src/fleet/repos/fleet-repos.auto-review.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "configureAutoReview with enabled true and profiles ['bad/profile'] throws AutoReviewException with reason profiles.",
+        "configureAutoReview with { enabled: true, profiles: [] } replaces stored non-empty profiles with [].",
+        "configureAutoReview with enabled false and maxCostUsd 2.5 keeps the stored autoReviewMaxCostUsd unchanged.",
+        "UpdateAutoReviewDto rejects maxCostUsd 1.00001 even when enabled is false.",
+        "UpdateAutoReviewDto rejects an array of nine profiles even when enabled is false."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "gains the autoReview key with its 422 message, Auto-review cannot be configured: {reason}."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "gains the autoReview key with the Chinese 422 message carrying {reason}."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "it constructs FleetReposService with positional arguments; each construction gains a trailing PermissionService stub for the new last constructor parameter; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "line 303 constructs FleetReposService with positional arguments; it gains a trailing PermissionService stub; no assertion changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4b4d62ea67c481cc1deaf0db3b3267de6e6a5ed0"
+    },
+    {
+      "id": "US-003",
+      "title": "API auto-review route and permission key",
+      "description": "**Goal** — Expose auto-review settings through a globally permissioned, approval-gated PATCH and regenerate the API/CLI contract.\n\n**Motivation** — Part A (merged as #360) lets a person dispatch a `REVIEW` job by hand through `POST /projects/:slug/fleet/jobs` with `command: 'REVIEW'` and a `prNumber`.\n\n**Approach** — The controller method is `FleetReposController.configureAutoReview(id, dto)`. It follows the `check` route:\n- `@Patch(':id/auto-review')`, `@HttpCode(200)`, `@UseGuards(RequiresGuard)`, `@Requires('fleet.repo.review.configure')`, `@ApprovalGated()`;\n- `@ApiOperation({ summary: 'Configure auto-review for a registered repo (fleet.repo.review.configure, global)' })`, `@ApiResponse` entries for 200 (`FleetRepoDto`), 403, 404 and 422;\n- `routeGate.run({ key: 'fleet.repo.review.configure', variant: FLEET_REPO_ROUTE_VARIANTS.autoReview, projectId: null, input: { id, patch: dto } })`.\n\nThe variant is `rest:fleet-repos.auto-review`. Its route command parses `{ id, patch }` like the role update command (`permission-route.commands.ts:63-66`): the non-empty string `id`, plus `parseBody(UpdateAutoReviewDto, patch)`. It runs `configureAutoReview(principal, input.id, input.patch)` with the principal the loader rebuilds, so a deferred approval records the original requester as the enabler.\n\nThe settings change records audit key `fleet.repo.review.configure`. Add the catalog key `fleet.repo.review.configure` (global, role access, approvable) through `INVENTORY_SCOPE_ROWS` and a new inventory row. Add `'fleet.repo.review.configure': ['global']` right after `'fleet.repo.check'`. The role-matrix snapshot follows catalog order, so the new cells sit at the same positions.\n\nNo endpoint e2e entry. No existing `fleet/repos` route is in `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts`; the gated fleet admin routes are covered by `fleet-admin-gates.spec.ts`, the approval OpenAPI contract and the route integration spec. This route follows that family.\n\nFollow existing JsonResponse.Ok and ApprovalPending behavior. An agent under a human-approval policy gets 202 and no settings change until approved; the enabler after approval remains that agent. Modify fleet-repo-route.commands.spec.ts variants count 3->4 and its variant loops; add configureAutoReview to fleet-admin-gates.spec.ts service stub/cases with key fleet.repo.review.configure, variant rest:fleet-repos.auto-review and {id:'r1',patch:{enabled:false}}. Add PATCH /api/fleet/repos/{id}/auto-review to fleet-openapi.contract.spec.ts and approval-openapi.contract.spec.ts; update the latter's gatedOperations list, 125 titles and exact length to 126. Update permission-contract.integration.spec.ts exact gated-route count/comment 125->126. Update role-matrix.spec.ts exact per-role count 219->220. In permissions/__snapshots__/role-matrix.json add only this key after fleet.repo.check for each role, copying that role's fleet.repo.check cell (granted, granted for owner/admin); every other entry stays identical. Add REST row to docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv mirroring every fleet.repo.check column except route/key. Regenerate openapi.json and CLI client (`bun run generate` from the repo root); do not edit generated files manually. The spec must include the six FleetRepoDto fields, UpdateAutoReviewDto and the new operation. Cover stored state and deferred requester identity in fleet-repo-auto-review-route.integration.spec.ts.\n\n**Scope** — In: global key/TSV, controller, approval command, contract pins, OpenAPI/CLI regeneration and route behavior. Out: system.pr-review.dispatch key and writer registration (US-009), poller orchestration (US-009/010), web control (US-011). CLI commands for auto-review; the generated CLI client is regenerated but no command is added. A `fleet.repo.check` approval requested before an auto-review change and approved after it answers 409 `fleet.repos`, because `prepareCheck` compares the whole repo row; this is accepted.\n\n**Interface** — `FleetReposController.configureAutoReview(id, dto)`; `FLEET_REPO_ROUTE_VARIANTS.autoReview: 'rest:fleet-repos.auto-review'`; `routeGate.run({ key: 'fleet.repo.review.configure', variant: FLEET_REPO_ROUTE_VARIANTS.autoReview, projectId: null, input: { id, patch: dto } })`.",
+      "acceptanceCriteria": [
+        "[integration] PATCH /api/fleet/repos/:id/auto-review as a global admin with { enabled: true, profiles: ['native-ds'], maxCostUsd: 2.5 } answers 200 with autoReview true and autoReviewMaxCostUsd '2.5000'.",
+        "[integration] That 200 reply has autoReviewEnabledById equal to the admin's id.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review with { enabled: false } answers 200 with autoReview false and autoReviewEnabledAt null.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review as a user without fleet.repo.review.configure answers 403.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review with { enabled: true } for a GitLab repo answers 422 with a message containing github app required.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review for an unknown id answers 404.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review with { enabled: 'yes' } answers 400.",
+        "[integration] PATCH /api/fleet/repos/:id/auto-review by an agent principal, whose role binding grants fleet.job.dispatch in the repo's project, under a policy that requires human approval for fleet.repo.review.configure, answers 202, and the repo's autoReview stays false.",
+        "[integration] Approving that pending request turns autoReview on with autoReviewEnabledByType AGENT and autoReviewEnabledById equal to the agent's id.",
+        "[integration] GET /api/fleet/repos returns each repo with the field autoReviewEnabledAt.",
+        "[unit] findCatalogEntry('fleet.repo.review.configure') returns an entry with scope global and access role.",
+        "[unit] findCatalogEntry('fleet.repo.review.configure') returns an entry whose approval.approvable is true."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "security",
+        "approvals",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds an access-control and deferred-approval surface with requester reconstruction, catalog/inventory contracts and generated consumers; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/repos/fleet-repos.controller.ts",
+        "apps/api/src/fleet/repos/fleet-repo-route.commands.ts",
+        "apps/api/src/permissions/permission-route.commands.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-repo-auto-review-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The auto-review route command's parser rejects { id: '', patch: { enabled: false } } before execution.",
+        "PATCH /api/fleet/repos/:id/auto-review with enabled false and maxCostUsd 0 answers 400.",
+        "Approving a request after its requester loses fleet.job.dispatch does not enable auto-review."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by bun run generate; gains the PATCH /api/fleet/repos/{id}/auto-review operation and the six FleetRepoDto fields."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "AC-12 (US-007) pins exactly 125 gated routes (line 68); the new gated PATCH makes it 126. Change the number and its comment; the assertion stays an exact count."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "the gatedOperations list gains the entry patch /api/fleet/repos/{id}/auto-review; the describe title (line 175) and the it title (line 256) change from 125 to 126, and toHaveLength(125) (line 258) becomes 126."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repo-route.commands.spec.ts",
+          "reason": "the variants length assertion (line 19) changes from 3 to 4, and any per-variant loop gains auto-review."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-admin-gates.spec.ts",
+          "reason": "the cases table gains a fleet.repo.review.configure case with variant rest:fleet-repos.auto-review, input with id r1 and patch enabled false, and a call through configureAutoReview; the service stub gains configureAutoReview."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "the permission rows gain one row: path /api/fleet/repos/{id}/auto-review, method patch, key fleet.repo.review.configure; the controller's summary and 403 response satisfy its per-row checks."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-role cell count (line 224) pins 219 catalog keys; the new key makes it 220; it stays an exact count."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role gains fleet.repo.review.configure, placed right after fleet.repo.check, with the same cell as fleet.repo.check for that role (granted, granted for owner and admin). Every other entry stays identical."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "the catalog spec re-derives the catalog from this file; it gains one REST row for PATCH /fleet/repos/:id/auto-review with key fleet.repo.review.configure and catalog scope global, every column mirroring the fleet.repo.check row at line 86."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ecbf6f08a2c14c51469b813842c45743916588ab"
+    },
+    {
+      "id": "US-004",
+      "title": "API open-PR listing through the App",
+      "description": "**Goal** — Add one-page authenticated GitHub open-PR listing with strict provider response mapping and observable fake-forge queries.\n\n**Motivation** — `GitHubAppClient` can read one PR (`getPullRequest`) but cannot list a repo's open PRs.\n\n**Approach** — `OpenPullRequest` (exported from `fleet/git-broker/github-app-client.ts`) has the shape `{ number: number; headSha: string; draft: boolean; headRepoFullName: string | null; updatedAt: Date }`.\n\n`GitHubAppClient.listOpenPullRequests(token, owner, name): Promise<OpenPullRequest[]>` sends `GET /repos/{owner}/{name}/pulls?state=open&per_page=100` through `FleetHttpClient`, one page only.\n- It maps each item from `number`, `head.sha`, `draft`, `head.repo?.full_name ?? null` and `updated_at`.\n- A reply of exactly 100 items logs a warning, through a Nest `Logger` named `GitHubAppClient`, naming `<owner>/<name>`: PRs past the first page are not seen.\n- A non-200 reply throws `RepoCheckException('provider_error')`, like `getPullRequest`.\n- These replies also throw `RepoCheckException('provider_error')`:\n  - a body that is not an array;\n  - an item without a numeric `number`, a string `head.sha`, a boolean `draft` or a string `updated_at`.\n\nToken. Listing PRs needs the Pull requests permission. `mintReadOnlyToken` grants only `contents: read` and `metadata: read`, so the poller uses `mintInstallationToken`, as `FleetPrStateRefresher` does. This story accepts the token; the pass mints it in US-009. Keep the existing Bearer headers and encoded repo path patterns and never log tokens or provider bodies.\n\n`FakeRequest` (`apps/api/test/helpers/fake-forge.ts`): adds `query: string` (the raw query string, `''` when absent). Set it where the path is split from the URL; additive, no existing request field changes. Expand github-app-client.spec.ts against startFakeForge for exact method/path/query/header, mapping, errors and full-page warning.\n\n**Scope** — In: exported OpenPullRequest type, GitHubAppClient method/logger and additive fake-forge query field. Out: head selection (US-006), access recheck (US-008), token mint/orchestration (US-009). Open PRs beyond the first page of 100 per repo per pass; a full page logs a warning. Live verification against GitHub; it needs a nax with the `bot-forge-identity` feature on a runner and happens at deploy.\n\n**Interface** — `GitHubAppClient.listOpenPullRequests(token, owner, name): Promise<OpenPullRequest[]>`; `{ number: number; headSha: string; draft: boolean; headRepoFullName: string | null; updatedAt: Date }`; `FakeRequest.query: string`.",
+      "acceptanceCriteria": [
+        "[unit] listOpenPullRequests('tok', 'o', 'n') against startFakeForge() sends a request with method GET, path /repos/o/n/pulls and query state=open&per_page=100.",
+        "[unit] That request carries the authorization header Bearer tok.",
+        "[unit] listOpenPullRequests maps a reply item { number: 7, draft: false, updated_at: '2026-11-02T00:00:00Z', head: { sha: 'aaa', repo: { full_name: 'o/n' } } } to { number: 7, headSha: 'aaa', draft: false, headRepoFullName: 'o/n', updatedAt: new Date('2026-11-02T00:00:00Z') }.",
+        "[unit] listOpenPullRequests maps an item whose head.repo is null to headRepoFullName null.",
+        "[unit] listOpenPullRequests throws RepoCheckException with reason provider_error on a 500 reply.",
+        "[unit] listOpenPullRequests throws RepoCheckException with reason provider_error when the reply body is an object instead of an array.",
+        "[unit] listOpenPullRequests throws RepoCheckException with reason provider_error for an item without head.sha.",
+        "[unit] listOpenPullRequests given a reply of 100 items logs a warning naming o/n, and given 99 items logs none.",
+        "[unit] Given a fake-forge handler registered as POST /probe, POST /probe?x=1 with Authorization: Bearer tok and JSON { value: 7 } still reaches that path-only handler with method POST, path /probe, headers.authorization 'Bearer tok' and body { value: 7 }, preserving existing request-field semantics while query is 'x=1'."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "github",
+        "security",
+        "tokens"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small additive provider method and test-helper change, but authenticated GitHub token handling invokes the security-critical TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/git-broker/fleet-http-client.ts",
+        "apps/api/test/helpers/fake-forge.ts"
+      ],
+      "suggestedCriteria": [
+        "listOpenPullRequests throws RepoCheckException('provider_error') when draft is absent or not boolean.",
+        "listOpenPullRequests throws RepoCheckException('provider_error') when number is absent or not numeric.",
+        "listOpenPullRequests throws RepoCheckException('provider_error') when updated_at is absent or not a string.",
+        "startFakeForge records query '' for a request without a query string."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/helpers/fake-forge.ts",
+          "reason": "FakeRequest gains a query field holding the raw query string (empty when absent), set where the path is split from the URL (line 28); additive, no existing request field changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1694a470337d34c34b4f03521e5904b663bc5818"
+    },
+    {
+      "id": "US-005",
+      "title": "API review-head table and automatic turn-off",
+      "description": "**Goal** — Persist unique PR-head claims/outcomes and add compare-and-set auto-disable with transactional audit.\n\n**Motivation** — No component dispatches `REVIEW` jobs.\n\n**Approach** — `FleetPrReview` columns:\n- `id` (cuid);\n- `repoId`, an FK to `FleetRepo` with cascade delete;\n- `prNumber Int`, `headSha String`;\n- `jobId String?`;\n- `outcome String`;\n- `createdAt DateTime @default(now())`, `updatedAt DateTime @updatedAt`.\n\nIt has a unique index on `(repoId, prNumber, headSha)`. It sits behind `FLEET_PR_REVIEW_REPOSITORY` (interface `IFleetPrReviewRepository`), implemented by `PrismaFleetPrReviewRepository extends AbstractPrismaRepository`, which adds:\n- `findHead(repoId, prNumber, headSha): Promise<FleetPrReviewRecord | null>`;\n- `insertPending(repoId, prNumber, headSha): Promise<FleetPrReviewRecord | null>`. It returns null on a unique violation (P2002), so a concurrent pass loses quietly;\n- `markDispatched(id, jobId): Promise<void>`;\n- `markFailed(id, outcome): Promise<void>`;\n- `remove(id): Promise<void>`;\n- `findPrincipalAccess(ref: PrincipalRef): Promise<{ exists: boolean; disabled: boolean }>`, the `PrismaScheduleRepository.findOwnerAccess` rules.\n\nOne row per PR head. `FleetPrReview` has one row per `(repoId, prNumber, headSha)`. Its `outcome` is `pending` (inserted, dispatch not finished), `dispatched` (with `jobId`) or `failed:<reason>`. A head with a `dispatched` or `failed:` row is never dispatched again.\n\nA USER exists when its `User` row does and is disabled when `User.disabled` is true. An AGENT exists when its `Agent` row does and is never disabled. `PrismaFleetPrReviewRepository.findPrincipalAccess` reads the `User` and `Agent` tables directly, as `PrismaScheduleRepository.findOwnerAccess` does; this is the accepted precedent, not a layering breach.\n\nCompare-and-set turn-off. `disableAutoReview(id, reason, expectedEnablerId)` changes the row only when `autoReview` is true and `autoReviewEnabledById` equals `expectedEnablerId`. It records its audit entry only when it changed the row, and returns whether it did. So a pass reading a stale repo list cannot turn off a repo someone else has just re-enabled.\n\n`FleetReposService.disableAutoReview(id: string, reason: string, expectedEnablerId: string): Promise<boolean>` makes the call-4 compare-and-set update and records the audit entry `{ key: 'system.pr-review.dispatch', resourceType: 'fleet-repo', resourceId: id, projectId, summary: 'auto-review disabled: <reason>' }`, both inside one `txManager.run`.\n\n`IFleetRepoRepository` adds `disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean>`. Disable clears autoReview and the three autoReviewEnabled* columns, preserving profiles/cost. Add migration `20261113090000_fleet_pr_review`, schema model and FleetRepo reverse relation. Put record/interface/token in reviews/domain/fleet-pr-review.domain.ts. Use transaction-scoped Prisma and generated imports; adopt existing AbstractPrismaRepository patterns, and return null only for P2002. Unit-test turn-off audit with mocks and repository behavior under the shared DB gate. The new system catalog key/writer/module are deliberately deferred together to US-009; no background writer is booted by this story.\n\n**Scope** — In: ledger schema/migration/repository/access lookup and repo CAS/service audit methods. Out: dispatch selection/recovery and outcome policy (US-006/007), permission recheck gate (US-008), writer/key/module registration (US-009). Deleting old `FleetPrReview` rows; they are kept.\n\n**Interface** — `IFleetPrReviewRepository` methods above; `disableAutoReviewIf(id: string, expectedEnablerId: string): Promise<boolean>`; `FleetReposService.disableAutoReview(id: string, reason: string, expectedEnablerId: string): Promise<boolean>`.",
+      "acceptanceCriteria": [
+        "[integration] insertPending(repoId, 7, 'aaa') returns a record with outcome pending and jobId null.",
+        "[integration] A second insertPending(repoId, 7, 'aaa') returns null and leaves one row.",
+        "[integration] markDispatched(id, 'j1') then findHead(repoId, 7, 'aaa') returns outcome dispatched and jobId j1.",
+        "[integration] markFailed(id, 'failed:profiles') then findHead returns outcome failed:profiles.",
+        "[integration] remove(id) then findHead(repoId, 7, 'aaa') returns null.",
+        "[integration] Deleting the FleetRepo deletes its FleetPrReview rows.",
+        "[integration] findPrincipalAccess({ type: 'USER', id }) for a user with disabled true returns { exists: true, disabled: true }.",
+        "[integration] findPrincipalAccess({ type: 'USER', id: 'missing' }) returns { exists: false, disabled: false }.",
+        "[integration] findPrincipalAccess({ type: 'AGENT', id }) for an existing agent returns { exists: true, disabled: false }.",
+        "[integration] disableAutoReviewIf(id, 'u1') on a repo enabled by u1 returns true and leaves autoReview false.",
+        "[integration] disableAutoReviewIf(id, 'u1') on a repo enabled by u2 returns false and leaves autoReview true.",
+        "[unit] disableAutoReview('r1', 'enabler_lost_access', 'u1') when disableAutoReviewIf returns true records an audit entry with key system.pr-review.dispatch and summary auto-review disabled: enabler_lost_access.",
+        "[unit] disableAutoReview returns what disableAutoReviewIf returns.",
+        "[unit] disableAutoReview when disableAutoReviewIf returns false records no audit entry."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "prisma",
+        "concurrency",
+        "security",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New ledger repository and unique claims cross schema/transaction boundaries, with security-critical principal access lookup and stale-enabler CAS authorization state.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/fleet/schedules/prisma-schedule.repository.ts",
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261113090000_fleet_pr_review/migration.sql",
+        "apps/api/src/fleet/reviews/domain/fleet-pr-review.domain.ts",
+        "apps/api/src/fleet/reviews/prisma-fleet-pr-review.repository.ts",
+        "apps/api/test/integration/fleet/fleet-pr-review.integration.spec.ts",
+        "apps/api/src/fleet/repos/fleet-repos.disable-auto-review.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "disableAutoReviewIf returns false for an already-disabled repo even if expectedEnablerId matches a stale enabler value.",
+        "disableAutoReviewIf on success clears autoReviewEnabledById, autoReviewEnabledByType and autoReviewEnabledAt while leaving profiles and cost unchanged.",
+        "findPrincipalAccess({ type: 'AGENT', id: 'missing' }) returns { exists: false, disabled: false }.",
+        "insertPending rethrows a database error whose code is not P2002."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "gains the FleetPrReview model and the reverse relation on FleetRepo, matching the US-005 migration."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4e2fdbe89a3e29a4b40825ff3e0c22430659f6d4"
+    },
+    {
+      "id": "US-006",
+      "title": "API review-head dispatcher, selection and recovery",
+      "description": "**Goal** — Select eligible PR heads, claim each durably, recover stale pending claims and dispatch bounded REVIEW jobs.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") wants koda to review PRs as they change without anyone dispatching.\n\n**Approach** — What a pass reviews. For each enabled repo, the poller reads one page of up to 100 open PRs and skips a PR that:\n- is a draft;\n- has a `headRepoFullName` that is null or is not `<owner>/<name>` (compared case-insensitively), meaning it comes from a fork or a deleted repository;\n- was last updated before auto-review was turned on (`updatedAt < autoReviewEnabledAt`). When `autoReviewEnabledAt` is null, this rule skips nothing.\nThe last rule stops the first pass after enabling from reviewing every old open PR at once.\n\nCrash recovery. A `pending` row older than one poll interval (`createdAt < now - prReviewPollMs`) is left over from a pass that stopped between insert and dispatch. The next pass deletes it and handles the head as new.\n\n`ReviewHeadDispatcher.dispatchRepo(repo: FleetRepoRecord, prs: readonly OpenPullRequest[], opts: { now: Date; pollMs: number; remaining: number }): Promise<number>` handles one repo. It returns the number of `dispatch` calls it made. It walks `prs` in ascending `number`, and for each PR:\n\n1. Skip it under the call-5 rules.\n2. Read `findHead`.\n   - A `dispatched` or `failed:` row: skip.\n   - A `pending` row with `createdAt >= now - pollMs`: skip.\n   - An older `pending` row: `remove` it and go on.\n3. Stop when the number of calls made has reached `opts.remaining`.\n4. `insertPending`. On null, skip.\n5. Call `FleetJobsService.dispatch` with:\n   - `actorId` = `repo.autoReviewEnabledById` and the repo's `projectId`;\n   - the body `{ command: 'REVIEW', repoId, prNumber, profiles: repo.autoReviewProfiles, maxCostUsd: Number(repo.autoReviewMaxCostUsd) }`;\n   - opts `{ auditKey: 'system.pr-review.dispatch' }`.\n   On success, `markDispatched` with the result's job id. On a throw, apply call 7.\n\nEvery `FleetPrReview` write runs in `bookkeeping('fleet.pr-review-bookkeeping', ...)`.\n\nPer-pass cap on attempts. A pass makes at most `prReviewMaxDispatch` (default 10) `dispatch` calls, across all repos, whether they succeed or fail. Heads it did not reach are picked up by a later pass. This also bounds the load while a budget is paused. The dispatcher enforces its remaining argument; cross-repo accounting belongs to US-009. Call 7's failure outcomes land in US-007, not this story. The pass provides the system/onBehalfOf context in US-009; do not invent an unregistered system writer here. Use result.job.id, not a top-level id. Avoid an open transaction around FleetJobsService.dispatch. Add BOOKKEEPING_REASONS entry fleet.pr-review-bookkeeping and matching EXPECTED_REASON_IDS entry in audit-coverage.bookkeeping.spec.ts; widen FleetJobsService.dispatch opts.auditKey from `'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch'` to include `'system.pr-review.dispatch'`. Unit tests use an in-memory IFleetPrReviewRepository and injected jobs fake, verifying currentBookkeepingReason for every write. Extend the existing apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts with the regression assertion that omitted opts.auditKey still produces fleet.job.dispatch; no new test file is needed for that assertion.\n\n**Scope** — In: selection, sorting, unique claim, fresh/stale pending recovery, successful dispatch/linking, per-call cap and bookkeeping registration. Out: retry/permanent failure mapping (US-007), enabler permission checks (US-008), repo orchestration/writer (US-009) and timer (US-010). Re-reviewing a head whose `REVIEW` job failed or was cancelled; its row stays `dispatched` until the PR gets a new head. A duplicate review when the API stops after `dispatch` commits and before `markDispatched`; the `pending` row is replaced after one poll interval and the head is dispatched again. Reviewing draft PRs and PRs from forks. Reviewing a head whose PR was last updated before auto-review was turned on. Recording which head a `REVIEW` job actually reviewed; nax reviews the PR's current head when the job runs, so a head that arrives while a review is queued can be reviewed twice.\n\n**Interface** — `ReviewHeadDispatcher.dispatchRepo(repo: FleetRepoRecord, prs: readonly OpenPullRequest[], opts: { now: Date; pollMs: number; remaining: number }): Promise<number>`.",
+      "acceptanceCriteria": [
+        "[unit] dispatchRepo for repo o/n enabled by u1 at 2026-11-01T00:00:00Z, with PR 7 at head aaa updated 2026-11-02T00:00:00Z and no row, calls FleetJobsService.dispatch once with u1, the repo's project id, { command: 'REVIEW', repoId, prNumber: 7, profiles: <autoReviewProfiles>, maxCostUsd: 1 } and { auditKey: 'system.pr-review.dispatch' }.",
+        "[unit] After that dispatch returns a DispatchResultDto whose job.id is j1, the head's row has outcome dispatched and jobId j1, and dispatchRepo returns 1.",
+        "[unit] dispatchRepo with a dispatched row for PR 7 head aaa does not call dispatch.",
+        "[unit] dispatchRepo with a dispatched row for PR 7 head aaa and the PR now at head bbb calls dispatch once, for PR 7.",
+        "[unit] dispatchRepo with a failed:profiles row for the head does not call dispatch.",
+        "[unit] dispatchRepo does not call dispatch for a PR with draft true.",
+        "[unit] dispatchRepo does not call dispatch for a PR whose headRepoFullName is fork/n or null.",
+        "[unit] dispatchRepo calls dispatch for a PR whose headRepoFullName is O/N on repo o/n.",
+        "[unit] dispatchRepo does not call dispatch for a PR whose updatedAt is before the repo's autoReviewEnabledAt.",
+        "[unit] With a pending row for the head created 10 minutes before now and pollMs 300000, dispatchRepo removes that row and calls dispatch.",
+        "[unit] With a pending row for the head created 1 minute before now and pollMs 300000, dispatchRepo does not call dispatch.",
+        "[unit] dispatchRepo with three new PR heads, PRs 9, 3 and 5, and remaining 2 calls dispatch for PRs 3 and 5 only, and returns 2.",
+        "[unit] When insertPending returns null, dispatchRepo does not call dispatch.",
+        "[unit] Every FleetPrReview write made by dispatchRepo runs inside bookkeeping with reason fleet.pr-review-bookkeeping.",
+        "[unit] FleetJobsService.dispatch called without opts.auditKey still records its job-creation audit with key fleet.job.dispatch, preserving existing manual dispatch callers after widening the auditKey union."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "dispatch",
+        "concurrency",
+        "audit"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Unique head claims, stale-pending recovery, attempt accounting and job/ledger writes form a new stateful dispatcher; it does not decide permissions or handle tokens, so the standard complex-story strategy is sufficient.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/action-context/audit-coverage.reasons.ts",
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/fleet/reviews/domain/fleet-pr-review.domain.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/reviews/review-head-dispatcher.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "dispatchRepo dispatches an otherwise eligible PR when autoReviewEnabledAt is null.",
+        "dispatchRepo dispatches an otherwise eligible PR whose updatedAt equals autoReviewEnabledAt.",
+        "dispatchRepo skips a pending row whose createdAt equals now minus pollMs.",
+        "dispatchRepo with remaining 0 makes no dispatch call."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "EXPECTED_REASON_IDS (lines 14-43) must equal BOOKKEEPING_REASONS; it gains fleet.pr-review-bookkeeping."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+          "reason": "gains one assertion that a dispatch with opts.auditKey omitted still records fleet.job.dispatch; no existing assertion changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "da50caf5ab8117e6139c320851caefc70d886600"
+    },
+    {
+      "id": "US-007",
+      "title": "API review-head dispatcher, failure outcomes",
+      "description": "**Goal** — Classify dispatch failures into retryable removal, permanent failed outcomes and budget-paused repo termination.\n\n**Motivation** — The fleet design (§9.122, \"S6 = K1 + K2\") wants koda to review PRs as they change without anyone dispatching.\n\n**Approach** — Retry later, not never. A dispatch that fails for a reason that can clear later deletes the head's row, so a later pass tries the head again:\n- `BudgetPausedException` (`fleet.budgetPaused`). Every PR of the repo shares the project's budget, so the dispatcher also stops the rest of that repo's PRs for this pass.\n- `ConflictAppException` with key `fleet.jobs` (409): a `REVIEW` for the PR is still active. This happens when a new head arrives while the last review runs.\n- Any other unexpected error. It is also logged at warn level with the repo id, the PR number and the error name.\nThe exceptions are checked in that order, because `BudgetPausedException` is a `ConflictAppException`.\nA dispatch that fails for a reason a retry cannot fix keeps the row as `failed:<reason>`:\n- `ValidationAppException`: its `args.reason` when that is a string, else the class name;\n- `NotFoundAppException` or `FleetDispatchException`: the class name.\nThe stored outcome is cut to 200 characters.\n\n`ReviewHeadDispatcher.dispatchRepo(repo: FleetRepoRecord, prs: readonly OpenPullRequest[], opts: { now: Date; pollMs: number; remaining: number }): Promise<number>` continues to return the number of dispatch calls including throws. Every `FleetPrReview` write runs in `bookkeeping('fleet.pr-review-bookkeeping', ...)`. Wrap both remove and markFailed paths; never make dispatch itself bookkeeping. Use a Nest Logger on the dispatcher and log only error names plus repo id/PR number for unexpected failures, not token/provider payloads. A fleet.jobs conflict does not stop subsequent PRs; a budget pause does. Store the truncated whole string including failed: prefix. Do not copy ScheduleTicker's unexpected-error active-job recovery: even an unexpected post-commit dispatch error removes this head's row. Cover these outcomes through an in-memory ledger and typed exception instances in review-head-dispatcher.outcomes.spec.ts; selection behavior from US-006 stays unchanged.\n\n**Scope** — In: dispatch throw classification, failed outcome truncation, retry cleanup, warning and per-repo budget stop. Out: core PR selection/claim algorithm (US-006), permission gate (US-008), cross-repo pass cap/module (US-009). An unexpected error thrown after `dispatch` has committed the job (placement, live publish or ticket effects) removes the head's row; later passes then get 409 until that job ends and review the head again. Suppressing failure notifications for poller-dispatched reviews; a failed review notifies its user requester like any job, and agent requesters get none, as today.\n\n**Interface** — `ReviewHeadDispatcher.dispatchRepo(repo: FleetRepoRecord, prs: readonly OpenPullRequest[], opts: { now: Date; pollMs: number; remaining: number }): Promise<number>`; permanent outcome `failed:<reason>`; retryable outcome deletes the row.",
+      "acceptanceCriteria": [
+        "[unit] When dispatch throws ConflictAppException({ activeJobId: 'j0' }, 'fleet.jobs'), dispatchRepo removes the head's row.",
+        "[unit] After that removal, a following dispatchRepo with the same PR head calls dispatch again.",
+        "[unit] When dispatch throws BudgetPausedException for PR 3, dispatchRepo removes PR 3's row.",
+        "[unit] When dispatch throws BudgetPausedException for PR 3, dispatchRepo makes no dispatch call for PR 5 in the same call, and returns 1.",
+        "[unit] When dispatch throws ValidationAppException({ reason: 'profiles' }, 'fleet.dispatchInput'), the head's row is marked failed:profiles.",
+        "[unit] After that, a following dispatchRepo with the same PR head does not call dispatch.",
+        "[unit] When dispatch throws ValidationAppException({}, 'fleet.dispatchInput'), the row is marked failed:ValidationAppException.",
+        "[unit] When dispatch throws NotFoundAppException({}, 'fleet.repos'), the row is marked failed:NotFoundAppException.",
+        "[unit] When dispatch throws FleetDispatchException, the row is marked failed:FleetDispatchException.",
+        "[unit] When dispatch throws ValidationAppException with a 300-character reason, the stored outcome is 200 characters long.",
+        "[unit] When dispatch throws Error('boom'), dispatchRepo removes the row and resolves.",
+        "[unit] When dispatch throws Error('boom') for PR 7, dispatchRepo logs a warning naming the repo id, PR 7 and Error.",
+        "[unit] With two new heads and remaining 2, when the first dispatch throws ConflictAppException with key fleet.jobs, dispatchRepo still calls dispatch for the second head and returns 2."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "dispatch",
+        "retries",
+        "budgets"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends one existing dispatcher with explicit exception precedence, bounded outcome strings and retry/stop behavior, without changing authorization or token handling.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/budgets/budget.exceptions.ts",
+        "apps/api/src/fleet/jobs/fleet-dispatch.exception.ts",
+        "apps/api/src/common/exceptions/conflict-app.exception.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.outcomes.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When dispatch throws ValidationAppException with a non-string args.reason, dispatchRepo marks the row failed:ValidationAppException.",
+        "When dispatch throws ConflictAppException with a key other than fleet.jobs, dispatchRepo removes the row and logs an unexpected-error warning.",
+        "Every remove and markFailed caused by a dispatch exception observes bookkeeping reason fleet.pr-review-bookkeeping."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dae8bc0be68a2619150444c7cf7cdd2b51665e9d"
+    },
+    {
+      "id": "US-008",
+      "title": "API enabler gate",
+      "description": "**Goal** — Revalidate the stored user or agent's project dispatch permission and automatically disable stale access before polling.\n\n**Motivation** — Nothing in koda notices a new PR or a new push today.\n\n**Approach** — Re-check every pass. Before polling a repo, the poller checks the enabler with the schedule rule, `mayDispatch(access, keys)` (`fleet/schedules/schedule-access.ts:12`):\n- `access` comes from `IFleetPrReviewRepository.findPrincipalAccess(enabler)`. A USER exists when its `User` row does and is disabled when `User.disabled` is true. An AGENT exists when its `Agent` row does and is never disabled.\n- `keys` is `PermissionService.effectiveKeys(enabler, { projectId: repo.projectId })`.\nThe check lives in `EnablerGate.check(repo): Promise<PrincipalRef | null>`. It returns the enabler when the check passes. On a failed check it calls `FleetReposService.disableAutoReview(repo.id, 'enabler_lost_access', enabler.id)` and returns null, and the pass does not dispatch for that repo.\n\nCompare-and-set turn-off. `disableAutoReview(id, reason, expectedEnablerId)` changes the row only when `autoReview` is true and `autoReviewEnabledById` equals `expectedEnablerId`. It records its audit entry only when it changed the row, and returns whether it did. So a pass reading a stale repo list cannot turn off a repo someone else has just re-enabled.\n\nBuild the PrincipalRef from the repo's stored autoReviewEnabledByType/id, not a currently signed-in human or approver. Reuse mayDispatch directly; do not duplicate key semantics, consult agent liveness or substitute a global scope. Await automatic disable, then return null even if its CAS returned false. Read, effectiveKeys and disable errors propagate for US-009's repo-local catch and warning. This class performs no token/PR reads or direct job dispatch. Unit-test it with an in-memory IFleetPrReviewRepository, PermissionService stub and FleetReposService.disableAutoReview stub in reviews/enabler-gate.spec.ts. The pass later places the gate inside onBehalfOf context so the disable audit carries the enabler.\n\n**Scope** — In: stored principal reconstruction, principal/access/key recheck, mayDispatch reuse and failed-gate CAS disable call. Out: database access lookup/CAS implementation (US-005), runAsSystem/writer/module (US-009), dispatcher (US-006/007) and poller (US-010).\n\n**Interface** — `EnablerGate.check(repo): Promise<PrincipalRef | null>`; `findPrincipalAccess(ref: PrincipalRef): Promise<{ exists: boolean; disabled: boolean }>`; `PermissionService.effectiveKeys(enabler, { projectId: repo.projectId })`.",
+      "acceptanceCriteria": [
+        "[unit] EnablerGate.check for a repo enabled by USER u1, where findPrincipalAccess reports { exists: true, disabled: false } and effectiveKeys({ type: 'USER', id: 'u1' }, { projectId: repo.projectId }) returns a set containing fleet.job.dispatch, returns { type: 'USER', id: 'u1' }.",
+        "[unit] EnablerGate.check reads effectiveKeys with the repo's projectId.",
+        "[unit] EnablerGate.check for a repo enabled by AGENT a1 that holds the key returns { type: 'AGENT', id: 'a1' }.",
+        "[unit] When the enabler's effective keys lack fleet.job.dispatch, EnablerGate.check returns null.",
+        "[unit] In that case EnablerGate.check calls disableAutoReview(repoId, 'enabler_lost_access', 'u1').",
+        "[unit] When findPrincipalAccess reports { exists: true, disabled: true }, EnablerGate.check returns null and calls disableAutoReview with reason enabler_lost_access.",
+        "[unit] When findPrincipalAccess reports { exists: false, disabled: false }, EnablerGate.check returns null and calls disableAutoReview."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "security",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A focused gate using existing schedule rules, but principal existence, disabled state and effective project permission are security-critical access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-access.ts",
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/reviews/domain/fleet-pr-review.domain.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/enabler-gate.ts",
+        "apps/api/src/fleet/reviews/enabler-gate.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "EnablerGate.check returns null after a failed permission check even when disableAutoReview returns false because its compare-and-set lost.",
+        "EnablerGate.check propagates a rejected effectiveKeys call without returning a permitted PrincipalRef.",
+        "EnablerGate.check passes { type: 'AGENT', id: 'a1' } to findPrincipalAccess and effectiveKeys for an agent-enabled repo."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "78108f92a2f8d0fd87bf61bfab6450ee51b1d337"
+    },
+    {
+      "id": "US-009",
+      "title": "API PR review pass and module",
+      "description": "**Goal** — Boot a registered system writer that polls eligible repos under their enablers' identities and enforces a shared dispatch-attempt cap.\n\n**Motivation** — No component dispatches `REVIEW` jobs.\n\n**Approach** — Polling, not a webhook. The `koda-fleet` App is installed with no webhooks and the reference deployment listens on loopback only, so GitHub cannot call koda. The poller reads through the App, like `FleetPrStateRefresher`.\n\nThe enabler is the requester. Turning auto-review on stores the caller's principal (`type` and `id`) and needs the caller to hold `fleet.job.dispatch` in the repo's project at that moment. The poller dispatches each review with `actorId` = the enabler's id inside `runAsSystem('pr-review', ..., { onBehalfOf: enabler })`, the `ScheduleTicker` shape, so the job's `requestedByType` is the enabler's type.\n\n`FleetPrReviewPass` has `@SystemWriter('system.pr-review.dispatch')` and is the system writer for this feature. `FleetPrReviewPass.run(now): Promise<void>` runs its whole body inside `runAsSystemWriter(this, ...)`.\n\n`FleetPrReviewPass.run(now)`:\n\n1. Reads `FleetReposService.listAutoReviewRepos(50)`: repos with `autoReview` true, provider `github`, a non-null `githubInstallationId` and a project with `deletedAt` null, ordered by `id`, at most 50. A full page logs a warning.\n2. For each repo, with `remaining = prReviewMaxDispatch - calls made so far`:\n   1. Inside `runAsSystem('pr-review', ..., { onBehalfOf: <the stored enabler> })`, so the turn-off audit and the dispatch audit both carry the enabler:\n   2. Call `EnablerGate.check(repo)`. On null, go to the next repo.\n   3. Mint a token with `mintInstallationToken(installationId, name)` and read `listOpenPullRequests(token, owner, name)`.\n   4. Run `dispatchRepo(repo, prs, { now, pollMs: prReviewPollMs, remaining })`.\n3. A throw anywhere in step 2 for one repo is logged at warn level with the repo id and the error name, and the pass goes on to the next repo.\n4. The pass ends when `remaining` reaches 0.\n\nToken. Listing PRs needs the Pull requests permission. `mintReadOnlyToken` grants only `contents: read` and `metadata: read`, so the poller uses `mintInstallationToken`, as `FleetPrStateRefresher` does.\n\nAudit.\n- The settings change records audit key `fleet.repo.review.configure`.\n- The poller's writes to `FleetPrReview` run inside `bookkeeping('fleet.pr-review-bookkeeping', ...)`.\n- Each dispatch records audit key `system.pr-review.dispatch` through `FleetJobsService.dispatch`.\n- An automatic turn-off records audit key `system.pr-review.dispatch`.\n\nThe pass, the poller, `EnablerGate` and `ReviewHeadDispatcher` live in a new `FleetReviewsModule` (`apps/api/src/fleet/reviews/`), which `FleetModule` imports.\n- It provides them plus `PrismaFleetPrReviewRepository` and `FLEET_PR_REVIEW_REPOSITORY`.\n- `PrismaFleetPrReviewRepository.findPrincipalAccess` reads the `User` and `Agent` tables directly, as `PrismaScheduleRepository.findOwnerAccess` does; this is the accepted precedent, not a layering breach.\n- It imports `FleetReposModule`, `FleetJobsModule` and `GitBrokerModule`, and exports nothing.\n- `FleetReposModule` adds `FleetReposService` to its `exports`, so the poller can inject it. The repository token stays where it is.\n\nThis story registers the pass, gate, dispatcher and repository; US-010 adds the poller provider when its lifecycle class is authored. Add the system catalog key `system.pr-review.dispatch` (inventory row and `INVENTORY_SCOPE_ROWS`, system access). Add `'system.pr-review.dispatch': ['system']` right after `'system.schedule.dispatch'`. The system key, its writer class and that class's module registration land together in US-009, because the permission contract checks every catalog key against the writers of the booted module. Add TSV system row for FleetPrReviewPass (run by FleetPrReviewPoller on a setInterval), mirroring ScheduleTicker columns. Update system-writer.decorator.spec.ts writers map with FleetPrReviewPass/key and exact count 34->35. Update role-matrix.spec.ts exact cells 220->221; in each role snapshot add system.pr-review.dispatch after system.schedule.dispatch as non-role-key, non-role-key, leaving every other entry identical. System actor ids derive from catalog keys, so no separate hardcoded actor allowlist is needed.\n\nUse unit tests stubbing listAutoReviewRepos/listOpenPullRequests/EnablerGate/dispatcher and inspecting action context. A DB-free FleetReviewsModule compilation test mocks external PrismaService, TRANSACTION_MANAGER, config, permission and other imported collaborators through providers. Include all per-repo failure sources: mint, list, enabler check and failed automatic turn-off. Errors in the initial repo list can escape run for US-010 to log.\n\n**Scope** — In: pass orchestration, enabler context, shared cap, containment/warnings, system catalog/TSV/snapshot changes and module registration/export. Out: timer/single-flight ownership (US-010), settings route (US-003), selection/outcomes (US-006/007) and permission gate internals (US-008). More than 50 auto-review repos per pass; repos past the first 50 by id are not polled, and a full page logs a warning. Fair sharing of the per-pass cap between repos; repos are polled in id order, so a low-id repo with many retrying heads can use the whole cap. A narrower PR-read token; the poller uses the installation token that `FleetPrStateRefresher` uses. A GitHub webhook trigger for reviews; reviews are found by polling through the App.\n\n**Interface** — `FleetPrReviewPass.run(now): Promise<void>`; `@SystemWriter('system.pr-review.dispatch')`; `runAsSystem('pr-review', ..., { onBehalfOf: enabler })`; `dispatchRepo(repo, prs, { now, pollMs: prReviewPollMs, remaining })`.",
+      "acceptanceCriteria": [
+        "[unit] FleetPrReviewPass.run calls listAutoReviewRepos with 50.",
+        "[unit] run with one auto-review repo whose EnablerGate.check returns { type: 'USER', id: 'u1' } calls mintInstallationToken with the repo's installation id and name.",
+        "[unit] In that run, listOpenPullRequests is called with the minted token, the repo's owner and its name.",
+        "[unit] In that run, ReviewHeadDispatcher.dispatchRepo is called with the repo, the listed PRs and remaining 10.",
+        "[unit] The dispatchRepo call runs in an action context whose actor is { type: 'SYSTEM', id: 'pr-review' }.",
+        "[unit] The dispatchRepo call runs in an action context whose onBehalfOf is { type: 'USER', id: 'u1' }.",
+        "[unit] When the first repo's dispatchRepo returns 7 and prReviewMaxDispatch is 10, the second repo's dispatchRepo receives remaining 3.",
+        "[unit] When dispatchRepo returns 10 for the first repo, run does not call EnablerGate.check for the second repo.",
+        "[unit] When EnablerGate.check returns null, run does not mint a token for that repo.",
+        "[unit] When listOpenPullRequests throws for the first of two repos, run still calls dispatchRepo for the second repo; the same continuation occurs when mintInstallationToken or the automatic disableAutoReview called by the enabler check throws.",
+        "[unit] For a first-repo mint, list, enabler-check or automatic turn-off error, run logs a warning naming the first repo's id and the error name.",
+        "[unit] When EnablerGate.check rejects for the first of two repos, run still calls dispatchRepo for the second repo.",
+        "[unit] Compiling FleetReviewsModule with mocked external collaborators resolves FleetPrReviewPass.",
+        "[unit] The module metadata of FleetModule imports FleetReviewsModule.",
+        "[unit] The module metadata of FleetReposModule exports FleetReposService alongside the existing FLEET_REPO_REPOSITORY token, preserving existing repository consumers."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "security",
+        "system-writer",
+        "github",
+        "audit"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-007",
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Integrates permission revocation, GitHub installation tokens, on-behalf-of action contexts, audit/catalog contracts and boot-time DI; security override requires strict isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/src/fleet/repos/fleet-repos.module.ts",
+        "apps/api/src/fleet/fleet.module.ts",
+        "apps/api/src/permissions/system-writer.decorator.spec.ts",
+        "apps/api/src/fleet/reviews/enabler-gate.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/fleet-pr-review.pass.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.ts",
+        "apps/api/src/fleet/reviews/fleet-pr-review.pass.spec.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "FleetPrReviewPass.run logs a warning when listAutoReviewRepos returns exactly 50 repos.",
+        "FleetPrReviewPass.run passes the supplied now and configured prReviewPollMs to dispatchRepo.",
+        "For an agent-enabled repo, the dispatchRepo action context has onBehalfOf { type: 'AGENT', id: 'a1' }.",
+        "When EnablerGate.check automatically disables a repo, its action context identifies the stored enabler as onBehalfOf.",
+        "When dispatchRepo rejects for the first repo, FleetPrReviewPass.run still processes the next repo."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writers map (lines 39-75) gains FleetPrReviewPass with key system.pr-review.dispatch, and the length assertion (line 99) changes from 34 to 35; AC-5 then holds for the new system key."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-role cell count (line 224), 220 after US-003, becomes 221 for the new system key; it stays an exact count."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role gains system.pr-review.dispatch, placed right after system.schedule.dispatch, as non-role-key, non-role-key, like system.schedule.dispatch. Every other entry stays identical."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "it gains one system row for FleetPrReviewPass (run by FleetPrReviewPoller on a setInterval) with key system.pr-review.dispatch and catalog scope system, every column mirroring the ScheduleTicker row at line 258."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "93a666308199f9893f55f8993c7e604bed16e8bd"
+    },
+    {
+      "id": "US-010",
+      "title": "API PR review poller lifecycle",
+      "description": "**Goal** — Schedule review passes through an opt-out, single-flight lifecycle component that never rejects from poll().\n\n**Motivation** — Nothing in koda notices a new PR or a new push today.\n\n**Approach** — `FleetPrReviewPoller` owns the lifecycle:\n- On `onModuleInit`, when `sweepEnabled` and `prReviewEnabled` are both true, it starts an unref'd `setInterval` of `prReviewPollMs` that calls `poll()`.\n- `onModuleDestroy` clears the interval.\n- `poll()` calls `FleetPrReviewPass.run(new Date())` once. A `poll()` that starts while an earlier one is unresolved returns without calling `run`. `poll()` never rejects; an error escaping `run` is logged at error level by the poller's Nest `Logger`.\n\nGlobal switch defaults on. `FLEET_PR_REVIEW_ENABLED` defaults to `true`, because every repo's `autoReview` defaults to `false`. The timer starts only when `sweepEnabled` is also true.\n\nAdd FleetPrReviewPoller to the existing FleetReviewsModule providers. Keep runAsSystemWriter/@SystemWriter on FleetPrReviewPass (US-009), not on a second writer class. Use finally to release single-flight state on success and failure, clear/null timer on destroy, and avoid a startup pass not requested by the spec. Unit tests use fake timers and a deferred pass promise to assert callback timing, unref/cleanup, both enable gates and overlap; extend the existing DB-free fleet-reviews.module.spec.ts to resolve the poller.\n\n**Scope** — In: poller class/provider, timer, shutdown, single-flight and top-level error logging. Out: pass/repo loop/system writer/catalog (US-009), head dispatch policy (US-006/007), config defaults/validation (US-001).\n\n**Interface** — `FleetPrReviewPoller.poll(): Promise<void>`; `onModuleInit`; `onModuleDestroy`; `FleetPrReviewPass.run(now): Promise<void>`.",
+      "acceptanceCriteria": [
+        "[unit] poll() calls FleetPrReviewPass.run once with a Date.",
+        "[unit] A poll() started while another poll() is unresolved returns without calling run.",
+        "[unit] When run rejects, poll() resolves and logs an error.",
+        "[unit] onModuleInit with sweepEnabled true and prReviewEnabled true starts an interval of prReviewPollMs that calls poll().",
+        "[unit] onModuleDestroy clears that interval.",
+        "[unit] onModuleInit with prReviewEnabled false starts no interval.",
+        "[unit] onModuleInit with sweepEnabled false starts no interval.",
+        "[unit] Compiling FleetReviewsModule with mocked external collaborators resolves FleetPrReviewPoller."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "api",
+        "lifecycle",
+        "polling"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard Nest lifecycle/single-flight wrapper and provider registration with deterministic fake-timer tests; permission/token decisions remain in the upstream pass.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.ts",
+        "apps/api/src/fleet/reviews/fleet-pr-review.pass.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/fleet-pr-review.poller.ts",
+        "apps/api/src/fleet/reviews/fleet-pr-review.poller.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After a rejected run settles, a later poll() invokes FleetPrReviewPass.run again.",
+        "When onModuleInit starts a timer, that timer's unref method is called.",
+        "After onModuleDestroy, advancing timers does not invoke another review pass."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/reviews/fleet-reviews.module.ts",
+          "reason": "created by US-009; gains FleetPrReviewPoller as a provider."
+        },
+        {
+          "path": "apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts",
+          "reason": "created by US-009; gains the assertion that the compiled module resolves FleetPrReviewPoller; existing assertions stay."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b8f3634c9a463a75436418b34b091edb72e5acd8"
+    },
+    {
+      "id": "US-011",
+      "title": "Web auto-review switch",
+      "description": "**Goal** — Let permitted global administrators enable, edit or disable a repo's auto-review settings without misrepresenting pending approvals.\n\n**Motivation** — `FleetRepo` has no review settings.\n\n**Approach** — On `/admin/fleet/repos`, each GitHub repo with an App installation gets an auto-review control, the component `FleetRepoAutoReview` (file `components/fleet/RepoAutoReview.vue`, auto-imported by Nuxt under that name). Its switch is enabled only when `useGlobalPermissions()` has `fleet.repo.review.configure`. Turning it on, or choosing the edit button of an enabled repo, opens a dialog with:\n- a profiles field (comma-separated);\n- a max-cost field;\nboth validated with vee-validate and zod. Saving calls `useFleetRepos().setAutoReview` with `enabled: true`; turning the switch off calls it with `{ enabled: false }`.\n\n`setAutoReview` returns `{ kind: 'pending', request }` when the API's data has a `permissionKey` (the 202 approval summary), and `{ kind: 'saved', repo }` otherwise. Strings live under `fleet.repos.autoReview.*` in `en` and `zh`.\n\nWeb `FleetRepo` (`apps/web/lib/fleet-types.ts:120`) adds the six fields. `useFleetRepos` adds `setAutoReview(id, body): Promise<{ kind: 'saved'; repo: FleetRepo } | { kind: 'pending'; request: ApprovalRequestSummary }>`.\n\nThe API fields are autoReview boolean, autoReviewProfiles string[], autoReviewMaxCostUsd four-place string, autoReviewEnabledById string|null, autoReviewEnabledByType 'USER'|'AGENT'|null and autoReviewEnabledAt ISO string|null. PATCH body is `{ enabled: boolean; profiles?: string[]; maxCostUsd?: number }`; profiles accepts at most 8 strings, each at most 64 characters; max cost is 0.0001..10000 with at most 4 decimals. Use existing API wrapper/apiPath and extractApiError. Read the permission composable's computed permission set rather than roles. Keep the switch controlled by persisted repo state: opening the enabling dialog is not a save; 202 keeps old state and shows fleet.repos.autoReview.pending; a saved response updates the displayed repo. Choosing edit pre-fills the stored chain/cost; split and trim comma-separated profiles, sending numeric cost. A 422 shows the API message from extractApiError. Localize every label, validation error, action and pending notice in both JSON locales; use the existing Switch/dialog/input primitives and HSL design tokens. Preserve explicit-only forge checks and all existing repo actions.\n\nExtend tests/helpers/mount-sfc.ts FleetComponentName and FLEET_COMPONENT_FILES with FleetRepoAutoReview mapped to RepoAutoReview.vue, so pages mount the real component; no other entry changes. Add only a Switch stub to tests/helpers/fleet-harness.ts uiStubs. In tests/pages/admin-fleet-repos.spec.ts, mountRepos supplies a useGlobalPermissions stub granting fleet.repo.review.configure unless overridden and includes FleetRepoAutoReview in fleetComponents; repo fixtures gain all six fields with autoReview false, empty profiles, '1.0000' and three nulls; existing assertions stay unchanged. Add tests/components/repo-auto-review.spec.ts for dialog/permission/API result and error behavior.\n\n**Scope** — In: repo web type/composable PATCH union, per-row control/dialog, permission gating, en/zh strings and mounting integration. Out: API route/settings rules (US-002/003), background polling/dispatch (US-006 through US-010), layout/navigation redesign. Showing a repo's review history (`FleetPrReview` rows) in the web. GitLab auto-review.\n\n**Interface** — `setAutoReview(id, body): Promise<{ kind: 'saved'; repo: FleetRepo } | { kind: 'pending'; request: ApprovalRequestSummary }>`; `FleetRepoAutoReview` at `components/fleet/RepoAutoReview.vue`; API path `/fleet/repos/<id>/auto-review`.",
+      "acceptanceCriteria": [
+        "[unit] /admin/fleet/repos renders a FleetRepoAutoReview switch for a GitHub repo with a githubInstallationId.",
+        "[unit] /admin/fleet/repos renders no FleetRepoAutoReview for a GitLab repo.",
+        "[unit] /admin/fleet/repos renders the auto-review switch disabled when useGlobalPermissions() lacks fleet.repo.review.configure.",
+        "[unit] FleetRepoAutoReview for a repo with autoReview true renders the switch on and lists its profiles.",
+        "[unit] Saving the FleetRepoAutoReview dialog with profiles native-ds, review and max cost 2.5 calls $api.patch with path /fleet/repos/<id>/auto-review and body { enabled: true, profiles: ['native-ds', 'review'], maxCostUsd: 2.5 }.",
+        "[unit] The FleetRepoAutoReview dialog with max cost 0 does not call $api.patch and shows the fleet.repos.autoReview.maxCostInvalid message.",
+        "[unit] Choosing the edit button of an enabled repo opens the dialog prefilled with its profiles and max cost.",
+        "[unit] Turning an enabled switch off calls $api.patch with path /fleet/repos/<id>/auto-review and body { enabled: false }.",
+        "[unit] setAutoReview returns { kind: 'pending', request } when the API data has a permissionKey.",
+        "[unit] setAutoReview returns { kind: 'saved', repo } when the API data is a repo.",
+        "[unit] After a pending result, FleetRepoAutoReview keeps the switch in its previous state and shows the fleet.repos.autoReview.pending notice.",
+        "[unit] When $api.patch rejects with a 422 ApiError, FleetRepoAutoReview shows the message from extractApiError.",
+        "[unit] The English and Chinese locale files both define every fleet.repos.autoReview.* key."
+      ],
+      "tags": [
+        "fleet-auto-review",
+        "web",
+        "nuxt",
+        "security",
+        "approvals",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The row control, validated dialog and saved/pending PATCH union reuse established Nuxt, form and API patterns; permission gating retains the strict security TDD override despite the otherwise standard UI scope.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/fleet/repos.vue",
+        "apps/web/composables/useFleetRepos.ts",
+        "apps/web/pages/admin/fleet/budgets.vue",
+        "apps/web/lib/approval-requests.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/RepoAutoReview.vue",
+        "apps/web/tests/components/repo-auto-review.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "/admin/fleet/repos renders no FleetRepoAutoReview for a GitHub repo whose githubInstallationId is null.",
+        "Cancelling the enable dialog leaves the switch off and makes no PATCH request.",
+        "A saved setAutoReview response replaces the displayed repo settings with the returned settings.",
+        "When global permissions are still loading, FleetRepoAutoReview's switch remains disabled.",
+        "A pending disable response leaves a previously enabled switch on."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/admin/fleet/repos.vue",
+          "reason": "gains the FleetRepoAutoReview control per GitHub repo with an installation and reads useGlobalPermissions for fleet.repo.review.configure."
+        },
+        {
+          "path": "apps/web/composables/useFleetRepos.ts",
+          "reason": "gains setAutoReview with the saved or pending result."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "FleetRepo gains the six auto-review fields."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains the fleet.repos.autoReview keys."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the fleet.repos.autoReview keys, matching en."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "FleetComponentName and FLEET_COMPONENT_FILES (lines 286-312 and 428) gain FleetRepoAutoReview mapped to RepoAutoReview.vue, so pages can mount the real component; no other entry changes."
+        },
+        {
+          "path": "apps/web/tests/helpers/fleet-harness.ts",
+          "reason": "the uiStubs list (lines 81-110) gains a Switch stub so the repos page and FleetRepoAutoReview mount under the harness; no other stub changes."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-repos.spec.ts",
+          "reason": "mountRepos passes a useGlobalPermissions stub in its globals (granting fleet.repo.review.configure unless a test overrides it) and adds FleetRepoAutoReview to its fleetComponents; its repo fixtures gain the six auto-review fields with autoReview false; existing assertions stay unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "35b314ea6f086c077930b4d5f2d8bb70f5503d42"
+    }
+  ],
+  "analysis": "EXECUTION CONTEXT AND GOAL\nThis is an enhancement to an existing Bun-managed Turborepo, not a greenfield service. Execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. Codebase-memory MCP was not exposed in this session; discovery therefore used direct Read/Grep/Glob tools. App guidance was read from .nax/mono/apps/api/context.md and .nax/mono/apps/web/context.md. The detected Express/Next.js labels are inaccurate: the API is NestJS on Fastify with Nathapp modules and Prisma 7, and the web is Nuxt 4 SSR/Vue with handwritten composables, Jest, vee-validate and zod. Follow the nathapp-nestjs-patterns skill before implementation; it was not available among this session's exposed tools or repository filenames. This planning task changes only this PRD. Implement exactly US-001 through US-011 with the binding workdirs and dependencies, even where generation touches root/CLI files. The capability is opt-in per GitHub App-backed repo, polling open non-draft same-repo PR heads and dispatching the already-implemented REVIEW job as the enabler. Part A already exists: DispatchFleetJobDto accepts REVIEW/prNumber (apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10), and normalizeDispatch derives the feature/default ref and rejects REVIEW-incompatible fields (apps/api/src/fleet/jobs/dispatch-input.ts:27-66). Do not rebuild runner review execution.\n\nDATA, CONFIGURATION AND CONSUMER IMPACT (US-001)\nFleetRepo is at apps/api/prisma/schema.prisma:766-786, currently without review settings. Add migration 20261112090000_fleet_auto_review and matching schema changes for the six settings columns plus autoReview index. Existing rows default disabled, empty profiles, Decimal(10,4) 1.0000 and null enabler/time, so deploying the globally enabled poller does not launch work until a repo is explicitly enabled. FleetRepoRecord and IFleetRepoRepository are at apps/api/src/fleet/repos/domain/fleet-repo.domain.ts:6-34. Its current create input is Omit<FleetRepoRecord, 'id' | 'createdAt'> (:21); explicitly exclude the six new settings from create inputs as well, so registration callers continue to rely on database defaults. PrismaFleetRepoRepository currently returns raw Prisma rows, NOT a pre-existing shared mapping (apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts:22-46); introduce one and apply it consistently to create, findById, findAnchor, findPage and new methods. Convert Decimal toFixed(4), preserve dates in records, and narrow enabledByType to USER | AGENT | null. FleetRepoDto.from currently maps installation BigInt to string and createdAt to ISO (apps/api/src/fleet/repos/dto/fleet-repo.dto.ts:15-21); add the six fields, normalizing even a record money string '2.5' to '2.5000'. New enabled repo query must filter autoReview true, github, installation not null AND project.deletedAt null, order id ascending and limit. FleetJobsService.dispatch does not itself check project deletion (apps/api/src/fleet/jobs/fleet-jobs.service.ts:77-85), making this filter essential. ProjectBriefService imports FleetRepoRecord (apps/api/src/fleet/threads/project-brief.service.ts:4,72,97); its full test fixture needs the six defaults at project-brief.service.spec.ts:27. Threads tests also cast anchor repos (threads.service.spec.ts:403); preserve their prior behavior. Fleet config consists of IFleetConfig (:8), string-decorated FleetConfigSchema (:69) and registerAs resolution (:124) in apps/api/src/config/fleet.config.ts. Add fields to all three surfaces and Joi validation alongside other fleet booleans/intervals in apps/api/src/config/env.validation.ts:76-97. FLEET_PR_REVIEW_ENABLED defaults true, with case-insensitive false disabling; poll defaults 300000 with range 60000..86400000, cap defaults 10 with range 1..100. The shared testFleetConfig literal must set prReviewEnabled false to keep tests deterministic. Existing fleet.config.spec.ts and env.validation.spec.ts cover configuration.\n\nSETTING WRITE AND APPROVAL BOUNDARY (US-002/003)\nFleetReposService has seven positional dependencies today, with audit last (apps/api/src/fleet/repos/fleet-repos.service.ts:21-30). Add PermissionService as the new LAST parameter, available from global PermissionsModule. Grep confirmed direct constructor calls at fleet/repos/fleet-repos.service.spec.ts:14 and approvals/approval-execution.service.spec.ts:303; append a permission stub without changing existing assertions. Service create/remove show txManager.run + audit patterns (:44-64,80-94). configureAutoReview must perform lookup, ordered provider/profile/duplicate/project-dispatch permission checks, update and audit inside one transaction. DTO structural validation applies even for enabled false; semantic profile/provider/permission enable checks apply only for enabled true. Omitted profiles/cost preserve stored values, [] explicitly clears profiles, re-saving an enabled row keeps its enabledAt but changes the enabler to the caller, and disabling clears enabler metadata but retains settings. Use PROFILE_NAME_RE and RESERVED_PROFILE_PREFIX, not a second grammar (apps/api/src/fleet/jobs/dispatch-input.ts:2,14,52-54). PermissionService.canHoldKey accepts PrincipalRef and project scope (:59-72); effectiveKeys is project-scoped and cached through the existing permission cache (:98-105). API errors use separate en/zh API fleet.json strings, AutoReviewException key fleet.autoReview with 422 and {reason}.\nFleetReposController.check is the reference global RequiresGuard/Requires/ApprovalGated route with JsonResponse.Ok and ApprovalPending handling (apps/api/src/fleet/repos/fleet-repos.controller.ts:64-83). Add PATCH :id/auto-review under fleet.repo.review.configure with projectId null and input {id, patch:dto}, not a direct service invocation bypassing routeGate. FleetRepoRouteCommands registers variants through ActorPrincipalLoader (apps/api/src/fleet/repos/fleet-repo-route.commands.ts:12-48); add rest:fleet-repos.auto-review, parsing id plus parseBody(UpdateAutoReviewDto, patch) as in permissions/permission-route.commands.ts:63-66. routeCommand loads the original action principal for immediate and deferred execution (apps/api/src/approvals/route/route-command.ts:39-55). An approved agent request MUST store the agent as enabler, not the human decider. The new key is a global, role-access, approvable fleet.repo high-risk write; catalog derives those attributes and principal eligibility (apps/api/src/permissions/catalog.ts:137-150,365-374,383-398,401-449). Add the inventory TSV row as well as INVENTORY_SCOPE_ROWS immediately after fleet.repo.check (:212), without special-casing catalog derivation.\nContracts pin exact catalog/route totals. In US-003 update gated routes 125->126 in test/integration/permissions/permission-contract.integration.spec.ts and approvals/approval-openapi.contract.spec.ts (list and titles included), variants 3->4, role cells 219->220 (confirmed at permissions/role-matrix.spec.ts:224). Add cases to fleet-admin-gates.spec.ts and fleet-openapi.contract.spec.ts. Every role's snapshot cell for the global key mirrors fleet.repo.check in the same order. Do not weaken exact assertions or bulk-rewrite unrelated snapshot entries. Regenerate openapi.json and apps/cli/src/generated using bun run generate from repo root (package.json:21-24); never hand-edit generated clients. Existing generated files include client.gen.ts, index.ts, sdk.gen.ts and types.gen.ts; no new CLI command or web-generated client. No fleet/repos endpoint entry belongs in endpoint.e2e.spec.ts: this family uses gated-route unit contracts, approval OpenAPI contracts and route integration tests.\n\nGITHUB READ SEAM (US-004)\nGitHubAppClient headers and API URL normalization are at apps/api/src/fleet/git-broker/github-app-client.ts:34-40. mintInstallationToken grants pull_requests write plus existing contents/metadata/checks/status/actions grants (:61-63); mintReadOnlyToken lacks PR permission (:66-72) and is not suitable. getPullRequest (:122-145) demonstrates provider error handling and encoded paths. Add exported OpenPullRequest, listOpenPullRequests, one GET page with exact state=open&per_page=100 query, strict required field types, null head repo mapping and Date updatedAt. Non-200 and malformed response/item throw RepoCheckException('provider_error'); do not leak provider bodies or tokens. Nest Logger named GitHubAppClient warns on exactly 100 results and names owner/name. All HTTP continues through FleetHttpClient (timeouts/no redirects); no new direct HTTP stack. Fake forge currently splits req.url at '?' and discards the query (apps/api/test/helpers/fake-forge.ts:27-30); add raw query as an additive field without changing method/path/header/body or route keys. github-app-client.spec.ts:19-34 already constructs a fake-forge client, and :45-55 validates token scoping/auth. Its real socket fixtures require host availability; use existing sandbox gates, never a live GitHub dependency.\n\nHEAD LEDGER AND TURN-OFF (US-005)\nAdd migration 20261113090000_fleet_pr_review, matching FleetPrReview model and FleetRepo reverse relation. Unique(repoId,prNumber,headSha) and FK cascade delete are the concurrency/deduplication boundary; jobId is a nullable string, not a new job FK. Do not confuse this permanent head ledger with existing FleetReviewResult analytics. New IFleetPrReviewRepository/token/record live under fleet/reviews/domain and PrismaFleetPrReviewRepository extends AbstractPrismaRepository. Existing Nathapp base-class/delegate/transaction pattern is visible at apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:39-77; use generated Prisma imports and transaction-scoped prisma.client. insertPending returns null on P2002, rethrows other errors, never relies on adapter meta.target. Existing fleet repo P2002 pattern is apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts:22-30. findPrincipalAccess deliberately reads User/Agent directly, copying apps/api/src/fleet/schedules/prisma-schedule.repository.ts:114-121: USER row existence/disabled, AGENT existence and disabled false regardless of liveness. CAS disable is id + autoReview true + expected enabler id, clearing the enabler metadata on success while preserving profiles/cost. FleetReposService.disableAutoReview combines CAS and system.pr-review.dispatch audit in a single transaction, emits no audit for false and returns the CAS boolean. A stale pass must not disable a repo now enabled by a different principal. Unknown/deleted repos lose the CAS quietly rather than manufacturing an audit.\n\nDISPATCH SELECTION, RECOVERY AND FAILURE POLICY (US-006/007)\nReviewHeadDispatcher receives one already-authorized repo/list and a pass-wide remaining allowance. Sort PRs by ascending number; skip drafts, null/fork heads with case-insensitive owner/name comparison, and updatedAt strictly before enabledAt (null cutoff skips nothing). Dispatched and failed heads are permanent; pending createdAt >= now-pollMs is fresh; only older pending is removed and reclaimed. Claim via insertPending before dispatch and skip a null concurrent claim. Count dispatch CALLS including failed attempts, not jobs created; remaining applies across repos through the pass. Dispatch uses the stored enabler id, projectId, command REVIEW, prNumber, stored profiles and Number(four-place cost), with auditKey system.pr-review.dispatch; job id is result.job.id (apps/api/src/fleet/jobs/fleet-jobs.service.ts:145-155). Widen only dispatch's audit-key union, preserving its existing transaction, duplicate-active translation, live/placement behavior (:77,107-143). Never hold a transaction open over a job dispatch or GitHub HTTP request. Every ledger mutation, including stale removal and error cleanup, is inside bookkeeping('fleet.pr-review-bookkeeping', ...), but dispatch itself is NOT bookkeeping. Register that reason plus the exact EXPECTED_REASON_IDS entry in audit-coverage.bookkeeping.spec.ts; bookkeeping rejects unregistered reasons (apps/api/src/action-context/audit-coverage.ts:227-246).\nMost-specific-first exceptions are required: BudgetPausedException extends ConflictAppException, so remove its row and stop this repo; fleet.jobs 409 removes its row and continues; ValidationAppException retains failed:<string args.reason or class name>; NotFoundAppException and FleetDispatchException retain failed:<class name>; anything else warns with repo id, PR number and error name, removes the row and continues. Truncate the whole stored outcome to 200 characters. ScheduleTicker.onDispatchError at apps/api/src/fleet/schedules/schedule-ticker.ts:195-217 provides exception precedence, but its unexpected-error recovery is DIFFERENT: auto-review intentionally deletes the head row even if dispatch already committed. Do not copy the scheduler's findActiveJob/link fallback into this feature. Crash recovery is at-least-once: a crash between commit and markDispatched can create a later duplicate after stale pending recovery. These duplicates, post-commit side-effect errors, no re-review of dispatched-but-failed/cancelled jobs, cap unfairness and unpruned ledger rows are accepted feature boundaries.\n\nENABLER RECHECK, SYSTEM CONTEXT AND MODULE REGISTRATION (US-008/009)\nReuse mayDispatch rather than duplicate authorization: apps/api/src/fleet/schedules/schedule-access.ts:12-14 requires existence, not disabled and exact fleet.job.dispatch membership in effectiveKeys for this repo's project. EnablerGate.check returns the stored USER/AGENT PrincipalRef on success; otherwise await disableAutoReview(id,'enabler_lost_access',enabler.id) and return null even if its CAS loses. Read/access/disable errors escape to the pass's per-repo catch. ScheduleTicker.dispatchFresh illustrates effective keys and onBehalfOf attribution (apps/api/src/fleet/schedules/schedule-ticker.ts:147-178). Every repo's gate (including automatic-disable audit), token/list and dispatch must run within runAsSystem('pr-review', ..., {onBehalfOf:storedEnabler}); wrap the pass body in runAsSystemWriter(this,...). actorTypeFor consults onBehalfOf (apps/api/src/action-context/action-context.ts:168-178), and FleetJobsService uses it for requestedByType (:119), so agent jobs remain agent-requested. runAsSystem refuses unknown component ids (:123-140); allowed ids derive from catalog system keys (:75-80). Therefore US-009 must land catalog key system.pr-review.dispatch, @SystemWriter class and booted module together, not in the earlier ledger/dispatcher stories. Earlier units exercise service/repository seams with mocked audit/context as appropriate.\nFleetPrReviewPass reads at most 50 eligible repos, warns on a full page, iterates id order, gates before minting, mints installation token once per repo, lists one page, and carries maxDispatch minus calls across repos. Catch any per-repo error at warn with repo id and error name and continue; global list errors escape to the poller. Add FleetReviewsModule importing FleetReposModule/FleetJobsModule/GitBrokerModule and providing the pass, EnablerGate, dispatcher, Prisma repository and useExisting token binding; exports none. FleetReposModule currently exports only FLEET_REPO_REPOSITORY (apps/api/src/fleet/repos/fleet-repos.module.ts:17-20); export FleetReposService too without moving its token. FleetModule's imports are at apps/api/src/fleet/fleet.module.ts:23-25. Add system inventory/catalog row after system.schedule.dispatch (catalog.ts:342), every role snapshot non-role-key pair in the same position, cell count 220->221 and system writers map/count 34->35 (confirmed in permissions/system-writer.decorator.spec.ts:99). Mock external Prisma/transaction/config/permission collaborators for a DB-free module compilation test under src/fleet/reviews/fleet-reviews.module.spec.ts. Do not move DI tests into integration or mask wiring with database skips.\n\nLIFECYCLE (US-010)\nSeparate timer from pass: FleetPrReviewPoller starts an unref'd interval only when sweepEnabled AND prReviewEnabled, clears it on destroy, and has an independent in-flight boolean reset in finally. poll() invokes pass.run(new Date()) once, returns early for overlap, catches/logs errors at error level, and never rejects. Existing FleetPrStateRefresher shows timer/unref/clear and single-flight behavior (apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:35-100); use its lifecycle shape, not its combined pass/writer class. FleetPrReviewPass is the only writer class for this capability. Use fake timers plus a deferred promise to assert overlap, failures and cleanup.\n\nWEB INTEGRATION (US-011)\nFleetRepo currently has nine fields (apps/web/lib/fleet-types.ts:120-130); add six API-aligned fields including four-place cost string and nullable ISO enabledAt. useFleetRepos uses useApi, apiPath, local refs, explicit load/check/create/remove functions (apps/web/composables/useFleetRepos.ts:23-84). Add setAutoReview with PATCH and a saved/pending discriminated union; ApprovalRequestSummary.permissionKey is the distinguishing field (apps/web/lib/approval-requests.ts:42-62). Do not infer approval from HTTP status unavailable after envelope unwrapping, and do not optimistically mutate an approval-pending repo. Current repos page mounts/loads only registry and labels, does not fan out forge checks (apps/web/pages/admin/fleet/repos.vue:44-68,82), and renders actions per row (:116-132). Preserve that behavior. Add FleetRepoAutoReview only for GitHub plus installation; useGlobalPermissions().permissions.has('fleet.repo.review.configure'), not hardcoded admin role names. The permission composable fails closed while pending/error and SSR-serializes raw keys (apps/web/composables/usePermissions.ts:48-76). Switch reflects persisted state; enabling/editing opens a prefilled vee-validate/zod form with comma-separated profiles and numeric cost; disabling sends only {enabled:false}. A pending result preserves the old switch and shows localized notice; saved result updates the displayed row; errors surface extractApiError. Use existing Switch/dialog/input primitives, HSL tokens, interpolation, and both locale JSON files under fleet.repos.autoReview. This is a row control, not a navigation/layout/token redesign; if broader layout changes are made, follow docs/ux/redesign/MASTER-PLAN.md first. Tests mount real SFCs through helpers: add FleetRepoAutoReview mapping to mount-sfc.ts:286,428 and only a Switch stub to fleet-harness.ts:81-110. admin-fleet-repos.spec.ts:15-18 has a full FleetRepo fixture, :53-85 constructs the API/global harness and currently mounts only reachability; add six defaults, permission stub and real auto-review component, retaining existing assertions. No review-history UI or CLI command.\n\nVERIFICATION, MIGRATION AND RISKS\nUnit tests belong beside API source using Vitest vi, web uses Jest under tests; API integration fixtures follow test/integration/fleet/fleet-repos.integration.spec.ts:1-25 (canRunDbTests, bootHttpApp, fake forge, action-context/fixture helpers). Add the three specified repository/route integration specs and the source unit specs in each story's expectedFiles. Extend existing config, repo service, route, gate, OpenAPI, role matrix, writer and audit-reason contracts rather than weakening them. DB tests require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, shared PG helper/adapter and a local *_test database; skipped suites are not verification. DB-mode runs force-reset: never parallelize them on one database, and use KODA_TEST_DB_CONTAINER=1 in a second checkout. Unit DI tests must be DB-free. New migrations must be deployed before new code; regenerate Prisma client with bun run db:generate before tests/spec generation. Test both fresh schema db-push behavior and committed SQL migrations, since db push alone does not prove migration correctness. US-003 regeneration commits API contract and CLI output. Rollout is disabled by each repo default plus sweep and global switches; no historical ledger backfill, no initial sweep of old PRs before enabledAt, and no cleanup migration. Preserve bigint handling, exact decimal serialization, enabler attribution, approval requester identity, permission revocation, CAS stale-read behavior, audit write accounting and no-secrets logs. The single-process poller is not a distributed scheduler; uniqueness handles races without promising exactly-once review. Failure-table coverage maps to US-002/003 for 422/403/404/202, US-005/008/009 for lost-access disable and audit, US-009 for per-repo mint/list/gate/turn-off warn/continue, US-006/007 for 409/budget/permanent/unexpected/pending recovery, and US-011 for pending state and API error display. The US-009 per-repo containment and warning criteria include the failure-table mint and turn-off variants in addition to its explicit list/gate examples, without moving criteria to another story. Preserve all 134 numbered-story criteria and use suggestedCriteria for extra edge assertions. All eleven stories produce production code and include tests as part of implementation, not a separate validation story.\n\nSECOND-PASS ADVERSARIAL AUDIT\nRe-read all spec sections, all 134 story ACs, the 19 feature exclusions, the draft criteria/descriptions, and the relevant existing repo service/repository, dispatch return/audit behavior, principal access lookup, fake forge, web composable/page and role-matrix contract. Preservation inventory by spec ordinal: US-001 AC1..15 (global 1..15), US-002 AC1..15 (16..30), US-003 AC1..12 (31..42), US-004 AC1..8 (43..50), US-005 AC1..14 (51..64), US-006 AC1..14 (65..78), US-007 AC1..13 (79..91), US-008 AC1..7 (92..98), US-009 AC1..15 (99..113), US-010 AC1..8 (114..121), US-011 AC1..13 (122..134): every assertion remains in its original story, including already-enabled timestamp retention, permission-bound agent approval, ascending order and all skip/error qualifiers. No deprecated grep/file/verbatim AC tags were present. Semantic corrections clarify that effectiveKeys/canHoldKey take PrincipalRef rather than an id string, profile semantic rejection requires enabled true, and dispatch yields DispatchResultDto.job.id rather than a bare job id. The US-009 failure-table variants preserve its explicit list/gate examples while covering mint and automatic-disable failures too.\nNegative-path inventory, using original story ordinals: US-001 AC7/14/15 (deleted project and invalid config), US-002 AC9..14 (provider/profile/access/not-found), US-003 AC4..8 (403/422/404/400/approval deferral), US-004 AC5..7 (provider/body/item errors), US-005 AC2/8/11/14 (duplicate/missing principal/stale CAS/no audit), US-006 AC5..7/9/11/13 (ineligible heads/fresh pending/lost insert), US-007 AC1..13 (typed dispatch errors), US-008 AC4..7 (lost access/disabled/deleted), US-009 AC9..12 (gate rejection and contained repo errors), US-010 AC2/3/6/7 (overlap/rejection/disabled flags), US-011 AC2/3/6/11/12 (unsupported provider/permission/validation/pending/422). All stories already had observable negative paths; none needed an invented failure scenario.\nAdded five explicit regression ACs: US-003 retains every old role-matrix cell, US-004 preserves fake-forge request fields and path-only handler lookup, US-006 preserves the omitted auditKey default, US-007 preserves successful dispatch ledger state, and US-011 preserves explicit-only reachability checks. US-001's existing create-default AC now explicitly uses the unchanged registration input; US-009's existing export AC preserves the repository token. Re-saving existing settings in US-002 still retains the timestamp, omitted values and ignored disable fields. Total acceptance criteria are now 139, distributed 15/15/13/9/14/15/14/7/15/8/14, with none exceeding 15. Binding story ids, workdirs and dependencies are unchanged. All spec-recommended context files fit within five slots; US-011 now includes pages/admin/fleet/budgets.vue:22-25 as the concrete global-permission gating example instead of displacing it with the underlying composable. No context points at a file created by its own story.\nAdditional codebase-fit finding: existing tests return incomplete repo mocks even though they are cast through repository interfaces. Add six defaults to fleet-repos.service.spec.ts:16-19 created() and approvals/approval-execution.service.spec.ts:293-295 mocked create results in US-001, preserving their existing assertions. Otherwise FleetRepoDto.from's new Decimal/date conversion can fail in previously passing registration/approval tests despite real database defaults being correct. Keep the PermissionService constructor additions in US-002 as specified. The existing fleet-jobs.service.spec.ts is the place to extend tests for the omitted-auditKey regression; no invented helper or new test file is required. Routing was reduced to medium/tdd-simple for standard additive schema/config work, medium with the security override for configuration and web controls, and complex/three-session-tdd-lite for the head dispatcher, which itself does not authorize or handle tokens. Access-control/token stories retain strict three-session TDD. The 19 outOfScope strings remain verbatim and nearby story Scope exclusions remain consistent with their in-scope API/generation/poller/UI work. This audit used file inspection, not an executed test suite or JSON parser.",
+  "outOfScope": [
+    "A GitHub webhook trigger for reviews; reviews are found by polling through the App.",
+    "Reviewing draft PRs and PRs from forks.",
+    "Open PRs beyond the first page of 100 per repo per pass; a full page logs a warning.",
+    "More than 50 auto-review repos per pass; repos past the first 50 by id are not polled, and a full page logs a warning.",
+    "Reviewing a head whose PR was last updated before auto-review was turned on.",
+    "Recording which head a `REVIEW` job actually reviewed; nax reviews the PR's current head when the job runs, so a head that arrives while a review is queued can be reviewed twice.",
+    "Re-reviewing a head whose `REVIEW` job failed or was cancelled; its row stays `dispatched` until the PR gets a new head.",
+    "A duplicate review when the API stops after `dispatch` commits and before `markDispatched`; the `pending` row is replaced after one poll interval and the head is dispatched again.",
+    "A PATCH that turns auto-review off while a pass is running; that pass can still dispatch reviews for the repo.",
+    "Suppressing failure notifications for poller-dispatched reviews; a failed review notifies its user requester like any job, and agent requesters get none, as today.",
+    "Deleting old `FleetPrReview` rows; they are kept.",
+    "An unexpected error thrown after `dispatch` has committed the job (placement, live publish or ticket effects) removes the head's row; later passes then get 409 until that job ends and review the head again.",
+    "Fair sharing of the per-pass cap between repos; repos are polled in id order, so a low-id repo with many retrying heads can use the whole cap.",
+    "A `fleet.repo.check` approval requested before an auto-review change and approved after it answers 409 `fleet.repos`, because `prepareCheck` compares the whole repo row; this is accepted.",
+    "A narrower PR-read token; the poller uses the installation token that `FleetPrStateRefresher` uses.",
+    "CLI commands for auto-review; the generated CLI client is regenerated but no command is added.",
+    "Live verification against GitHub; it needs a nax with the `bot-forge-identity` feature on a runner and happens at deploy.",
+    "GitLab auto-review.",
+    "Showing a repo's review history (`FleetPrReview` rows) in the web."
+  ],
+  "routingProfile": "native-codex-ds"
+}
