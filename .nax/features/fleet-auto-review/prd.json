@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T10:16:22.785Z",
+  "updatedAt": "2026-10-31T10:19:57.697Z",
   "userStories": [
     {
       "id": "US-001",
@@ -521,14 +521,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends one existing dispatcher with explicit exception precedence, bounded outcome strings and retry/stop behavior, without changing authorization or token handling."
+        "reasoning": "Extends one existing dispatcher with explicit exception precedence, bounded outcome strings and retry/stop behavior, without changing authorization or token handling.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
@@ -549,7 +552,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dae8bc0be68a2619150444c7cf7cdd2b51665e9d"
     },
     {
       "id": "US-008",
