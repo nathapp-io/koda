@@ -20,6 +20,7 @@ export const BOOKKEEPING_REASONS = {
   'fleet.ingest-progress': 'The activity row reporting how many bundles a backfill or rerun queued, including zero.',
   'fleet.analytics-progress': 'The activity row reporting analytics deletion counts, including a deletion that found no rows.',
   'fleet.schedule-bookkeeping': "A schedule's fire claim, a skip or coalesce activity row, and the last dispatched job link.",
+  'fleet.pr-review-bookkeeping': "A PR review head's claim, dispatched link, failure mark or stale-claim removal; the dispatch it follows records `system.pr-review.dispatch`.",
   'assistant.tool-call-ledger': 'The tool-call ledger row every assistant tool call stores, read or write.',
   'assistant.action-request-link': "The thread link of a waiting assistant write: its thread, job, tool call, tool and preview; the request is `approval.request-open`.",
   'email.template-seed': 'The built-in email templates written from code at boot; the code is their source.',
