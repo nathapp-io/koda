@@ -1,0 +1,5 @@
+{
+  "notFound": { "404": "Memory item not found" },
+  "retireNotDecision": { "422": "Only decisions can be retired" },
+  "retireNotActive": { "409": "Only active decisions can be retired" }
+}

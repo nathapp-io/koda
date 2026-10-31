@@ -131,6 +131,50 @@ describe('GitHubAppClient', () => {
     await expect(broken.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_key_unreadable' });
   });
 
+  describe('getRepoRole (US-003)', () => {
+    const path = '/repos/acme/api/collaborators/alice/permission';
+
+    it('AC-1: sends the permission GET with the supplied token', async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { role_name: 'maintain' } }));
+      await client.getRepoRole('ghs_role', 'acme', 'api', 'alice');
+      expect(forge.requests[0]).toMatchObject({ method: 'GET', path, headers: { authorization: 'Bearer ghs_role' } });
+    });
+
+    it("AC-2: returns a recognized role_name", async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { role_name: 'maintain' } }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'alice')).resolves.toBe('maintain');
+    });
+
+    it("AC-3: maps permission when role_name is absent", async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { permission: 'write' } }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'alice')).resolves.toBe('write');
+    });
+
+    it("AC-4: falls back to permission for an unrecognized role_name", async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 200, body: { role_name: 'custom-role', permission: 'read' } }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'alice')).resolves.toBe('read');
+    });
+
+    it('AC-5: returns none for 404', async () => {
+      forge.routes.set(`GET ${path}`, () => ({ status: 404, body: {} }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'alice')).resolves.toBe('none');
+    });
+
+    it.each([
+      ['AC-6', 500],
+      ['AC-7', 403],
+    ])('%s: throws provider_error for status %s', async (_criterion, status) => {
+      forge.routes.set(`GET ${path}`, () => ({ status, body: {} }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'alice')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it('AC-8: URL-encodes the login', async () => {
+      forge.routes.set('GET /repos/acme/api/collaborators/a%2Fb/permission', () => ({ status: 200, body: { permission: 'read' } }));
+      await expect(client.getRepoRole('t', 'acme', 'api', 'a/b')).resolves.toBe('read');
+      expect(forge.requests[0].path).toBe('/repos/acme/api/collaborators/a%2Fb/permission');
+    });
+  });
+
   describe('getPullRequest (C9 §3.4)', () => {
     const PR = 'GET /repos/acme/app/pulls/9';
 

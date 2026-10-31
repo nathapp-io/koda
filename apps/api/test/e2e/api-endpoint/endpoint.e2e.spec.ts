@@ -3655,6 +3655,25 @@ describeIntegration('API Integration Tests', () => {
       }
     });
 
+    it('AC-9 (US-009): POST /api/memory/:id/retire returns 201 for an owned active DECISION', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const topic = uniqueName();
+      await request(httpServer).post('/api/memory/decisions').set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectId: project.id, topic, decision: 'keep' }).expect(201);
+      const item = await db.memoryItem.findFirstOrThrow({ where: { projectId: project.id, predicate: topic, status: 'active' } });
+      const response = await request(httpServer).post(`/api/memory/${item.id}/retire`)
+        .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(201);
+      expect(body<{ status: string }>(response)).toMatchObject({ status: 'rejected' });
+      expect(await db.memoryItem.findUniqueOrThrow({ where: { id: item.id } })).toMatchObject({ status: 'rejected', activeKey: null });
+    });
+
+    it('AC-10 (US-009): POST /api/memory/:id/retire returns 404 for an unknown id', async () => {
+      const response = await request(httpServer).post('/api/memory/e2e-unknown-memory-item/retire')
+        .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(404);
+      refusal(response, 'memory.notFound.404');
+    });
+
     it('AC-10: agent memory create under a wait policy answers exactly 202', async () => {
       const db = fixtureDb(app);
       const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });

@@ -14,7 +14,9 @@ function make(attempts: number, opts: { expired?: boolean; storeFails?: boolean 
     markRetry: vi.fn(), markFailed: vi.fn(), markOutcome: vi.fn(), replaceRows: vi.fn(),
   };
   const store = { get: vi.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
-  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never);
+  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never,
+    { record: vi.fn() } as never, { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never,
+  );
   return { svc, repo };
 }
 
@@ -134,6 +136,7 @@ describe('BundleIngestService audit coverage (permissions P2 US-007)', () => {
       { record: vi.fn() } as never, { signal: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never,
       { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never,
       { record: vi.fn(async () => undefined) } as never,
+      { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never,
     );
     return { svc, repo, seen };
   }
@@ -183,5 +186,72 @@ describe('BundleIngestService audit coverage (permissions P2 US-007)', () => {
     await svc.ingestOne(now);
 
     expect(currentBookkeepingReason()).toBeUndefined();
+  });
+});
+
+describe('review event ingest', () => {
+  async function review(opts: { pending?: number; epoch?: number; reject?: boolean; state?: string; command?: string } = {}) {
+    const order: string[] = [];
+    const job = {
+      id: 'j1', projectId: 'p1', repoId: 'r1', leaseEpoch: opts.epoch ?? 1, command: opts.command ?? 'REVIEW',
+      feature: 'review-pr-42', state: opts.state ?? 'COMPLETED', naxRunId: null, costSpentUsd: '0',
+      stateReason: null, finishResult: null, escalationReason: null, resultPrUrl: null, resultBranch: null,
+      resultSha: null, workflow: null,
+    };
+    const repo = {
+      claimNext: vi.fn().mockResolvedValueOnce(claim(0)).mockResolvedValue(null),
+      findArtifact: vi.fn().mockResolvedValue({ storageKey: 'k', expiredAt: null }),
+      replaceRows: vi.fn(), markOutcome: vi.fn(), markRetry: vi.fn(), markFailed: vi.fn(),
+    };
+    const reviewEvents = { recordForJob: vi.fn(async () => {
+      order.push('record');
+      if (opts.reject) throw new Error('review storage failed');
+      return { pending: opts.pending ?? 1 };
+    }) };
+    const events = { emit: vi.fn(() => { order.push('emit'); return true; }) };
+    const body = await tarGz([{ name: 'nax-out/bot/pr-42/r1/bot-review.json', body: JSON.stringify({ version: 3, pr: { number: 42 }, trusted: true, events: [] }) }]);
+    const svc = new BundleIngestService(
+      repo as never, { get: async () => Readable.from([body]) } as never,
+      { lockById: async () => job } as never, { event: () => ({}), publish: vi.fn() } as never,
+      { record: vi.fn() } as never, { signal: vi.fn() } as never,
+      { run: async (fn: () => Promise<unknown>) => { order.push('start'); const result = await fn(); order.push('commit'); return result; } } as never,
+      { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, events as never,
+      { record: vi.fn() } as never, reviewEvents as never,
+    );
+    return { svc, repo, reviewEvents, events, order, job };
+  }
+
+  it('AC-11: records inside the transaction and emits once after commit', async () => {
+    const t = await review();
+    await t.svc.ingestOne(now);
+    expect(t.repo.markRetry).not.toHaveBeenCalled();
+    expect(t.reviewEvents.recordForJob).toHaveBeenCalledWith(t.job, 1, { outcome: 'done', trusted: true, events: [] });
+    expect(t.events.emit).toHaveBeenCalledExactlyOnceWith('fleet.review.events-ingested', { jobId: 'j1' });
+    expect(t.order).toEqual(['start', 'record', 'commit', 'emit']);
+  });
+
+  it('AC-12: no newly pending rows means no event', async () => {
+    const t = await review({ pending: 0 });
+    await t.svc.ingestOne(now);
+    expect(t.reviewEvents.recordForJob).toHaveBeenCalledTimes(1);
+    expect(t.repo.markOutcome).toHaveBeenCalled();
+    expect(t.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: stale epoch never records or parses botReview', async () => {
+    const t = await review({ epoch: 2 });
+    await t.svc.ingestOne(now);
+    expect(t.reviewEvents.recordForJob).not.toHaveBeenCalled();
+    expect(t.repo.markOutcome).toHaveBeenCalledWith('i1', expect.objectContaining({ files: expect.not.objectContaining({ botReview: expect.anything() }) }));
+    expect(t.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('AC-14: a review row write failure retries the claim without publishing', async () => {
+    const t = await review({ reject: true });
+    await t.svc.ingestOne(now);
+    expect(t.reviewEvents.recordForJob).toHaveBeenCalledTimes(1);
+    expect(t.repo.markRetry).toHaveBeenCalledWith('i1', 1, new Date(now.getTime() + 60_000), 'review storage failed');
+    expect(t.repo.markOutcome).not.toHaveBeenCalled();
+    expect(t.events.emit).not.toHaveBeenCalled();
   });
 });

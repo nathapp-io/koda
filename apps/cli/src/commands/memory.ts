@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, projectsControllerFindBySlug } from '../generated';
+import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -23,6 +23,32 @@ async function resolveProjectId(slug: string): Promise<string> {
 export function memoryCommand(program: Command): void {
   const memory = program.command('memory');
   memory.description('View project memory and timeline');
+
+  memory
+    .command('retire <id>')
+    .description('Retire a decision from memory')
+    .option('--reason <text>', 'Reason for retiring the decision')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, options: { reason?: string; json?: boolean }) => {
+      try {
+        await withContext({}, { requireProject: false });
+
+        const response = await memoryControllerRetireDecision({
+          path: { id },
+          body: options.reason === undefined ? {} : { reason: options.reason },
+        });
+        const result = unwrap(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log('Decision retired.');
+        }
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
 
   memory
     .command('timeline')

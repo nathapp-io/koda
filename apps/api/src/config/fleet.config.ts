@@ -66,6 +66,7 @@ export interface IFleetConfig {
   knowledgePollMs: number;
   prReviewEnabled: boolean;
   prReviewPollMs: number;
+  reviewMintPollMs: number;
   prReviewMaxDispatch: number;
 }
 
@@ -105,6 +106,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() KNOWLEDGE_POLL_MS: string;
   @IsOptional() @IsString() FLEET_PR_REVIEW_ENABLED: string;
   @IsOptional() @IsString() FLEET_PR_REVIEW_POLL_MS: string;
+  @IsOptional() @IsString() FLEET_REVIEW_MINT_POLL_MS: string;
   @IsOptional() @IsString() FLEET_PR_REVIEW_MAX_DISPATCH: string;
 }
 
@@ -166,6 +168,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     knowledgePollMs: knowledgePollMs(),
     prReviewEnabled: (process.env['FLEET_PR_REVIEW_ENABLED'] ?? 'true').toLowerCase() === 'true',
     prReviewPollMs: int('FLEET_PR_REVIEW_POLL_MS', 300_000),
+    reviewMintPollMs: int('FLEET_REVIEW_MINT_POLL_MS', 300_000),
     prReviewMaxDispatch: int('FLEET_PR_REVIEW_MAX_DISPATCH', 10),
   };
 });

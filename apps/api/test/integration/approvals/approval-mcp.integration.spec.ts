@@ -55,7 +55,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
   });
   it('AC-12: an agent with no decide key sees the approval tools last', async () => {
     const answer = await rpc('tools/list');
-    expect(answer.result.tools.slice(-2).map((tool: { name: string }) => tool.name)).toEqual(['koda_list_approvals', 'koda_decide_approval']);
+    expect(answer.result.tools.slice(-3, -1).map((tool: { name: string }) => tool.name)).toEqual(['koda_list_approvals', 'koda_decide_approval']);
+    expect(answer.result.tools.at(-1)?.name).toBe('koda_retire_decision');
     expect(new Set(answer.result.tools.map((tool: { name: string }) => tool.name)).size).toBe(answer.result.tools.length);
     expect(answer.result.tools.filter((tool: { name: string }) => tool.name === 'koda_list_approvals')).toHaveLength(1);
   });

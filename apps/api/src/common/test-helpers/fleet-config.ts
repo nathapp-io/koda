@@ -38,6 +38,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     knowledgePollMs: 1_800_000,
     prReviewEnabled: false,
     prReviewPollMs: 300_000,
+    reviewMintPollMs: 300_000,
     prReviewMaxDispatch: 10,
     ...overrides,
   };

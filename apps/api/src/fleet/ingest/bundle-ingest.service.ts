@@ -21,6 +21,9 @@ import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
 import { FleetJobOutcomeRecorder } from '../jobs/job-outcome.recorder';
 import { KNOWLEDGE_RUN_INGESTED, type KnowledgeRunIngestedEvent } from '../common/knowledge-events';
+import { REVIEW_EVENTS_INGESTED, type ReviewEventsIngestedEvent } from '../common/review-events';
+import { prNumberOfReviewFeature } from '../common/review-jobs';
+import { FleetReviewEventsService } from '../reviews/fleet-review-events.service';
 
 const SECRETISH = /(token|secret|password|key)=\S+/gi;
 const trimError = (error: unknown): string =>
@@ -45,6 +48,7 @@ export class BundleIngestService {
     /** S5b 3c-2-D8 (US-004): carries `KNOWLEDGE_RUN_INGESTED`; the ingest is the outcome pass's only trigger. */
     private readonly events: EventEmitter2,
     private readonly audit: AuditRecorder,
+    private readonly reviewEvents: FleetReviewEventsService,
   ) {}
 
   /**
@@ -96,7 +100,12 @@ export class BundleIngestService {
     const result = await this.txManager.run(async () => {
       const job = await this.jobs.lockById(claim.jobId);
       if (!job) return null;
-      const parsed = parseBundle(files, job.leaseEpoch === claim.leaseEpoch ? job.naxRunId : null);
+      const reviewPrNumber = job.command === 'REVIEW' && job.state === 'COMPLETED' && job.leaseEpoch === claim.leaseEpoch
+        ? prNumberOfReviewFeature(job.feature) : null;
+      const parsed = parseBundle(files, job.leaseEpoch === claim.leaseEpoch ? job.naxRunId : null,
+        reviewPrNumber === null ? {} : { reviewPrNumber });
+      const pending = parsed.botReview
+        ? (await this.reviewEvents.recordForJob(job, claim.leaseEpoch, parsed.botReview)).pending : 0;
       // S5b 3c-2-D1: outcomes are stored for RUN jobs only; every other command writes an empty list.
       const isRun = job.command === 'RUN';
       await this.repo.replaceRows(
@@ -123,9 +132,10 @@ export class BundleIngestService {
         summary: parsed.partial ? 'ingested partial' : 'ingested done',
       });
       // `isRun` travels with the commit result for the post-commit outcome-index hook (S5b 3c-2-D8, US-004).
-      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled, isRun };
+      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled, isRun, pending };
     });
     if (!result) return;
+    if (result.pending > 0) this.events.emit(REVIEW_EVENTS_INGESTED, { jobId: claim.jobId } satisfies ReviewEventsIngestedEvent);
     this.live.publish([result.event]);
     if (result.spendKeys.length > 0) this.budgets.signal(result.spendKeys);
     if (result.prFilled) void this.ticketEffects.upsertPrLinks(claim.jobId); // C9 §3.3: late PR URL; never throws

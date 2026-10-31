@@ -1,0 +1,823 @@
+{
+  "project": "koda",
+  "feature": "fleet-review-ingest",
+  "branchName": "feat/fleet-review-ingest",
+  "createdAt": "2026-11-16T00:00:00.000Z",
+  "updatedAt": "2026-10-31T15:16:56.197Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Read and parse the review artifact",
+      "description": "**Goal** — Add bounded review-artifact discovery and pure parsing without changing existing bundle partial semantics.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — Which artifact. The reader gains two slots: `nax-out/bot/pr-<n>/<runId>/bot-review.json` (`botReview`, may match more than one) and top-level `nax.stdout` (`naxStdout`). **Neither slot ever adds to the bundle's `oversized` list**: an oversized file in either slot is skipped silently, so a large `nax.stdout` on a `RUN` bundle never makes that ingest partial. The parser picks the `bot-review.json` whose path the stdout line `nax bot review: artifact <path>` names, matched on the path's trailing `bot/pr-<n>/<runId>/bot-review.json`. With no such line and exactly one `bot-review.json`, it uses that one; otherwise the artifact is `invalid` (reason `artifact-ambiguous`).\n\nArtifact checks. The PR number comes from `prNumberOfReviewFeature(job.feature)`. The artifact must parse as JSON with `version` 1, 2 or 3, `pr.number` equal to that PR number, and a boolean `trusted`; otherwise it is `invalid` (reason `artifact-invalid`) and no rows are written. A missing `events` field means no events. Events whose `type` is not `finding-withdrawn` are ignored. A `finding-withdrawn` event needs string `key` (1..200 chars), `threadId` (1..200 chars), `finding`, `reason`, and a `disagreedBy` array of strings; an event missing one is dropped. `file` (string) and `line` (positive integer) are optional; a wrongly typed optional field is treated as absent. `finding` and `reason` are clipped to 1000 characters each. Logins that do not match `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\\[bot\\])?$` are dropped, and `disagreedBy` keeps its first 10 valid logins. At most 50 events per artifact are kept (the first 50).\n\n`BundleFiles` / `SLOTS` / `readBundleFiles`: Baseline: nine slots. Target: adds optional `botReview?: BundleFile[]` and `naxStdout?: BundleFile | null` per call 2. `parseBundle` gains an optional third parameter `opts: { reviewPrNumber?: number }`; when given, it returns `botReview` and records `files.botReview`, excluded from the partial calculation. Preserve path safety, existing slot behavior and existing callers.\n\n**Scope** — In: reader slots, parser, additive parseBundle integration and unit tests in the existing reader/parse-bundle suites plus the new parser suite. Out: job eligibility, event persistence and post-commit emission (US-002); role checks/minting (US-003 through US-007). Turning agreed findings or any event type other than `finding-withdrawn` into memory. Checking `pr.repo` or `pr.forge` in the artifact against the job's repo; the job, its bundle and its PR number already tie the artifact to the repo.\n\n**Interface** — `parseBotReview(files: BundleFiles, prNumber: number): BotReviewParse` where `BotReviewParse = { outcome: 'absent' } | { outcome: 'invalid'; reason: 'artifact-ambiguous' | 'artifact-invalid' } | { outcome: 'done'; trusted: boolean; events: WithdrawnEvent[] }` and `WithdrawnEvent = { key, threadId, file?, line?, finding, reason, disagreedBy }`. Event keys must match nax's finding-key format ^f-[0-9a-f]{8,64}$ (other events are dropped); in finding and reason every control character (Unicode Cc, including newlines and tabs) becomes a space before clipping to 1000 characters.",
+      "acceptanceCriteria": [
+        "[unit] slotOf maps nax-out/bot/pr-42/r1/bot-review.json to botReview and nax.stdout to naxStdout.",
+        "[unit] readBundleFiles given a bundle whose nax.stdout and bot-review.json are both larger than INGEST_LIMITS.fileBytes returns an empty oversized list.",
+        "[unit] parseBotReview given a finding-withdrawn event whose key is review-pr-1 drops that event.",
+        "[unit] parseBotReview given a finding-withdrawn event whose finding is 'a\\nb\\u0007c' (a newline and a BEL control character) returns that event with finding 'a b c'.",
+        "[unit] parseBotReview given one bot-review.json for PR 42 with version: 3, trusted: true and one valid finding-withdrawn event returns { outcome: 'done', trusted: true, events: [<that event>] }.",
+        "[unit] parseBotReview given bot-review.json files for runs r1 and r2 and a nax.stdout line 'nax bot review: artifact /x/out/bot/pr-42/r2/bot-review.json' returns the events of run r2.",
+        "[unit] parseBotReview given two bot-review.json files and a nax.stdout without the success line returns { outcome: 'invalid', reason: 'artifact-ambiguous' }.",
+        "[unit] parseBotReview given no bot-review.json returns { outcome: 'absent' }.",
+        "[unit] parseBotReview given a bot-review.json whose text is not JSON returns { outcome: 'invalid', reason: 'artifact-invalid' }.",
+        "[unit] parseBotReview(files, 42) given a bot-review.json whose pr.number is 43 returns { outcome: 'invalid', reason: 'artifact-invalid' }.",
+        "[unit] parseBotReview given a bot-review.json whose trusted is the string yes returns { outcome: 'invalid', reason: 'artifact-invalid' }.",
+        "[unit] parseBotReview given events of types finding-withdrawn and finding-agreed returns only the finding-withdrawn event.",
+        "[unit] parseBotReview given a finding-withdrawn event whose disagreedBy is ['alice', 'bad login', 'bob'] returns that event with disagreedBy ['alice', 'bob'].",
+        "[unit] parseBotReview given 60 valid finding-withdrawn events returns the first 50.",
+        "[unit] parseBundle(files, null, { reviewPrNumber: 42 }) for a bundle whose bot-review.json is invalid and whose other files are done returns partial false."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "parsing"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive bounded parser and two allowlisted slots using existing pure-parser patterns; exercise tar size and selection edge cases first.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/bundle-reader.ts",
+        "apps/api/src/fleet/ingest/parse-bundle.ts",
+        "apps/api/src/fleet/ingest/parsers/workflow.parser.ts",
+        "apps/api/src/fleet/common/review-jobs.ts",
+        "apps/api/src/fleet/ingest/bundle-reader.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/ingest/parsers/bot-review.parser.ts",
+        "apps/api/src/fleet/ingest/parsers/bot-review.parser.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseBotReview accepts otherwise valid artifacts with version 1 or 2 and returns outcome done.",
+        "parseBotReview returns an empty events array when the selected valid artifact omits events.",
+        "parseBotReview drops a finding-withdrawn event whose key or threadId is empty or exceeds 200 characters.",
+        "parseBotReview clips finding and reason to 1000 characters each.",
+        "parseBotReview retains only the first ten valid disagreedBy logins after filtering invalid logins.",
+        "parseBotReview omits wrongly typed file or non-positive, fractional line values from a retained event.",
+        "parseBotReview returns artifact-ambiguous when stdout names an artifact whose trailing bot/pr-<n>/<runId>/bot-review.json path matches none of the retained files.",
+        "slotOf returns null for traversal, absolute or backslash-containing paths that end in bot-review.json."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8b113dd26a4b615e4495db60c4533135ede5c75c"
+    },
+    {
+      "id": "US-002",
+      "title": "Store review events at ingest",
+      "description": "**Goal** — Persist eligible review withdrawals atomically with bundle ingestion and notify minting only after commit.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — Two phases: store, then mint. The GitHub permission check is a network call, so it never runs inside the ingest transaction. The ingest stores each withdrawal as a `FleetReviewEvent` row in the same transaction as the rest of the bundle; after commit it emits `REVIEW_EVENTS_INGESTED`. A system writer, `ReviewEventMinter`, then checks permissions and mints decisions for `pending` rows. The row is also the record of every skipped event and its reason.\n\nWhen the ingest reads it. Only for a `REVIEW` job whose state is `COMPLETED` at ingest time **and** whose `leaseEpoch` equals the claim's epoch. The outcome joins the ingest's per-file outcomes as `botReview`: `done`, `invalid` or `absent`. `botReview` never makes the ingest partial.\n\nUntrusted PRs never mint (user ruling). When `trusted` is false, every event's row is written with status `skipped`, reason `untrusted-pr`.\n\nIdempotent rows. `FleetReviewEvent` is unique on `(jobId, leaseEpoch, threadId)`; a re-ingest of the same bundle inserts nothing new (insert skipping duplicates) and never changes an existing row.\n\nNew `FleetReviewEvent` model + migration `20261115090000_fleet_review_event`: `id`, `jobId` (FK FleetJob, cascade), `leaseEpoch`, `projectId`, `repoId`, `prNumber`, `findingKey`, `threadId`, `file?`, `line?`, `finding`, `reason`, `disagreedBy String[]`, `trusted Boolean`, `status` (`pending` | `minted` | `skipped`), `skipReason?`, `approverLogin?`, `memoryItemId?`, `attempts Int @default(0)`, `createdAt`, `updatedAt`; unique `(jobId, leaseEpoch, threadId)`; index `(status, createdAt)`.\n\n`BundleIngestService`: Baseline: constructor ends with `private readonly audit: AuditRecorder`. Target: adds a last parameter `private readonly reviewEvents: FleetReviewEventsService`; `write` calls `recordForJob` inside the transaction per call 4; after commit emits `REVIEW_EVENTS_INGESTED` (`{ jobId }`, constant in `apps/api/src/fleet/common/review-events.ts`) when `pending > 0`. `IngestModule` imports `FleetReviewsModule`; `FleetReviewsModule` exports `FleetReviewEventsService` (its header comment stops saying it exports nothing).\n\nRun `bun run db:generate` in `apps/api` after the schema edit; the Prisma client is git-ignored. Keep the repository module-private under `FLEET_REVIEW_EVENT_REPOSITORY`. claimPending is a pure read, oldest createdAt first; marks and attempt mutation are designed for bookkeeping wrappers added by US-006. Adjust positional constructor calls in bundle-ingest.service.spec.ts, bundle-ingest.outcomes.spec.ts, bundle-ingest.workflow.spec.ts and bundle-ingest.pr-links.spec.ts with a trailing `{ recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never`; every existing assertion is unchanged. Add this story's ingest unit tests to bundle-ingest.service.spec.ts. Preserve existing RUN rows, corrections and KNOWLEDGE_RUN_INGESTED hooks.\n\n**Scope** — In: schema/migration, event repository/service, eligibility, same-transaction recording, post-commit event and real-Postgres ingest tests through drain/upload/requeue. Out: GitHub calls (US-003/US-006), memory minting (US-005/US-006), minter subscription/poller (US-007). Expiring or pruning `FleetReviewEvent` rows; they cascade with their job.\n\n**Interface** — `recordForJob(job, leaseEpoch, parse): Promise<{ pending: number }>` (`pending` = rows this call newly inserted with status `pending`), `claimPending(limit)`, `markMinted(id, { memoryItemId, approverLogin })`, `markSkipped(id, reason)`, `bumpAttempt(id): Promise<number>` (returns the new count).",
+      "acceptanceCriteria": [
+        "[integration] BundleIngestService.drain for a COMPLETED REVIEW job (feature review-pr-42) whose bundle has a trusted artifact with one finding-withdrawn event stores one FleetReviewEvent row matching { status: 'pending', prNumber: 42, attempts: 0 } with the event's findingKey, threadId and disagreedBy.",
+        "[integration] drain for a COMPLETED REVIEW job whose artifact has trusted: false and one event stores that row with skipReason untrusted-pr.",
+        "[integration] re-ingesting the same bundle through IngestRequeueService and drain leaves exactly one FleetReviewEvent row for that job and thread.",
+        "[integration] drain for a FAILED REVIEW job whose bundle has a valid artifact with one event stores no FleetReviewEvent row.",
+        "[integration] drain for a RUN job stores no FleetReviewEvent row.",
+        "[integration] drain for a COMPLETED REVIEW job whose artifact is invalid marks the ingest done.",
+        "[integration] FleetReviewEventsService.recordForJob called twice with the same parse for one job returns { pending: 0 } the second time.",
+        "[integration] FleetReviewEventsService.claimPending(20) given pending rows created at 10:00, 09:00 and 11:00 and one skipped row returns the three pending rows in the order 09:00, 10:00, 11:00.",
+        "[integration] claimPending(2) given three pending rows returns two.",
+        "[integration] FleetReviewEventsService.bumpAttempt called three times on one row returns 1, then 2, then 3.",
+        "[unit] BundleIngestService.write for a COMPLETED REVIEW whose recordForJob resolves { pending: 1 } emits REVIEW_EVENTS_INGESTED with { jobId } once, after the transaction callback returns.",
+        "[unit] BundleIngestService.write for a COMPLETED REVIEW whose recordForJob resolves { pending: 0 } does not emit REVIEW_EVENTS_INGESTED.",
+        "[unit] BundleIngestService.write for a COMPLETED REVIEW whose claim's leaseEpoch is 1 while the job's is 2 never calls recordForJob.",
+        "[unit] BundleIngestService.ingestOne for a COMPLETED REVIEW whose recordForJob rejects records an ingest retry for the claim."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "persistence",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New durable queue abstraction crosses ingest and reviews, with transaction/epoch fencing and trusted-versus-untrusted write eligibility; strict isolation for the trust boundary plus real Postgres constraints.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/ingest/ingest.module.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.ts",
+        "apps/api/src/fleet/reviews/prisma-fleet-pr-review.repository.ts",
+        "apps/api/test/integration/fleet/fleet-pr-review.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261115090000_fleet_review_event/migration.sql",
+        "apps/api/src/fleet/reviews/fleet-review-event.repository.ts",
+        "apps/api/src/fleet/reviews/fleet-review-events.service.ts",
+        "apps/api/src/fleet/common/review-events.ts",
+        "apps/api/test/integration/fleet/fleet-review-events-ingest.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the ingest transaction rolls back after recordForJob, no FleetReviewEvent rows from that transaction remain.",
+        "When the ingest transaction rolls back after recordForJob returned pending 1, REVIEW_EVENTS_INGESTED is not emitted.",
+        "claimPending leaves status, attempts and updatedAt unchanged for every returned row.",
+        "Deleting a FleetJob cascades to its FleetReviewEvent rows."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.spec.ts",
+          "reason": "its `new BundleIngestService(...)` calls pass the constructor arguments positionally and stop type-checking once the constructor gains its last `reviewEvents` parameter; each gains a trailing `{ recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never`, every existing assertion is unchanged, and the file gains this story's `BundleIngestService` unit tests."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.outcomes.spec.ts",
+          "reason": "its `new BundleIngestService(...)` calls stop type-checking once the constructor gains its last `reviewEvents` parameter; each gains a trailing `{ recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never`, and every existing assertion is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts",
+          "reason": "its `new BundleIngestService(...)` calls stop type-checking once the constructor gains its last `reviewEvents` parameter; each gains a trailing `{ recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never`, and every existing assertion is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.pr-links.spec.ts",
+          "reason": "its `new BundleIngestService(...)` calls stop type-checking once the constructor gains its last `reviewEvents` parameter; each gains a trailing `{ recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never`, and every existing assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8318adfd98d42bc4bc3cf580ed0ea70a3958c3c0"
+    },
+    {
+      "id": "US-003",
+      "title": "Ask GitHub for a login's role on a repo",
+      "description": "**Goal** — Expose a fail-closed GitHub repository permission query through the existing forge HTTP client.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — `GitHubAppClient` gains `getRepoRole(token, owner, name, login): Promise<'admin' | 'maintain' | 'write' | 'triage' | 'read' | 'none'>`: `GET /repos/{owner}/{name}/collaborators/{login}/permission`; 200 returns `role_name` when it is one of those values, else maps `permission` (`admin`, `write`, `read` map to themselves, anything else to `none`); 404 returns `none`; any other status throws `RepoCheckException('provider_error')`. The login is URL-encoded.\n\nUse the existing `http.request` / `obj` / `repoPath` helpers and token headers; forge HTTP stays behind FleetHttpClient timeout/no-redirect policy, with no token logging or persistence. `apps/api/src/fleet/git-broker/github-app-client.spec.ts` adds tests for this story's acceptance criteria; every existing assertion is unchanged.\n\n**Scope** — In: getRepoRole and fake-HTTP boundary tests. Out: minter orchestration that selects an approver, obtains tokens for pending rows and retries failures (US-006), audit approver types (US-004). GitLab reviews; K1 reviews GitHub repos only.\n\n**Interface** — `getRepoRole(token, owner, name, login): Promise<'admin' | 'maintain' | 'write' | 'triage' | 'read' | 'none'>`.",
+      "acceptanceCriteria": [
+        "[unit] getRepoRole(token, 'acme', 'api', 'alice') sends GET /repos/acme/api/collaborators/alice/permission with the token.",
+        "[unit] getRepoRole answering 200 with role_name: 'maintain' returns maintain.",
+        "[unit] getRepoRole answering 200 with permission: 'write' and no role_name returns write.",
+        "[unit] getRepoRole answering 200 with role_name: 'custom-role' and permission: 'read' returns read.",
+        "[unit] getRepoRole answering 404 returns none.",
+        "[unit] getRepoRole answering 500 throws RepoCheckException with reason provider_error.",
+        "[unit] getRepoRole answering 403 throws RepoCheckException with reason provider_error.",
+        "[unit] getRepoRole(token, 'acme', 'api', 'a/b') sends the login URL-encoded as a%2Fb."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "github",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small existing-client extension, but bearer credentials and repository role checks are security-critical and require strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/git-broker/fleet-http-client.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts"
+      ],
+      "suggestedCriteria": [
+        "getRepoRole answering 200 with a recognized role_name and conflicting permission returns role_name.",
+        "getRepoRole answering 200 with unrecognized role_name and permission returns none.",
+        "getRepoRole answering 302 throws RepoCheckException with reason provider_error."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+          "reason": "adds tests for this story's acceptance criteria; every existing assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "32bc9e7d67831cfa2cf3ad45d105101a301863fd"
+    },
+    {
+      "id": "US-004",
+      "title": "Record a forge user as the approver",
+      "description": "**Goal** — Carry a forge identity as approval metadata while preserving the separate system actor and existing audit context.\n\n**Motivation** — There is also no way to take a decision back: memory has no retire or supersede route (`memory.controller.ts` serves `extract`, `decisions` and create only).\n\n**Approach** — Forge approver type. `ActionApproval.approverType` widens from `ActorType` to `ActorType | 'FORGE_USER'`, and so does `AuditEntryRecord.approverType`. The audit entry DTO's `approval.approverType` TypeScript union gains `FORGE_USER` (the OpenAPI schema is `type: Object` and does not change), and the audit display labels a `FORGE_USER` approver with its id (`github:alice`).\n\nNew `runWithApproval(approval: ActionApproval, fn)` in `action-context.ts`: runs `fn` in a copy of the current context with `approval` replaced; throws `Error('no action context')` outside one.\n\nUpdate `ActionApproval.approverType`, `AuditEntryRecord.approverType`, `AuditEntryDto.approval.approverType` and `principalLabel` / `collectDisplayIds`. Keep FORGE_USER out of user/agent/runner identity lookup batches; do not widen actors or onBehalfOf principals and do not add a GitHub-login-to-user map. Existing optionality/nullability is preserved. Prisma already stores approverType as a string; no database or OpenAPI schema migration is needed. Extend existing recorder/log suites and add the run-with-approval suite, verifying nested async context restoration.\n\n**Scope** — In: approval type widening, context helper, recorder propagation and literal forge display labels. Out: system-key declaration and decision audit hook (US-005), permission verification/approval selection (US-006), retirement (US-008). Mapping a GitHub login to a koda user; the approver is recorded as `FORGE_USER` / `github:<login>` only.\n\n**Interface** — `runWithApproval(approval: ActionApproval, fn)`; `ActionApproval.approverType` is `ActorType | 'FORGE_USER'`.",
+      "acceptanceCriteria": [
+        "[unit] Inside runWithActionContext({ actor: { type: 'SYSTEM', id: 'review' }, origin: 'system' }, ...), runWithApproval({ requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:alice' }, fn) runs fn with currentContext().approval.approverId equal to github:alice.",
+        "[unit] Inside that runWithApproval call, currentContext().actor is { type: 'SYSTEM', id: 'review' }.",
+        "[unit] Inside that runWithApproval call, currentContext().correlationId equals the outer context's.",
+        "[unit] After that runWithApproval call returns, currentContext().approval is the outer context's approval.",
+        "[unit] runWithApproval(approval, fn) outside any action context throws no action context.",
+        "[unit] AuditRecorder.record inside a context whose approval has approverType: 'FORGE_USER' and approverId: 'github:alice' stores an entry with approverType FORGE_USER and approverId github:alice.",
+        "[unit] The audit log list maps an entry with approverType FORGE_USER and approverId github:alice to a display approver of github:alice."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "audit",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing ALS and audit types need an additive helper, approver union widening and display case; medium scope, with strict three-session TDD retained for approval-identity integrity.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/src/audit/domain/audit-entry.domain.ts",
+        "apps/api/src/audit/dto/audit-entry.dto.ts",
+        "apps/api/src/audit/audit-log.service.ts",
+        "apps/api/src/audit/audit-recorder.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/run-with-approval.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runWithApproval preserves currentContext().origin and onBehalfOf from the outer context.",
+        "After an asynchronous runWithApproval callback rejects, the enclosing context retains its original approval.",
+        "Listing an audit page containing only FORGE_USER approver ids never requests user, agent or runner display names for those ids."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "712dbab315d851cef5c5e4fdc61dd7155d6f18c6"
+    },
+    {
+      "id": "US-005",
+      "title": "Write a review decision and declare its system key",
+      "description": "**Goal** — Add the project-scoped review decision writer, durable duplicate/retirement guards and its auditable system-key declarer.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — The decision row (design D5). `kind DECISION`, `subject repo:<repoId>`, `predicate review-finding:<findingKey>`, `object` = `Not a defect: <finding>. Reason: <reason>` plus ` (<file>:<line>)` when both are present (` (<file>)` when only `file` is), `confidence 1.0`, `ownerId`/`ownerType` null, `sourceType review_event`, `sourceId <jobId>:<threadId>`. Written through `PrismaMemoryItemRepository.upsert`, so a newer withdrawal of the same finding key on the same repo supersedes the older one.\n\nMint guards, before any network call, in this order. `ReviewDecisionWriter.guard(input)` returns `{ status: 'skipped', reason: 'duplicate' }` when a `MemoryItem` with `sourceType review_event` and the same `sourceId` exists in any status; `{ status: 'skipped', reason: 'retired' }` when a `rejected` row with `sourceType review_event` and the same project, `subject` and `predicate` exists; otherwise `null`. `mint` runs the same guards again inside its write; when `mint` returns `{ status: 'skipped', reason }`, the minter calls `markSkipped(reason)`. A crash between `mint` and `markMinted` leaves the row `pending`; the next pass then ends it `skipped` / `duplicate` (the decision exists; the row's approver login is lost, the audit entry keeps it).\n\nAudit. One `system.review.decision` entry per minted decision, actor `SYSTEM/review` (the design said `review-ingest`; the system actor id must be the key's second segment, `review`), approval `{ requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:<login>' }` set with `runWithApproval` around `mint`, resource `memory-item` / the new id, summary `review decision from job <jobId>, PR #<prNumber>, approver github:<login> (one of the thread's commenters)`, written by the writer's own `onWritten` hook (not `memoryAuditHook`, whose summary is fixed).\n\n`ReviewDecisionWriter` is provided and exported by `MemoryModule`; `reviewDecisionObject(input)` builds the call-8 `object`. `FleetReviewsModule` imports `MemoryModule`. `MemoryAuditKey` gains `system.review.decision`. Declare a `@SystemWriter('system.review.decision') ReviewEventMinter` class provided by FleetReviewsModule whose `run(): Promise<void>` resolves without doing anything in this story. Add `'system.review.decision': ['system']` immediately after `'system.pr-review.dispatch'` in the catalog in this same story, because undeclared catalog keys fail contracts. Pin the writer map with `[ReviewEventMinter, 'system.review.decision']` and exact count 35 -> 36. Role-matrix exact catalog cell count 221 -> 222; every role gains system.review.decision immediately after system.pr-review.dispatch with identical cells to that adjacent key; every other entry stays identical. Add one system inventory TSV row mirroring FleetPrReviewPass except the class/key and entry description for run on REVIEW_EVENTS_INGESTED and ReviewEventMintPoller setInterval. Integration ACs run mint inside `runAsSystem('review', ...)`; use runWithApproval where forge approval is asserted and real Postgres to verify memory/audit atomicity.\n\n**Scope** — In: writer/object builder/guards, atomic custom audit hook, MemoryModule export/Reviews import, inert minter declarer, system catalog/role-matrix/writer-map/inventory pins. Out: event rows (US-002), the minter's orchestration and permission lookup (US-006), concurrency/event/timer lifecycle (US-007), retire key and route (US-008). Passing decisions into the review and the decisions selection; those are part A (feature `fleet-review-decisions`). This feature defines its own `review_event` and `repo:<id>` literals and does not import part A's module.\n\n**Interface** — `ReviewDecisionInput = { projectId, repoId, prNumber, jobId, threadId, findingKey, finding, reason, file?, line? }`; `ReviewDecisionWriter.guard(input)`; `ReviewDecisionWriter.mint(input): Promise<{ status: 'minted'; memoryItemId: string } | { status: 'skipped'; reason: 'duplicate' | 'retired' }>`; `reviewDecisionObject(input)`; `ReviewEventMinter.run(): Promise<void>`.",
+      "acceptanceCriteria": [
+        "[unit] reviewDecisionObject({ finding: 'missing null check', reason: 'guarded upstream', file: 'src/a.ts', line: 12 }) returns 'Not a defect: missing null check. Reason: guarded upstream (src/a.ts:12)'.",
+        "[unit] reviewDecisionObject with file: 'src/a.ts' and no line returns text ending in ' (src/a.ts)'.",
+        "[unit] reviewDecisionObject with neither file nor line returns 'Not a defect: missing null check. Reason: guarded upstream'.",
+        "[integration] ReviewDecisionWriter.mint for project P, repo R1, PR 42, finding key f-ab12, job j1 and thread t1 creates an active MemoryItem matching { kind: 'DECISION', subject: 'repo:R1', predicate: 'review-finding:f-ab12', sourceType: 'review_event', sourceId: 'j1:t1', confidence: 1, ownerId: null, ownerType: null }.",
+        "[integration] That mint, run inside runWithApproval with approver github:alice, stores one AuditEntry matching { key: 'system.review.decision', resourceId: <new item id>, approverType: 'FORGE_USER', approverId: 'github:alice' }.",
+        "[integration] That AuditEntry's summary is 'review decision from job j1, PR #42, approver github:alice (one of the thread's commenters)'.",
+        "[integration] mint called a second time with job j1 and thread t1 returns { status: 'skipped', reason: 'duplicate' }.",
+        "[integration] mint for repo R1 and key f-ab12 when a rejected review_event item with subject repo:R1 and predicate review-finding:f-ab12 exists in project P returns { status: 'skipped', reason: 'retired' }.",
+        "[integration] mint for repo R1 and key f-ab12 in project P when that rejected item exists only in project Q returns status minted.",
+        "[integration] mint for job j2, thread t9, repo R1 and key f-ab12 while an active minted item for repo R1 and key f-ab12 exists sets the older item's status to superseded.",
+        "[integration] ReviewDecisionWriter.guard for an input whose sourceId has no item and no retired match returns null.",
+        "[unit] PERMISSION_CATALOG has an entry system.review.decision with scopes ['system'].",
+        "[unit] A testing module importing FleetReviewsModule with the global stub providers resolves ReviewEventMinter."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "memory",
+        "audit",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New system-authorized memory abstraction needs transactionally rechecked guards, forge attribution and exact permission contracts; strict security TDD plus PG atomicity checks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory-audit.ts",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/fleet/reviews/fleet-pr-review.pass.ts",
+        "apps/api/test/integration/memory/decision-replacement-atomic.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/review-decision.writer.ts",
+        "apps/api/src/memory/review-decision.writer.spec.ts",
+        "apps/api/src/fleet/reviews/review-event.minter.ts",
+        "apps/api/test/integration/memory/review-decision-writer.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ReviewDecisionWriter.guard returns duplicate for a matching review_event sourceId even when the existing memory item is superseded or rejected.",
+        "ReviewDecisionWriter.guard returns duplicate rather than retired when both guards match.",
+        "When the custom audit onWritten hook throws, mint leaves neither a new decision nor a superseded previous active item committed.",
+        "The audit entry written by mint records actorType SYSTEM and actorId review independently of the FORGE_USER approver.",
+        "ReviewDecisionWriter.mint records no additional audit entry when returning skipped."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-role cell count (line 224) pins 221 catalog keys; the new `system.review.decision` key makes it 222; it stays an exact count."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role gains `system.review.decision`, placed right after `system.pr-review.dispatch`, with the same cells as `system.pr-review.dispatch` for that role. Every other entry stays identical."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writers map (lines 40-77) gains `[ReviewEventMinter, 'system.review.decision']`, and the length assertion (line 101) changes from 35 to 36."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "the catalog spec re-derives the catalog from this file; it gains one system row for ReviewEventMinter (run on REVIEW_EVENTS_INGESTED and by ReviewEventMintPoller on a setInterval) with key system.review.decision and catalog scope system, every column mirroring the FleetPrReviewPass row (line 260) except the class name and key."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cb232a39db14786e2bef8a75343010a46d45b87d"
+    },
+    {
+      "id": "US-006",
+      "title": "Mint pending review events",
+      "description": "**Goal** — Turn pending trusted withdrawals into decisions only after a verified repository writer is found, with durable skip and retry outcomes.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — Approver = a writer. For a `pending` row, in this order: drop logins that end in `[bot]` from `disagreedBy` (none left: `skipped`, reason `no-writer`, before any lookup); run the call-9 guards; load the repo with `FleetReposService.findReviewRepo` (missing repo, or no `githubInstallationId`: `skipped`, reason `repo-unavailable`); mint a read-only token (`mintReadOnlyToken`); then walk the remaining logins in order, asking `getRepoRole` for each. The first login whose role is `admin`, `maintain` or `write` is the approver. No such login: `skipped`, reason `no-writer`. A `getRepoRole` that throws: `skipped`, reason `permission-check-failed` (never minted on an unverified login).\n\nMint guards, before any network call, in this order. `ReviewDecisionWriter.guard(input)` returns `{ status: 'skipped', reason: 'duplicate' }` when a `MemoryItem` with `sourceType review_event` and the same `sourceId` exists in any status; `{ status: 'skipped', reason: 'retired' }` when a `rejected` row with `sourceType review_event` and the same project, `subject` and `predicate` exists; otherwise `null`. `mint` runs the same guards again inside its write; when `mint` returns `{ status: 'skipped', reason }`, the minter calls `markSkipped(reason)`. A crash between `mint` and `markMinted` leaves the row `pending`; the next pass then ends it `skipped` / `duplicate` (the decision exists; the row's approver login is lost, the audit entry keeps it).\n\nTransient failures retry. When `mintReadOnlyToken` or `mint` throws, the row stays `pending` and its `attempts` count goes up by one; at 3 attempts it becomes `skipped`, reason `mint-failed`. The error is logged.\n\nAudit. One `system.review.decision` entry per minted decision, actor `SYSTEM/review` (the design said `review-ingest`; the system actor id must be the key's second segment, `review`), approval `{ requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:<login>' }` set with `runWithApproval` around `mint`, resource `memory-item` / the new id, summary `review decision from job <jobId>, PR #<prNumber>, approver github:<login> (one of the thread's commenters)`, written by the writer's own `onWritten` hook (not `memoryAuditHook`, whose summary is fixed). `markMinted`, `markSkipped` and the attempts bump are bookkeeping (reason `fleet.review-event-bookkeeping`); `claimPending` is a pure read.\n\nFill the existing @SystemWriter ReviewEventMinter.run body using runAsSystemWriter, the real event service, GitHub client and ReviewDecisionWriter. One pass claims at most 20 pending rows, oldest createdAt first. Keep forge HTTP outside memory/ingest transactions; the read-only token exists only in memory. Add `fleet.review-event-bookkeeping` to BOOKKEEPING_REASONS and the exact EXPECTED_REASON_IDS pin; the assertion stays exact. Add findReviewRepo service tests to the existing fleet-repos.service.spec.ts; every existing assertion is unchanged. Unit ACs stub all collaborator seams and capture calls/context, while the PG skip-only pass uses the real event service.\n\n**Scope** — In: minter orchestration body, narrow repo projection, attempts/marks/bookkeeping and unit/PG skip-only behavior. Out: single-flight, never-rejecting wrapper, event handler and timer (US-007); writer internals/key (US-005); GitHub HTTP query internals (US-003). Re-checking a `skipped` event later (for example after a GitHub outage); a `skipped` row stays skipped. Classifying each comment in a withdrawn thread as agreement or disagreement; nax's withdrawal is taken as the judgment, and `disagreedBy` is used only to pick a writer, so the recorded approver may be any writer who commented in the thread. Re-pinning the approver login on a row whose decision was minted just before a crash; the next pass ends that row `skipped` / `duplicate`, and the audit entry keeps the approver.\n\n**Interface** — `ReviewEventMinter.run(): Promise<void>`; `FleetReposService.findReviewRepo(id): Promise<{ id, projectId, owner, name, githubInstallationId: bigint | null } | null>`.",
+      "acceptanceCriteria": [
+        "[unit] ReviewEventMinter.run() with one pending row whose disagreedBy is ['alice'] and getRepoRole returning write calls ReviewDecisionWriter.mint once with that row's projectId, repoId, prNumber, findingKey, jobId and threadId.",
+        "[unit] In that run, currentContext() captured inside the mint stub has approval { requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:alice' }.",
+        "[unit] In that run, markMinted is called as markMinted(row.id, { memoryItemId: <the minted item's id>, approverLogin: 'alice' }), using the review-event id as the first parameter.",
+        "[unit] run() with disagreedBy ['dependabot[bot]', 'bob'] asks getRepoRole only for bob.",
+        "[unit] run() with disagreedBy ['dependabot[bot]'] calls markSkipped with no-writer and never calls findReviewRepo.",
+        "[unit] run() with disagreedBy ['carol', 'alice'], carol answering read and alice answering maintain, calls markMinted with approver login alice.",
+        "[unit] run() with disagreedBy ['carol'] and getRepoRole returning triage calls markSkipped with no-writer.",
+        "[unit] run() with getRepoRole throwing calls markSkipped with permission-check-failed.",
+        "[unit] run() whose guard returns { status: 'skipped', reason: 'duplicate' } calls markSkipped with duplicate and never calls mintReadOnlyToken.",
+        "[unit] run() whose findReviewRepo returns null calls markSkipped with repo-unavailable.",
+        "[unit] run() whose mintReadOnlyToken throws for a row whose bumpAttempt returns 1 never calls markSkipped.",
+        "[unit] run() whose mint throws for a row whose bumpAttempt returns 3 calls markSkipped with mint-failed.",
+        "[unit] run() whose mint returns { status: 'skipped', reason: 'retired' } calls markSkipped with retired.",
+        "[integration] ReviewEventMinter.run() against Postgres with one pending row whose disagreedBy is ['dependabot[bot]'] leaves the row skipped with skipReason no-writer.",
+        "[integration] FleetReposService.findReviewRepo for an unknown id returns null."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "memory",
+        "github",
+        "security"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Permission-verified automated writes combine tokens, fail-closed role checks, system/forge identity separation, durable retries and crash recovery; strict isolated security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-event.minter.ts",
+        "apps/api/src/fleet/reviews/fleet-review-events.service.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/action-context/audit-coverage.reasons.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/review-event.minter.spec.ts",
+        "apps/api/test/integration/fleet/review-event-minter.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When mintReadOnlyToken or mint throws, run() logs the failure.",
+        "ReviewEventMinter.run calls claimPending with 20.",
+        "run stops checking later disagreedBy logins after the first admin, maintain or write role.",
+        "run never calls mint after getRepoRole throws, even if later logins could hold write access.",
+        "run whose pre-network guard returns skipped never calls findReviewRepo or getRepoRole.",
+        "When a previous pass minted the decision but did not mark the event, the next run marks it skipped/duplicate without a GitHub call.",
+        "findReviewRepo for an existing repository returns exactly id, projectId, owner, name and githubInstallationId."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "`EXPECTED_REASON_IDS` (lines 14-44), compared exactly with `Object.keys(BOOKKEEPING_REASONS).sort()` (line 127), gains `'fleet.review-event-bookkeeping'`; the assertion stays exact."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "adds tests for `findReviewRepo`; every existing assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f8569a49d600226d569956f4653bff9a341664ed"
+    },
+    {
+      "id": "US-007",
+      "title": "Run the minter on ingest and on a timer",
+      "description": "**Goal** — Connect the minter to committed ingest events and a bounded, lifecycle-managed recovery poller.\n\n**Motivation** — The next PR then gets the same finding again.\n\n**Approach** — When the minter runs. `ReviewEventMinter.run()` is single-flight (a `run` that starts while one is in progress returns at once without claiming) and never rejects (an unexpected error is logged). It is called by an `@OnEvent(REVIEW_EVENTS_INGESTED)` handler and by `ReviewEventMintPoller` every `FLEET_REVIEW_MINT_POLL_MS` (default 300000) when `sweepEnabled` is true. One pass claims at most 20 `pending` rows, oldest `createdAt` first. A wake-up dropped by single-flight, and rows past the first 20, wait for the next poller tick (accepted).\n\n`IFleetConfig` gains `reviewMintPollMs` (`FLEET_REVIEW_MINT_POLL_MS`, default 300000) in `config/fleet.config.ts` (env validation class next to lines 106-108, value next to line 168). Follow the existing timer/unref/destroy and @OnEvent conventions, but put single-flight on run itself so both event and timer paths share it. Do not additionally require prReviewEnabled for this mint timer. Register ReviewEventMintPoller in FleetReviewsModule. The full typed IFleetConfig literal in `apps/api/src/common/test-helpers/fleet-config.ts` gains `reviewMintPollMs: 300000`, and every other value is unchanged. Extend the existing minter spec from US-006 for single-flight and never-rejection and use fake timers for the poller.\n\n**Scope** — In: single-flight/finally reset, error boundary, EventEmitter2 subscription, config and poller lifecycle. Out: changing verification/retry/mint semantics (US-006), ingest emission/persistence (US-002), creating new memory keys (US-005/US-008).\n\n**Interface** — `ReviewEventMinter.run(): Promise<void>`; `ReviewEventMintPoller`; `IFleetConfig.reviewMintPollMs`; `FLEET_REVIEW_MINT_POLL_MS`.",
+      "acceptanceCriteria": [
+        "[unit] A ReviewEventMinter.run() started while another run() has not settled resolves without calling claimPending.",
+        "[unit] ReviewEventMinter.run() whose claimPending rejects resolves.",
+        "[unit] Emitting REVIEW_EVENTS_INGESTED through EventEmitter2 in a module that registers ReviewEventMinter calls its run once.",
+        "[unit] ReviewEventMintPoller with sweepEnabled true and reviewMintPollMs 300000 calls ReviewEventMinter.run once after 300000 ms of fake time.",
+        "[unit] ReviewEventMintPoller with sweepEnabled false never calls run.",
+        "[unit] ReviewEventMintPoller.onModuleDestroy stops further ticks.",
+        "[unit] The fleet config with FLEET_REVIEW_MINT_POLL_MS unset resolves reviewMintPollMs to 300000.",
+        "[unit] The fleet config with FLEET_REVIEW_MINT_POLL_MS set to the string '60000' resolves reviewMintPollMs to 60000."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "events",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Reuses the existing OnEvent, interval lifecycle and single-flight patterns in the minter, poller and config; fake timers and a deferred promise cover overlap without new authorization or queue abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-event.minter.ts",
+        "apps/api/src/fleet/reviews/fleet-pr-review.poller.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/common/test-helpers/fleet-config.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/review-event-mint.poller.ts",
+        "apps/api/src/fleet/reviews/review-event-mint.poller.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After a claimPending failure is logged, a later ReviewEventMinter.run can claim again.",
+        "When twenty pending rows are returned and more remain, run ends after that page without claiming a second page.",
+        "An unexpected minter error is logged while the run promise resolves."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-config.ts",
+          "reason": "the full typed `IFleetConfig` literal (lines 4-42) stops type-checking once `IFleetConfig` gains `reviewMintPollMs`; it gains `reviewMintPollMs: 300000`, and every other value is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "00c21d46d17b48c885c837dc3d9f915dd00bab62"
+    },
+    {
+      "id": "US-008",
+      "title": "Retire a decision through the gated REST route",
+      "description": "**Goal** — Add project-scoped, ownership-aware and approval-gated decision retirement with audit and generated API contract support.\n\n**Motivation** — There is also no way to take a decision back: memory has no retire or supersede route (`memory.controller.ts` serves `extract`, `decisions` and create only).\n\n**Approach** — Retire (design D6). `POST /memory/:id/retire`, handler `MemoryController.retireDecision`, body `{ reason?: string }` (at most 500 characters), key `memory.decision.retire`, catalog scope `['project']`, approval-gated like the other memory writes. Before the gate, `MemoryWriteService.retireTarget(principal, id): Promise<{ projectId: string }>` answers 404 `memory.notFound` when the item does not exist, is soft-deleted, or belongs to a project the principal is not a member of (`ProjectAccessService.assertProjectMembership`, its refusal mapped to 404, so a non-member learns nothing); then 422 `memory.retireNotDecision` for a kind other than `DECISION`; then 409 `memory.retireNotActive` for a status other than `active`. The gate runs with the item's project. `retireDecision` re-checks kind and status inside its transaction (409 / 422 at execution), applies the same replace check as superseding (`MemoryWriteGuard.mayReplace`: a developer may retire only items it owns; a holder of `memory.update`, such as project-admin, may retire any, including review-minted ones), sets `status rejected`, `activeKey null`, and records `memory.decision.retire` (summary includes the reason when given). Roles: `developer` gains `memory.decision.retire` in the seed and, for existing deployments, through an idempotent data migration `20261116090000_developer_memory_decision_retire` that inserts the key after `memory.decision.record` into the stored `developer` role when it lacks it (an unlocked system role keeps its stored permissions, `system-role.seeder.ts:15-22`; precedent `20261111090000_retire_fleet_approval_keys`); `project-admin` holds it via `*`.\n\nThe stored-role migration mentioned above is authored in US-009, not this story. This story declares the route and catalog key together, seeds developer, adds RetireDecisionDto/MemoryRetireException, bilingual `memory.notFound`, `memory.retireNotDecision`, `memory.retireNotActive` messages, and adds `memory.decision.retire` to MemoryAuditKey. Follow the 422 pattern `super(422, { reason }, '<i18n key>', 422)`. Add `MEMORY_ROUTE_VARIANTS.retire = 'rest:memory.decision.retire'` and a durable routeCommand registration that re-executes the same service with principal reloading. Keep membership/key/ownership enforcement in the execution path too.\n\nPreserve exact contracts: role-matrix per-role cells 222 -> 223, new memory.decision.retire immediately after memory.decision.record; owner, admin, project-admin and developer get `[\"no-project\",\"granted\"]`, all other roles get `[\"no-project\",\"not-granted\"]`, every other entry identical. Add the POST /memory/:id/retire TSV row mirroring POST /memory/decisions except key/scope/route/handler. Gated route count 126 -> 127 in permission-contract.integration.spec.ts and approval-openapi.contract.spec.ts, retaining exact assertions and updating comments/titles. Add post /api/memory/{id}/retire to the OpenAPI gated operations list. memory-route.commands.spec.ts expects four registrations and the four variants including retire. Regenerate from repo root with `bun run generate`; tracked `openapi.json` gains only the retire operation and RetireDecisionDto; CLI generated output is git-ignored and must not be hand-edited.\n\n**Scope** — In: service preflight/transaction, REST controller, DTO/exception/i18n, approval command registration, catalog/seed/audit and contract pins, route PG behavior and API/client regeneration. Out: data migration and deferred-approval/e2e cases (US-009); MCP tool (US-010); CLI command (US-011). Retiring memory items of kinds other than `DECISION`, and un-retiring a decision. A web UI for review events or for retiring decisions; the audit page shows the new entries.\n\n**Interface** — `MemoryWriteService.retireTarget(principal, id): Promise<{ projectId: string }>`; `MemoryWriteService.retireDecision(principal, id, reason?)`; `MemoryController.retireDecision`; `RetireDecisionDto` body `{ reason?: string }`; `MemoryRetireException` (422, `memory.retireNotDecision`); `MEMORY_ROUTE_VARIANTS.retire = 'rest:memory.decision.retire'`.",
+      "acceptanceCriteria": [
+        "[unit] PERMISSION_CATALOG has an entry memory.decision.retire with scopes ['project'].",
+        "[unit] The developer system role seed holds memory.decision.retire.",
+        "[integration] POST /api/memory/:id/retire by a project-admin of P on an active review-minted DECISION of P with body { reason: 'wrong call' } answers 201.",
+        "[integration] After that retire, the item's status is rejected.",
+        "[integration] After that retire, the item's activeKey is null.",
+        "[integration] That retire stores one AuditEntry with key memory.decision.retire whose summary contains wrong call.",
+        "[integration] POST /api/memory/:id/retire by a developer of P on a DECISION it recorded itself answers 201.",
+        "[integration] POST /api/memory/:id/retire by a developer of P on a review-minted DECISION (no owner) answers 403.",
+        "[integration] POST /api/memory/:id/retire by a viewer of P answers 403.",
+        "[integration] POST /api/memory/:id/retire by a member of project Q only, on a DECISION of project P, answers 404.",
+        "[integration] POST /api/memory/:id/retire with an unknown id answers 404 memory.notFound.",
+        "[integration] POST /api/memory/:id/retire on a FACT item answers 422 memory.retireNotDecision.",
+        "[integration] POST /api/memory/:id/retire on a superseded DECISION answers 409 memory.retireNotActive.",
+        "[integration] POST /api/memory/:id/retire with a reason of 501 characters answers 400.",
+        "[integration] The booted app's permission contract lists POST /api/memory/:id/retire as gated with key memory.decision.retire."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "memory",
+        "approvals",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends established memory and gated-route patterns across service, controller, durable command and exact contracts rather than redesigning architecture; ownership, privacy and approval checks still require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-write.service.ts",
+        "apps/api/src/memory/memory-write.guard.ts",
+        "apps/api/src/memory/memory.controller.ts",
+        "apps/api/src/memory/memory-route.commands.ts",
+        "apps/api/src/fleet/repos/auto-review.exception.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/dto/retire-decision.dto.ts",
+        "apps/api/src/memory/memory-retire.exception.ts",
+        "apps/api/src/i18n/en/memory.json",
+        "apps/api/src/i18n/zh/memory.json",
+        "apps/api/test/integration/memory/retire-decision-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "retireTarget returns 404 memory.notFound for a soft-deleted DECISION.",
+        "retireTarget checks project membership before exposing whether the item is a DECISION or active.",
+        "retireTarget on a non-active FACT returns 422 memory.retireNotDecision before considering status.",
+        "When retirement audit recording fails, the item remains active with its original activeKey.",
+        "After retiring a review_event item, ReviewDecisionWriter.guard returns retired for a new job/thread with the same project, repo and finding key."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-role cell count (line 224), 222 after US-005, becomes 223 for the new `memory.decision.retire` key; it stays an exact count."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role gains `memory.decision.retire`, placed right after `memory.decision.record`: owner, admin, project-admin and developer get `[\"no-project\",\"granted\"]`, every other role gets `[\"no-project\",\"not-granted\"]` (a project-scoped key answers no-project in the global cell). Every other entry stays identical."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "it gains one REST row for POST /memory/:id/retire with key memory.decision.retire and catalog scope project, its other columns mirroring the POST /memory/decisions row (line 144)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "AC-12 (line 68) pins exactly 126 gated routes; the new gated POST /memory/:id/retire makes it 127. Change the number and its comment (lines 65-67); the assertion stays an exact count."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "the gated operations list gains post /api/memory/{id}/retire; the describe title (line 176) and the it title (line 257) change from 126 to 127, and toHaveLength(126) (line 259) becomes 127."
+        },
+        {
+          "path": "apps/api/src/memory/memory-route.commands.spec.ts",
+          "reason": "it asserts 3 registrations and `MEMORY_ROUTE_VARIANTS` equal to the three current variants (lines 22-23); they become 4 registrations and the four variants including `retire: 'rest:memory.decision.retire'`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "the expected output of `bun run generate`: the new retire operation and `RetireDecisionDto`; no other schema changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6ae99853ab1f04d759300e9d907a4667fb6b05c1"
+    },
+    {
+      "id": "US-009",
+      "title": "Retire for stored roles, approvals and the endpoint suite",
+      "description": "**Goal** — Upgrade deployed developer roles idempotently and complete deferred retirement behavior through the real approval and endpoint paths.\n\n**Motivation** — There is also no way to take a decision back: memory has no retire or supersede route (`memory.controller.ts` serves `extract`, `decisions` and create only).\n\n**Approach** — Roles: `developer` gains `memory.decision.retire` in the seed and, for existing deployments, through an idempotent data migration `20261116090000_developer_memory_decision_retire` that inserts the key after `memory.decision.record` into the stored `developer` role when it lacks it (an unlocked system role keeps its stored permissions, `system-role.seeder.ts:15-22`; precedent `20261111090000_retire_fleet_approval_keys`); `project-admin` holds it via `*`.\n\n`retireDecision` re-checks kind and status inside its transaction (409 / 422 at execution), applies the same replace check as superseding (`MemoryWriteGuard.mayReplace`: a developer may retire only items it owns; a holder of `memory.update`, such as project-admin, may retire any, including review-minted ones), sets `status rejected`, `activeKey null`, and records `memory.decision.retire` (summary includes the reason when given).\n\nAn approved retire whose item is no longer active at execution: The request ends `failed` with `result.error` `execution-failed`.\n\nAuthor the data migration as an ordered JSONB permission edit of developer only, preserving all other permissions/roles and leaving a role already holding the key untouched on reapply. The route and seed were introduced in US-008; this story exercises and completes the durable pending/approval/late-failure seam using real Postgres. Use an agent with project.read, memory.decision.retire and memory.update, and a human-required project policy. A pending 202 includes the request id and does not mutate the item until approval. Add the endpoint e2e POST /api/memory/:id/retire happy path (201) and unknown-id error (404), next to existing memory create entries; every existing case is unchanged. Follow developer-bash-decide-migration.integration.spec.ts and gated-memory-routes.integration.spec.ts fixtures. This binding story includes the actual stored-role data change, not a standalone validation-only task.\n\n**Scope** — In: stored developer data migration, approved execution and late-state-failure behavior, migration/approval integration tests and endpoint cases. Out: initial REST/catalog/seed/DTO/OpenAPI work (US-008); MCP (US-010); CLI (US-011).\n\n**Interface** — Migration `20261116090000_developer_memory_decision_retire`; `POST /memory/:id/retire`; `MemoryWriteService.retireDecision(principal, id, reason?)`; pending HTTP 202 and approval request `result.error` `execution-failed`.",
+      "acceptanceCriteria": [
+        "[integration] Applying 20261116090000_developer_memory_decision_retire to a database whose stored developer role lacks memory.decision.retire adds it right after memory.decision.record.",
+        "[integration] Applying that migration a second time leaves the stored developer permissions unchanged.",
+        "[integration] Applying that migration leaves the stored viewer role's permissions unchanged.",
+        "[integration] POST /api/memory/:id/retire by an agent of P whose project role grants project.read, memory.decision.retire and memory.update, under a project policy for memory.decision.retire requiring human approval, answers 202.",
+        "[integration] That 202 body carries the approval request id.",
+        "[integration] After that 202, the item's status is still active.",
+        "[integration] Approving that pending request retires the item (its status becomes rejected).",
+        "[integration] Approving a pending retire request after the item was retired by someone else ends the request failed with result.error execution-failed.",
+        "[integration] The endpoint e2e suite's POST /api/memory/:id/retire case answers 201 for an owner on an active DECISION.",
+        "[integration] The endpoint e2e suite's POST /api/memory/:id/retire case answers 404 for an unknown id."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "migration",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds one ordered JSONB role migration and connects existing approval/endpoint fixtures to the route from US-008; established patterns keep scope medium, while authorization data and deferred execution require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/prisma/migrations/20261111090000_retire_fleet_approval_keys/migration.sql",
+        "apps/api/test/integration/permissions/developer-bash-decide-migration.integration.spec.ts",
+        "apps/api/test/integration/memory/gated-memory-routes.integration.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/src/memory/memory-write.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261116090000_developer_memory_decision_retire/migration.sql",
+        "apps/api/test/integration/permissions/developer-memory-retire-migration.integration.spec.ts",
+        "apps/api/test/integration/memory/retire-decision-approval.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The developer migration preserves the relative order and values of every pre-existing permission other than inserting the missing retire key.",
+        "When a stored developer role already contains memory.decision.retire, migration leaves its permissions and updatedAt unchanged.",
+        "Rejecting a pending retirement approval leaves the memory item active.",
+        "When the requesting principal loses the necessary project permission before approval executes, the request fails without retiring the item."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains a POST /api/memory/:id/retire happy path (201) and error case (404), next to the memory create entries (lines 3658-3665); every existing case is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0165f1669d9f55b1d9cdda4b9eec140ef7a1f86f"
+    },
+    {
+      "id": "US-010",
+      "title": "Retire decisions over MCP",
+      "description": "**Goal** — Expose decision retirement to every MCP agent through the same project-aware approval gate as REST.\n\n**Motivation** — There is also no way to take a decision back: memory has no retire or supersede route (`memory.controller.ts` serves `extract`, `decisions` and create only).\n\n**Approach** — Retire on CLI and MCP. CLI `koda memory retire <id> [--reason <text>] [--json]` calls the generated `memoryControllerRetireDecision`. MCP gains a direct tool `koda_retire_decision` `{ id, reason? }`, listed for every agent (like the approval tools; the gate enforces the key), provided and exported by `MemoryModule`, spread in the MCP controller after the approval tools, running the same route gate with origin `mcp`.\n\nNew `apps/api/src/memory/mcp/memory-mcp-tools.ts` `MemoryMcpTools.registrations(principal)`; `McpController` gains a `MemoryMcpTools` parameter. Mirror ApprovalMcpTools direct registrations, not the assistant tool registry. Establish the authenticated AGENT/mcp context, validate id and optional reason (at most 500 characters), reject unknown keys, and call retireTarget to derive projectId before calling the shared gate with key memory.decision.retire and variant rest:memory.decision.retire. Never accept a caller-supplied project or user id. The AC requires success text for a stub gate returning done; the live gate returns executed, so handle that real successful outcome too without changing the shared gate contract. Render pending request ids and safe not-found/errors with isError, rather than bypassing the gate.\n\nAppend koda_retire_decision to the exact MCP tool lists in fleet/mcp-route.integration.spec.ts and fleet/permissions-mcp-tools.integration.spec.ts; every other entry and order is unchanged. In approvals/approval-mcp.integration.spec.ts, preserve the approval tools check via tools.slice(-3, -1), and assert the last tool is koda_retire_decision. In mcp.controller.routes.spec.ts add a MemoryMcpTools stub whose registrations returns []; its exact tool list remains unchanged. AssistantModule already imports MemoryModule; provide/export the tool there through MemoryModule without a new business-rule implementation.\n\n**Scope** — In: MemoryMcpTools, module exports, controller injection/registration, validation/result mapping and MCP list regression adjustments. Out: CLI implementation from the shared design paragraph (US-011), REST/service/gate/permission declaration (US-008), stored-role migration and deferred HTTP integration (US-009).\n\n**Interface** — `MemoryMcpTools.registrations(principal)`; direct tool `koda_retire_decision` input `{ id, reason? }`; shared `MemoryWriteService.retireTarget(principal, id): Promise<{ projectId: string }>` and `MEMORY_ROUTE_VARIANTS.retire = 'rest:memory.decision.retire'`.",
+      "acceptanceCriteria": [
+        "[unit] MemoryMcpTools.registrations(agent) includes a tool named koda_retire_decision whose input schema requires id and allows an optional reason.",
+        "[unit] Calling koda_retire_decision with { id: 'm1' } runs the route gate with key memory.decision.retire, variant rest:memory.decision.retire, the project retireTarget returned, and origin mcp.",
+        "[unit] koda_retire_decision answers a text containing retired m1 and isError false when the gate returns done.",
+        "[unit] koda_retire_decision answers a text containing the approval request id when the gate returns pending.",
+        "[unit] koda_retire_decision with an unknown input key force answers invalid_input: force with isError true.",
+        "[unit] koda_retire_decision for an id retireTarget rejects with memory.notFound answers isError true with a text containing not found.",
+        "[integration] The MCP tool list for an agent ends with koda_retire_decision, right after koda_decide_approval."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "api",
+        "memory",
+        "mcp",
+        "security"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One direct tool mirrors ApprovalMcpTools and reuses the existing retire target and route gate, with module/controller wiring and list updates; medium implementation scope still requires strict security TDD for agent write authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/memory-route.commands.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/mcp/memory-mcp-tools.ts",
+        "apps/api/src/memory/mcp/memory-mcp-tools.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "koda_retire_decision answers success text containing retired m1 with isError false when the real route gate returns executed.",
+        "koda_retire_decision with a reason of 501 characters returns invalid_input: reason and never calls retireTarget or the gate.",
+        "koda_retire_decision remains listed for an agent lacking memory.decision.retire, but calling it returns a permission error without modifying memory.",
+        "When retireTarget rejects a foreign-project id, koda_retire_decision never calls the route gate."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+          "reason": "the exact MCP tool list (line 128) ending in `'koda_list_approvals', 'koda_decide_approval'` gains `'koda_retire_decision'` at the end; every other entry and order is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-mcp.integration.spec.ts",
+          "reason": "AC-12 (line 58) asserts `tools.slice(-2)` equals the two approval tools; it becomes `tools.slice(-3, -1)` equals the two approval tools and the last tool is `koda_retire_decision`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts",
+          "reason": "the exact MCP tool lists (lines 162, 172, 180, 201) ending in `'koda_list_approvals', 'koda_decide_approval'` gain `'koda_retire_decision'` at the end; every other entry and order is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts",
+          "reason": "the test module (lines 75-76) provides only `ApprovalMcpTools`; it also provides a `MemoryMcpTools` stub whose `registrations` returns `[]`, and the exact tool list (line 151) is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a74efa68071e9c8337d419a1cd10a51373b5dc35"
+    },
+    {
+      "id": "US-011",
+      "title": "Retire a decision from the CLI",
+      "description": "**Goal** — Add the thin generated-client-backed memory retire command with human and JSON output.\n\n**Motivation** — There is also no way to take a decision back: memory has no retire or supersede route (`memory.controller.ts` serves `extract`, `decisions` and create only).\n\n**Approach** — Retire on CLI and MCP. CLI `koda memory retire <id> [--reason <text>] [--json]` calls the generated `memoryControllerRetireDecision`. MCP gains a direct tool `koda_retire_decision` `{ id, reason? }`, listed for every agent (like the approval tools; the gate enforces the key), provided and exported by `MemoryModule`, spread in the MCP controller after the approval tools, running the same route gate with origin `mcp`.\n\nImplement only the CLI half of that shared design paragraph. Extend the existing Commander memory group, use the API id path directly, send {} when no reason is supplied and { reason } when supplied, unwrap the API response with the existing helper, print `Decision retired.` on success or response data for --json, and delegate failures to handleApiError. Bootstrap the existing API client through withContext without requiring a project slug because the server derives scope from the memory id. Use the generated operation created by US-008's root bun run generate, not handwritten HTTP or local business rules. Extend memory.spec.ts generated-boundary mocks and command cases; every existing assertion is unchanged. Do not hand-edit apps/cli/src/generated; it is git-ignored and must be regenerated if missing.\n\n**Scope** — In: memory retire command and existing Jest command-suite extensions. Out: the MCP half of the shared design paragraph (US-010), permission/ownership/retirement logic and generated operation definition (US-008), stored-role/deferred-approval integration (US-009).\n\n**Interface** — `koda memory retire <id> [--reason <text>] [--json]`; generated `memoryControllerRetireDecision` with path id and body `{ reason?: string }`.",
+      "acceptanceCriteria": [
+        "[unit] koda memory retire m1 calls memoryControllerRetireDecision with path id m1 and an empty body.",
+        "[unit] koda memory retire m1 --reason \"wrong call\" sends body { reason: 'wrong call' }.",
+        "[unit] koda memory retire m1 prints Decision retired. on success.",
+        "[unit] koda memory retire m1 --json prints the response data as JSON.",
+        "[unit] koda memory retire m1 with the API answering 404 exits through handleApiError."
+      ],
+      "tags": [
+        "fleet-review-ingest",
+        "cli",
+        "memory"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two-file thin Commander/generated-client extension using unchanged auth/context helpers; mock API calls and assert request shape, output and error delegation with Jest.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/memory.ts",
+        "apps/cli/src/commands/memory.spec.ts",
+        "apps/cli/src/utils/context.ts",
+        "apps/cli/src/utils/api.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "suggestedCriteria": [
+        "koda memory retire m1 sends the API request when API credentials are configured but no projectSlug is configured.",
+        "koda memory retire m1 --json emits no human success message alongside the JSON response."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/memory.spec.ts",
+          "reason": "adds tests for this story's acceptance criteria; every existing assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6f16f5397481bf36f84155788954b760a0389563"
+    }
+  ],
+  "analysis": "Enhancement of an existing Bun/Turborepo monorepo, not greenfield. Navigation used direct reads and text search because codebase-memory MCP was not exposed; the supplied execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. Read the API and CLI authoring contexts. The detected Express/Next.js labels in the prompt are not authoritative: apps/api is NestJS 12 on Fastify, with Express-compatible HTTP test helpers, Prisma 7/Postgres and Vitest; the web is Nuxt and needs no changes. API changes must follow Nathapp platform patterns and the nathapp-nestjs-patterns skill before implementation; that skill was not exposed in this drafting session. API owns persistence, permissions, approval, audit and business rules; CLI stays a generated-client consumer. No runner, web or nax transport changes are required. The binding spec has exactly eleven stories, with its specified dependency graph and package workdirs even where a story also updates root contract/inventory artifacts. The original combined K2 design still says DRAFT (docs/superpowers/specs/2026-10-31-fleet-s6-k2-review-memory-design.md:3); the approved, later feature spec and its ACs govern this implementation, not that stale status or part-A requirements.\n\nExisting ingest seam: BundleFiles has nine slots, with featureReport/decisions optional to preserve old literal fixtures (apps/api/src/fleet/ingest/bundle-reader.ts:10-37). slotOf rejects absolute paths, backslashes and traversal before matching the allowlist (:40-46); keep that security boundary. readBundleFiles streams tar.gz, keeps regular files only, and currently adds every oversized allowlisted file to oversized (:64-101). botReview and naxStdout must be exceptions to that oversized accounting, not a global weakening of limits. Multiple review artifacts are retained for stdout-tail disambiguation; stdout is selection data, never an instruction or a path to read from disk. parseBundle is pure, currently takes two arguments, accumulates per-file outcomes and excludes workflow invalidity from partial (apps/api/src/fleet/ingest/parse-bundle.ts:28-68). Extend it additively with optional reviewPrNumber and optional botReview result, preserving existing RUN outcome behavior and all prior callers. The workflow parser demonstrates typed readers, clipped strings and bounded arrays (apps/api/src/fleet/ingest/parsers/workflow.parser.ts:1-42). PR identity is recoverable only from the existing safe-integer parser of review-pr-<n> (apps/api/src/fleet/common/review-jobs.ts:7-12). Never infer a different PR from artifact content.\n\nBundleIngestService already locks the job and executes parsing, replaceRows, corrections, outcome and audit inside txManager.run, then publishes live/budget/ticket/knowledge effects after commit (apps/api/src/fleet/ingest/bundle-ingest.service.ts:93-133). ingestOne catches read/write failures and records retry/failure (:76-90, :136-150). Record FleetReviewEvent rows atomically with the ingest, only for command REVIEW, state COMPLETED at the locked read, and the same claim epoch. Do not interfere with RUN-only outcome storage (:100-105) or its KNOWLEDGE_RUN_INGESTED event (:126-133). review pending count must travel in the transaction result so REVIEW_EVENTS_INGESTED cannot escape a rollback. The row write is insert-with-duplicate-skip, unlike replaceRows; requeue must never reset attempts, status, timestamps or historical reviewer data. Add the final reviewEvents constructor collaborator and adjust the four positional-constructor suites: bundle-ingest.service.spec.ts:17,132; bundle-ingest.outcomes.spec.ts:32,92; bundle-ingest.workflow.spec.ts:47,121; bundle-ingest.pr-links.spec.ts:25. One existing service fixture at :17 currently omits the audit argument too: retain/restore the existing audit stub position before appending reviewEvents rather than shifting arguments or weakening assertions. IngestModule currently imports no Reviews module and explicitly avoids KnowledgeModule (apps/api/src/fleet/ingest/ingest.module.ts:18-32); add FleetReviewsModule only.\n\nPersistence/module design: FleetReviewsModule currently imports FleetReposModule, FleetJobsModule, GitBrokerModule and exports nothing (apps/api/src/fleet/reviews/fleet-reviews.module.ts:12-30). Add the private FLEET_REVIEW_EVENT_REPOSITORY binding, exported FleetReviewEventsService, MemoryModule, minter and poller in their assigned stories; update the misleading header. Existing PrismaFleetPrReviewRepository uses transaction-scoped PrismaService.client via ALS (apps/api/src/fleet/reviews/prisma-fleet-pr-review.repository.ts:12-28); follow that repository pattern without copying its mutating claim semantics: claimPending here is a pure ordered read, not a lease, status change or SKIP LOCKED claim. Migration 20261115090000_fleet_review_event must create the full model, job cascade FK, unique (jobId, leaseEpoch, threadId), index (status, createdAt), default attempts 0 and timestamps. Add the FleetJob backrelation. Use strings/local types for statuses, no Prisma enums. Run bun run db:generate in apps/api after schema edits; generated Prisma code is ignored. Persist skipped rows too, particularly untrusted-pr. Bookkeeping marks/attempt bumps use the new exact fleet.review-event-bookkeeping reason, while recordForJob remains part of counted ingest writes. claimPending reads at most twenty pending rows oldest first, single-flight is process-local, and the architecture assumes one API instance; do not silently add a distributed queue or claim mutation. Integration fixtures at apps/api/test/integration/fleet/fleet-pr-review.integration.spec.ts:12-50 demonstrate canRunDbTests, bootHttpApp, fixtureDb and action context wrappers.\n\nForge and trust boundary: GitHubAppClient centralizes FleetHttpClient requests, bearer headers, URL helpers and provider errors (apps/api/src/fleet/git-broker/github-app-client.ts:46-100, :128-180). mintReadOnlyToken already returns { token, expiresAt } with contents+metadata read (:74-78). getRepoRole must reuse the HTTP client, encode the login as one segment, trust only the six enumerated role_name values, fall back only to admin/write/read permission values, treat 404 as none and every other non-200 as provider_error. Do not broaden token scope, log tokens, or perform forge calls inside a DB transaction. A real GitHub deployment may deny the collaborator endpoint with the existing App permissions: the specified result is permission-check-failed and no mint, not insecure fallback. FleetReposService currently delegates internal reads through its repo, including listAutoReviewRepos (apps/api/src/fleet/repos/fleet-repos.service.ts:28-39, :109-111); add a narrow findReviewRepo projection using the existing findById seam. Do not make a public principal route or duplicate forge access checks there. Filter [bot] logins before any lookup, then duplicate/retired guards before repo/token/role network work. The first verified admin/maintain/write login wins in original order; a role lookup exception is a terminal permission-check-failed skip, whereas token mint or decision mint errors retry only three times. Untrusted PRs never reach minting. disagreedBy means all thread commenters, not a proven vote; audit must not overclaim consensus.\n\nAction context/audit seam: ActionApproval currently accepts only ActorType USER|AGENT (apps/api/src/action-context/action-context.ts:24, :41-48); widen only the approver field, not actors, onBehalfOf, principals or permission identity. runWithActionContext uses AsyncLocalStorage and copies the input with shared correlation (:89-107); runWithApproval must nest a copy, preserve actor/onBehalfOf/origin/correlationId, restore on return or asynchronous settlement and throw outside a context. runAsSystemWriter derives the system actor from the second segment of its declared key (:141-151), so system.review.decision means SYSTEM/review, never review-ingest. AuditEntryRecord.approverType is currently ActorType|null (apps/api/src/audit/domain/audit-entry.domain.ts:8-27), and the DTO approval block has a TypeScript union but Swagger type Object (apps/api/src/audit/dto/audit-entry.dto.ts:13-20); no audit OpenAPI schema expansion is intended. collectDisplayIds and principalLabel currently batch users/agents/runners and return null for other types (apps/api/src/audit/audit-log.service.ts:35-71); FORGE_USER must bypass identity-table lookup and display its id literally. Prisma AuditEntry already stores approverType as String? (apps/api/prisma/schema.prisma:857-870), so this widening needs no schema migration.\n\nMemory writer/replacement seam: MemoryItem already has project-scoped active-key uniqueness and a source lookup index; rejected rows clear activeKey and remain history (apps/api/prisma/schema.prisma:640-670). PrismaMemoryItemRepository.upsert runs a Serializable transaction, looks up the active key, handles replay no-op, optionally checks beforeSupersede, supersedes and inserts, then awaits onWritten inside the write transaction (apps/api/src/memory/prisma-memory-item.repository.ts:182-267). ReviewDecisionWriter must use that API, but first and again inside its write check sourceType review_event+sourceId across any status, then rejected review_event by project/subject/predicate; an active-only or non-project-scoped lookup would violate crash safety or isolation. Keep guards and memory+audit writes atomic; validate transaction nesting with the repository's existing ALS behavior rather than using an untracked root Prisma client. In a crash after mint but before event marking, a later guard produces duplicate, not a recreated item; audit remains the authoritative approver record. memoryAuditHook has a fixed created/superseded summary (apps/api/src/memory/memory-audit.ts:11-46), so use the review writer's own onWritten hook for the exact job/PR/forge approver summary and add its audit-key union member. Preserve supersession through upsert for a newer job/thread with the same project/repo/finding key. A rejected review finding is a durable veto against recreation, unlike superseded history. Part A is not a dependency: define review_event and repo:<id> locally.\n\nPermissions/contracts are deliberately exact: PERMISSION_CATALOG places memory.decision.record at apps/api/src/permissions/catalog.ts:256 and system.pr-review.dispatch at :344. Add each new key in the same story as its declarer. The current role matrix pins 221 cells (apps/api/src/permissions/role-matrix.spec.ts:224) and system-writer inventory pins 35 writers (apps/api/src/permissions/system-writer.decorator.spec.ts:101). US-005 raises these to 222/36 and US-008 raises catalog cells to 223; copy only the specified adjacent cells and retain every existing entry. The TSV is an executable catalog source, not optional documentation: mirror the current REST decisions row at docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv:144 and FleetPrReviewPass row at :260, changing only the specified class/key/scope/entrypoint details. Update bookkeeping reason pins, 126-to-127 gated-route and OpenAPI lists, and three-to-four memory command registrations exactly as assigned. Do not relax count assertions or regenerate unrelated snapshots.\n\nRetirement is an access-control change: MemoryWriteService currently checks project membership before keys, applies ownership on replacement and blocks generic DECISION creation (apps/api/src/memory/memory-write.service.ts:47-59, :83-104, :194-202). MemoryWriteGuard.mayReplace passes typed ownership as the resource for memory.update; null/partial ownership cannot satisfy .own (apps/api/src/memory/memory-write.guard.ts:49-74, :82-94). Reuse it inside retirement's transaction, not only as an HTTP precheck. retireTarget resolves a live item and membership first, hides any membership refusal as 404, then checks DECISION before active status; this resolution precedes approval gating so callers cannot probe foreign project metadata. retireDecision rechecks state/kind and permission at execution, atomically rejects, clears activeKey and records the reason-bearing audit. Existing repository.reject (apps/api/src/memory/prisma-memory-item.repository.ts:293-298) is only a low-level mutation; calling it alone would miss transactional rechecks and audit. MemoryController uses ApprovalRouteGate and ApprovalPending/JsonResponse (apps/api/src/memory/memory.controller.ts:24-69). MemoryRouteCommands registers durable replay parsers with ActorPrincipalLoader (apps/api/src/memory/memory-route.commands.ts:19-56); register the new rest:memory.decision.retire variant so deferred approvals execute the same service. A 202 must leave memory unchanged; a later stale execution must settle the approval failed/execution-failed, not report success. Default immediate POST success is 201, not 200. Add bilingual memory messages and the 422 custom exception matching apps/api/src/fleet/repos/auto-review.exception.ts:3-7.\n\nMigration/rollout: developer currently names memory.decision.record in apps/api/src/permissions/system-roles.ts:56-94 and is an unlocked stored system role. SystemRoleSeeder explicitly preserves unlocked stored permissions (apps/api/src/permissions/system-role.seeder.ts:15-22); updating seeds alone does not upgrade deployed users. US-009 ships the idempotent JSONB permissions data migration 20261116090000_developer_memory_decision_retire that inserts only into developer after record when missing, retaining order, custom entries and all other roles. Use the SQL/data-test precedent apps/api/prisma/migrations/20261111090000_retire_fleet_approval_keys/migration.sql:1-15 and developer-bash-decide-migration.integration.spec.ts. Deploy the schema migration before code reads FleetReviewEvent, and the role migration with the retire-capable code. There is no historical bundle backfill requirement; re-ingest stays idempotent. No deletion or expiry of review-event history beyond job cascade. Retired memory vetoes remain after job deletion because they are memory history.\n\nModule/timer risks: FleetPrReviewPass shows @SystemWriter/runAsSystemWriter (apps/api/src/fleet/reviews/fleet-pr-review.pass.ts:33-62), while the existing poller owns single-flight and also checks prReviewEnabled (apps/api/src/fleet/reviews/fleet-pr-review.poller.ts:19-39). This feature intentionally differs: ReviewEventMinter.run itself owns single-flight and never rejects, covering event and timer entry together, and its timer is gated by sweepEnabled only. Add reviewMintPollMs to the IFleetConfig interface/schema/factory and the complete fleet-config test literal, using FLEET_REVIEW_MINT_POLL_MS and default 300000 (existing related config at apps/api/src/config/fleet.config.ts:68,107,133-170). A full page or overlapping event wake is allowed to wait for the next poll; do not add recursion, indefinite draining or transactions around HTTP. MemoryModule already has real forwardRef cycles through Projects/Agents/Context and exports the repository and write guard (apps/api/src/memory/memory.module.ts:27-65). Preserve those existing edges when adding writer/tools exports and importing MemoryModule in Reviews. Both FleetReviewsModule and IngestModule have no-DB DI tests (apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts:25-59; apps/api/src/fleet/ingest/ingest.module.spec.ts:14-32), and MemoryModule has its own (:20-56). Extend those unit suites rather than putting compilation tests behind Postgres.\n\nMCP seam: ApprovalMcpTools.registrations universally lists direct approval tools and establishes AGENT/mcp action context before service calls (apps/api/src/approvals/mcp/approval-mcp-tools.ts:18-85). MemoryMcpTools should likewise be universally visible, validate unknown keys and reason length, call retireTarget and the same route gate, and translate done/pending/errors into MCP text without bypassing permissions. McpController appends approval tools after permission-filtered assistant tools (apps/api/src/fleet/assistant/mcp/mcp.controller.ts:50-70); append memory tools after those, inject the new collaborator and add its stub to the route-unit test. The real ApprovalRouteGate/ApprovalGate currently returns status executed for an immediate write, not done (apps/api/src/approvals/route/approval-route-gate.ts:55-90; apps/api/src/approvals/approval-gate.service.ts:20-21,111). Preserve the explicit spec unit AC for a gate stub returning done while also interoperating with the real executed outcome; do not change the shared gate contract. The existing AssistantModule already imports MemoryModule, so avoid a redundant module edge. Preserve all exact MCP tool lists and approval-tools relative order while appending one new final tool.\n\nCLI seam and generated artifacts: apps/cli/src/commands/memory.ts:1-21 imports generated functions and resolves slugs only for project-ID writes; :68-109 shows existing success/JSON/handleApiError conventions. Retire identifies its project server-side from id, so bootstrap the API client with withContext({}, { requireProject: false }) instead of forcing local project context or resolving a slug (apps/cli/src/utils/context.ts:5-50). Add memoryControllerRetireDecision to the generated-boundary mocks, not handwritten HTTP. apps/cli/src/commands/memory.spec.ts:15-59 uses Jest, Commander parseAsync and mocked process.exit/console; preserve all existing assertions. Root package.json:19-23 defines bun run generate as API export plus CLI generation. Despite general prose claiming generated CLI files are committed, actual .gitignore:21-26 ignores apps/cli/src/generated and Prisma generated output; regenerate rather than hand-edit and commit tracked openapi.json only. US-008 must generate the new operation/RetireDecisionDto for US-011; no unrelated OpenAPI changes and no audit schema expansion.\n\nVerification built into every story: API unit tests use vi and no DB; CLI uses Jest and mocks generated functions. PG tests belong in test/integration and use canRunDbTests; module/DI tests remain src/*.spec.ts with GlobalStubsModule. KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 is required for genuine PG evidence. Run scoped DB specs on the host; skipping in a sandbox is not verification. DB-mode runs force-reset a *_test DB; never run parallel DB suites against the same database, and a second worktree uses KODA_TEST_DB_CONTAINER=1. Acceptance artifacts are generated under apps/<app>/.nax/features/fleet-review-ingest, are not story-authored outputs and must not be edited or copied. Keep the API Vitest SWC/decorator path, generated-client regeneration and exact contract pins intact. Security-sensitive role lookup, identity/approval attribution, system-key declaration, minter authorization, retirement gates/migrations and MCP all use strict three-session-tdd. Parsing, thin CLI formatting and the standard event/timer lifecycle use tdd-simple. The refine audit reduced approval metadata, timer wiring, stored-role rollout and direct MCP tool work to medium complexity because they reuse existing patterns; the retire route is complex rather than expert. Security-sensitive stories retain three-session-tdd regardless of reduced complexity. Refine audit enumerated all 117 explicit spec ACs by story ordinal: US-001 1-15, US-002 1-14, US-003 1-8, US-004 1-7, US-005 1-13, US-006 1-15, US-007 1-8, US-008 1-15, US-009 1-10, US-010 1-7 and US-011 1-5. All remain in their original stories with matching/precondition/after-commit/unchanged qualifiers intact. The US-006 markMinted assertion was clarified against its actual interface: the first argument is the event row id, and the minted memory id plus approver login belong in the second argument object. Every story already has a negative-path AC; none needed an invented failure condition. Explicit failure-table cases lacking standalone ACs are enumerated in the appropriate story. The refine request additionally requires backward-compatibility assertions; seven were added for two-argument parseBundle, existing RUN outcome forwarding, unchanged token scope, independent PR-review config defaults, existing durable memory.create execution, the pre-existing MCP tool prefix and CLI decision self-attribution. Other optional hardening remains in suggestedCriteria. Eligibility ACs now name the captured parseBundle opts.reviewPrNumber field rather than the vague phrase requests parsing; physical bundle streaming remains shared across job commands. All eleven feature-level out-of-scope statements remain verbatim, and every spec-recommended context file is present within the five-file cap with no current-story output used as context. Binding story ids, workdirs and dependencies are unchanged.",
+  "outOfScope": [
+    "Mapping a GitHub login to a koda user; the approver is recorded as `FORGE_USER` / `github:<login>` only.",
+    "Turning agreed findings or any event type other than `finding-withdrawn` into memory.",
+    "GitLab reviews; K1 reviews GitHub repos only.",
+    "Re-checking a `skipped` event later (for example after a GitHub outage); a `skipped` row stays skipped.",
+    "Classifying each comment in a withdrawn thread as agreement or disagreement; nax's withdrawal is taken as the judgment, and `disagreedBy` is used only to pick a writer, so the recorded approver may be any writer who commented in the thread.",
+    "A web UI for review events or for retiring decisions; the audit page shows the new entries.",
+    "Retiring memory items of kinds other than `DECISION`, and un-retiring a decision.",
+    "Passing decisions into the review and the decisions selection; those are part A (feature `fleet-review-decisions`). This feature defines its own `review_event` and `repo:<id>` literals and does not import part A's module.",
+    "Expiring or pruning `FleetReviewEvent` rows; they cascade with their job.",
+    "Re-pinning the approver login on a row whose decision was minted just before a crash; the next pass ends that row `skipped` / `duplicate`, and the audit entry keeps the approver.",
+    "Checking `pr.repo` or `pr.forge` in the artifact against the job's repo; the job, its bundle and its PR number already tie the artifact to the repo."
+  ],
+  "routingProfile": "native-codex"
+}

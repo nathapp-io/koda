@@ -1536,6 +1536,75 @@
         ]
       }
     },
+    "/api/memory/{id}/retire": {
+      "post": {
+        "operationId": "MemoryController_retireDecision",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Decision retired"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or ownership refused"
+          },
+          "404": {
+            "description": "Memory item not found"
+          },
+          "409": {
+            "description": "Decision is not active"
+          },
+          "422": {
+            "description": "Memory item is not a decision"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retire a decision (memory.decision.retire)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/memory": {
       "post": {
         "operationId": "MemoryController_createMemory",
@@ -15452,6 +15521,16 @@
           "topic",
           "decision"
         ]
+      },
+      "RetireDecisionDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Why the decision is being retired"
+          }
+        }
       },
       "CreateMemoryDto": {
         "type": "object",

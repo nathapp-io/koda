@@ -10,6 +10,7 @@ import { KnowledgeIndexQueue } from '../fleet/knowledge/knowledge-index.queue';
 import { FleetLogRetentionProcessor } from '../fleet/logs/fleet-log-retention.processor';
 import { EnrollmentRetentionProcessor } from '../fleet/runners/enrollment-retention.processor';
 import { ScheduleTicker } from '../fleet/schedules/schedule-ticker';
+import { ReviewEventMinter } from '../fleet/reviews/review-event.minter';
 import { FleetPrReviewPass } from '../fleet/reviews/fleet-pr-review.pass';
 import { FleetSweeper } from '../fleet/sync/fleet-sweeper';
 import { FleetPrStateRefresher } from '../fleet/tickets/fleet-pr-state.refresher';
@@ -49,6 +50,7 @@ const writers = new Map<Function, string>([
   [EnrollmentRetentionProcessor, 'system.enrollment.retention'],
   [ScheduleTicker, 'system.schedule.dispatch'],
   [FleetPrReviewPass, 'system.pr-review.dispatch'],
+  [ReviewEventMinter, 'system.review.decision'],
   [FleetSweeper, 'system.job.crash-silent-runner'],
   [FleetPrStateRefresher, 'system.ticket-link.pr-refresh'],
   [FleetHealthDetector, 'system.health.detect'],
@@ -98,7 +100,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(35);
+    expect(writers).toHaveLength(36);
     expect(actual).toEqual(expected);
   });
 

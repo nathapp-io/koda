@@ -137,6 +137,13 @@ describe('AuditLogService.list', () => {
     expect(findDisplayNames).toHaveBeenCalledWith({ userIds: ['u2'], agentIds: ['a2'], runnerIds: ['r1'], projectIds: ['p2'] });
   });
 
+  it('US-004 AC-7: displays a forge approver as its literal id without looking it up', async () => {
+    const { service, findDisplayNames } = setup([{ ...record, actorType: 'SYSTEM', actorId: 'review', projectId: null, approverType: 'FORGE_USER', approverId: 'github:alice' }]);
+    const result = await service.list({}, pageOption);
+    expect(result.records[0].display.approver).toBe('github:alice');
+    expect(findDisplayNames).not.toHaveBeenCalled();
+  });
+
   it('US-002 AC-2: passes correlationId through to findPage unchanged', async () => {
     const { service, findPage } = setup();
     await service.list({ correlationId: 'c-1' }, pageOption);

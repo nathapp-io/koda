@@ -18,7 +18,7 @@ export interface AuditEntryRecord {
   origin: ActionOrigin;
   requiredMode: ActionApproval['requiredMode'];
   satisfiedBy: ActionApproval['satisfiedBy'];
-  approverType: ActorType | null;
+  approverType: ActorType | 'FORGE_USER' | null;
   approverId: string | null;
   approvalRequestId: string | null;
   correlationId: string;

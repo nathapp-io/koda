@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
-import { MemoryItemInput } from './memory-item-repository';
+import { MemoryItemInput, type MemoryItem } from './memory-item-repository';
+import { MemoryRetireException } from './memory-retire.exception';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { MemoryKind } from '../common/enums';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectAccessService } from '../projects/project-access.service';
@@ -18,7 +20,7 @@ import { ExtractEventDto } from './dto/extract-event.dto';
 const ATTRIBUTE_KEY = 'memory.update';
 
 /**
- * The three memory write routes (permissions P1 US-008).
+ * Principal-driven memory writes, including decision retirement.
  *
  * Each one is a service-mode key: the handler first keeps the membership check it has always made
  * (`assertProjectMembership`, which is what refuses a runner and a non-member), then asks
@@ -190,6 +192,40 @@ export class MemoryWriteService {
       if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
       throw error;
     }
+  }
+
+  private async assertRetireTarget(principal: KodaPrincipal, item: MemoryItem | null): Promise<MemoryItem> {
+    if (!item || item.deletedAt) throw new NotFoundAppException({}, 'memory.notFound');
+    try {
+      await this.projectAccess.assertProjectMembership(item.projectId, principal);
+    } catch (error) {
+      // Hide only membership refusals, never infrastructure failures.
+      if (error instanceof ForbiddenAppException) throw new NotFoundAppException({}, 'memory.notFound');
+      throw error;
+    }
+    if (item.kind !== MemoryKind.DECISION) throw new MemoryRetireException(item.kind);
+    if (item.status !== 'active') throw new ConflictAppException({}, 'memory.retireNotActive');
+    return item;
+  }
+
+  async retireTarget(principal: KodaPrincipal, id: string): Promise<{ projectId: string }> {
+    const item = await this.assertRetireTarget(principal, await this.repository.findById(id));
+    return { projectId: item.projectId };
+  }
+
+  async retireDecision(principal: KodaPrincipal, id: string, reason?: string) {
+    return this.repository.retire(id, async (target) => {
+      const item = await this.assertRetireTarget(principal, target);
+      await this.assertMayWrite(principal, 'memory.decision.retire', item.projectId);
+      if (!(await this.writeGuard.mayReplace(principal, item.projectId, item))) {
+        throw new ForbiddenAppException({}, 'permissions');
+      }
+    }, async (item) => {
+      await this.audit.record({
+        key: 'memory.decision.retire', resourceType: 'memory-item', resourceId: item.id,
+        projectId: item.projectId, summary: reason ? `retired DECISION: ${reason}` : 'retired DECISION',
+      });
+    });
   }
 
   async create(principal: KodaPrincipal, input: CreateMemoryDto) {

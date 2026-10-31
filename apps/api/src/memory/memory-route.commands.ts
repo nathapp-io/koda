@@ -8,6 +8,7 @@ import { CreateMemoryDto } from './dto/create-memory.dto';
 import { ExtractEventDto } from './dto/extract-event.dto';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { MemoryWriteService } from './memory-write.service';
+import { RetireDecisionDto } from './dto/retire-decision.dto';
 
 function routeBody(input: unknown, key: string): unknown {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return {};
@@ -19,6 +20,7 @@ export const MEMORY_ROUTE_VARIANTS = {
   create: 'rest:memory.create',
   recordDecision: 'rest:memory.decisions.record',
   extract: 'rest:memory.extract',
+  retire: 'rest:memory.decision.retire',
 } as const;
 
 interface CreateInput { memory: CreateMemoryDto }
@@ -34,6 +36,12 @@ export class MemoryRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    this.commands.register(routeCommand<{ id: string; body: RetireDecisionDto }, Awaited<ReturnType<MemoryWriteService['retireDecision']>>>({
+      key: 'memory.decision.retire', variant: MEMORY_ROUTE_VARIANTS.retire,
+      parse: (input) => ({ ...parseRouteInput(input, ['id']), body: parseBody(RetireDecisionDto, routeBody(input, 'body')) }),
+      run: (principal, input) => this.memoryWrites.retireDecision(principal, input.id, input.body.reason),
+      toResult: (result) => result,
+    }, this.loader));
     this.commands.register(routeCommand<CreateInput, Awaited<ReturnType<MemoryWriteService['create']>>>({
       key: 'memory.create', variant: MEMORY_ROUTE_VARIANTS.create,
       parse: (input) => ({ memory: parseBody(CreateMemoryDto, routeBody(input, 'memory')) }),

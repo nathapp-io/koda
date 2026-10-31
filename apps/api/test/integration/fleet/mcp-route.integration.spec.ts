@@ -125,7 +125,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
   it('AC-5: tools/list answers the MCP descriptor names', async () => {
     const res = await mcp(claude.apiKey, rpc('tools/list')).expect(200);
 
-    expect(body(res).result.tools.map((t: { name: string }) => t.name)).toEqual([...mcpToolDescriptors().map((d) => d.name), 'koda_list_approvals', 'koda_decide_approval']);
+    expect(body(res).result.tools.map((t: { name: string }) => t.name)).toEqual([...mcpToolDescriptors().map((d) => d.name), 'koda_list_approvals', 'koda_decide_approval', 'koda_retire_decision']);
   });
 
   it('AC-6: koda_search_tickets on web answers a ticket of web', async () => {
