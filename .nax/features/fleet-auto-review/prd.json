@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T09:27:22.816Z",
+  "updatedAt": "2026-10-31T09:36:51.777Z",
   "userStories": [
     {
       "id": "US-001",
@@ -122,14 +122,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The DTO, repository patch and transactional service follow existing repo patterns with explicit validation rules; project dispatch authorization and user/agent attribution still require the strict security TDD override."
+        "reasoning": "The DTO, repository patch and transactional service follow existing repo patterns with explicit validation rules; project dispatch authorization and user/agent attribution still require the strict security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/repos/fleet-repos.service.ts",
@@ -172,7 +175,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b4d62ea67c481cc1deaf0db3b3267de6e6a5ed0"
     },
     {
       "id": "US-003",
