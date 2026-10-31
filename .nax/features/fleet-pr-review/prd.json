@@ -3,7 +3,7 @@
   "feature": "fleet-pr-review",
   "branchName": "feat/fleet-pr-review",
   "createdAt": "2026-10-01T00:00:00.000Z",
-  "updatedAt": "2026-10-31T06:31:17.814Z",
+  "updatedAt": "2026-10-31T06:39:29.365Z",
   "userStories": [
     {
       "id": "US-001",
@@ -287,14 +287,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Four bounded branches extend existing assignment, checkout, argv and PLAN-style readoption paths without new process machinery; validating injected identity and preserving process-ownership checks still require the security override."
+        "reasoning": "Four bounded branches extend existing assignment, checkout, argv and PLAN-style readoption paths without new process machinery; validating injected identity and preserving process-ownership checks still require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -313,7 +316,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c9a3a5016cdbfe49de81e9a2b02af1617ea47ac4"
     },
     {
       "id": "US-006",
