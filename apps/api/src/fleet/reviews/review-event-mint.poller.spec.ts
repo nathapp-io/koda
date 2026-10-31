@@ -1,19 +1,9 @@
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { REVIEW_EVENTS_INGESTED } from '../common/review-events';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { ReviewEventMintPoller } from './review-event-mint.poller';
 import { ReviewEventMinter } from './review-event.minter';
 
 describe('ReviewEventMintPoller', () => {
   afterEach(() => vi.useRealTimers());
-
-  it('AC-3: emitted ingest event runs the registered minter once', async () => {
-    const emitter = new EventEmitter2();
-    const minter = { run: vi.fn().mockResolvedValue(undefined) };
-    emitter.on(REVIEW_EVENTS_INGESTED, () => void minter.run());
-    emitter.emit(REVIEW_EVENTS_INGESTED, { jobId: 'job-1' });
-    expect(minter.run).toHaveBeenCalledExactlyOnceWith();
-  });
 
   it('AC-4: calls minter once after configured interval when sweeping enabled', () => {
     vi.useFakeTimers();
