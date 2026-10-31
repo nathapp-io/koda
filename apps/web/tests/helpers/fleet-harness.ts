@@ -91,7 +91,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['NuxtLink', 'nuxt-link'],
     ['Table', 'table'], ['TableHeader', 'thead'], ['TableBody', 'tbody'],
     ['TableRow', 'tr'], ['TableHead', 'th'], ['TableCell', 'td'],
-    ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'],
+    ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'], ['Switch', 'switch'],
     ['Textarea', 'textarea'],
     ['Avatar', 'avatar'], ['AvatarFallback', 'avatar-fallback'], ['AvatarImage', 'avatar-image'],
     ['LoadingState', 'loading-state'], ['EmptyState', 'empty-state'],

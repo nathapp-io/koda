@@ -270,6 +270,7 @@ function withEmitRecorder(inner: Component, record: (name: string, args: unknown
 export function registerFleetComponents(app: { component: (name: string, c: Component) => void }): void {
   for (const [name, file] of Object.entries({
     FleetRepoReachabilityBadge: 'RepoReachabilityBadge.vue',
+    FleetRepoAutoReview: 'RepoAutoReview.vue',
     FleetAge: 'Age.vue',
     FleetRunnerCapabilityChips: 'RunnerCapabilityChips.vue',
     FleetNativeSelect: 'NativeSelect.vue',
@@ -287,6 +288,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetAge: 'Age.vue',
   FleetRunnerCapabilityChips: 'RunnerCapabilityChips.vue',
   FleetRepoReachabilityBadge: 'RepoReachabilityBadge.vue',
+  FleetRepoAutoReview: 'RepoAutoReview.vue',
   FleetNativeSelect: 'NativeSelect.vue',
   FleetBudgetTable: 'BudgetTable.vue',
   FleetScheduleTable: 'ScheduleTable.vue',
@@ -426,7 +428,7 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 
 /** The `components/fleet/*.vue` files, by the name Nuxt auto-imports them under. */
 export type FleetComponentName =
-  | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
+  | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetRepoAutoReview' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetJobApprovals' | 'FleetJobWorkflow'
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'

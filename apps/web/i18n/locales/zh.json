@@ -1594,6 +1594,9 @@
         "branch": "默认分支",
         "reachability": "可达性"
       },
+      "autoReview": {
+        "heading": "自动审查", "toggle": "启用自动审查", "edit": "编辑", "title": "自动审查设置", "profiles": "配置档案（逗号分隔）", "maxCost": "最高费用（美元）", "save": "保存", "pending": "审批待处理；已保存的设置尚未更改。", "profilesInvalid": "最多使用 8 个配置档案，每个不超过 64 个字符。", "maxCostInvalid": "请输入 0.0001 至 10000 且最多 4 位小数的费用。"
+      },
       "reach": {
         "checking": "检查中…",
         "unchecked": "未检查",

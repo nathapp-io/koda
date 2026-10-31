@@ -14,7 +14,9 @@ import type { FleetPage, FleetRepo, FleetRepoCheck } from '../../lib/fleet-types
 
 const repo = (id: string, over: Partial<FleetRepo> = {}): FleetRepo => ({
   id, projectId: 'p1', provider: 'github', owner: 'acme', name: id, defaultBranch: 'main',
-  githubInstallationId: '7', createdAt: '2026-10-01T00:00:00Z', ...over,
+  githubInstallationId: '7', autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000',
+  autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null,
+  createdAt: '2026-10-01T00:00:00Z', ...over,
 })
 
 const pageOf = (records: unknown[], over: Record<string, unknown> = {}): FleetPage<never> =>

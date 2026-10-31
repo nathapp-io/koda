@@ -1594,6 +1594,9 @@
         "branch": "Default branch",
         "reachability": "Reachability"
       },
+      "autoReview": {
+        "heading": "Auto-review", "toggle": "Enable automatic reviews", "edit": "Edit", "title": "Auto-review settings", "profiles": "Profiles (comma-separated)", "maxCost": "Maximum cost (USD)", "save": "Save", "pending": "Approval is pending; the saved setting has not changed.", "profilesInvalid": "Use at most 8 profiles, each no longer than 64 characters.", "maxCostInvalid": "Enter a cost from 0.0001 to 10000 with at most 4 decimal places."
+      },
       "reach": {
         "checking": "Checking…",
         "unchecked": "Not checked",

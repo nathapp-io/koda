@@ -125,6 +125,12 @@ export interface FleetRepo {
   name: string
   defaultBranch: string
   githubInstallationId: string | null
+  autoReview: boolean
+  autoReviewProfiles: string[]
+  autoReviewMaxCostUsd: string
+  autoReviewEnabledById: string | null
+  autoReviewEnabledByType: 'USER' | 'AGENT' | null
+  autoReviewEnabledAt: string | null
   createdAt: string
 }
 
