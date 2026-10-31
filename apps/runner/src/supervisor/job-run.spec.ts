@@ -120,6 +120,15 @@ describe('REVIEW verdicts (US-007)', () => {
     await b.run.start('prepare');
     expect(states(b).at(-1)?.to).toBe('CANCELLED');
   });
+
+  test('cancel remains CANCELLED if reading the posted marker would throw', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPostedError = new Error('stdout unreadable');
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(b.ex.calls).not.toContain('readReviewPosted:j1');
+  });
 });
 
 describe('verdicts', () => {

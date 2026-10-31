@@ -415,11 +415,14 @@ export class JobRun {
       return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
     if (row.command === 'REVIEW') {
-      const posted = await this.deps.executor.readReviewPosted(row);
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
-      const verdict = cancelled
-        ? { state: 'CANCELLED' as const, reason: null }
-        : posted ? { state: 'COMPLETED' as const, reason: null } : { state: 'FAILED' as const, reason: 'review not posted' };
+      if (cancelled) {
+        return { verdict: { state: 'CANCELLED', reason: null }, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
+      }
+      const posted = await this.deps.executor.readReviewPosted(row);
+      const verdict = posted
+        ? { state: 'COMPLETED' as const, reason: null }
+        : { state: 'FAILED' as const, reason: 'review not posted' };
       return { verdict, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
     const status = await this.deps.executor.readStatus(row);
