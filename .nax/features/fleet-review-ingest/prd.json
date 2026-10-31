@@ -3,7 +3,7 @@
   "feature": "fleet-review-ingest",
   "branchName": "feat/fleet-review-ingest",
   "createdAt": "2026-11-16T00:00:00.000Z",
-  "updatedAt": "2026-10-31T14:21:14.142Z",
+  "updatedAt": "2026-10-31T14:29:57.347Z",
   "userStories": [
     {
       "id": "US-001",
@@ -298,14 +298,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New system-authorized memory abstraction needs transactionally rechecked guards, forge attribution and exact permission contracts; strict security TDD plus PG atomicity checks."
+        "reasoning": "New system-authorized memory abstraction needs transactionally rechecked guards, forge attribution and exact permission contracts; strict security TDD plus PG atomicity checks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -349,7 +352,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cb232a39db14786e2bef8a75343010a46d45b87d"
     },
     {
       "id": "US-006",
