@@ -31,36 +31,39 @@ describe('FleetReposService.configureAutoReview', () => {
     permissions = { canHoldKey: vi.fn().mockResolvedValue(true) };
   });
 
-  it('sets enabled settings and user attribution', async () => {
+  it('AC-1/AC-2 sets enabled settings and user attribution', async () => {
     await configure(true, { profiles: ['native-ds'], maxCostUsd: 2.5 });
-    expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReview: true, autoReviewProfiles: ['native-ds'], autoReviewMaxCostUsd: expect.anything(), autoReviewEnabledById: 'u1', autoReviewEnabledByType: 'USER' }));
+    expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReview: true, autoReviewProfiles: ['native-ds'], autoReviewMaxCostUsd: '2.5', autoReviewEnabledById: 'u1', autoReviewEnabledByType: 'USER' }));
   });
-  it('attributes agent callers', async () => { await configure(true, {}, 'agent'); expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReviewEnabledById: 'a1', autoReviewEnabledByType: 'AGENT' })); });
-  it('sets activation time once and preserves it on re-save', async () => {
+  it('AC-3 attributes agent callers', async () => { await configure(true, {}, 'agent'); expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReviewEnabledById: 'a1', autoReviewEnabledByType: 'AGENT' })); });
+  it('AC-4/AC-5 sets activation time once and preserves it on re-save', async () => {
     await configure(true); expect(repo.updateAutoReview.mock.calls[0][1].autoReviewEnabledAt).toBeInstanceOf(Date);
     const enabledAt = new Date('2026-11-01T00:00:00Z'); repo.findById.mockResolvedValue(row({ autoReview: true, autoReviewEnabledAt: enabledAt }));
     await configure(true); expect(repo.updateAutoReview.mock.calls[1][1].autoReviewEnabledAt).toBe(enabledAt);
   });
-  it('keeps omitted fields when enabling', async () => { await configure(true); expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.not.objectContaining({ autoReviewProfiles: expect.anything(), autoReviewMaxCostUsd: expect.anything() })); });
-  it('disables without changing stored profile/cost and clears attribution', async () => {
+  it('AC-6 keeps omitted fields when enabling', async () => { await configure(true); expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.not.objectContaining({ autoReviewProfiles: expect.anything(), autoReviewMaxCostUsd: expect.anything() })); });
+  it('AC-7/AC-8 disables and preserves stored profiles/cost', async () => {
     await configure(false, { profiles: ['x'], maxCostUsd: 4 });
     expect(repo.updateAutoReview).toHaveBeenCalledWith('r1', expect.objectContaining({ autoReview: false, autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null }));
     expect(repo.updateAutoReview.mock.calls[0][1]).not.toHaveProperty('autoReviewProfiles');
   });
-  it.each([{ provider: 'gitlab' }, { githubInstallationId: null }])('requires an installed GitHub app: %o', async (overrides) => {
+  it.each([{ provider: 'gitlab' }, { githubInstallationId: null }])('AC-9/AC-10 requires installed GitHub app: %o', async (overrides) => {
     repo.findById.mockResolvedValue(row(overrides)); await expect(configure(true)).rejects.toMatchObject({ reason: 'github app required', status: 422 });
   });
-  it('rejects reserved or invalid profiles and duplicates', async () => {
+  it('AC-11/AC-12 rejects reserved profiles and duplicates', async () => {
     await expect(configure(true, { profiles: ['koda-job-x'] })).rejects.toMatchObject({ reason: 'profiles' });
     await expect(configure(true, { profiles: ['a', 'a'] })).rejects.toMatchObject({ reason: 'duplicate profile' });
   });
-  it.each(['user', 'agent'] as const)('requires dispatch permission for %s', async (actorType) => {
+  it.each(['user', 'agent'] as const)('AC-13 requires dispatch permission for %s', async (actorType) => {
     permissions.canHoldKey.mockResolvedValue(false);
     await expect(configure(true, {}, actorType)).rejects.toMatchObject({ reason: 'caller cannot dispatch in this project' });
     expect(permissions.canHoldKey).toHaveBeenCalledWith({ type: actorType === 'user' ? 'USER' : 'AGENT', id: actorType === 'user' ? 'u1' : 'a1' }, 'fleet.job.dispatch', { projectId: 'p1' });
   });
-  it('404s an unknown repo', async () => { repo.findById.mockResolvedValue(null); await expect(configure(true)).rejects.toBeInstanceOf(NotFoundAppException); });
-  it('records audit in the transaction containing update', async () => {
+  it('AC-14 404s an unknown repo with fleet.repos key', async () => {
+    repo.findById.mockResolvedValue(null);
+    await expect(configure(true)).rejects.toMatchObject({ name: 'NotFoundAppException', prefix: 'fleet.repos' });
+  });
+  it('AC-15 records audit in the transaction containing update', async () => {
     const events: string[] = [];
     tx.run.mockImplementation(async (fn) => { events.push('begin'); const value = await fn(); events.push('end'); return value; });
     repo.updateAutoReview.mockImplementation(async () => { events.push('update'); return row({ autoReview: true }); });
