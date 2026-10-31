@@ -17,6 +17,6 @@ import { FLEET_REPO_REPOSITORY } from './domain/fleet-repo.domain';
   imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, VcsModule, FleetActivityModule, GitBrokerModule],
   controllers: [FleetReposController, ProjectFleetReposController],
   providers: [FleetRepoRouteCommands, PrismaFleetRepoRepository, { provide: FLEET_REPO_REPOSITORY, useExisting: PrismaFleetRepoRepository }, FleetReposService],
-  exports: [FLEET_REPO_REPOSITORY],
+  exports: [FLEET_REPO_REPOSITORY, FleetReposService],
 })
 export class FleetReposModule {}
