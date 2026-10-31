@@ -3,7 +3,7 @@
   "feature": "fleet-review-ingest",
   "branchName": "feat/fleet-review-ingest",
   "createdAt": "2026-11-16T00:00:00.000Z",
-  "updatedAt": "2026-10-31T14:58:17.433Z",
+  "updatedAt": "2026-10-31T15:06:08.814Z",
   "userStories": [
     {
       "id": "US-001",
@@ -629,14 +629,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds one ordered JSONB role migration and connects existing approval/endpoint fixtures to the route from US-008; established patterns keep scope medium, while authorization data and deferred execution require strict security TDD."
+        "reasoning": "Adds one ordered JSONB role migration and connects existing approval/endpoint fixtures to the route from US-008; established patterns keep scope medium, while authorization data and deferred execution require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/migrations/20261111090000_retire_fleet_approval_keys/migration.sql",
@@ -666,7 +669,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0165f1669d9f55b1d9cdda4b9eec140ef7a1f86f"
     },
     {
       "id": "US-010",
