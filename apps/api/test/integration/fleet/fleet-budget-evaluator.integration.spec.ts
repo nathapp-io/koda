@@ -107,6 +107,14 @@ describeIntegration('budget evaluator (PG)', () => {
     expect(await evaluate(policy.id)).toEqual({ warned: false, stopped: false });
   });
 
+  it('US-003 AC-8: hard stop cancels a queued REVIEW job', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    const review = await job({ command: 'REVIEW', feature: 'review-pr-42', state: 'QUEUED', firstStartedAt: null });
+    expect((await evaluate(policy.id)).stopped).toBe(true);
+    expect(await reload(review.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
+  });
+
   it('hard stop under cancel: the runner\'s CANCELLED report ends the job with the budget reason', async () => {
     const policy = await projectPolicy({ runningJobs: 'cancel' });
     const runner = await insertRunner(prisma);

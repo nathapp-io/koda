@@ -23,6 +23,21 @@ const repo: FleetRepoRef = {
 const identity = { name: 'koda-fleet[bot]', email: 'koda-fleet[bot]@users.noreply.github.com' };
 
 describe('buildAssignPayload', () => {
+  it('US-003 AC-9: includes review metadata for REVIEW jobs', () => {
+    const payload = buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-42' }, repo, 'https://x/y.git', identity);
+    expect(payload.review).toEqual({ prNumber: 42, botLogin: 'koda-fleet[bot]' });
+  });
+
+  it('US-003 AC-10: rejects malformed REVIEW features', () => {
+    expect(() => buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-x' }, repo, 'https://x/y.git', identity))
+      .toThrow('invalid review feature');
+  });
+
+  it('US-003 AC-11: omits review metadata for RUN jobs', () => {
+    const payload = buildAssignPayload(job, repo, 'https://x/y.git', identity);
+    expect(payload).not.toHaveProperty('review');
+  });
+
   it('carries bashMode and approvalTimeoutSec from the job', () => {
     const payload = buildAssignPayload({ ...job, bashMode: 'escalate', approvalTimeoutSec: 120 }, repo, 'https://x/y.git', identity);
     expect(payload).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120 }));
