@@ -23,24 +23,26 @@
 /:project/memory                ← Agent memory
 /:project/code-intel            ← Code intelligence
 /:project/settings              ← Project settings
+/:project/approvals             ← Approvals inbox (project scope; bash asks, budget overrides, gated actions)
+/:project/approval-policies     ← Project approval policies
 /:project/fleet                 ← Fleet jobs list
 /:project/fleet/overview        ← Fleet overview (project scope)
 /:project/fleet/jobs/:id        ← Fleet job detail
 /:project/fleet/jobs/:id/logs   ← Fleet job log viewer
-/:project/fleet/approvals       ← Fleet approvals inbox (project scope)
 /:project/fleet/budgets         ← Fleet budget policies
 /:project/fleet/schedules       ← Fleet schedules (+ detail)
 /:project/fleet/dispatch        ← Fleet dispatch form
 /:project/fleet/analytics       ← Fleet analytics (project scope)
 
 /agents                         ← Global agent registry
+/approvals                      ← Approvals inbox (every visible project)
 /admin/users                    ← Admin: users (global admin)
 /admin/slos                     ← Admin: SLOs (global admin)
 /admin/fleet                    ← Fleet overview (global scope)
 /admin/fleet/runners            ← Admin: runner registry
 /admin/fleet/repos              ← Admin: repo registry
 /admin/fleet/budgets            ← Admin: budget policies
-/admin/fleet/approvals          ← Admin: approvals inbox
+/admin/approval-policies        ← Admin: global approval policies
 /admin/fleet/analytics          ← Admin: fleet analytics
 ```
 
@@ -53,9 +55,10 @@ Root
 ├── / (Dashboard)
 │   └── /:project (Project Board)
 │       ├── /:project/tickets/:ref (Ticket Detail)
-│       ├── /:project/agents, /labels, /kb, /timeline, /memory, /code-intel, /settings
-│       └── /:project/fleet/** (overview, jobs, approvals, budgets, schedules, dispatch, analytics)
+│       ├── /:project/agents, /labels, /kb, /timeline, /memory, /code-intel, /settings, /approvals, /approval-policies
+│       └── /:project/fleet/** (overview, jobs, budgets, schedules, dispatch, analytics)
 ├── /agents (Agents)
+├── /approvals (Approvals inbox)
 ├── /admin/** (global admin only: users, slos, fleet)
 ├── /login (Auth)
 └── /register (Auth)
