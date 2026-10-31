@@ -58,6 +58,29 @@ describe('listProfileNames (D98, D112)', () => {
 });
 
 describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
+  test('US-004 AC-9/10: FakeNaxCli defaults remain non-K0 independent of overlays', async () => {
+    const nax = new FakeNaxCli();
+    expect((await nax.run(['--version'], { cwd: '/tmp', env: { NAX_FORGE_TOKEN: 'probe' } })).code).toBe(0);
+    const help = await nax.run(['bot', 'review', '--help'], { cwd: '/tmp' });
+    expect(JSON.parse(help.stdout)).toMatchObject({ error: { code: 'UNKNOWN_COMMAND' } });
+  });
+  test('US-004: advertises K0 only when bot review exists and rejects ambient token env', async () => {
+    const home = await naxHome([]);
+    const unsupported = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };
+    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: 'help', stderr: '', timedOut: false }, k0Version: unsupported });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect(capabilities.botReview).toBe(true);
+    expect(nax.calls.find((call) => call.args[0] === '--version' && call.env?.['NAX_FORGE_TOKEN'] === 'probe')).toBeDefined();
+  });
+
+  test('US-004: omits K0 when version accepts the probe token or bot review is unavailable', async () => {
+    const home = await naxHome([]);
+    const accepted = await probeWith(home, new FakeNaxCli({ k0Version: { code: 0, stdout: '0.83.1', stderr: '', timedOut: false }, botReview: { code: 0, stdout: '', stderr: '', timedOut: false } })).run();
+    expect('botReview' in accepted.capabilities).toBe(false);
+    const unavailable = await probeWith(home, new FakeNaxCli({ botReview: { code: 1, stdout: '', stderr: '', timedOut: false }, k0Version: { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false } })).run();
+    expect('botReview' in unavailable.capabilities).toBe(false);
+  });
+
   test('US-007 AC-4: the report advertises workspaceThreads', async () => {
     const home = await naxHome(['fast']);
     const { capabilities } = await probeWith(home, new FakeNaxCli({ config: { fast: NATIVE } })).run();

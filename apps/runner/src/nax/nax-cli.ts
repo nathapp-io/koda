@@ -17,6 +17,8 @@ export interface NaxCallOptions {
   readonly cwd: string;
   /** Overrides the client's own timeout: a short bound for a call on a job's critical path. */
   readonly timeoutMs?: number;
+  /** Explicit per-call variables are applied after inherited credential variables are stripped. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** D96: how the runner asks nax a question (its read-only JSON commands). Tests inject a fake. */
@@ -78,7 +80,7 @@ export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number
 export function createNaxCli(naxCommand: readonly string[], naxHome: string, timeoutMs: number = NAX_CALL_TIMEOUT_MS): NaxCli {
   return {
     async run(args, options) {
-      const env = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: naxHome };
+      const env = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: naxHome, ...options.env };
       const spawned = spawnCall([...naxCommand, ...args], options.cwd, env, options.timeoutMs ?? timeoutMs);
       if (!('proc' in spawned)) return spawnFailure(spawned.errno, naxCommand[0] ?? 'nax');
       const { proc } = spawned;

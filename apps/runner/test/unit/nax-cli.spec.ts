@@ -7,9 +7,10 @@ import { makeTempDirs } from '../helpers/tmp';
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 
-const TOKEN_VARS = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN'];
+const TOKEN_VARS = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN', 'NAX_FORGE_TOKEN', 'NAX_FORGE_TOKEN_FILE', 'NAX_FORGE_LOGIN', 'NAX_FORGE_USER_ID'];
+const FORGE_VARS = ['NAX_FORGE_TOKEN', 'NAX_FORGE_TOKEN_FILE', 'NAX_FORGE_LOGIN', 'NAX_FORGE_USER_ID'];
 /** A stand-in nax that prints its argv, cwd and the variables the runner controls as one JSON object. */
-const ECHO = `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), home: process.env.NAX_GLOBAL_CONFIG_DIR ?? null, tokens: ${JSON.stringify(TOKEN_VARS)}.filter((k) => process.env[k] !== undefined) }));`;
+const ECHO = `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), home: process.env.NAX_GLOBAL_CONFIG_DIR ?? null, tokens: ${JSON.stringify(TOKEN_VARS)}.filter((k) => process.env[k] !== undefined), a: process.env.A ?? null, forge: Object.fromEntries(${JSON.stringify(FORGE_VARS)}.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])) }));`;
 
 async function script(body: string): Promise<string> {
   const path = join(await tmp.make('naxcli'), 'nax.ts');
@@ -31,6 +32,26 @@ describe('createNaxCli (D96)', () => {
     } finally {
       if (saved === undefined) delete process.env['GH_TOKEN'];
       else process.env['GH_TOKEN'] = saved;
+    }
+  });
+  test('US-004 AC-2: merges explicit environment overlays after the sanitized base environment', async () => {
+    const path = await script(ECHO);
+    const result = parseNaxJson(await createNaxCli(['bun', path], '/tmp').run(['--version'], { cwd: await tmp.make('cwd'), env: { A: '1', NAX_FORGE_LOGIN: 'explicit' } }));
+    if (!result.ok) throw new Error(`unexpected ${result.code}`);
+    expect(result.value['a']).toBe('1');
+    expect(result.value['forge']).toEqual({ NAX_FORGE_LOGIN: 'explicit' });
+  });
+  test('US-004 AC-3: strips inherited forge identity without an explicit overlay', async () => {
+    const path = await script(ECHO);
+    const saved = process.env['NAX_FORGE_TOKEN'];
+    process.env['NAX_FORGE_TOKEN'] = 'ambient-secret';
+    try {
+      const result = parseNaxJson(await createNaxCli(['bun', path], '/tmp').run(['--version'], { cwd: await tmp.make('cwd') }));
+      if (!result.ok) throw new Error(`unexpected ${result.code}`);
+      expect(result.value['forge']).toEqual({});
+    } finally {
+      if (saved === undefined) delete process.env['NAX_FORGE_TOKEN'];
+      else process.env['NAX_FORGE_TOKEN'] = saved;
     }
   });
   test('Review focus 2: a nax that hangs is killed at the timeout and reported as NAX_TIMEOUT', async () => {
