@@ -51,6 +51,15 @@ async function world(command: 'RUN' | 'PLAN' | 'REVIEW' = 'RUN', over: Partial<A
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
 
+describe('HostExecutor review verdict (US-007)', () => {
+  test('reads the posted marker from <jobDir>/nax.stdout', async () => {
+    const w = await world('REVIEW');
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'nax.stdout'), 'nax bot review: artifact /out/bot/pr-42/r1/bot-review.json\n');
+    expect(await w.ex.readReviewPosted(w.row)).toBe(true);
+  });
+});
+
 describe('HostExecutor process lookups are injected (US-001)', () => {
   /** A registry entry for this job's clone, written where `reap` reads it. */
   async function registerPid(w: { workspaceRoot: string }, pid: number, registered: Date): Promise<void> {

@@ -93,6 +93,35 @@ describe('RUN happy path (D35)', () => {
   });
 });
 
+describe('REVIEW verdicts (US-007)', () => {
+  test('posted review completes without reading status and reports ledger cost', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = true;
+    b.ex.planCost = '0.0421';
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)?.costSpentUsd).toBe('0.0421');
+    expect(b.ex.calls).not.toContain('readStatus:j1');
+  });
+
+  test('unposted review fails with review not posted', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = false;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+  });
+
+  test('cancel takes precedence over a posted review', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = true;
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+});
+
 describe('verdicts', () => {
   test.each(['PLAN', 'RUN'] as const)('%s missing output reports nax stderr through a lifecycle event (#207)', async (command) => {
     const b = build(command);

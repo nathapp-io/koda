@@ -18,6 +18,7 @@ import type { StatusView } from '../verdict/status-view';
 import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-result';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
+import { reviewPosted } from '../verdict/review-posted';
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
@@ -248,6 +249,10 @@ export class HostExecutor implements JobExecutor {
 
   async readStatus(job: JobRow): Promise<StatusView | null> {
     return (await readStatusFile(join(this.dirs(job).outDir, 'status.json'))).status;
+  }
+
+  async readReviewPosted(job: JobRow): Promise<boolean> {
+    return reviewPosted(join(this.dirs(job).jobDir, 'nax.stdout'));
   }
 
   /** D61: once the write-once stash exists it is the PRD; the checkout may have been switched back to the ref's stale one. */
