@@ -73,7 +73,7 @@ function mountRepos(
   const app = mountSfc(reposPage, {
     components: uiStubs,
     // The reachability badge is mounted for real: its label is the page's main output.
-    fleetComponents: ['FleetRepoReachabilityBadge'],
+    fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview'],
     alias: { '~/composables/useApi': apiModule },
     globals: {
       ref, computed, watch, nextTick,
@@ -83,6 +83,7 @@ function mountRepos(
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
       useFleetRepos: () => useFleetRepos(),
+      useGlobalPermissions: () => ({ permissions: computed(() => ({ has: () => true })) }),
     },
   })
 
@@ -117,6 +118,13 @@ describe('Fleet admin Repos page (behaviour)', () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).window
     delete (globalThis as Record<string, unknown>).useApi
+  })
+
+  test('mounts real auto-review switches only for GitHub repos with installations (AC-1, AC-2)', async () => {
+    const { app, settle, unmount } = mountRepos({ repos: [repo('github'), repo('gitlab', { provider: 'gitlab', githubInstallationId: null }), repo('no-install', { githubInstallationId: null })] })
+    await settle()
+    expect(app.find('[data-stub="switch"]')).toHaveLength(1)
+    unmount()
   })
 
   test('renders a row per repo with its owner/name, provider, branch and project', async () => {

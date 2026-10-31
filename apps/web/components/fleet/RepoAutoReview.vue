@@ -4,13 +4,13 @@
     <span v-if="repo.autoReview" class="text-xs text-muted-foreground">{{ repo.autoReviewProfiles.join(', ') }}</span>
     <Button v-if="repo.autoReview && allowed" size="sm" variant="outline" @click="openDialog(true)">{{ t('fleet.repos.autoReview.edit') }}</Button>
     <p v-if="notice" class="text-xs text-muted-foreground">{{ notice }}</p>
+    <p v-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
     <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
       <DialogContent>
         <DialogHeader><DialogTitle>{{ t('fleet.repos.autoReview.title') }}</DialogTitle></DialogHeader>
         <form class="space-y-4" @submit="save">
           <FormField v-slot="{ componentField }" name="profiles"><FormItem><FormLabel>{{ t('fleet.repos.autoReview.profiles') }}</FormLabel><FormControl><Input v-bind="componentField" /></FormControl><FormMessage /></FormItem></FormField>
           <FormField v-slot="{ componentField }" name="maxCost"><FormItem><FormLabel>{{ t('fleet.repos.autoReview.maxCost') }}</FormLabel><FormControl><Input v-bind="componentField" inputmode="decimal" /></FormControl><FormMessage /></FormItem></FormField>
-          <p v-if="error" role="alert">{{ error }}</p>
           <div class="flex justify-end gap-2"><Button type="button" variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button><Button type="submit" :disabled="saving">{{ t('fleet.repos.autoReview.save') }}</Button></div>
         </form>
       </DialogContent>
