@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T10:23:29.652Z",
+  "updatedAt": "2026-10-31T10:40:48.565Z",
   "userStories": [
     {
       "id": "US-001",
@@ -646,14 +646,17 @@
         "US-007",
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Integrates permission revocation, GitHub installation tokens, on-behalf-of action contexts, audit/catalog contracts and boot-time DI; security override requires strict isolation."
+        "reasoning": "Integrates permission revocation, GitHub installation tokens, on-behalf-of action contexts, audit/catalog contracts and boot-time DI; security override requires strict isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
@@ -697,7 +700,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "93a666308199f9893f55f8993c7e604bed16e8bd"
     },
     {
       "id": "US-010",
