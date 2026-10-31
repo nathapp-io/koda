@@ -20,6 +20,12 @@ export interface DispatchRepoOptions {
   pollMs: number;
   /** Dispatch calls this repo may still make, the pass's `prReviewMaxDispatch` accounting for earlier repos. */
   remaining: number;
+  /**
+   * Called once for each dispatch attempt, just before that attempt is made (spec call 9 counts calls, not
+   * successes). The pass keeps one cap across repos, so an attempt this run makes must be visible to it even
+   * when the run then fails — a `markDispatched` that throws, for instance, leaves no return value behind.
+   */
+  onAttempt?: () => void;
 }
 
 const PENDING = 'pending';
@@ -59,6 +65,7 @@ export class ReviewHeadDispatcher {
       const pending = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.insertPending(repo.id, pr.number, pr.headSha));
       if (pending === null) continue;
       calls += 1;
+      opts.onAttempt?.();
       const stopRepo = await this.dispatch(actorId, repo, pr, pending);
       if (stopRepo) break;
     }

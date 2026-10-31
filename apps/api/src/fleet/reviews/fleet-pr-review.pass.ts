@@ -78,6 +78,10 @@ export class FleetPrReviewPass {
    */
   private async pollRepo(repo: FleetRepoRecord, now: Date, remaining: number): Promise<number> {
     const enabler = storedEnabler(repo);
+    // Call 9 counts attempts, not successes: a run that dispatches and then fails has still spent them, and
+    // its return value never arrives, so the dispatcher reports each attempt as it makes it.
+    let attempts = 0;
+    const countAttempt = () => { attempts += 1; };
     try {
       // The gate's turn-off audit runs inside this context too, so it carries the enabler as well.
       return await runAsSystem(
@@ -86,13 +90,18 @@ export class FleetPrReviewPass {
           if ((await this.gate.check(repo)) === null) return 0;
           const { token } = await this.github.mintInstallationToken(this.installationId(repo), repo.name);
           const prs = await this.github.listOpenPullRequests(token, repo.owner, repo.name);
-          return await this.dispatcher.dispatchRepo(repo, prs, { now, pollMs: this.config.prReviewPollMs, remaining });
+          return await this.dispatcher.dispatchRepo(repo, prs, {
+            now,
+            pollMs: this.config.prReviewPollMs,
+            remaining,
+            onAttempt: countAttempt,
+          });
         },
         enabler === null ? undefined : { onBehalfOf: enabler },
       );
     } catch (error) {
       this.logger.warn(`Auto-review pass skipped repo ${repo.id}: ${errorName(error)}`);
-      return 0;
+      return attempts;
     }
   }
 

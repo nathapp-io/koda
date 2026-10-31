@@ -36,6 +36,11 @@ interface BuildOptions {
   maxDispatch?: number;
   /** The call count `dispatchRepo` answers for each repo, in repo order; 1 unless stated. */
   dispatchCalls?: readonly number[];
+  /**
+   * Simulates a dispatcher run that makes this many dispatch attempts and then rejects (a post-dispatch
+   * bookkeeping write fails), reporting each attempt through `onAttempt` as the real dispatcher does.
+   */
+  attemptsBeforeThrow?: number;
 }
 
 function build(options: BuildOptions = {}) {
@@ -49,8 +54,17 @@ function build(options: BuildOptions = {}) {
     listOpenPullRequests: vi.fn(async () => [...PRS]),
   };
   const dispatcher = {
-    dispatchRepo: vi.fn(async () => {
+    dispatchRepo: vi.fn(async (
+      _repo: FleetRepoRecord,
+      _prs: readonly OpenPullRequest[],
+      opts: { onAttempt?: () => void },
+    ) => {
       contexts.push(currentContext());
+      // The real dispatcher reports every attempt before making it, then answers the count on success.
+      if (options.attemptsBeforeThrow !== undefined && contexts.length === 1) {
+        for (let attempt = 0; attempt < options.attemptsBeforeThrow; attempt += 1) opts.onAttempt?.();
+        throw new Error('bookkeeping boom');
+      }
       return calls.shift() ?? 1;
     }),
   };
@@ -101,6 +115,7 @@ describe('FleetPrReviewPass.run', () => {
       now: NOW,
       pollMs: POLL_MS,
       remaining: 10,
+      onAttempt: expect.any(Function),
     });
   });
 
@@ -125,6 +140,32 @@ describe('FleetPrReviewPass.run', () => {
     expect(h.dispatcher.dispatchRepo).toHaveBeenCalledTimes(2);
     expect(h.remainingSeenBy(0)).toBe(10);
     expect(h.remainingSeenBy(1)).toBe(3);
+  });
+
+  it('AC-7: counts the attempts of a repo the dispatcher fails after dispatching, so the next repo gets what is left', async () => {
+    const h = build({
+      repos: [repoRecord({ id: 'r1' }), repoRecord({ id: 'r2', owner: 'o2' })],
+      dispatchCalls: [2],
+      attemptsBeforeThrow: 3,
+    });
+
+    await h.pass.run(NOW);
+
+    expect(h.dispatcher.dispatchRepo).toHaveBeenCalledTimes(2);
+    expect(h.repoSeenBy(1).id).toBe('r2');
+    expect(h.remainingSeenBy(1)).toBe(7);
+  });
+
+  it('AC-7: ends the pass when the failing repo already spent the whole cap', async () => {
+    const h = build({
+      repos: [repoRecord({ id: 'r1' }), repoRecord({ id: 'r2', owner: 'o2' })],
+      attemptsBeforeThrow: 10,
+    });
+
+    await h.pass.run(NOW);
+
+    expect(h.dispatcher.dispatchRepo).toHaveBeenCalledTimes(1);
+    expect(h.gate.check).toHaveBeenCalledTimes(1);
   });
 
   it('AC-8: stops the pass once the cap is spent, without checking the next repo', async () => {

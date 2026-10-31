@@ -85,9 +85,12 @@ function createDispatcher(reviews: Reviews = createReviews()) {
 function run(
   dispatcher: ReviewHeadDispatcher,
   prs: readonly OpenPullRequest[],
-  opts: { repo?: FleetRepoRecord; remaining?: number } = {},
+  opts: { repo?: FleetRepoRecord; remaining?: number; onAttempt?: () => void } = {},
 ): Promise<number> {
-  return dispatcher.dispatchRepo(opts.repo ?? repoRecord(), prs, { now: NOW, pollMs: POLL_MS, remaining: opts.remaining ?? 10 });
+  return dispatcher.dispatchRepo(opts.repo ?? repoRecord(), prs, {
+    now: NOW, pollMs: POLL_MS, remaining: opts.remaining ?? 10,
+    ...(opts.onAttempt === undefined ? {} : { onAttempt: opts.onAttempt }),
+  });
 }
 
 describe('ReviewHeadDispatcher.dispatchRepo', () => {
@@ -222,5 +225,50 @@ describe('ReviewHeadDispatcher.dispatchRepo', () => {
 
     expect(await run(dispatcher, [pullRequest()], { repo: repoRecord({ autoReviewEnabledById: null }) })).toBe(0);
     expect(jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  /**
+   * US-009 fix (F1): the pass's cap counts dispatch attempts, and a repo whose run *fails* after dispatching
+   * still spent them. `onAttempt` is how the count reaches the pass when `dispatchRepo` cannot return it.
+   */
+  it('reports every dispatch attempt through onAttempt, before the dispatch call it counts', async () => {
+    const { dispatcher, jobs } = createDispatcher();
+    const onAttempt = vi.fn(() => {
+      // The attempt is counted before the dispatch it belongs to, so a throw from that dispatch stays counted.
+      expect(onAttempt.mock.calls).toHaveLength(jobs.dispatch.mock.calls.length + 1);
+    });
+
+    expect(await run(dispatcher, [
+      pullRequest({ number: 3, headSha: 's3' }),
+      pullRequest({ number: 5, headSha: 's5' }),
+    ], { onAttempt })).toBe(2);
+
+    expect(onAttempt).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an attempt counted when the dispatch after it throws', async () => {
+    const { dispatcher, jobs } = createDispatcher();
+    jobs.dispatch.mockRejectedValue(new TypeError('dispatch boom'));
+    const onAttempt = vi.fn();
+
+    expect(await run(dispatcher, [pullRequest()], { onAttempt })).toBe(1);
+    expect(onAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an attempt counted when the bookkeeping after it throws, so the run rejects with the count already told', async () => {
+    const { dispatcher, reviews } = createDispatcher();
+    reviews.markDispatched.mockRejectedValue(new Error('bookkeeping boom'));
+    const onAttempt = vi.fn();
+
+    await expect(run(dispatcher, [pullRequest()], { onAttempt })).rejects.toThrow('bookkeeping boom');
+    expect(onAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports no attempt for a head that never reaches a dispatch', async () => {
+    const { dispatcher } = createDispatcher(createReviews([reviewRow({ outcome: 'dispatched', jobId: 'j0' })]));
+    const onAttempt = vi.fn();
+
+    expect(await run(dispatcher, [pullRequest()], { onAttempt })).toBe(0);
+    expect(onAttempt).not.toHaveBeenCalled();
   });
 });
