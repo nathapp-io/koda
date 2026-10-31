@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T09:52:25.530Z",
+  "updatedAt": "2026-10-31T09:57:13.493Z",
   "userStories": [
     {
       "id": "US-001",
@@ -301,14 +301,17 @@
         "tokens"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small additive provider method and test-helper change, but authenticated GitHub token handling invokes the security-critical TDD override."
+        "reasoning": "Small additive provider method and test-helper change, but authenticated GitHub token handling invokes the security-critical TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/github-app-client.ts",
@@ -332,7 +335,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1694a470337d34c34b4f03521e5904b663bc5818"
     },
     {
       "id": "US-005",
