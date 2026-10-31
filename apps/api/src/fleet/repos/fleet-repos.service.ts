@@ -12,6 +12,7 @@ import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
+import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
@@ -65,6 +66,10 @@ export class FleetReposService {
 
   private async verifyGitLab(projectId: string, owner: string, name: string) {
     return this.gitlab.verifyRepo(owner, name, await this.gitlabTokens.resolve(projectId, owner, name));
+  }
+
+  async listAutoReviewRepos(limit: number): Promise<FleetRepoRecord[]> {
+    return this.repo.findAutoReviewPage(limit);
   }
 
   async list(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoDto>> {

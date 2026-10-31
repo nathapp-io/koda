@@ -28,6 +28,11 @@ describe('env validation', () => {
     expect(() => validate({ ...REQUIRED, LIVE_HEARTBEAT_MS: '100.0' })).toThrow();
   });
 
+  it('rejects out-of-range PR review polling and dispatch settings', () => {
+    expect(() => validate({ ...REQUIRED, FLEET_PR_REVIEW_POLL_MS: '59999' })).toThrow();
+    expect(() => validate({ ...REQUIRED, FLEET_PR_REVIEW_MAX_DISPATCH: '0' })).toThrow();
+  });
+
   it('accepts empty SMTP_URL / EMAIL_FROM / WEB_PUBLIC_URL as "email off" (S4b review I1)', () => {
     expect(() => validate({ ...REQUIRED, SMTP_URL: '', EMAIL_FROM: '', WEB_PUBLIC_URL: '' })).not.toThrow();
   });

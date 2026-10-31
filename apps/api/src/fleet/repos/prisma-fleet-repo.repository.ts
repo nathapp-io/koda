@@ -19,9 +19,14 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     return this.db.project.findFirst({ where: { slug, deletedAt: null }, select: { id: true, slug: true } });
   }
 
-  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt'>): Promise<FleetRepoRecord> {
+  private toDomain(row: Prisma.FleetRepoGetPayload<object>): FleetRepoRecord {
+    return { ...row, autoReviewMaxCostUsd: row.autoReviewMaxCostUsd.toFixed(4),
+      autoReviewEnabledByType: row.autoReviewEnabledByType === 'USER' || row.autoReviewEnabledByType === 'AGENT' ? row.autoReviewEnabledByType : null };
+  }
+
+  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'>): Promise<FleetRepoRecord> {
     try {
-      return await this.db.fleetRepo.create({ data });
+      return this.toDomain(await this.db.fleetRepo.create({ data }));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictAppException({}, 'fleet.repos');
@@ -30,19 +35,29 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     }
   }
 
-  findById(id: string) {
-    return this.db.fleetRepo.findUnique({ where: { id } });
+  async findById(id: string): Promise<FleetRepoRecord | null> {
+    const row = await this.db.fleetRepo.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : null;
   }
 
   /** The project's anchor repo (S5b-R13): oldest `createdAt`, ties by smallest `id`. */
-  findAnchor(projectId: string): Promise<FleetRepoRecord | null> {
-    return this.db.fleetRepo.findFirst({ where: { projectId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  async findAnchor(projectId: string): Promise<FleetRepoRecord | null> {
+    const row = await this.db.fleetRepo.findFirst({ where: { projectId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    return row ? this.toDomain(row) : null;
+  }
+
+  async findAutoReviewPage(limit: number): Promise<FleetRepoRecord[]> {
+    const rows = await this.db.fleetRepo.findMany({
+      where: { autoReview: true, provider: 'github', githubInstallationId: { not: null }, project: { deletedAt: null } },
+      orderBy: { id: 'asc' }, take: limit,
+    });
+    return rows.map((row) => this.toDomain(row));
   }
 
   async findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>> {
     const where: Prisma.FleetRepoWhereInput = filters.projectId ? { projectId: filters.projectId } : {};
     const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }] });
-    return rows.remap((m: FleetRepoRecord) => m);
+    return rows.remap((m) => this.toDomain(m));
   }
 
   async delete(id: string): Promise<void> {

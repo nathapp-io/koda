@@ -64,6 +64,9 @@ export interface IFleetConfig {
   knowledgeIndexEnabled: boolean;
   /** S5b 1c-c-D1: repository knowledge poll interval (ms); non-numeric falls back to 1 800 000, min 60 000. */
   knowledgePollMs: number;
+  prReviewEnabled: boolean;
+  prReviewPollMs: number;
+  prReviewMaxDispatch: number;
 }
 
 export class FleetConfigSchema {
@@ -100,6 +103,9 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_THREADS_ENABLED: string;
   @IsOptional() @IsString() KNOWLEDGE_INDEX_ENABLED: string;
   @IsOptional() @IsString() KNOWLEDGE_POLL_MS: string;
+  @IsOptional() @IsString() FLEET_PR_REVIEW_ENABLED: string;
+  @IsOptional() @IsString() FLEET_PR_REVIEW_POLL_MS: string;
+  @IsOptional() @IsString() FLEET_PR_REVIEW_MAX_DISPATCH: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -158,6 +164,9 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     threadsEnabled: process.env['FLEET_THREADS_ENABLED'] === 'true',
     knowledgeIndexEnabled: process.env['KNOWLEDGE_INDEX_ENABLED'] === 'true',
     knowledgePollMs: knowledgePollMs(),
+    prReviewEnabled: (process.env['FLEET_PR_REVIEW_ENABLED'] ?? 'true').toLowerCase() === 'true',
+    prReviewPollMs: int('FLEET_PR_REVIEW_POLL_MS', 300_000),
+    prReviewMaxDispatch: int('FLEET_PR_REVIEW_MAX_DISPATCH', 10),
   };
 });
 

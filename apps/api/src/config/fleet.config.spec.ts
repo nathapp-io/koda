@@ -11,6 +11,15 @@ describe('fleet config', () => {
     process.env = { ...saved };
   });
 
+  it('defaults PR review polling configuration and accepts a case-insensitive disable flag', () => {
+    delete process.env.FLEET_PR_REVIEW_ENABLED;
+    delete process.env.FLEET_PR_REVIEW_POLL_MS;
+    delete process.env.FLEET_PR_REVIEW_MAX_DISPATCH;
+    expect(fleetConfig()).toEqual(expect.objectContaining({ prReviewEnabled: true, prReviewPollMs: 300_000, prReviewMaxDispatch: 10 }));
+    process.env.FLEET_PR_REVIEW_ENABLED = 'FALSE';
+    expect(fleetConfig().prReviewEnabled).toBe(false);
+  });
+
   it('defaults the enrollment TTL to 24h and the HTTP timeout to 10s', () => {
     delete process.env.FLEET_ENROLLMENT_TTL_SEC;
     delete process.env.FLEET_HTTP_TIMEOUT_MS;

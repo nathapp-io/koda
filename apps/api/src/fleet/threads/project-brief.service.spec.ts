@@ -34,6 +34,12 @@ const repoRecord = (over: Partial<FleetRepoRecord> = {}): FleetRepoRecord => ({
   githubInstallationId: BigInt(9),
   createdById: 'u1',
   createdAt: new Date('2026-10-01T00:00:00.000Z'),
+  autoReview: false,
+  autoReviewProfiles: [],
+  autoReviewMaxCostUsd: '1.0000',
+  autoReviewEnabledById: null,
+  autoReviewEnabledByType: null,
+  autoReviewEnabledAt: null,
   ...over,
 });
 
