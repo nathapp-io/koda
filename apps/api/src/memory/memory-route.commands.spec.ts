@@ -16,11 +16,28 @@ describe('MemoryRouteCommands', () => {
       ['memory.create', 'rest:memory.create'],
       ['memory.decision.record', 'rest:memory.decisions.record'],
       ['memory.extract', 'rest:memory.extract'],
+      ['memory.decision.retire', 'rest:memory.decision.retire'],
     ]) {
       expect(registered.get(`${key}:${variant}`)).toMatchObject({ key, variant });
     }
-    expect(registered.size).toBe(3);
-    expect(MEMORY_ROUTE_VARIANTS).toEqual({ create: 'rest:memory.create', recordDecision: 'rest:memory.decisions.record', extract: 'rest:memory.extract' });
+    expect(registered.size).toBe(4);
+    expect(MEMORY_ROUTE_VARIANTS).toEqual({ create: 'rest:memory.create', recordDecision: 'rest:memory.decisions.record', extract: 'rest:memory.extract', retire: 'rest:memory.decision.retire' });
+  });
+
+  it('reloads the principal and executes retirement with a validated reason', async () => {
+    const registered = new Map<string, { parse(input: unknown): unknown; execute(input: unknown): Promise<unknown> }>();
+    const registry = { register: vi.fn((command: { key: string; parse(input: unknown): unknown; execute(input: unknown): Promise<unknown> }) => registered.set(command.key, command)) };
+    const principal = { actorType: 'user', id: 'u1' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = { retireDecision: vi.fn().mockResolvedValue({ id: 'm1', status: 'rejected' }) };
+    new MemoryRouteCommands(registry as unknown as ApprovalCommandRegistry, service as unknown as MemoryWriteService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    const command = registered.get('memory.decision.retire');
+    if (!command) throw new Error('retirement command not registered');
+    expect(() => command.parse({ id: '', body: {} })).toThrow();
+    expect(() => command.parse({ id: 'm1', body: { reason: 'x'.repeat(501) } })).toThrow();
+    await expect(command.execute(command.parse({ id: 'm1', body: { reason: 'wrong call' } }))).resolves.toEqual({ id: 'm1', status: 'rejected' });
+    expect(loader.forContext).toHaveBeenCalledOnce();
+    expect(service.retireDecision).toHaveBeenCalledWith(principal, 'm1', 'wrong call');
   });
 
   it('AC-9 runs memory.create with the rebuilt principal and parsed memory DTO', async () => {

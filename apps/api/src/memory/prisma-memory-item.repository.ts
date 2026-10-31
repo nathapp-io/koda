@@ -296,6 +296,25 @@ export class PrismaMemoryItemRepository
     return m ? this.toDomain(m) : null;
   }
 
+  /** Lock, validate and audit in one transaction; callbacks never outlive the row lock. */
+  async retire(
+    id: string,
+    check: (item: MemoryItem | null) => Promise<void>,
+    onRetired: (item: MemoryItem) => Promise<void>,
+  ): Promise<MemoryItem> {
+    return this.prisma.withTransaction(async (tx) => {
+      const db = tx as unknown as PrismaClient;
+      await db.$queryRaw`SELECT id FROM "MemoryItem" WHERE id = ${id} FOR UPDATE`;
+      const model = await db.memoryItem.findUnique({ where: { id } });
+      await check(model ? this.toDomain(model) : null);
+      const retired = this.toDomain(await db.memoryItem.update({
+        where: { id }, data: { status: 'rejected', activeKey: null },
+      }));
+      await onRetired(retired);
+      return retired;
+    }, { isolationLevel: 'Serializable' });
+  }
+
   async reject(id: string): Promise<void> {
     await this.prisma.client.memoryItem.update({
       where: { id },

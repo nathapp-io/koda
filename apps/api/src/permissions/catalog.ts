@@ -254,6 +254,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'memory.read': ['project'],
   'memory.extract': ['own'],
   'memory.decision.record': ['project', 'own'],
+  'memory.decision.retire': ['project'],
   'memory.create': ['project', 'own'],
   'timeline.read': ['project'],
   'admin.slo.read': ['global'],

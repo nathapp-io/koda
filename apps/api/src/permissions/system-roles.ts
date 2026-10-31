@@ -91,6 +91,7 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'memory.create',
       'memory.extract',
       'memory.decision.record',
+      'memory.decision.retire',
       'memory.update.own',
       'codeintel.*',
       'context.*',

@@ -8,7 +8,7 @@ export interface MemoryWritten {
 }
 
 /** The keys a memory write records: the entry point that wrote it. */
-export type MemoryAuditKey = 'memory.create' | 'memory.extract' | 'memory.decision.record' | 'system.memory.extract-from-event' | 'system.review.decision';
+export type MemoryAuditKey = 'memory.create' | 'memory.extract' | 'memory.decision.record' | 'memory.decision.retire' | 'system.memory.extract-from-event' | 'system.review.decision';
 
 /** The audit resource every memory entry names. */
 const RESOURCE_TYPE = 'memory-item';
