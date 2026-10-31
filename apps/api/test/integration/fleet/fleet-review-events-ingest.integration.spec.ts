@@ -17,6 +17,7 @@ import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.ser
 import { BUNDLE_INGEST_REPOSITORY, type IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { IngestRequeueService } from '../../../src/fleet/ingest/ingest-requeue.service';
 import { FleetReviewEventsService } from '../../../src/fleet/reviews/fleet-review-events.service';
+import { ReviewEventMinter } from '../../../src/fleet/reviews/review-event.minter';
 import type { BotReviewParse } from '../../../src/fleet/ingest/parsers/bot-review.parser';
 
 const event = { type: 'finding-withdrawn', key: 'f-12345678', threadId: 'thread-1', finding: 'not wrong', reason: 'intended', disagreedBy: ['alice'], file: 'a.ts', line: 4 };
@@ -34,12 +35,17 @@ describeDb('review event bundle ingest (PG)', () => {
   let service: FleetReviewEventsService;
   let ingest: BundleIngestService;
   let queue: IBundleIngestRepository;
+  let mintPass: ReturnType<typeof vi.spyOn<ReviewEventMinter, 'run'>>;
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'koda-review-events-'));
     process.env.FLEET_ARTIFACT_DIR = dir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
+    // Test the store phase independently: the post-commit listener must not mint
+    // or bump attempts while we assert pending rows and re-ingest idempotency.
+    // The minter and its event subscription have their own suites.
+    mintPass = vi.spyOn(app.get(ReviewEventMinter), 'run').mockResolvedValue(undefined);
     db = fixtureDb(app);
     base = await seedFleetBase(db);
     runnerId = (await insertRunner(db)).id;
@@ -49,11 +55,15 @@ describeDb('review event bundle ingest (PG)', () => {
   });
   afterAll(async () => {
     await app?.close();
+    mintPass?.mockRestore();
     if (dir) rmSync(dir, { recursive: true, force: true });
     if (savedDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedDir;
   });
-  beforeEach(async () => { await db.fleetReviewEvent.deleteMany(); });
+  beforeEach(async () => {
+    mintPass.mockClear();
+    await db.fleetReviewEvent.deleteMany();
+  });
 
   const job = (command = 'REVIEW', state = 'COMPLETED') => db.fleetJob.create({ data: {
     projectId: base.projectId, repoId: base.repoId, ref: 'main', command, state, feature: 'review-pr-42',
@@ -81,6 +91,7 @@ describeDb('review event bundle ingest (PG)', () => {
     const j = await job(); await attach(j.id);
     expect(await ingest.drain(now)).toBe(1);
     expect(await rows(j.id)).toEqual([expect.objectContaining({ status: 'pending', prNumber: 42, attempts: 0, findingKey: event.key, threadId: event.threadId, disagreedBy: ['alice'] })]);
+    expect(mintPass).toHaveBeenCalledTimes(1);
   });
   it('AC-2: untrusted reviews are stored as skipped', async () => {
     const j = await job(); await attach(j.id, false); await ingest.drain(now);
