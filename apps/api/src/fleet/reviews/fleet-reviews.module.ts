@@ -5,6 +5,7 @@ import { FleetReposModule } from '../repos/fleet-repos.module';
 import { EnablerGate } from './enabler-gate';
 import { FLEET_PR_REVIEW_REPOSITORY } from './domain/fleet-pr-review.domain';
 import { FleetPrReviewPass } from './fleet-pr-review.pass';
+import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { PrismaFleetPrReviewRepository } from './prisma-fleet-pr-review.repository';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
 
@@ -23,6 +24,7 @@ import { ReviewHeadDispatcher } from './review-head-dispatcher';
     EnablerGate,
     ReviewHeadDispatcher,
     FleetPrReviewPass,
+    FleetPrReviewPoller,
   ],
 })
 export class FleetReviewsModule {}

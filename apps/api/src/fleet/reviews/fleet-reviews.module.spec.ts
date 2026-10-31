@@ -7,6 +7,7 @@ import { FLEET_REPO_REPOSITORY } from '../repos/domain/fleet-repo.domain';
 import { EnablerGate } from './enabler-gate';
 import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './domain/fleet-pr-review.domain';
 import { FleetPrReviewPass } from './fleet-pr-review.pass';
+import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
 
@@ -26,6 +27,12 @@ describe('FleetReviewsModule', () => {
   afterEach(async () => {
     await module?.close();
     module = undefined;
+  });
+
+  it('AC-8: compiles with FleetPrReviewPoller resolvable', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] }).compile();
+
+    expect(module.get(FleetPrReviewPoller)).toBeInstanceOf(FleetPrReviewPoller);
   });
 
   it('AC-13: compiles with the pass, the gate, the dispatcher and the review repository resolvable', async () => {
