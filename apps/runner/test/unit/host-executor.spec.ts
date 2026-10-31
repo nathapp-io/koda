@@ -635,11 +635,13 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
 
   test('AC-9: a RUN job spawns with no NAX_FORGE_TOKEN_FILE key, even when the daemon inherited one', async () => {
     const w = await injectedWorld('RUN');
+    const inherited = process.env['NAX_FORGE_TOKEN_FILE'];                         // restore, never delete: this process is shared
     process.env['NAX_FORGE_TOKEN_FILE'] = '/elsewhere/forge-token';
     try {
       await w.ex.spawn(w.row);
     } finally {
-      delete process.env['NAX_FORGE_TOKEN_FILE'];
+      if (inherited === undefined) delete process.env['NAX_FORGE_TOKEN_FILE'];
+      else process.env['NAX_FORGE_TOKEN_FILE'] = inherited;
     }
     expect(w.calls).toHaveLength(1);
     expect('NAX_FORGE_TOKEN_FILE' in (w.calls[0]?.options.env ?? {})).toBe(false);
