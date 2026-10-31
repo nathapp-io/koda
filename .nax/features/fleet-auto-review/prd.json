@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T09:36:51.777Z",
+  "updatedAt": "2026-10-31T09:52:25.530Z",
   "userStories": [
     {
       "id": "US-001",
@@ -206,14 +206,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds an access-control and deferred-approval surface with requester reconstruction, catalog/inventory contracts and generated consumers; security override applies."
+        "reasoning": "Adds an access-control and deferred-approval surface with requester reconstruction, catalog/inventory contracts and generated consumers; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/repos/fleet-repos.controller.ts",
@@ -272,7 +275,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ecbf6f08a2c14c51469b813842c45743916588ab"
     },
     {
       "id": "US-004",
