@@ -11,6 +11,7 @@ import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
 import { ReviewEventMinter } from './review-event.minter';
+import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
 import { ReviewDecisionWriter } from '../../memory/review-decision.writer';
 
 /**
@@ -31,8 +32,10 @@ describe('FleetReviewsModule', () => {
     module = undefined;
   });
 
-  it('US-005 AC-13: resolves the inert minter and the exported memory writer', async () => {
-    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] }).compile();
+  it('US-005 AC-13: resolves the minter and the exported memory writer', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] })
+      .overrideProvider(FLEET_REVIEW_EVENT_REPOSITORY).useValue({ claimPending: vi.fn().mockResolvedValue([]) })
+      .compile();
     expect(module.get(ReviewEventMinter)).toBeInstanceOf(ReviewEventMinter);
     expect(module.get(ReviewDecisionWriter)).toBeInstanceOf(ReviewDecisionWriter);
     await expect(module.get(ReviewEventMinter).run()).resolves.toBeUndefined();

@@ -106,6 +106,13 @@ export class FleetReposService {
     });
   }
 
+  async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId'> | null> {
+    const row = await this.repo.findById(id);
+    if (!row) return null;
+    const { projectId, owner, name, githubInstallationId } = row;
+    return { id: row.id, projectId, owner, name, githubInstallationId };
+  }
+
   async listAutoReviewRepos(limit: number): Promise<FleetRepoRecord[]> {
     return this.repo.findAutoReviewPage(limit);
   }
