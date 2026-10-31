@@ -3,7 +3,7 @@
   "feature": "fleet-auto-review",
   "branchName": "feat/fleet-auto-review",
   "createdAt": "2026-11-12T00:00:00.000Z",
-  "updatedAt": "2026-10-31T10:19:57.697Z",
+  "updatedAt": "2026-10-31T10:23:29.652Z",
   "userStories": [
     {
       "id": "US-001",
@@ -577,14 +577,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A focused gate using existing schedule rules, but principal existence, disabled state and effective project permission are security-critical access control."
+        "reasoning": "A focused gate using existing schedule rules, but principal existence, disabled state and effective project permission are security-critical access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/schedule-access.ts",
@@ -606,7 +609,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "78108f92a2f8d0fd87bf61bfab6450ee51b1d337"
     },
     {
       "id": "US-009",
