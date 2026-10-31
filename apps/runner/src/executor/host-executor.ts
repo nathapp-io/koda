@@ -7,6 +7,7 @@ import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
 import { withoutCredentialVars } from '../credentials/credential-env';
+import { errorMessage } from '../errors';
 import type { JobRow } from '../journal/types';
 import type { JobLogSources } from '../logs/types';
 import type { Logger } from '../logger';
@@ -27,9 +28,9 @@ import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } fro
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
-import { removeReviewToken, writeReviewToken } from './review-token';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
+import { removeReviewToken, writeReviewToken } from './review-token';
 import { cleanWorkspace, ensureClone } from './workspace';
 
 export interface HostExecutorDeps {
@@ -47,8 +48,8 @@ export interface HostExecutorDeps {
   readonly jobCheck?: JobCheck;
   /** The process lookups for the identity check and the reap; unset reads `ps` (PS_PROCESS_INFO). Unit specs inject fakes. */
   readonly processInfo?: ProcessInfo;
-  /** US-006: the nax start; unset spawns the real detached nax. A spec observes argv and env without a process. */
-  readonly spawnNax?: (argv: readonly string[], options: SpawnNaxOptions) => { pid: number; pgid: number };
+  /** US-006: the nax start; unset runs the module's `spawnNax`. A spec records argv and env without a process. */
+  readonly spawnNax?: (argv: readonly string[], options: SpawnNaxOptions) => SpawnHandle;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
@@ -172,13 +173,25 @@ export class HostExecutor implements JobExecutor {
     try {
       return this.startNax(argv, options);
     } catch (error) {
-      if (review) await removeReviewToken(jobDir);   // no nax started, so nothing else deletes the token file
+      if (review) await this.dropReviewToken(job, jobDir);   // no nax started, so nothing else deletes the token file
       throw error;
     }
   }
 
   private startNax(argv: readonly string[], options: SpawnNaxOptions): SpawnHandle {
     return (this.deps.spawnNax ?? spawnNax)(argv, options);
+  }
+
+  /**
+   * US-006: `forge-token` must not outlive a start that failed or a job that ended, but its removal must never hide the
+   * error that mattered (the spawn failure) or fail a cleanup whose other steps already ran: it warns instead.
+   */
+  private async dropReviewToken(job: JobRow, jobDir: string): Promise<void> {
+    try {
+      await removeReviewToken(jobDir);
+    } catch (error) {
+      this.deps.log.warn('review token file could not be removed', { jobId: job.jobId, error: errorMessage(error) });
+    }
   }
 
   /**
@@ -332,7 +345,7 @@ export class HostExecutor implements JobExecutor {
         try {
           await this.deps.credentials.release(job);
         } finally {
-          await removeReviewToken(this.dirs(job).jobDir);   // US-006: a token file nax never got to delete itself
+          await this.dropReviewToken(job, this.dirs(job).jobDir);   // US-006: a token file nax never got to delete itself
         }
       }
     }

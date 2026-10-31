@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
@@ -9,6 +10,7 @@ import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
 import { configBranchName } from '../../src/executor/config-job/commit-push';
 import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
+import type { SpawnHandle } from '../../src/executor/job-executor';
 import { isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
 import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { REVIEW_TOKEN_FILE, writeReviewToken } from '../../src/executor/review-token';
@@ -17,7 +19,6 @@ import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
 import { runVerdict } from '../../src/verdict/run-verdict';
-import { assignFor } from '../helpers/assign';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
 import { NO_APPROVALS } from '../helpers/no-approvals';
 import { NO_CREDENTIALS } from '../helpers/no-credentials';
@@ -33,7 +34,7 @@ afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAK
 /** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
 const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
 
-async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
+async function world(command: 'RUN' | 'PLAN' | 'REVIEW' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -554,40 +555,47 @@ describe('HostExecutor workflow stash and bundle (US-003)', () => {
 describe('HostExecutor REVIEW token file (US-006)', () => {
   const BOT = 'koda-fleet[bot]';
   const TOKEN = 'tok-review-9';
+  const HANDLE: SpawnHandle = { pid: 4242, pgid: 4242 };
   type SpawnCall = { readonly argv: readonly string[]; readonly options: SpawnNaxOptions };
+  interface Injection {
+    currentToken?: string | null;
+    omitCurrentToken?: boolean;
+    spawnError?: Error | null;
+    breakTokenFile?: boolean;
+  }
 
-  /** A job whose nax start is injected (no process) and whose provider hands back a fixed token; real temp files. */
-  async function injectedWorld(command: 'RUN' | 'REVIEW', over: { currentToken?: string | null; spawnError?: Error | null; omitCurrentToken?: boolean } = {}) {
-    const base = await tmp.make('review');
-    const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x' } });
-    const workspaceRoot = join(base, 'ws');
-    const naxHome = join(base, 'naxhome');
-    const assign: AssignPayload = {
-      ...assignFor(command, { jobId: 'rjob1' }),
-      repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: origin.url },
-      feature: command === 'REVIEW' ? 'review-pr-42' : 'feat',
-      ...(command === 'REVIEW' ? { review: { prNumber: 42, botLogin: BOT } } : {}),
-    };
-    const row = Journal.open(':memory:').insertJob({
-      assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId),
-    }).row;
+  /**
+   * The file's own `world()` fixture (real origin, real temp job dir) with the two US-006 injections: a provider that
+   * hands back a fixed token, and a nax start that records its argv and env and starts no process.
+   */
+  async function injectedWorld(command: 'RUN' | 'REVIEW', over: Injection = {}) {
+    const w = await world(command, {
+      jobId: 'rjob1',
+      ...(command === 'REVIEW' ? { feature: 'review-pr-42', review: { prNumber: 42, botLogin: BOT } } : {}),
+    });
     const calls: SpawnCall[] = [];
+    const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
     const credentials: CredentialProvider = {
       acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
       release: async () => undefined,
       ...(over.omitCurrentToken === true ? {} : { currentToken: () => (over.currentToken === undefined ? TOKEN : over.currentToken) }),
     };
-    const spawnNax = (argv: readonly string[], options: SpawnNaxOptions): { pid: number; pgid: number } => {
+    const spawnNax = (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => {
       calls.push({ argv, options });
+      // "the token file cannot be removed": something `rm` refuses now sits at its path.
+      if (over.breakTokenFile === true) {
+        rmSync(tokenPath);
+        mkdirSync(join(tokenPath, 'leftover'), { recursive: true });
+      }
       if (over.spawnError) throw over.spawnError;
-      return { pid: 4242, pgid: 4242 };
+      return HANDLE;
     };
     const ex = new HostExecutor({
-      config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(),
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
       nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax,
     });
-    await mkdir(row.jobDir, { recursive: true });
-    return { base, origin, workspaceRoot, naxHome, assign, row, calls, ex, tokenPath: join(row.jobDir, REVIEW_TOKEN_FILE) };
+    await mkdir(w.row.jobDir, { recursive: true });
+    return { ...w, calls, ex, tokenPath };
   }
 
   test('AC-6: spawn calls spawnNax with NAX_FORGE_TOKEN_FILE at <jobDir>/forge-token for a REVIEW job', async () => {
@@ -650,12 +658,27 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     await expect(stat(w.tokenPath)).rejects.toThrow();
   });
 
+  test('a token file that cannot be removed never replaces the start error', async () => {
+    const w = await injectedWorld('REVIEW', { spawnError: new Error('ENOENT nax'), breakTokenFile: true });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');                  // the cause, not the failed cleanup
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'review token file could not be removed' }));
+  });
+
   test('AC-12: cleanup removes a token file that is still there', async () => {
     const w = await injectedWorld('REVIEW');
     const path = await writeReviewToken(w.row.jobDir, TOKEN);
     expect(await readFile(path, 'utf8')).toBe(TOKEN);
     await w.ex.cleanup(w.row);
     await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('cleanup warns, and still ends, when the token file cannot be removed', async () => {
+    const w = await injectedWorld('REVIEW');
+    const path = await writeReviewToken(w.row.jobDir, TOKEN);
+    rmSync(path);
+    mkdirSync(join(path, 'leftover'), { recursive: true });
+    await expect(w.ex.cleanup(w.row)).resolves.toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'review token file could not be removed' }));
   });
 
   test('AC-13: the attempt wipe removes a token file an earlier attempt left, before the retry runs', async () => {
