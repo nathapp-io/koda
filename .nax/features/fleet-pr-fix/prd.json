@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T06:31:51.160Z",
+  "updatedAt": "2026-11-01T06:51:56.819Z",
   "userStories": [
     {
       "id": "US-001",
@@ -277,14 +277,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "An additive field traverses migration, repository/domain narrowing, sync mirror, DTO and requeue, requiring real PostgreSQL round trips and generated contract updates."
+        "reasoning": "An additive field traverses migration, repository/domain narrowing, sync mirror, DTO and requeue, requiring real PostgreSQL round trips and generated contract updates.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/event-payloads.ts",
@@ -343,7 +346,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fc876345f43462bf74d4cc4068bc4c3ed155ce9a"
     },
     {
       "id": "US-005",
