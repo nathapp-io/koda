@@ -95,13 +95,25 @@ is a designer call unless marked as a standing rule.
   policy for that key, as for every dispatch. *Alternative rejected: a separate `fleet.job.fix` key. It would let a
   project require human approval for agent fixes but not agent reviews; add it later if a project asks.*
 - Budget: one `maxCostUsd` covers the whole job (review + fix). `FIX` joins `BUDGET_STOP_COMMANDS`.
+- **Cost cap reaches nax through the job profile** *(builder-check call)*. `nax bot review|fix` take no cost flag;
+  they read `bot.costLimit` from config. The runner already writes a per-job profile (`koda-job-<jobId>`), so it
+  sets `bot.costLimit` there: for step 1, `maxCostUsd`; for step 2, `maxCostUsd` minus step 1's ledger cost (step 2
+  is skipped as `FAILED`, reason `budget spent by review`, when nothing is left). This also closes a K1 gap: today a
+  REVIEW job's `maxCostUsd` never reaches nax; K3 sets `bot.costLimit = maxCostUsd` for REVIEW too.
+- **Assign shape** *(builder-check call)*: a FIX reuses the REVIEW `review` object unchanged
+  (`{ prNumber, botLogin, decisions? }`); `buildAssignPayload` emits it for both commands, and the runner's
+  `invalid review` check applies to both.
 
 ### D2. One job runs review, then fix
 
 - The runner runs two nax steps in the job dir, in order:
-  1. `nax bot review <pr> --decisions <review-decisions.json>` (exactly the K1/K2 REVIEW argv and decisions file),
+  1. `nax bot review <pr> --full --decisions <review-decisions.json>` (the K1/K2 REVIEW argv plus `--full`),
   2. only when step 1 posted (its `artifact` line is on stdout): `nax bot fix <pr> --no-rereview`, with the same
      profiles.
+- **Why `--full`** *(builder-check call)*: on a nax-workflow PR whose head was already reviewed, nax re-checks only
+  the conversation (`reviewRange` -> `conversationOnly`). Earlier open bot threads are carried into `agreed` either
+  way (`mergeEarlier`), but summary-only minors from the earlier review are not. `--full` makes the fix act on a
+  complete review of the current head. It costs one full review on every FIX, which is accepted.
 - Each step gets its own freshly written `forge-token` file (nax deletes it at startup) and the same
   `NAX_FORGE_LOGIN`.
 - *Why not reuse the last REVIEW job's artifact:* it lives in another job's output dir, it is often for an older
@@ -119,12 +131,16 @@ The runner judges a finished FIX from `<jobDir>/nax.stdout` (nax runs detached, 
 | cancel requested | `CANCELLED` | |
 | no `nax bot review: artifact` line | `FAILED`, reason `review not posted` | |
 | a `nax bot fix: PR #<n> — pushed <sha7>` line | `COMPLETED` | fix outcome `pushed`, pushed sha, head branch |
-| a `nax bot fix: PR #<n> — nothing to fix` line | `COMPLETED` | fix outcome `nothing` |
+| a `nax bot fix: PR #<n> — nothing to fix` line | `COMPLETED` | fix outcome `nothing`; when the line ends `; pushed advisor ledger <sha7>`, that sha is recorded too (an App push, so it must be attributed), but no follow-up REVIEW (no code changed) |
 | otherwise | `FAILED`, `stateReason` = first line of nax's fix stderr, trimmed (falls back to `fix not pushed`) | |
 
 - The pushed sha and head branch go in the job's existing result fields (`resultSha`, `resultBranch`) and the
-  PR URL in `resultPrUrl`, so the job detail links the PR and commit the same way a RUN does. The full sha comes
-  from the fix's `bot-state.json` (`pushedSha`) in the bundle when present; the 7-char stdout sha is the fallback.
+  PR URL in `resultPrUrl`, so the job detail links the PR and commit the same way a RUN does. **The runner reads the
+  full sha locally** *(builder-check call)* from the fix run's `nax-out/bot/pr-<n>/<runId>/bot-state.json`
+  (`pushedSha`; the run dir is the one under the fix step, not the review step) and reports it with the result, as
+  it reports a RUN's result from `status.json`. No bundle allowlist change. The 7-char stdout sha is never stored.
+- **Head moved between step 1 and step 2:** nax refuses (no review of the new head); the job is `FAILED` with nax's
+  reason. No retry: the user re-dispatches.
 - A `FAILED` FIX notifies its requester through the existing job-outcome recorder, like any job. `gates-failed`,
   `protected`, `no-change` and refusals (untrusted, no push access, no checks) all surface as `FAILED` with nax's
   reason, so the user sees why nothing was pushed.
@@ -137,6 +153,11 @@ The runner judges a finished FIX from `<jobDir>/nax.stdout` (nax runs detached, 
   decisions), as the system actor on behalf of the FIX's requester, with the FIX's profiles and `maxCostUsd`. It
   is a normal REVIEW job: it checks the new head, marks fixed threads, and its artifact is ingested by K2. It never
   queues a FIX (one round, R5).
+- **Approval** *(builder-check call, K1-B precedent)*: the follow-up is part of the FIX the policy already
+  approved, so it needs no second approval. It is dispatched under a new system writer key (name left to the
+  builder, like `system.pr-review.dispatch`), actor `SYSTEM/<component>`, `onBehalfOf` the FIX requester, and its
+  audit entry links the FIX job id. If the requester has since lost `fleet.job.dispatch` on the project, it is
+  skipped and audited (the K1-B enabler re-check rule).
 - If the follow-up cannot be queued (409 because a REVIEW is already active, budget paused, repo gone), it is
   skipped and audited; a K1-B auto-review of the new head covers the same ground when that is enabled. The
   follow-up records the reviewed head in `FleetPrReview` the way the poller does, so the poller does not review
@@ -151,6 +172,11 @@ The runner judges a finished FIX from `<jobDir>/nax.stdout` (nax runs detached, 
   **whatever the final state** (a fix whose gates failed still had a posted review). Same parsing, trust rule
   (untrusted never mints), idempotency and minting as K2.
 - A `CANCELLED` FIX is read only when the review line is present (the review posted before the cancel).
+- **Mechanics** *(builder-check call)*: the decision is made in the api from the bundle's `nax.stdout` slot (already
+  collected for K2). The ingest gate today is `command === 'REVIEW' && state === 'COMPLETED'`
+  (`bundle-ingest.service.ts:103`); K3 widens it to `REVIEW` in `COMPLETED`, or `FIX` in any terminal state whose
+  stdout has the review `artifact` line. FAILED and CANCELLED jobs do upload a bundle when nax ran (checked on
+  koda-wk 11-01); a FIX that failed before nax started has none and is simply not read.
 
 ### D6. Runner capability `botFix`
 
