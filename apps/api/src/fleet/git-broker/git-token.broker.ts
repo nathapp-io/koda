@@ -33,7 +33,8 @@ export class GitTokenBroker {
    * runner can tell which repository a token belongs to. Write mints are unchanged.
    */
   async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }, now = new Date()): Promise<MintResult> {
-    const readOnly = req.readOnly === true;
+    // FIX always requires a write-capable result; readOnly remains meaningful for purpose-less PROJECT mints.
+    const readOnly = req.readOnly === true && req.purpose !== 'fix';
     // Purpose credentials are GitHub-only; reject before cache lookup so a legacy/write entry cannot bypass this.
     if (req.purpose && req.repo.provider !== 'github') {
       return { ok: false, error: { jobId: req.jobId, reason: 'provider_error' } };
@@ -63,7 +64,8 @@ export class GitTokenBroker {
   }
 
   private async fresh(req: { jobId: string; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }, now: Date): Promise<GitToken> {
-    const { repo, readOnly, purpose } = req;
+    const { repo, purpose } = req;
+    const readOnly = req.readOnly === true && purpose !== 'fix';
     if (repo.provider === 'github') {
       if (repo.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
       if (purpose === 'review') {

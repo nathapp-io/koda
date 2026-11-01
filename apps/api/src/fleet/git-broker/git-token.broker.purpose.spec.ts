@@ -50,6 +50,13 @@ describe('GitTokenBroker job purposes', () => {
     expect(result).toMatchObject({ ok: true });
   });
 
+  it('FIX purpose still returns a write credential when readOnly is also true', async () => {
+    const result = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo, purpose: 'fix', readOnly: true }, NOW);
+    expect(github.isBranchProtected).toHaveBeenCalledWith('readonly', repo.owner, repo.name, repo.defaultBranch);
+    expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: true, token: { jobId: 'j1', token: 'minted', username: 'x-access-token', expiresAt: minted.expiresAt.toISOString() } });
+  });
+
   it('AC-9, AC-10: maps protection-check errors and never mints a write token', async () => {
     github.isBranchProtected.mockRejectedValue(new RepoCheckException('provider_error'));
     await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo, purpose: 'fix' }, NOW)).resolves.toEqual({
