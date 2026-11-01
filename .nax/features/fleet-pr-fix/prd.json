@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T06:51:56.819Z",
+  "updatedAt": "2026-11-01T06:57:28.600Z",
   "userStories": [
     {
       "id": "US-001",
@@ -371,14 +371,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Only the existing ingest eligibility predicate changes; current unit and PG bundle fixtures already cover the recording pipeline, so ordinary TDD can pin terminal-state and lease-epoch regressions."
+        "reasoning": "Only the existing ingest eligibility predicate changes; current unit and PG bundle fixtures already cover the recording pipeline, so ordinary TDD can pin terminal-state and lease-epoch regressions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
@@ -400,7 +403,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a14b6ab503daab477a4faa978d17f8c30ed2fdda"
     },
     {
       "id": "US-006",
