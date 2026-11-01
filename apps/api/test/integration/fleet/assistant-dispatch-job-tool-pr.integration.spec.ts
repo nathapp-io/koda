@@ -146,6 +146,21 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     expect(jobs[0]).toMatchObject({ command: 'FIX', requestedById: world.ids.dev });
   });
 
+  it('AC-12: REVIEW and FIX on GitLab store no action', async () => {
+    await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { provider: 'gitlab' } });
+    try {
+      for (const [toolCallId, command] of [['gitlab-review', 'REVIEW'], ['gitlab-fix', 'FIX']] as const) {
+        const response = await callTool(toolCallId, { repo: 'acme/app', command, prNumber: 7023, maxCostUsd: 1 }).expect(200);
+        const result = resultOf(response);
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain(command === 'FIX' ? 'fix is GitHub-only' : 'review is GitHub-only');
+        expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId } })).toBe(0);
+      }
+    } finally {
+      await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { provider: 'github' } });
+    }
+  });
+
   it('AC-15: the foreign project\'s repository answers not_found and stores no action', async () => {
     const { content, isError } = resultOf(await callTool('ac15', {
       repo: 'acme/ops', command: 'RUN', feature: FEATURE, maxCostUsd: 0.5,
