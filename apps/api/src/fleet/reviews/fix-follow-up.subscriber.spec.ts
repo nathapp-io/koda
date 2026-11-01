@@ -47,6 +47,7 @@ function createSubscriber() {
 
   const writeReasons: (BookkeepingReason | undefined)[] = [];
   const reviews = {
+    findPrincipalAccess: vi.fn(async () => ({ exists: true, disabled: false })),
     insertPending: vi.fn(async (): Promise<FleetPrReviewRecord | null> => {
       writeReasons.push(currentBookkeepingReason());
       return claimRow();

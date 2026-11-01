@@ -5,6 +5,7 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { PermissionService } from '../../permissions/permission.service';
+import { mayDispatch } from '../schedules/schedule-access';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import {
   FIX_FOLLOW_UP,
@@ -65,13 +66,31 @@ export class FixFollowUpSubscriber implements OnModuleInit {
   };
 
   private async followUp(p: FixFollowUpPayload): Promise<void> {
+    const requester = { type: p.requestedByType, id: p.requestedById } as const;
+    const [access, keys] = await Promise.all([
+      this.reviews.findPrincipalAccess(requester),
+      this.permissions.effectiveKeys(requester, { projectId: p.projectId }),
+    ]);
+    if (!mayDispatch(access, keys)) {
+      await this.recordSkip(p, 'requester_lost_access');
+      return;
+    }
+
+    const repo = await this.repos.findReviewRepo(p.repoId);
+    if (repo === null) {
+      await this.recordSkip(p, 'repo_gone');
+      return;
+    }
+
     const claim = await bookkeeping(
       'fleet.pr-review-bookkeeping',
       () => this.reviews.insertPending(p.repoId, p.prNumber, p.headSha),
     );
-    // A null claim means the auto-review poller, or an earlier delivery of this event, already owns the
-    // head. US-003 turns this into the audited `head_already_claimed` skip; nothing may dispatch twice.
-    if (claim === null) return;
+    // A null claim means the auto-review poller, or an earlier delivery of this event, already owns the head.
+    if (claim === null) {
+      await this.recordSkip(p, 'head_already_claimed');
+      return;
+    }
 
     const { job } = await this.jobs.dispatch(
       p.requestedById,
@@ -98,6 +117,16 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       resourceId: p.jobId,
       projectId: p.projectId,
       summary: `follow-up review dispatched: ${job.id}`,
+    }));
+  }
+
+  private async recordSkip(p: FixFollowUpPayload, reason: string): Promise<void> {
+    await this.txManager.run(() => this.audit.record({
+      key: 'system.pr-fix.follow-up',
+      resourceType: 'fleet-job',
+      resourceId: p.jobId,
+      projectId: p.projectId,
+      summary: `follow-up review skipped: ${reason}`,
     }));
   }
 }
