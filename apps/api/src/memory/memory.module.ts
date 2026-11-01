@@ -24,6 +24,7 @@ import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
 import { MemoryMcpTools } from './mcp/memory-mcp-tools';
+import { ReviewDecisionsService } from './review-decisions.service';
 
 @Module({
   // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
@@ -55,6 +56,7 @@ import { MemoryMcpTools } from './mcp/memory-mcp-tools';
     ExtractionService,
     MemoryOutboxSubscriber,
     MemoryMcpTools,
+    ReviewDecisionsService,
   ],
   exports: [
     TimelineService,
@@ -67,6 +69,7 @@ import { MemoryMcpTools } from './mcp/memory-mcp-tools';
     ReviewDecisionWriter,
     MemoryWriteGuard,
     MemoryMcpTools,
+    ReviewDecisionsService,
   ],
 })
 export class MemoryModule {}

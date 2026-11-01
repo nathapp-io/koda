@@ -7,6 +7,7 @@ import { MemoryRouteCommands } from './memory-route.commands';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
+import { ReviewDecisionsService } from './review-decisions.service';
 
 describe('MemoryModule (DI wiring)', () => {
   let moduleRef: TestingModule;
@@ -40,6 +41,10 @@ describe('MemoryModule (DI wiring)', () => {
 
     it('registers MemoryReadController', () => {
       expect(moduleRef.get(MemoryReadController)).toBeInstanceOf(MemoryReadController);
+    });
+
+    it('AC-15 resolves ReviewDecisionsService', () => {
+      expect(moduleRef.get(ReviewDecisionsService)).toBeInstanceOf(ReviewDecisionsService);
     });
 
     it('registers MemoryGovernanceService', () => {

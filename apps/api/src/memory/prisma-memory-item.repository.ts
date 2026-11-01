@@ -12,6 +12,7 @@ import {
   MemoryOwnerType,
 } from './memory-item-repository';
 import type { MemoryWritten } from './memory-audit';
+import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
 
 export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
   return `${kind}:${subject}:${predicate}`;
@@ -338,6 +339,30 @@ export class PrismaMemoryItemRepository
     if (data.ttlAt !== undefined) updateData.ttlAt = data.ttlAt;
 
     await this.prisma.client.memoryItem.update({ where: { id }, data: updateData });
+  }
+
+  async findReviewDecisionRows(projectId: string, repoId: string, take: number): Promise<{ recorded: MemoryItem[]; reviewMinted: MemoryItem[] }> {
+    const now = new Date();
+    const eligibility = {
+      projectId,
+      kind: 'DECISION',
+      status: 'active',
+      deletedAt: null,
+      OR: [{ ttlAt: null }, { ttlAt: { gt: now } }],
+    };
+    const [recorded, reviewMinted] = await Promise.all([
+      this.prisma.client.memoryItem.findMany({
+        where: { ...eligibility, AND: [{ OR: [{ sourceType: null }, { sourceType: { not: REVIEW_EVENT_SOURCE } }] }] },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take,
+      }),
+      this.prisma.client.memoryItem.findMany({
+        where: { ...eligibility, sourceType: REVIEW_EVENT_SOURCE, subject: reviewRepoSubject(repoId) },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take,
+      }),
+    ]);
+    return { recorded: recorded.map((item) => this.toDomain(item)), reviewMinted: reviewMinted.map((item) => this.toDomain(item)) };
   }
 
   async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
