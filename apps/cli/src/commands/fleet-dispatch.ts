@@ -10,6 +10,7 @@ import { unwrap } from '../utils/api';
 import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 import { parseUsd } from '../utils/parse-usd';
 import { type BashMode, type FleetPage, bashFlagProblem, handleFleetConflict, handleFleetValidation, parseApprovalTimeout, parseBashMode, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
 
@@ -17,18 +18,11 @@ const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
 interface DispatchOptions {
-  repo: string; feature: string; maxCost: number; plan?: string; ref?: string;
+  repo: string; feature?: string; review?: number; fix?: number; maxCost: number; plan?: string; ref?: string;
   profile: string[]; label: string[]; pin?: string; ticket: string[];
   bashMode?: BashMode; approvalTimeout?: number;
   project?: string; json?: boolean;
 }
-
-/**
- * The generated `DispatchFleetJobDto` marks `feature` optional because a REVIEW derives it from
- * `prNumber`, but this command only ever sends PLAN or RUN and always requires `--feature`. The narrow
- * type says so, so the conflict lookup can pass `feature` where a string is required.
- */
-type DispatchRunBody = DispatchFleetJobDto & { feature: string };
 
 /**
  * The active job behind a dispatch 409 (overview D121): the partial unique index allows at most one active
@@ -44,7 +38,18 @@ function invalid(message: string): null {
   return handleFleetValidation(message);
 }
 
-async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchRunBody | null> {
+async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFleetJobDto | null> {
+  const hasPrCommand = o.review !== undefined || o.fix !== undefined;
+  if (o.review !== undefined && o.fix !== undefined) return invalid('Use --review or --fix, not both');
+  if (hasPrCommand && (
+    o.feature !== undefined || o.plan !== undefined || o.ref !== undefined || o.ticket.length > 0 ||
+    o.bashMode !== undefined || o.approvalTimeout !== undefined
+  )) {
+    return invalid('--feature, --plan, --ref, --ticket, --bash-mode and --approval-timeout are not for --review or --fix');
+  }
+  if (!hasPrCommand && o.feature === undefined) {
+    return invalid('--feature is required unless --review or --fix is given');
+  }
   const bashProblem = bashFlagProblem(o);
   if (bashProblem) return invalid(bashProblem);
   if (o.pin && o.label.length > 0) return invalid('Use --label or --pin, not both: a pinned job ignores labels');
@@ -52,6 +57,15 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchRunB
   if (!repo) return invalid(`Unknown repo "${o.repo}" in project ${slug}: koda fleet repo list`);
   const pinned = o.pin ? await resolveRunner(slug, o.pin) : null;
   if (o.pin && !pinned) return invalid(`Unknown runner "${o.pin}"`);
+  const prNumber = o.review ?? o.fix;
+  if (prNumber !== undefined) {
+    return {
+      repoId: repo.id, command: o.review !== undefined ? 'REVIEW' : 'FIX', prNumber, maxCostUsd: o.maxCost,
+      ...(o.profile.length > 0 ? { profiles: o.profile } : {}),
+      ...(o.label.length > 0 ? { selectorLabels: o.label } : {}),
+      ...(pinned ? { pinnedRunnerId: pinned.id } : {}),
+    };
+  }
   return {
     repoId: repo.id, command: o.plan ? 'PLAN' : 'RUN', feature: o.feature, maxCostUsd: o.maxCost,
     ...(o.plan ? { planFrom: o.plan } : {}),
@@ -66,16 +80,16 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchRunB
 }
 
 /** A 409 on dispatch names the active job (D133, overview D121); any other error, or a failed lookup, reports as-is. */
-async function explainConflict(err: unknown, slug: string, body: DispatchRunBody): Promise<void> {
+async function explainConflict(err: unknown, slug: string, body: DispatchFleetJobDto, feature: string): Promise<void> {
   if (apiErrorCode(err) !== 409) return handleApiError(err);
   let active: FleetJobDto | null = null;
   try {
-    active = await findActiveJob(slug, body.repoId, body.feature);
+    active = await findActiveJob(slug, body.repoId, feature);
   } catch {
     // The lookup is a courtesy; the original 409 is the answer.
   }
   if (!active) return handleApiError(err);
-  handleFleetConflict(`An active job already runs ${body.feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
+  handleFleetConflict(`An active job already runs ${feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
 }
 
 export function registerFleetDispatch(fleet: Command): void {
@@ -83,7 +97,9 @@ export function registerFleetDispatch(fleet: Command): void {
     .command('dispatch')
     .description('Dispatch a nax run (or, with --plan, a nax plan) for a project repo to a fleet runner')
     .requiredOption('--repo <repo>', 'Repo id or owner/name (koda fleet repo list)')
-    .requiredOption('--feature <name>', 'nax feature name')
+    .option('--feature <name>', 'nax feature name')
+    .option('--review <pr>', 'Review a pull request', parsePositiveInt)
+    .option('--fix <pr>', 'Fix a pull request', parsePositiveInt)
     .requiredOption('--max-cost <usd>', 'Budget in USD, at most 4 decimals', parseUsd)
     .option('--plan <specPath>', 'Run nax plan from this repo-relative spec instead of nax run')
     .option('--ref <ref>', 'Git ref to check out (default: the repo default branch)')
@@ -96,7 +112,7 @@ export function registerFleetDispatch(fleet: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
     .action(async (options: DispatchOptions) => {
-      let body: DispatchRunBody | null = null;
+      let body: DispatchFleetJobDto | null = null;
       let slug = '';
       try {
         const ctx = await withContext({ projectSlug: options.project });
@@ -108,8 +124,11 @@ export function registerFleetDispatch(fleet: Command): void {
         else printPlacement(result, result.placement.assigned ? await runnerNamesOrEmpty(slug) : new Map());
         process.exit(0);
       } catch (err: unknown) {
-        if (body) await explainConflict(err, slug, body);
-        else handleApiError(err);
+        if (body) {
+          const feature = body.prNumber !== undefined ? `review-pr-${body.prNumber}` : body.feature;
+          if (feature) await explainConflict(err, slug, body, feature);
+          else handleApiError(err);
+        } else handleApiError(err);
       }
     });
 }

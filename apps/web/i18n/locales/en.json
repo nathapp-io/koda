@@ -1792,7 +1792,8 @@
         "bundle": "Download bundle",
         "bundleExpired": "Bundle expired",
         "logs": "Logs",
-        "dispatchRun": "Dispatch run"
+        "dispatchRun": "Dispatch run",
+        "dispatchFix": "Fix"
       },
       "confirmCancel": {
         "title": "Cancel this job?",
@@ -1855,6 +1856,10 @@
       "command": "Command",
       "commandRun": "nax run",
       "commandPlan": "nax plan",
+      "commandReview": "PR review",
+      "commandFix": "PR fix",
+      "prNumber": "Pull request number",
+      "prNumberHint": "Enter the number of the pull request to review or fix.",
       "ref": "Git ref",
       "refHint": "Leave empty for the repo's default branch.",
       "feature": "Feature",
@@ -1868,6 +1873,7 @@
       "maxCost": "Max cost (USD)",
       "maxCostHint": "Billed up to this amount. Test runs typically cost $1-2.",
       "prefilled": "Pre-filled from the PLAN job. Check the ref before dispatching.",
+      "prefilledReview": "Pre-filled from the pull request review. Check the details before dispatching.",
       "prefilledTicket": "Pre-filled from the ticket. Pick the repo, and for a PLAN the spec path, before dispatching.",
       "tickets": "Tickets",
       "ticketsHint": "The job is linked to these tickets. A RUN moves CREATED and VERIFIED tickets to In progress.",
@@ -1907,7 +1913,9 @@
         "labelsMax": "At most 16 labels",
         "label": "Labels use lowercase letters, digits, dot, dash or underscore",
         "labelsOrPin": "Choose labels or a runner, not both",
-        "tickets": "Use ticket refs like WEB-12, at most 20"
+        "tickets": "Use ticket refs like WEB-12, at most 20",
+        "bashMode": "Choose a valid shell approval mode",
+        "prNumber": "Enter a whole pull request number from 1 to 2147483647"
       }
     },
     "tickets": {

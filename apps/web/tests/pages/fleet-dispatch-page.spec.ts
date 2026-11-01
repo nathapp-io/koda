@@ -14,7 +14,7 @@ describe('dispatch page', () => {
 
   test('a 409 (ret 409) looks up and links the active job (D121); other errors toast the API message', () => {
     expect(dispatch).toContain('err instanceof ApiError && err.code === 409')
-    expect(dispatch).toContain('jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim())')
+    expect(dispatch).toContain('jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues))')
     expect(dispatch).toContain('data-testid="dispatch-conflict-link"')
     expect(dispatch).toContain('toast.error(extractApiError(err))')
   })
@@ -71,7 +71,7 @@ describe('dispatch page', () => {
     expect(dispatch).toMatch(/<FormField name="ticketRefs">[\s\S]*?<FleetTicketPicker[\s\S]*?:model-value="values\.ticketRefs \?\? \[\]"[\s\S]*?test-id="dispatch-tickets"[\s\S]*?@update:model-value="setFieldValue\('ticketRefs', \$event\)"/)
     expect(dispatch).toContain("setFieldValue('ticketRefs', prefill.ticketRefs)")
     expect(dispatch).toContain('prefilled.value = applied ? prefillNotice(prefill) : null')
-    expect(dispatch).toContain("prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
+    expect(dispatch).toContain("prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
   })
 
   test('#231: a non-active-job 409 on a RUN with tickets asks to confirm the open PR, then resends acknowledged', () => {

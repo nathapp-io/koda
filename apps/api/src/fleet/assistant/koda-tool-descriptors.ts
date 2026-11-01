@@ -552,13 +552,15 @@ export const KODA_DISPATCH_JOB: KodaToolDescriptor = {
   name: 'koda_dispatch_job',
   description:
     'Start one fleet job in this project on one of its repositories. `command` is `RUN` to work and open a PR, or ' +
-    '`PLAN` to plan only; `maxCostUsd` is the cost cap in USD, at least 0.0001, at most 10000 and at most 4 ' +
+    '`PLAN` to plan only. `REVIEW` reviews an open pull request; `FIX` reviews then fixes an open pull request. ' +
+    'For `REVIEW` and `FIX`, provide `prNumber` instead of `feature`. `maxCostUsd` is the cost cap in USD, ' +
+    'at least 0.0001, at most 10000 and at most 4 ' +
     'decimal places. The job is started only after the user approves it: this call proposes it and the user ' +
     'decides it, so tell the user it is waiting for their approval and do not call this tool again for the same job.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    required: ['repo', 'command', 'feature', 'maxCostUsd'],
+    required: ['repo', 'command', 'maxCostUsd'],
     properties: {
       repo: {
         type: 'string',
@@ -567,8 +569,8 @@ export const KODA_DISPATCH_JOB: KodaToolDescriptor = {
       },
       command: {
         type: 'string',
-        enum: ['RUN', 'PLAN'],
-        description: 'RUN works the feature and opens a PR; PLAN plans only',
+        enum: ['RUN', 'PLAN', 'REVIEW', 'FIX'],
+        description: 'RUN works the feature and opens a PR; PLAN plans only; REVIEW reviews an open PR; FIX reviews then fixes an open PR',
       },
       feature: {
         type: 'string',
@@ -576,6 +578,7 @@ export const KODA_DISPATCH_JOB: KodaToolDescriptor = {
         maxLength: DISPATCH_MAX_FEATURE_CHARS,
         description: `nax feature name, 1 to ${DISPATCH_MAX_FEATURE_CHARS} characters`,
       },
+      prNumber: { type: 'integer', minimum: 1, maximum: 2_147_483_647 },
       maxCostUsd: {
         type: 'number',
         minimum: DISPATCH_MIN_COST_USD,

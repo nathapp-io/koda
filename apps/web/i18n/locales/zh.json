@@ -1792,7 +1792,8 @@
         "bundle": "下载产物包",
         "bundleExpired": "产物包已过期",
         "logs": "日志",
-        "dispatchRun": "派发运行"
+        "dispatchRun": "派发运行",
+        "dispatchFix": "修复"
       },
       "confirmCancel": {
         "title": "取消这个任务？",
@@ -1855,6 +1856,10 @@
       "command": "命令",
       "commandRun": "nax run",
       "commandPlan": "nax plan",
+      "commandReview": "审查 PR",
+      "commandFix": "修复 PR",
+      "prNumber": "拉取请求编号",
+      "prNumberHint": "输入要审查或修复的拉取请求编号。",
       "ref": "Git 引用",
       "refHint": "留空则使用仓库默认分支。",
       "feature": "功能",
@@ -1868,6 +1873,7 @@
       "maxCost": "费用上限（美元）",
       "maxCostHint": "最多计费到该金额。测试运行通常花费 $1-2。",
       "prefilled": "已从 PLAN 任务预填。派发前请检查引用分支。",
+      "prefilledReview": "已从 PR 审查预填。派发前请检查详情。",
       "prefilledTicket": "已根据工单预填。派发前请选择仓库；PLAN 还需填写规格文件路径。",
       "tickets": "工单",
       "ticketsHint": "任务将关联这些工单。RUN 会将 CREATED 和 VERIFIED 状态的工单移至进行中。",
@@ -1907,7 +1913,9 @@
         "labelsMax": "最多 16 个标签",
         "label": "标签只能使用小写字母、数字、点、短横线或下划线",
         "labelsOrPin": "请选择标签或执行机，不能同时选择",
-        "tickets": "请使用 WEB-12 这样的工单编号，最多 20 个"
+        "tickets": "请使用 WEB-12 这样的工单编号，最多 20 个",
+        "bashMode": "请选择有效的 Shell 审批模式",
+        "prNumber": "请输入 1 到 2147483647 之间的整数 PR 编号"
       }
     },
     "tickets": {
