@@ -288,6 +288,8 @@ describe('POST /api/agents (US-003)', () => {
 
     app = testingModule.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.setGlobalPrefix('api');
+    // Make the injected principal available before application initialization invokes any hooks.
+    currentPrincipal = adminUser;
 
     // Stands in for the global CombinedAuthGuard: it is what puts the principal
     // on the request that `@Principal()` reads.
@@ -301,8 +303,6 @@ describe('POST /api/agents (US-003)', () => {
 
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
-
-    currentPrincipal = adminUser;
   });
 
   afterEach(async () => {
