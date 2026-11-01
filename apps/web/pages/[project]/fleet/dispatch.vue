@@ -25,7 +25,7 @@ const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))
 
 const loadFailed = ref(false)
 /** P7: which prefill notice to show, if any. */
-const prefilled = ref<'ticket' | 'plan' | null>(null)
+const prefilled = ref<'ticket' | 'plan' | 'review' | null>(null)
 onMounted(async () => {
   try {
     await options.load()

@@ -127,6 +127,8 @@ export interface DispatchQuery {
   readonly feature?: unknown
   readonly ref?: unknown
   readonly tickets?: unknown
+  readonly prNumber?: unknown
+  readonly profiles?: unknown
 }
 
 const singleText = (value: unknown): string | null =>
@@ -136,7 +138,7 @@ export function dispatchPrefillFromQuery(query?: DispatchQuery | null): Partial<
   const prefill: Partial<DispatchFormValues> = {}
   if (!query) return prefill
   const command = singleText(query.command)
-  if (command === 'RUN' || command === 'PLAN') prefill.command = command
+  if (command === 'RUN' || command === 'PLAN' || command === 'REVIEW' || command === 'FIX') prefill.command = command
   const repoId = singleText(query.repoId)?.trim()
   if (repoId) prefill.repoId = repoId
   const feature = singleText(query.feature)?.trim()
@@ -145,13 +147,31 @@ export function dispatchPrefillFromQuery(query?: DispatchQuery | null): Partial<
   if (ref && ref.trim() && ref.length <= 255) prefill.ref = ref.trim()
   const ticketRefs = ticketRefsFromQuery(query.tickets)
   if (ticketRefs.length > 0) prefill.ticketRefs = ticketRefs
+  if (prefill.command === 'REVIEW' || prefill.command === 'FIX') {
+    const prNumber = singleText(query.prNumber)?.trim()
+    if (prNumber && /^[1-9][0-9]*$/.test(prNumber) && Number(prNumber) <= 2_147_483_647) {
+      prefill.prNumber = String(Number(prNumber))
+    }
+  }
+  const rawProfiles = typeof query.profiles === 'string'
+    ? [query.profiles]
+    : Array.isArray(query.profiles) ? query.profiles.filter((value): value is string => typeof value === 'string') : []
+  const profiles = [...new Set(rawProfiles.filter(profile => PROFILE_NAME_RE.test(profile) && !profile.startsWith(RESERVED_PROFILE_PREFIX)))].slice(0, MAX_PROFILES)
+  if (profiles.length > 0) prefill.profiles = profiles
   return prefill
 }
 
-/** P7: the notice a prefilled form shows: from a ticket (tickets, no ref), else from a PLAN job or an admin link. */
-export function prefillNotice(prefill: Partial<DispatchFormValues>): 'ticket' | 'plan' | null {
+/** P7: the notice a prefilled form shows: PR action, ticket (tickets, no ref), or PLAN/admin handoff. */
+export function prefillNotice(prefill: Partial<DispatchFormValues>): 'ticket' | 'plan' | 'review' | null {
+  if (prefill.command === 'REVIEW' || prefill.command === 'FIX') return 'review'
   if (Object.keys(prefill).length === 0) return null
   return prefill.ticketRefs !== undefined && prefill.ref === undefined ? 'ticket' : 'plan'
+}
+
+/** The server's canonical lookup feature for a dispatch, shared by REVIEW and FIX of one PR. */
+export function dispatchFeatureOf(values: DispatchFormValues): string {
+  if (values.command === 'REVIEW' || values.command === 'FIX') return `review-pr-${Number((values.prNumber ?? '').trim())}`
+  return values.feature.trim()
 }
 
 /** Adds a token to a chain once, trimmed; the list is never mutated. */
