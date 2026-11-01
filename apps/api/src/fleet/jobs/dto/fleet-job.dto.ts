@@ -3,7 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
-import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem } from '../domain/fleet-job.domain';
+import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -91,7 +91,7 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultPrUrl: string | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'pushed | none | failed:<reason> (S1b §1.1)' }) declare wipPush: string | null;
   @ApiPropertyOptional({ enum: ['pushed', 'nothing'], type: String, nullable: true, description: "A FIX job's outcome, mirrored from its snapshots (US-004)" })
-  declare fixOutcome: 'pushed' | 'nothing' | null;
+  declare fixOutcome: FixOutcome | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })

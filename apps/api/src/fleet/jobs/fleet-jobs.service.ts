@@ -301,7 +301,7 @@ export class FleetJobsService {
             costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null,
-            // US-004: a fresh attempt judges its own fix outcome.
+            // D475, US-004: every attempt reports its own result — the config edit's, and the FIX outcome's.
             configResult: null, fixOutcome: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });

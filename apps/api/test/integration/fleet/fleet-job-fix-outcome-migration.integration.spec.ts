@@ -41,14 +41,14 @@ describeIntegration('fleet job fixOutcome migration (PG, US-004 AC-1)', () => {
     await scratch?.drop();
   });
 
-  /** A Project -> FleetRepo -> FleetJob chain, written with the columns every earlier migration requires. */
+  /** A Project -> FleetRepo -> FleetJob chain of its own, written with the columns every earlier migration requires. */
   const insertJob = async (id: string): Promise<{ fixOutcome: string | null }> => {
     await scratch.db.$executeRawUnsafe(
-      `INSERT INTO "Project" ("id", "name", "slug", "key", "updatedAt") VALUES ('p-${id}', 'p', 'p', 'p', now())`,
+      `INSERT INTO "Project" ("id", "name", "slug", "key", "updatedAt") VALUES ('p-${id}', 'p-${id}', 'slug-${id}', '${id}', now())`,
     );
     await scratch.db.$executeRawUnsafe(
       `INSERT INTO "FleetRepo" ("id", "projectId", "provider", "owner", "name", "defaultBranch", "createdById")
-       VALUES ('r-${id}', 'p-${id}', 'github', 'acme', 'app', 'main', 'u1')`,
+       VALUES ('r-${id}', 'p-${id}', 'github', 'acme', 'app-${id}', 'main', 'u1')`,
     );
     const rows = await scratch.db.$queryRawUnsafe<Array<{ fixOutcome: string | null }>>(
       `INSERT INTO "FleetJob" ("id", "projectId", "repoId", "ref", "command", "feature", "profiles", "maxCostUsd",
@@ -58,6 +58,12 @@ describeIntegration('fleet job fixOutcome migration (PG, US-004 AC-1)', () => {
     );
     return rows[0];
   };
+
+  /** The stored value of its own row, read straight from the column (never another test's row). */
+  const storedOutcome = async (id: string): Promise<Array<{ value: string | null }>> =>
+    scratch.db.$queryRawUnsafe<Array<{ value: string | null }>>(
+      `SELECT "fixOutcome" AS "value" FROM "FleetJob" WHERE "id" = '${id}'`,
+    );
 
   it('AC-1: the column does not exist in the schema built by the migrations before it', () => {
     // The chain must really have run, or "no column" would be true of an empty schema.
@@ -71,18 +77,14 @@ describeIntegration('fleet job fixOutcome migration (PG, US-004 AC-1)', () => {
   });
 
   it('AC-1: a job inserted without the column reads null', async () => {
-    expect(await insertJob('job-null')).toEqual({ fixOutcome: null });
-    const stored = await scratch.db.$queryRawUnsafe<Array<{ value: string | null }>>(
-      `SELECT "fixOutcome" AS "value" FROM "FleetJob" WHERE "id" = 'job-null'`,
-    );
-    expect(stored).toEqual([{ value: null }]);
+    const inserted = await insertJob('job-null');
+    expect(inserted).toEqual({ fixOutcome: null });
+    expect(await storedOutcome('job-null')).toEqual([{ value: null }]);
   });
 
   it('AC-1: the column also stores an outcome the runner reported', async () => {
-    await scratch.db.$executeRawUnsafe(`UPDATE "FleetJob" SET "fixOutcome" = 'pushed' WHERE "id" = 'job-null'`);
-    const stored = await scratch.db.$queryRawUnsafe<Array<{ value: string | null }>>(
-      `SELECT "fixOutcome" AS "value" FROM "FleetJob" WHERE "id" = 'job-null'`,
-    );
-    expect(stored).toEqual([{ value: 'pushed' }]);
+    await insertJob('job-pushed');
+    await scratch.db.$executeRawUnsafe(`UPDATE "FleetJob" SET "fixOutcome" = 'pushed' WHERE "id" = 'job-pushed'`);
+    expect(await storedOutcome('job-pushed')).toEqual([{ value: 'pushed' }]);
   });
 });
