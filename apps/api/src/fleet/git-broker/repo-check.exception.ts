@@ -8,6 +8,7 @@ export type RepoCheckReason =
   | 'repo_not_found'
   | 'provider_unreachable'
   | 'provider_error'
+  | 'default_branch_unprotected'
   | 'vcs_connection_missing'
   | 'vcs_connection_mismatch'
   | 'vcs_encryption_key_missing'
