@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T06:04:02.286Z",
+  "updatedAt": "2026-11-01T06:16:29.597Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "dispatch"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive contract and normalization changes follow established REVIEW patterns; regeneration is mechanical and runtime behavior has concrete unit seams."
+        "reasoning": "Additive contract and normalization changes follow established REVIEW patterns; regeneration is mechanical and runtime behavior has concrete unit seams.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/dispatch-input.ts",
@@ -89,7 +92,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cd45665928de044b7ef175ddc76e874a1400f732"
     },
     {
       "id": "US-002",
@@ -150,7 +157,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -229,7 +239,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -319,7 +332,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -369,7 +385,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -438,7 +457,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -507,7 +529,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -569,7 +594,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -632,7 +660,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -691,7 +722,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -760,7 +794,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -822,7 +859,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-013",
@@ -894,7 +934,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Discovery and architecture: codebase-memory MCP is unavailable in this session, so discovery used direct repository reads, Glob and Grep. This is an enhancement of the existing fleet PR review implementation, not a greenfield service. The detected Express/Next.js labels are inaccurate: the source-of-truth contexts specify NestJS 12 + Fastify + Prisma 7 for API (.nax/mono/apps/api/context.md:23), Bun-only ESM/SQLite for runner (.nax/mono/apps/runner/context.md:14), and Nuxt 4 SSR/Vue for web (.nax/mono/apps/web/context.md:20). Read each package context before implementation; API implementation must also follow the nathapp-nestjs-patterns skill. Preserve API ownership of workflow, auth and persistence; runner talks to the server through sync/daemon transports; web remains a Nuxt composable client. This PRD alone is being authored; source changes and tests are downstream story work. The binding 13-story structure and dependency graph are retained exactly, including API-scoped protocol/client regeneration work.\n\nDispatch and shared contract (US-001/002): apps/api/src/fleet/jobs/dispatch-input.ts:27 currently has a REVIEW-only normalization branch, which derives reviewFeature(prNumber), default-branch ref, and raw bash mode while refusing feature/ref/planFrom/tickets. Extend that branch to FIX with command-specific reasons and retain REVIEW reasons unchanged. RUN/PLAN reservation messages change to REVIEW and FIX. apps/api/src/fleet/common/review-jobs.ts:1-12 already encodes and parses review-pr-<positive safe integer>; do not add a separate fix feature prefix. apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10 currently accepts RUN/PLAN/REVIEW; PR numbers are validated as positive PostgreSQL integers at :12-13 and maxCostUsd is a bounded four-decimal number at :17-18. Add FIX to API FleetJobKind, dispatch DTO command validation/type/Swagger and FleetJobDto command enum without changing RUN/PLAN validation. packages/fleet-protocol/src/index.ts:90,123,143,261 hold botReview, FleetJobKindName, snapshots and the existing optional review payload; add FIX, botFix?: true and fixOutcome?: 'pushed' | 'nothing' in US-001 so later consumers share one wire contract. The API must keep import type only from the protocol in production: apps/api/src/fleet/common/protocol.spec.ts:34-40 enforces this and its exhaustive Record<FleetJobKindName,true> at :50 needs FIX. The spec calls out exact enum assertions in dispatch DTO specs and exact reason assertions in dispatch-input.spec.ts. FleetJobsService.dispatch at apps/api/src/fleet/jobs/fleet-jobs.service.ts:79-85 finds the scoped repo and applies the current REVIEW GitHub-only 422 check before normalization. Extend to FIX with fix is GitHub-only while preserving review is GitHub-only. Decisions are snapshotted once before the insert transaction at :108-119 using ReviewDecisionsService.selectForReview (apps/api/src/memory/review-decisions.service.ts:12); include FIX rather than duplicating memory rules. Dispatch transactions record events/activity/audit at :116-150, turn DuplicateActiveJobError into 409 at :151-155, and publish/place after commit at :158-169. Shared review-pr feature reuses the active (repoId,feature) partial unique index, so REVIEW/FIX conflicts work in both directions. Keep existing fleet.job.dispatch permission/audit path; no new permission. apps/api/src/fleet/budgets/prisma-budget.repository.ts:22,128,138 filters stop candidates by BUDGET_STOP_COMMANDS; add FIX so queued and running stop behavior uses existing transitions, locks and cancellation semantics. Existing integration files fleet-review-dispatch.integration.spec.ts:1-66, fleet-review-decisions-dispatch.integration.spec.ts:1-82 and fleet-budget-cancel/enforcement suites provide reusable HTTP/PG fixtures; extend them rather than creating test-only stories.\n\nPlacement/assignment (US-003): apps/api/src/fleet/common/capabilities-core.ts:121,149,173 currently reads, strictly accepts only true for, and emits botReview. Treat botFix identically; do not coerce strings or false. apps/api/src/fleet/jobs/placement-rules.ts:10-24 defines MisfitReason and PERMANENT_MISFITS; capabilityMisfit at :93 starts with the REVIEW capability gate and firstMisfit at :117 applies capability checks after global runner eligibility. For FIX, check botReview before botFix, then preserve profile/tool/load rules. bot_fix is recoverable, not permanent, including pinned dispatch. Shared placement evaluators are consumed by dispatch, fill and dashboard dry-runs; add the misfit enum in dashboard.types.ts and PlacementMisfitDto (apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:132-136), not new FIX read models. apps/api/src/fleet/jobs/assign-payload.ts:28-49 currently parses REVIEW feature and builds review with bot login and nonempty stored decisions. Include FIX and throw invalid review feature for malformed FIX features. Tests are placement-rules.spec.ts, assign-payload.spec.ts and common/capabilities.spec.ts; HTTP placement can extend fleet-review-dispatch.integration.spec.ts. Misfit enum generation also affects credential-board/dashboard OpenAPI DTOs; regenerate all derived schemas rather than updating only PlacementMisfitDto.\n\nPersistence/sync (US-004): apps/api/prisma/schema.prisma:990-998 defines FleetJob with string command and optional reviewDecisions; add nullable String? fixOutcome, not a Prisma enum or a new table. Commit migration 20261118090000_fleet_job_fix_outcome/migration.sql and regenerate Prisma using bun run db:generate from apps/api. apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:56-126 defines the domain record, :149-159 the mutable patch union. Keep fixOutcome optional on FleetJobRecord so existing literals remain source compatible; add it to patchable fields and export fixOutcomeOf returning pushed/nothing/null. Prisma mapping at apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:22-36 spreads database values and then narrows domain fields; explicitly override fixOutcome through the sanitizer, not a type assertion on arbitrary strings. FleetJobDto.from at apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:107-123 uses null fallbacks; expose fixOutcome as a nullable pushed/nothing union with r.fixOutcome ?? null. Its summary delegates to from at :126-129; do not accidentally omit the outcome from lists. apps/api/src/fleet/sync/event-payloads.ts:81-111 has private mirror(p), reached by interpretEvent('snapshot', ...) at :125; test through that public seam if mirror remains private. Only pushed/nothing becomes a patch; unknown values are dropped without failing the whole sync. Requeue reset at apps/api/src/fleet/jobs/fleet-jobs.service.ts:299-309 must explicitly clear fixOutcome while preserving carried-cost and lease bump semantics. The migration is additive with no backfill: existing rows read null. Ordinary API DB tests use db push, so they cannot prove committed SQL; apps/api/test/helpers/migration-schema.ts:1-63 applies earlier migrations into a scratch schema and the target separately, as demonstrated in test/integration/fleet/fleet-thread-workspace-migration.integration.spec.ts:1-69. Add the specified real migration integration spec; extend event-payloads.spec.ts, DTO specs and runner-sync.integration.spec.ts / runner-sync-lifecycle.integration.spec.ts for the wire-to-row-to-GET round trip and requeue. Apply the migration before deploying an API generated against the new Prisma column.\n\nReview memory (US-005): apps/api/src/fleet/ingest/bundle-ingest.service.ts:99-109 locks the job and currently enables review parsing only for current-epoch COMPLETED REVIEW; widen only the FIX predicate to COMPLETED/FAILED/CANCELLED. Do not include ESCALATED or CRASHED FIX and do not accept older epochs. The same transaction records review events and replaces ingest rows at :108-116; post-commit event emission at :140-149 triggers existing decision minting, so no new memory module dependency or alternate insert path is needed. apps/api/src/fleet/ingest/parsers/bot-review.parser.ts:44-59 already selects the stdout-named artifact, rejects ambiguity, and falls back to a single artifact when no marker exists; keep this behavior unchanged. Parsing validates PR/trust/event shape at :61-77. Preserve existing REVIEW COMPLETED-only semantics and ingest correction/outcome routing. Extend bundle-ingest.service.spec.ts and test/integration/fleet/fleet-review-events-ingest.integration.spec.ts:1-70, whose real bundle/store/queue fixtures disable the minter while asserting pending events. Do not add FIX to RUN-only knowledge outcomes or analytics command lists.\n\nRunner admission/readopt (US-006): apps/runner/src/capabilities/nax-probe.ts:152-183 currently gathers a bounded report and emits botReview. Its K0 check at :258-264 requires review --help with --decisions and a --version probe rejecting ambient NAX_FORGE_TOKEN. Preserve these checks; botFix additionally needs --full in review help and successful fix help containing --no-rereview, probing fix only after botReview passed. FakeNaxCli in apps/runner/test/helpers/fake-nax-cli.ts:15-22,55-60 defaults review to UNKNOWN_COMMAND; extend it with a configurable fix-help answer that also defaults unknown so old cases do not begin advertising botFix. apps/runner/src/supervisor/assign-parser.ts:172-239 revalidates all server-supplied paths, profile/cost values, command and review bot-login/decision fields; include FIX in allowed kinds and isReview-style payload/raw-bash handling, preserving rejection of stray review payloads on other commands. apps/runner/src/executor/checkout.ts:42-45 detaches REVIEW and bypasses prd.json; FIX follows it. apps/runner/src/supervisor/supervisor.ts:163-196 readopts PLAN/REVIEW using pid liveness plus matchesProcess instead of status.json; FIX joins this branch. A running matching process is watched, an absent/not-ours process is finished, but a re-adopted JobRun must never create step 2. Existing ASSIGNED/no-pid reprepare remains a fresh start. Extend nax-probe.spec.ts:67-111, assign parser specs, supervisor.spec.ts and test/unit/checkout.spec.ts; no installed nax dependency in unit tests.\n\nCost/argv (US-007): apps/runner/src/executor/job-profile.ts:31-52 currently returns outputDir/name for raw jobs and a relay overlay otherwise, atomically writing mode-0600 profiles. Add a trailing optional numeric botCostLimitUsd to jobProfileContent and writeJobProfile without changing exact existing objects when omitted; add bot.costLimit alongside rather than replacing relay keys. HostExecutor.prepare at apps/runner/src/executor/host-executor.ts:106-127 passes Number(assign.maxCostUsd) only for REVIEW/FIX. This intentionally changes manual and auto REVIEW budget enforcement; no bot cost flags exist. apps/runner/src/verdict/plan-cost.ts:8-38 returns the cumulative attempt ledger cost formatted as a decimal string, deduplicating callIds; HostExecutor.readPlanCost at host-executor.ts:266-273 converts read failures to undefined. Do not rewrite that ledger reader as part of this feature. There is an internal spec typo: the late integration bullet calls spentUsd a number, but Design call 3, JobExecutor.readPlanCost at apps/runner/src/executor/job-executor.ts:79 and every US-007 AC require fixBudgetRemainder(maxCostUsd: string, spentUsd: string | undefined): number | null. Use the latter. Parse decimal strings to exact integer ten-thousandths before subtraction; convert only the positive remainder to a number at the final division by 10000. Reuse the same pure helper in chaining, step-2 start and verdict so rounding cannot diverge. Undefined cost and nonpositive remainder fail closed. apps/runner/src/executor/nax-process.ts:11-33 validates profiles and review identity and builds profile chains; FIX step 1 adds --full without changing REVIEW/RUN exact argv, and buildFixArgv produces bot fix <n> --no-rereview --profile <chain> with the same validation. Tests extend job-profile.spec.ts, nax-process.spec.ts and real-file host-executor specs; create fix-budget.ts/spec.ts.\n\nExecution/token files/bundles (US-008/009): apps/runner/src/executor/host-executor.ts:59 has ATTEMPT_FILES; add fix.stdout/fix.stderr so retries cannot confuse stale step markers or outcomes. spawn at :160-183 writes decisions, strips ambient credentials, obtains shim PATH and overlays reviewEnv only for REVIEW. Include FIX in each gate. reviewEnv at :212-218 reads the current in-memory token, throws git token: none before writing, and passes only forge-token path plus botLogin to nax. apps/runner/src/executor/review-token.ts:15-24 creates the token file with mode 0600 on the write and removes leftovers; reuse it for both steps, no raw token in env/argv/log/journal/bundle. Cleanup/drop warnings must not mask the original spawn error. Step 2 must re-read cumulative cost and current token, refuse budget exhaustion before writing anything, rewrite the same per-job profile with the remainder, freshly write forge-token, and start detached into fix.stdout/fix.stderr. A ledger change after the chaining check can make spawnFixStep throw budget spent; no retry. Add spawnFixStep and hasFixStep to JobExecutor and FakeExecutor in US-009. apps/runner/src/executor/nax-process.ts:46-53 uses Bun.spawn detached with file-backed output; use the injected startNax seam in real-file tests rather than real network/auth. apps/runner/src/bundle/build-bundle.ts:41-54 allowlists nax-out and existing stdout/stderr; add optional fix output files but never token files/decisions secrets. Existing exact-list tests for directories without fix files remain unchanged. No new log shipping sources: host-executor.ts:242-248 continues streaming only review output for FIX. Security-critical spawn stories require three-session-tdd.\n\nChaining/concurrency (US-010): apps/runner/src/supervisor/job-run.ts:124-140 distinguishes prepare/reprepare from watch/finish; carry a per-JobRun eligibility flag, never a persistent journal schema change. watchUntilExit at :384-408 currently watches one pid with polling and final reap; extend FIX to at most two processes in one RUNNING phase, only if review posted, budget remains, no cancellation, no fix.stdout and this instance spawned step 1. Reset cancelSentAtMs and sigkilled for the second process group. requestCancel/sendTerm at :172-200 can run while spawnFixStep awaits; journal.updateJob must publish the new pid/pgid immediately upon resolution before checking halt/cancel, then signal the new group when cancel is pending. Otherwise ABANDON cleanup (job-run.ts:222-245; killIfOurs at apps/runner/src/supervisor/kill-if-ours.ts:14-22) would target stale processes. Halt must return without killing the detached child on daemon stop. Retain a thrown step-2 spawn error for judge rather than allowing failSafe to replace it with runner error, and never retry the second spawn. Read failures in FIX review detection must suppress chaining, unlike REVIEW's existing failSafe path. Use real SQLite Journal, fake time, FakeExecutor and explicitly controlled spawn promises for races. apps/runner/src/supervisor/job-run.spec.ts:21-58 already builds this harness; :96-132 pins REVIEW outcomes. Observe effects after awaited callbacks, not assertions swallowed inside try/catch. This is the highest-risk story: expert concurrency/process ownership, strict three-session-tdd.\n\nFile readers and verdict (US-011/012): apps/runner/src/verdict/review-posted.ts:6-15 only treats ENOENT as false and otherwise throws; do not globally soften REVIEW error handling. New fix-result.ts must parse exact PR-specific line prefixes from real files, retaining the log path separately; a stdout short sha is never a resultSha. readPushedSha reads the sibling bot-state.json and accepts only 40 lowercase hex. HostExecutor.readFixOutcome must resolve the log path under this job's nax-out/bot/pr-<n>/ before consulting state; outside paths yield no SHA. Missing files yield kind none and nulls; first nonempty stderr is trimmed to 200 characters. Respect containment for untrusted runner-produced paths and avoid symlink/path traversal escapes; additional hardening cases are suggestions, not extra spec ACs. Add the flat FixOutcome interface and readFixOutcome method to JobExecutor and FakeExecutor in US-011. Judge at apps/runner/src/supervisor/job-run.ts:410-440 currently special-cases PLAN/REVIEW; add FIX beside REVIEW, reading fix files only through the executor. Order: cancel; review marker; held spawn failure; absent fix.stdout budget exhausted/unreadable/interrupted; pushed/nothing success; stderr/fallback failure. Cancel must win before review/fix reads; keep any cost reporting subordinate to cancellation so unreadable files cannot turn a cancel into failure. Use readPlanCost for cumulative final cost; completion snapshot carries fixOutcome and optional validated resultSha, never resultPrUrl or resultBranch. finish at job-run.ts:481-577 already preserves judged.snapshot when row result fields are null: its resultBranch/resultSha overlays are conditional on truthy values. Feed FIX's validated SHA through judged.snapshot and preserve this existing merge; no new journal result columns or special FIX push path are needed. No RUN progress push or PLAN commit for FIX. A re-adopted FIX never starts another process: when it has no fix.stdout and review posted with budget left it ends interrupted before fix; an already-started detached step is merely watched/judged from existing files. This reconciles broad no-resume prose with the explicit file-based verdict/readopt design. apps/api/src/notifications/fleet/fleet-notification-events.ts:32-35 produces pr_opened for COMPLETED with resultPrUrl, so inventing a FIX PR URL would misattribute an existing PR and send a false notification. Tests extend job-run.spec.ts with ordered verdict and failure precedence without weakening REVIEW regressions; fix-result.spec.ts and host-executor.spec.ts use real temporary files.\n\nWeb (US-013): apps/web/lib/fleet-types.ts:153-159,240 holds MisfitReason/FleetJobKind/job fields; add bot_fix/FIX and optional fixOutcome for fixture compatibility. apps/web/lib/fleet-jobs.ts:217-224 already parses review-pr features; use it for FIX rather than another encoding. apps/web/pages/[project]/fleet/index.vue:97-99 and pages/[project]/fleet/jobs/[id]/index.vue:85-92 currently show PR titles only for REVIEW; include FIX, retaining RUN feature/config labels. Job detail already shows resultSha.slice(0,12) at :341; keep it, with no commit link or synthetic result branch/PR URL. Add localized outcome labels only for FIX, and English/Chinese fleet.command.FIX, fleet.misfit.bot_fix, fleet.fixOutcome.{pushed,nothing}. Tests: apps/web/tests/pages/fleet-jobs-list.spec.ts:21,60,154 contains both rendered REVIEW/misfit checks and a brittle REVIEW-only source assertion to replace with rendered RUN/REVIEW/FIX cases; fleet-job-detail.spec.ts:381 pins headers; tests/i18n/fleet-locale-parity.spec.ts:21-33,91 pins exact locale sets and must gain the new outcome enum without loosening equality. No form/action/tool/CLI command changes and no global layout redesign.\n\nDelivery and verification: US-001 seeds shared types; US-002/003/004/005 branch from it, US-006 depends on US-003, runner sequence US-007->008->009->010 and US-011 depends independently on US-006, then US-012 joins US-010/011; US-013 depends only on US-004. Shared files (fleet-job.dto.ts, fleet-jobs.service.ts, host-executor.ts, job-run.ts, job-executor.ts and FakeExecutor) are edited by several stories, so preserve accumulated changes when merging independently scheduled work. contextFiles only name existing files or upstream outputs; expectedFiles list only the specified new migration/test and verdict helpers/specs. After each API contract change in US-001/003/004 run bun run generate from repo root (package.json:20-23) to export committed openapi.json and regenerate CLI types; never hand-edit apps/cli/src/generated/. No CLI command or generated web client. Schema first, compatible API and capability-aware runner next; old runners omit botFix and leave FIX queued, so host nax upgrade is separately required. Manual/auto REVIEW now respects its dispatched cost cap and can stop earlier, an intentional backward behavior change. No token refresh/minimum lifetime or second fix round.\n\nTesting conventions: API unit specs use Vitest/vi with colocated *.spec.ts, DI wiring is DB-free; real HTTP/persistence/constraints/migration specs live under test/integration and must actually execute outside NAX_SANDBOXED with KODA_DB_TESTS=1 via bun run test:scoped. DB-mode setup force-resets a safe test database; do not run parallel DB modes against the same DB, use KODA_TEST_DB_CONTAINER=1 for another worktree. Runner uses bun test with real temp files/SQLite and injected fake nax/process seams; real git specs use isolateGit and host process/socket suites must be verified outside sandbox. Web uses Jest rendered mounts/locales; generated acceptance files remain untouched and run via the app-specific .nax acceptance commands with story AC filters, never copied into source test discovery. Test creation belongs to each behavior story, not a new story. Security-sensitive admission/identity/token/path/process and credential-failure verdict stories use three-session-tdd regardless of complexity. US-004 retains complex/three-session-tdd-lite for the migration-to-sync-to-requeue persistence seam; US-005 uses medium/tdd-simple for its existing-pipeline predicate change. US-010 remains expert/three-session-tdd for concurrent process handoff. Other implementation stories are medium, with tdd-simple where no security override applies. Done means all specified behavioral ACs and failure rows are represented, the migration and contracts are shipped, a capable runner can execute its own full review then one bounded fix under the brokered App identity, the server remembers outcomes and eligible review artifacts, and the web can display existing FIX jobs without adding part-B dispatch surfaces. The runner token-rule source still names REVIEW only (.nax/mono/apps/runner/context.md:53); the spec explicitly makes its manual REVIEW-and-FIX amendment plus nax generate an external pre-run prerequisite, not a story or an automatic edit of generated AGENTS.md.\n\nRefine-pass adversarial audit: re-read spec.md's complete Acceptance Criteria, Context Files, Creates/Modifies, Seams, Failure Handling and all 13 Out of Scope items against the draft and current source. Original spec AC enumeration, each retained in the same story and original ordinal position: US-001 [1,2,3,4,5,6,7,8,9,10,11,12]; US-002 [1,2,3,4,5]; US-003 [1,2,3,4,5,6,7,8,9,10]; US-004 [1,2,3,4,5,6,7,8,9]; US-005 [1,2,3,4,5,6,7]; US-006 [1,2,3,4,5,6,7,8,9,10,11]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12]; US-008 [1,2,3,4,5,6,7,8,9]; US-009 [1,2,3,4,5,6,7,8,9]; US-010 [1,2,3,4,5,6,7,8,9,10,11]; US-011 [1,2,3,4,5,6,7,8,9,10]; US-012 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-013 [1,2,3,4,5,6,7,8]. Thus all 127 declared ACs remain; appended failure-table/regression criteria do not replace any of them. Preserved regression qualifiers include matching profiles (US-003/5), REVIEW without botFix (US-003/6), same artifact (US-005/2), FAILED REVIEW still recording no event (US-005/5), checkout without reading prd.json (US-006/9), dead-pid finish without status.json (US-006/11), cleanup before error propagation (US-008/5 and US-009/7), profile rewrite before start (US-009/4), and all cancellation/read-error qualifiers. No deprecated grep/file/verbatim AC tags were present.\n\nObservable-interface corrections: mirror stays private and its ACs assert interpretEvent('snapshot', ...)'s returned mirror patch, matching apps/api/src/fleet/sync/event-payloads.ts:81-125. BundleIngestService.write and JobRun.judge remain private; their behavior is observed via ingestOne and JobRun.start/journal events using existing harnesses, not invented public APIs. US-012/2 now describes COMPLETED as the returned verdict, not a pre-terminal input row that finish would clean up without judging. Positive FIX verdict fixtures explicitly satisfy higher-priority review/step/cancel preconditions. US-006/9 uses the API-normalized default-branch ref rather than instructing checkout to ignore assign.ref. US-003's HTTP misfit fixture requires otherwise eligible candidates so earlier offline/disabled rules are not overridden. The original draft's warning that finish overwrites a judged SHA with null was false: job-run.ts:574-577 adds row result fields only when truthy. The revised notes preserve that existing merge instead of inventing a null-overwrite repair. US-011 can run independently of US-009, adding only its own executor reader methods/types.\n\nEach story has a directly testable negative path: US-001/3 missing PR; US-002/1 GitLab refusal; US-003/2 malformed capability; US-004/4 invalid outcome dropped; US-005/4 stale epoch; US-006/2 unsupported fix flag; US-007/8 exhausted budget; US-008/5 failed spawn cleanup; US-009/5 exhausted start; US-010/3 unposted review prevents chaining; US-011/3 wrong PR marker; US-012/9 unposted review verdict; US-013/10 malformed feature fallback. Existing-behavior regression ACs were made explicit where previously left only in prose/suggestions: REVIEW normalization/provider reasons, REVIEW argv/credential handoff, no-fix-file bundle entries, single-process REVIEW watch lifecycle, REVIEW read errors still reaching failSafe, and REVIEW web titles. Existing optional-field, RUN-title and no-bot-profile ACs continue to protect compatibility. Suggested hardening not promoted for these audit requirements remains in suggestedCriteria.\n\nFailure table audit in source row order: (1) non-GitHub -> US-002/1; (2) active REVIEW/FIX conflict -> US-002/4,6,7; (3) unsupported runner -> US-003/11; (4) no step-1 token -> US-008/10; (5) step-2 token/start failure and cleanup -> US-009/6,7 and US-012/8,16; (6) unposted review -> US-010/3 and US-012/9; (7) spent budget -> US-010/4 and US-012/5; (8) unreadable ledger -> US-010/12 and US-012/6; (9) throwing file read -> US-010/5 and US-012/10,13; (10) restart between steps -> US-012/15; (11) refusal/no push -> US-012/17; (12) cancellation -> US-010/6 and US-012/14; (13) missing/malformed bot state -> US-011/6 and US-012/18; (14) readopt cannot chain -> US-010/7 and US-012/15; (15) cancel during pending start -> US-010/8 and US-012/19; (16) halt during pending start -> US-010/10.\n\nStructure/scope audit: all 13 binding IDs, workdirs and dependencies remain exactly as specified, including the intentionally independent US-011 branch. Every spec-recommended context file is present within the five-file limit; this story's new files never appear in its contextFiles. The six expectedFiles remain only the specified US-004 migration/test, US-007 budget helper/test and US-011 result helper/test; other tests extend existing suites. All 13 feature exclusions remain verbatim in the top-level outOfScope array, with close boundaries echoed in story Scope sections. There are no source story-local out-of-scope blocks to hoist. Shared misfit DTO changes, CLI contract regeneration and bundled fix output are explicitly still in scope even though FIX dashboard read-model expansion, CLI commands and live fix-output streaming are excluded. No dependency, helper, new file or command surface was added by the audit beyond the specified feature outputs.",
