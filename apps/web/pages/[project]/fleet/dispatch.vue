@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
-import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
+import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchFeatureOf, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
 import type { DispatchFormValues } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
@@ -102,7 +102,7 @@ async function submitDispatch(formValues: DispatchFormValues, opts: { acknowledg
   catch (err: unknown) {
     // D121: a 409 means an active job already runs this (repo, feature); link to it.
     if (err instanceof ApiError && err.code === 409) {
-      const active = await jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim()).catch(() => null)
+      const active = await jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues)).catch(() => null)
       if (active) {
         activeJob.value = active
       }

@@ -14,7 +14,7 @@ describe('dispatch page', () => {
 
   test('a 409 (ret 409) looks up and links the active job (D121); other errors toast the API message', () => {
     expect(dispatch).toContain('err instanceof ApiError && err.code === 409')
-    expect(dispatch).toContain('jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim())')
+    expect(dispatch).toContain('jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues))')
     expect(dispatch).toContain('data-testid="dispatch-conflict-link"')
     expect(dispatch).toContain('toast.error(extractApiError(err))')
   })
