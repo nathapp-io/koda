@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-follow-up",
   "branchName": "feat/fleet-pr-fix-follow-up",
   "createdAt": "2026-11-01T00:00:00Z",
-  "updatedAt": "2026-11-01T10:09:30.446Z",
+  "updatedAt": "2026-11-01T10:13:28.627Z",
   "userStories": [
     {
       "id": "US-001",
@@ -250,14 +250,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized failure mapping mirrors an existing dispatcher; exception ordering and catch boundaries are important but introduce no new authorization or abstractions."
+        "reasoning": "Localized failure mapping mirrors an existing dispatcher; exception ordering and catch boundaries are important but introduce no new authorization or abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
@@ -271,7 +274,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f9a83a76b374beee74a5eb80104f7adf05fa4804"
     },
     {
       "id": "US-005",
