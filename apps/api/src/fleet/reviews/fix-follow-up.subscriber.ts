@@ -1,4 +1,8 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { BudgetPausedException } from '../budgets/budget.exceptions';
+import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystem } from '../../action-context/action-context';
 import { bookkeeping } from '../../action-context/audit-coverage';
@@ -92,18 +96,45 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       return;
     }
 
-    const { job } = await this.jobs.dispatch(
-      p.requestedById,
-      p.projectId,
-      {
-        command: 'REVIEW',
-        repoId: p.repoId,
-        prNumber: p.prNumber,
-        profiles: p.profiles,
-        maxCostUsd: Number(p.maxCostUsd),
-      },
-      { auditKey: 'system.pr-fix.follow-up' },
-    );
+    let job: { id: string };
+    try {
+      ({ job } = await this.jobs.dispatch(
+        p.requestedById,
+        p.projectId,
+        {
+          command: 'REVIEW',
+          repoId: p.repoId,
+          prNumber: p.prNumber,
+          profiles: p.profiles,
+          maxCostUsd: Number(p.maxCostUsd),
+        },
+        { auditKey: 'system.pr-fix.follow-up' },
+      ));
+    } catch (error) {
+      if (error instanceof BudgetPausedException) {
+        await this.removeClaim(claim.id);
+        await this.recordSkip(p, 'budget_paused');
+        return;
+      }
+      if (error instanceof ConflictAppException && getExceptionResponse(error).prefix === 'fleet.jobs') {
+        await this.removeClaim(claim.id);
+        await this.recordSkip(p, 'review_active');
+        return;
+      }
+      if (error instanceof ValidationAppException || error instanceof NotFoundAppException || error instanceof FleetDispatchException) {
+        const response = getExceptionResponse(error);
+        const reason = error instanceof ValidationAppException && typeof response.args?.reason === 'string'
+          ? response.args.reason
+          : error.constructor.name;
+        await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.markFailed(claim.id, `failed:${reason}`.slice(0, 200)));
+        await this.recordSkip(p, reason);
+        return;
+      }
+      this.logger.warn(`Follow-up review dispatch failed for FIX job ${p.jobId}: ${error instanceof Error ? error.constructor.name : 'UnknownError'}`);
+      await this.removeClaim(claim.id);
+      await this.recordSkip(p, 'dispatch_error');
+      return;
+    }
 
     await bookkeeping(
       'fleet.pr-review-bookkeeping',
@@ -120,6 +151,10 @@ export class FixFollowUpSubscriber implements OnModuleInit {
     }));
   }
 
+  private removeClaim(id: string): Promise<void> {
+    return bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(id));
+  }
+
   private async recordSkip(p: FixFollowUpPayload, reason: string): Promise<void> {
     await this.txManager.run(() => this.audit.record({
       key: 'system.pr-fix.follow-up',
@@ -129,4 +164,10 @@ export class FixFollowUpSubscriber implements OnModuleInit {
       summary: `follow-up review skipped: ${reason}`,
     }));
   }
+}
+
+function getExceptionResponse(error: Error): { prefix?: string; args?: Record<string, unknown> } {
+  const response: unknown = (error as Error & { getResponse: () => unknown }).getResponse();
+  if (typeof response !== 'object' || response === null) return {};
+  return response as { prefix?: string; args?: Record<string, unknown> };
 }
