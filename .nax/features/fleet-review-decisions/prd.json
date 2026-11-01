@@ -3,7 +3,7 @@
   "feature": "fleet-review-decisions",
   "branchName": "feat/fleet-review-decisions",
   "createdAt": "2026-11-14T09:00:00.000Z",
-  "updatedAt": "2026-11-01T03:05:21.396Z",
+  "updatedAt": "2026-11-01T03:09:00.366Z",
   "userStories": [
     {
       "id": "US-001",
@@ -322,14 +322,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two localized runner seams using established patterns; security override applies because botReview probing must preserve explicit rejection of ambient credential injection."
+        "reasoning": "Two localized runner seams using established patterns; security override applies because botReview probing must preserve explicit rejection of ambient credential injection.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/nax-process.ts",
@@ -358,7 +361,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a464556c8b7a18f76e31b2b3fedf0c54aff923aa"
     },
     {
       "id": "US-006",
