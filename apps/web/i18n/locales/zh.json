@@ -1101,7 +1101,8 @@
       "capacity": "执行机已满载",
       "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）",
       "bot_review": "此运行器上的 nax 无法执行 PR 评审",
-      "bot_fix": "此运行器上的 nax 无法执行 PR 修复"
+      "bot_fix": "此运行器上的 nax 无法执行 PR 修复",
+      "trust_domain": "执行机正在运行其他项目的任务（隔离）"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",
