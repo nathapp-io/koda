@@ -422,6 +422,17 @@ describe('FIX verdict (US-012)', () => {
     const empty = await judged({ outcome: { kind: 'none', logPath: null, pushedSha: null, stderrLine: null } });
     expect(states(empty).at(-1)).toEqual({ to: 'FAILED', reason: 'fix not pushed' });
   });
+  test('a failed fix-step existence read preserves the runner error', async () => {
+    const b = build('FIX');
+    b.ex.reviewPosted = true;
+    b.ex.planCost = '0.5000';
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.hasFixStep = async () => { throw new Error('fix marker unreadable'); };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('watch');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'runner error: fix marker unreadable' });
+  });
+
   test('AC-13: unreadable fix outcome falls back to fix not pushed', async () => {
     const b = build('FIX'); b.ex.reviewPosted = true; b.ex.fixStepStarted = true; b.ex.dieAfterTicks(1);
     b.ex.readFixOutcome = async () => { throw new Error('fix unreadable'); };

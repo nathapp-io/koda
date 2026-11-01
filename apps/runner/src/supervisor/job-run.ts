@@ -481,8 +481,7 @@ export class JobRun {
       if (!posted) verdict = { state: 'FAILED', reason: 'review not posted' };
       else if (fixSpawnFailure !== undefined) verdict = { state: 'FAILED', reason: `fix spawn failed: ${fixSpawnFailure}` };
       else {
-        let hasFixStep = false;
-        try { hasFixStep = await this.deps.executor.hasFixStep(row); } catch { hasFixStep = false; }
+        const hasFixStep = await this.deps.executor.hasFixStep(row);
         if (!hasFixStep) {
           const remainder = fixBudgetRemainder(row.assign.maxCostUsd, costSpentUsd);
           verdict = remainder === null
