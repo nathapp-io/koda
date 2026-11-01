@@ -1,3 +1,4 @@
+import type { ReviewDecision } from '@nathapp/fleet-protocol';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
@@ -44,6 +45,10 @@ export class FleetJobWorkflowDto implements FleetJobWorkflow {
 }
 
 export class FleetJobDto {
+  @ApiPropertyOptional({ type: 'array', nullable: true, description: 'Dispatch-time REVIEW decisions. Null for old jobs, other commands and list pages.', items: {
+    type: 'object', required: ['id', 'statement'], properties: { id: { type: 'string' }, statement: { type: 'string' }, source: { type: 'string' } },
+  } })
+  declare reviewDecisions: ReviewDecision[] | null;
   @ApiProperty() declare id: string;
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
@@ -101,6 +106,7 @@ export class FleetJobDto {
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
   static from(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
     return Object.assign(new FleetJobDto(), {
+      reviewDecisions: r.reviewDecisions ?? null,
       id: r.id, projectId: r.projectId, repoId: r.repoId, ref: r.ref, command: r.command, feature: r.feature,
       planFrom: r.planFrom, profiles: r.profiles, maxCostUsd: r.maxCostUsd, bashMode: r.bashMode,
       approvalTimeoutSec: r.approvalTimeoutSec, pendingApprovals,
@@ -119,7 +125,7 @@ export class FleetJobDto {
 
   /** D149, D433: a list page leaves the story list and post-run stages out; `GET :id` carries them. */
   static summary(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
-    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false, postRun: null, workflow: null });
+    return Object.assign(FleetJobDto.from(r, pendingApprovals), { reviewDecisions: null, stories: null, storiesTruncated: false, postRun: null, workflow: null });
   }
 }
 

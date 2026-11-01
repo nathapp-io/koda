@@ -75,6 +75,52 @@ describe('REVIEW assignment (US-005)', () => {
   });
 });
 
+describe('REVIEW decisions (US-004)', () => {
+  const decision = (over: Record<string, unknown> = {}) => ({ id: 'm1', statement: 's', source: 'koda:memory/m1', ...over });
+  const withDecisions = (decisions: unknown) => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]', decisions } });
+  const withoutDecisions = () => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } });
+
+  test('AC-1 preserves valid decisions', () => {
+    const decisions = [{ id: 'm1', statement: 's', source: 'koda:memory/m1' }];
+    expect(parseAssign(cmd(withDecisions(decisions)))).toMatchObject({ ok: true, assign: { review: { decisions } } });
+  });
+  test('AC-2 preserves an empty decisions array', () => {
+    const parsed = parseAssign(cmd(withDecisions([])));
+    expect(parsed.ok && parsed.assign.command === 'REVIEW' && parsed.assign.review?.decisions).toEqual([]);
+  });
+  test('AC-3 leaves decisions absent when the key is absent', () => {
+    const parsed = parseAssign(cmd(withoutDecisions()));
+    expect(parsed.ok && parsed.assign.command === 'REVIEW' && parsed.assign.review).toEqual({ prNumber: 42, botLogin: 'koda-fleet[bot]' });
+  });
+  test('AC-4 accepts all 100 decisions at inclusive field limits', () => {
+    const decisions = Array.from({ length: 100 }, (_, i) => decision(i === 0
+      ? { id: 'i'.repeat(64), statement: 's'.repeat(2000), source: 'x'.repeat(200) }
+      : { id: `m${i}` }));
+    const parsed = parseAssign(cmd(withDecisions(decisions)));
+    expect(parsed.ok && parsed.assign.command === 'REVIEW' && parsed.assign.review?.decisions).toEqual(decisions);
+  });
+  test.each([
+    ['AC-5 over 100 entries', Array.from({ length: 101 }, (_, i) => decision({ id: `m${i}` }))],
+    ['AC-6 invalid id syntax', [decision({ id: 'bad id' })]],
+    ['AC-7 id over 64 characters', [decision({ id: 'i'.repeat(65) })]],
+    ['AC-8 duplicate ids', [decision(), decision({ statement: 'second' })]],
+    ['AC-9 empty statement', [decision({ statement: '' })]],
+    ['AC-10 statement over 2000 characters', [decision({ statement: 's'.repeat(2001) })]],
+    ['AC-11 non-string statement', [decision({ statement: 5 })]],
+    ['AC-12 source over 200 characters', [decision({ source: 'x'.repeat(201) })]],
+    ['AC-13 non-object decision entry', ['m1']],
+    ['AC-14 decisions is not an array', { id: 'm1', statement: 's' }],
+  ])('%s rejects with invalid review', (_name, decisions) => {
+    expect(parseAssign(cmd(withDecisions(decisions)))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('copies only validated decision fields', () => {
+    const entry = { id: 'm1', statement: 's', source: 'koda:memory/m1', extra: 'discard' };
+    const parsed = parseAssign(cmd(withDecisions([entry])));
+    expect(parsed.ok && parsed.assign.command === 'REVIEW' && parsed.assign.review?.decisions).toEqual([{ id: 'm1', statement: 's', source: 'koda:memory/m1' }]);
+    expect(parsed.ok && parsed.assign.command === 'REVIEW' && parsed.assign.review?.decisions?.[0]).not.toBe(entry);
+  });
+});
+
 describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
   test.each(['raw', 'gated', 'escalate'] as const)('accepts %s on RUN', (bashMode) => {
     const r = parseAssign(cmd(assignFor('RUN', { bashMode, approvalTimeoutSec: 90 })));

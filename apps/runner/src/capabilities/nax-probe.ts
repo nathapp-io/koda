@@ -257,7 +257,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
   /** K0 is present only when both the command exists and nax explicitly rejects ambient token injection. */
   private async botReview(cwd: string): Promise<boolean> {
     const help = await this.deps.nax.run(['bot', 'review', '--help'], { cwd });
-    if (help.code !== 0 || help.timedOut || help.spawnError !== undefined) return false;
+    if (help.code !== 0 || help.timedOut || help.spawnError !== undefined || !help.stdout.includes('--decisions')) return false;
     const version = await this.deps.nax.run(['--version'], { cwd, env: { NAX_FORGE_TOKEN: 'probe' } });
     return version.code === 1 && !version.timedOut && version.stderr.includes('NAX_FORGE_TOKEN is not supported');
   }

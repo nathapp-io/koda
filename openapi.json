@@ -17955,6 +17955,29 @@
       "FleetJobDto": {
         "type": "object",
         "properties": {
+          "reviewDecisions": {
+            "type": "array",
+            "nullable": true,
+            "description": "Dispatch-time REVIEW decisions. Null for old jobs, other commands and list pages.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "statement"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "statement": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "id": {
             "type": "string"
           },

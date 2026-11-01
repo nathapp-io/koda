@@ -189,11 +189,11 @@ describe('failures before the process runs', () => {
     expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
     expect(b.uploads).toEqual([]);
   });
-  test('a spawn that throws is FAILED with spawn failed', async () => {
-    const b = build();
-    b.ex.spawnError = new Error('ENOENT nax');
+  test('AC-13 (US-006): a REVIEW decisions write error is FAILED with the spawn-failed reason', async () => {
+    const b = build('REVIEW');
+    b.ex.spawnError = new Error('EACCES decisions file');
     await b.run.start('prepare');
-    expect(states(b)).toEqual([{ to: 'FAILED', reason: 'spawn failed: ENOENT nax' }]);
+    expect(states(b)).toEqual([{ to: 'FAILED', reason: 'spawn failed: EACCES decisions file' }]);
   });
   test('AC-14 (US-006): a REVIEW job with no git token at spawn is FAILED with the mapped reason', async () => {
     const b = build('REVIEW');

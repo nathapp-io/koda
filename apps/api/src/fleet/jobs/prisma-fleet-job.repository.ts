@@ -1,3 +1,4 @@
+import type { ReviewDecision } from '@nathapp/fleet-protocol';
 import type { ChatThreadKind } from '../common/thread-jobs';
 import { Injectable } from '@nestjs/common';
 import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '../../generated/prisma/client';
@@ -20,6 +21,7 @@ import {
 
 const toJob = (r: JobRow): FleetJobRecord => ({
   ...r,
+  reviewDecisions: r.reviewDecisions as unknown as ReviewDecision[] | null,
   command: r.command as FleetJobKind,
   state: r.state as FleetJobState,
   requestedByType: r.requestedByType as 'USER' | 'AGENT',
@@ -67,10 +69,14 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
+    const { reviewDecisions, ...rest } = data;
     try {
       // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
       return toJob(await this.db.fleetJob.create({
-        data: { ...data, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd) },
+        data: {
+          ...rest, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd),
+          ...(reviewDecisions !== undefined ? { reviewDecisions: reviewDecisions === null ? Prisma.DbNull : (reviewDecisions as unknown as Prisma.InputJsonValue) } : {}),
+        },
       }));
     } catch (error) {
       // The unique constraints a new row can hit are the active (repoId, feature) index and, for a scheduled job, the

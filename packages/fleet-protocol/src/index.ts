@@ -239,6 +239,8 @@ export interface SyncRequest {
 export interface GitIdentity { name: string; email: string }
 
 /** ASSIGN carries everything the runner needs; never a secret (git tokens come via gitTokens). */
+export interface ReviewDecision { id: string; statement: string; source?: string }
+
 export interface AssignPayload {
   jobId: string;
   command: FleetJobKindName;
@@ -256,7 +258,7 @@ export interface AssignPayload {
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
   /** Fleet PR review: present only for REVIEW jobs. */
-  review?: { prNumber: number; botLogin: string };
+  review?: { prNumber: number; botLogin: string; decisions?: ReviewDecision[] };
   /** PLAN only: the branch the PRD must name (a thread PLAN). */
   expectBranch?: string;
 }

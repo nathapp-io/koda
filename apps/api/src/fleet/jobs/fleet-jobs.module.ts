@@ -1,3 +1,4 @@
+import { MemoryModule } from '../../memory/memory.module';
 import { Module } from '@nestjs/common';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../../auth/auth-repository.module';
@@ -24,7 +25,7 @@ import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
 @Module({
-  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ApprovalStoreModule, ScheduleStoreModule, FleetTicketsModule, ConfigEditStoreModule],
+  imports: [MemoryModule, ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ApprovalStoreModule, ScheduleStoreModule, FleetTicketsModule, ConfigEditStoreModule],
   controllers: [FleetJobsController],
   providers: [
     FleetJobRouteCommands,

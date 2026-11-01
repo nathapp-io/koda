@@ -8,7 +8,7 @@ export const COST_RE = /^\d+(\.\d{1,4})?$/;
 export const RESERVED_PREFIX = 'koda-job-';
 
 /** S1 spec §5.2 step 4. Every dynamic piece is checked again here (D30): the chain is joined with commas. */
-export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload): string[] {
+export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload, opts: { decisionsPath?: string } = {}): string[] {
   const feature = assertFeature(assign.feature);
   for (const profile of assign.profiles) {
     if (!PROFILE_NAME.test(profile) || profile.startsWith(RESERVED_PREFIX)) throw new PathError('invalid profile');
@@ -19,7 +19,10 @@ export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayloa
   }
   if (assign.command === 'REVIEW') {
     if (!assign.review || !Number.isSafeInteger(assign.review.prNumber) || assign.review.prNumber <= 0 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(assign.review.botLogin)) throw new PathError('invalid review');
-    return [...naxCommand, 'bot', 'review', String(assign.review.prNumber), '--profile', chain];
+    return [
+      ...naxCommand, 'bot', 'review', String(assign.review.prNumber), '--profile', chain,
+      ...(opts.decisionsPath === undefined ? [] : ['--decisions', opts.decisionsPath]),
+    ];
   }
   if (!COST_RE.test(assign.maxCostUsd)) throw new PathError('invalid maxCostUsd');
   return [...naxCommand, 'run', '--headless', '--json', '-f', feature, '--profile', chain, '--max-cost', assign.maxCostUsd];

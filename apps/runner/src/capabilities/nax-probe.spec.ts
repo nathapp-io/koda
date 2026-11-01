@@ -67,10 +67,27 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
   test('US-004: advertises K0 only when bot review exists and rejects ambient token env', async () => {
     const home = await naxHome([]);
     const unsupported = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };
-    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: 'help', stderr: '', timedOut: false }, k0Version: unsupported });
+    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: '--decisions <path>  Caller decisions file', stderr: '', timedOut: false }, k0Version: unsupported });
     const { capabilities } = await probeWith(home, nax).run();
     expect(capabilities.botReview).toBe(true);
     expect(nax.calls.find((call) => call.args[0] === '--version' && call.env?.['NAX_FORGE_TOKEN'] === 'probe')).toBeDefined();
+  });
+
+  test('US-005 AC-3: advertises botReview only with decisions help and the ambient-token safety check', async () => {
+    const home = await naxHome([]);
+    const unsupported = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };
+    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: 'usage --decisions <path>', stderr: '', timedOut: false }, k0Version: unsupported });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect(capabilities.botReview).toBe(true);
+    expect(nax.calls).toContainEqual(expect.objectContaining({ args: ['--version'], env: { NAX_FORGE_TOKEN: 'probe' } }));
+  });
+
+  test('US-005 AC-4: omits botReview when review help lacks decisions despite the safety check', async () => {
+    const home = await naxHome([]);
+    const unsupported = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };
+    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: 'usage: nax bot review <pr>', stderr: '', timedOut: false }, k0Version: unsupported });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect('botReview' in capabilities).toBe(false);
   });
 
   test('US-004: omits K0 when version accepts the probe token or bot review is unavailable', async () => {

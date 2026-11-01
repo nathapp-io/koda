@@ -2,7 +2,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
-import type { FleetJobRecord } from './domain/fleet-job.domain';
+import type { FleetJobRecord, NewFleetJob } from './domain/fleet-job.domain';
 
 describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   const now = new Date('2026-10-01T00:00:00.000Z');
@@ -47,6 +47,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       {} as never,
       configEdits as never,
       mockAuditRecorder,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
     );
   });
 
@@ -124,6 +125,7 @@ describe('fleet jobs service dispatch audit key', () => {
     {} as never,
     {} as never,
     mockAuditRecorder,
+    { selectForReview: vi.fn().mockResolvedValue([]) } as never,
   );
 
   const dto = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
@@ -171,6 +173,7 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
       {} as never,
       { findByJobId: vi.fn() } as never,
       mockAuditRecorder,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
     );
   };
 
@@ -200,5 +203,47 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
     build();
     await expect(service.dispatch('u', 'p', runDto({ command: 'PLAN', planFrom: 'spec.md' }) as never)).rejects.toThrow('budget-stop-sentinel');
     expect(fleetTickets.findOpenVcsPrLinks).not.toHaveBeenCalled();
+  });
+});
+
+describe('review decisions dispatch snapshot', () => {
+  const decisions = [{ id: 'm1', statement: 'auth: tokens live in Redis', source: 'koda:memory/m1' }];
+  const setup = () => {
+    const repo = {
+      findRepo: vi.fn().mockResolvedValue({ id: 'r', projectId: 'p', provider: 'github', defaultBranch: 'main' }),
+      createJob: vi.fn().mockImplementation(async (input: NewFleetJob) => ({ ...input, id: 'j', queuedAt: new Date() })),
+      appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
+    };
+    const selector = { selectForReview: vi.fn().mockResolvedValue(decisions) };
+    const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
+    const service = new FleetJobsService(repo as never,
+      { placeJob: vi.fn().mockResolvedValue({ assigned: false, runnerId: null, misfits: [] }) } as never,
+      { record: vi.fn() } as never, { publish: vi.fn(), event: vi.fn() } as never,
+      {} as never, {} as never, { assertNotPaused: vi.fn() } as never, tx as never,
+      {} as never, { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn() } as never,
+      {} as never, {} as never, mockAuditRecorder, selector as never);
+    return { service, repo, selector, tx };
+  };
+  const review = { repoId: 'r', command: 'REVIEW' as const, prNumber: 42, maxCostUsd: 1 };
+  it('AC-7 selects once before insertion and stores the exact snapshot', async () => {
+    const { service, repo, selector, tx } = setup();
+    await service.dispatch('u', 'p', review);
+    expect(selector.selectForReview).toHaveBeenCalledExactlyOnceWith('p', 'r');
+    expect(selector.selectForReview.mock.invocationCallOrder[0]).toBeLessThan(tx.run.mock.invocationCallOrder[0]);
+    expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({ reviewDecisions: decisions }));
+  });
+  it('AC-8 never selects for RUN and omits the snapshot key', async () => {
+    const { service, repo, selector } = setup();
+    await service.dispatch('u', 'p', { repoId: 'r', command: 'RUN', feature: 'f', maxCostUsd: 1 });
+    expect(selector.selectForReview).not.toHaveBeenCalled();
+    expect(repo.createJob.mock.calls[0][0]).not.toHaveProperty('reviewDecisions');
+  });
+  it('AC-9/10 propagates selector failure without opening a transaction or inserting', async () => {
+    const { service, repo, selector, tx } = setup();
+    const failure = new Error('memory unavailable');
+    selector.selectForReview.mockRejectedValue(failure);
+    await expect(service.dispatch('u', 'p', review)).rejects.toBe(failure);
+    expect(repo.createJob).not.toHaveBeenCalled();
+    expect(tx.run).not.toHaveBeenCalled();
   });
 });

@@ -15,6 +15,15 @@ describe('fleet job DTOs', () => {
     resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, storiesTruncated: false, scheduleId: null,
     coalescedCount: 0, configEdit: null,
   }) as never;
+  it('AC-14 defaults an old row snapshot to null', () => {
+    expect(FleetJobDto.from(workflowRecord())).toHaveProperty('reviewDecisions', null);
+  });
+  it('keeps decisions on detail only', () => {
+    const reviewDecisions = [{ id: 'm1', statement: 'settled' }];
+    const row = { ...(workflowRecord() as FleetJobRecord), reviewDecisions };
+    expect(FleetJobDto.from(row)).toHaveProperty('reviewDecisions', reviewDecisions);
+    expect(FleetJobDto.summary(row)).toHaveProperty('reviewDecisions', null);
+  });
   it('AC-11 maps workflow on a detail DTO', () => {
     expect(FleetJobDto.from(workflowRecord()).workflow).toEqual(workflow);
   });

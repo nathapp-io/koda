@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from '@jest/globals'
+import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { ref } from 'vue'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
@@ -6,9 +6,18 @@ import { loadSfc, mountSfc, webFile } from '../helpers/mount-sfc'
 import type { ApprovalRequestDetail, ApprovalRequestSummary } from '../../lib/approval-requests'
 import type { ProjectEventHandlers } from '../../lib/project-event-stream'
 
+// Always tear down, including when an assertion or event handler throws.
+const mountedApps: ReturnType<typeof mountSfc>[] = []
+afterEach(() => {
+  for (const app of mountedApps.splice(0)) app.unmount()
+})
+
 const T = enI18n()
 /** The browser moment a countdown renders at: 2026-11-01T00:00:00Z. */
 const NOW = new Date('2026-11-01T00:00:00.000Z')
+const countdownAlias = {
+  '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(NOW) }) },
+}
 
 const panelFile = webFile('components', 'approvals', 'ApprovalRequestPanel.vue')
 const bashPanelFile = webFile('components', 'approvals', 'ApprovalRequestBashPanel.vue')
@@ -78,9 +87,10 @@ function mountPanel(request: ApprovalRequestDetail, props: Record<string, unknow
     props: { request, userId: 'u2', busy: false, projectSlug: null, ...props },
     components: { ...uiStubs, ...specializedChildren() },
     // A fixed clock: the real countdown ticks with setInterval, and the panel owns no timer of its own.
-    alias: { '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(NOW) }) } },
+    alias: countdownAlias,
     globals: { ref, useI18n: () => T },
   })
+  mountedApps.push(app)
   const byId = (id: string) => app.find(`[data-testid="${id}"]`)
   const one = (id: string) => {
     const found = byId(id)[0]
@@ -110,7 +120,6 @@ describe('ApprovalRequestPanel — fleet panel selection', () => {
     expect(m.byId('approval-request-budget-panel')).toHaveLength(0)
     // The generic approve/reject form is US-003's, and a fleet key never shows it.
     expect(m.byId('approval-request-approve')).toHaveLength(0)
-    m.app.unmount()
   })
 
   test('AC-2: an open pending fleet.budget.override request renders ApprovalRequestBudgetPanel', () => {
@@ -118,7 +127,6 @@ describe('ApprovalRequestPanel — fleet panel selection', () => {
     expect(m.byId('approval-request-budget-panel')).toHaveLength(1)
     expect(m.byId('approval-request-bash-panel')).toHaveLength(0)
     expect(m.byId('approval-request-approve')).toHaveLength(0)
-    m.app.unmount()
   })
 
   test('a generic key keeps the US-003 form and renders no fleet panel', () => {
@@ -126,7 +134,6 @@ describe('ApprovalRequestPanel — fleet panel selection', () => {
     expect(m.byId('approval-request-bash-panel')).toHaveLength(0)
     expect(m.byId('approval-request-budget-panel')).toHaveLength(0)
     expect(m.byId('approval-request-approve')).toHaveLength(1)
-    m.app.unmount()
   })
 })
 
@@ -134,17 +141,14 @@ describe('ApprovalRequestBashPanel', () => {
   test('AC-3: shows the command of the frozen input payload', () => {
     const m = mountPanel(bashRequest())
     expect(m.app.textOf(m.one('approval-request-bash-command'))).toBe('rm -rf build')
-    m.app.unmount()
   })
 
   test('AC-4: links the job when the project slug is known, and never otherwise', () => {
     const linked = mountPanel(bashRequest(), { projectSlug: 'sandbox' })
     expect(linked.one('approval-request-bash-job').props.to).toBe('/sandbox/fleet/jobs/j1')
-    linked.app.unmount()
 
     const unknown = mountPanel(bashRequest(), { projectSlug: null })
     expect(unknown.byId('approval-request-bash-job')).toHaveLength(0)
-    unknown.app.unmount()
   })
 
   test('AC-5: a payload whose options are only deny offers the Deny button alone', () => {
@@ -154,28 +158,24 @@ describe('ApprovalRequestBashPanel', () => {
     expect(m.byId('approval-request-bash-deny')).toHaveLength(1)
     expect(m.byId('approval-request-bash-allow')).toHaveLength(0)
     expect(m.byId('approval-request-bash-allow_for_job')).toHaveLength(0)
-    m.app.unmount()
   })
 
   test('AC-6: Allow posts the approve-with-allow body', async () => {
     const m = mountPanel(bashRequest())
     await m.click('approval-request-bash-allow')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { choice: 'allow' } }])
-    m.app.unmount()
   })
 
   test('AC-7: Allow for this job posts the allow_for_job body', async () => {
     const m = mountPanel(bashRequest())
     await m.click('approval-request-bash-allow_for_job')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { choice: 'allow_for_job' } }])
-    m.app.unmount()
   })
 
   test('AC-8: Deny posts the reject-with-deny body', async () => {
     const m = mountPanel(bashRequest())
     await m.click('approval-request-bash-deny')
     expect(m.decided()).toEqual([{ decision: 'reject', params: { choice: 'deny' } }])
-    m.app.unmount()
   })
 
   test('a trimmed comment rides along, and a comment past the engine cap sends nothing', async () => {
@@ -188,7 +188,6 @@ describe('ApprovalRequestBashPanel', () => {
     await m.click('approval-request-bash-deny')
     expect(m.decided()).toHaveLength(1)
     expect(m.byId('approval-request-bash-comment-error')).toHaveLength(1)
-    m.app.unmount()
   })
 
   test('an unreadable payload is deny-only, and a viewer without the right gets no control', async () => {
@@ -196,14 +195,12 @@ describe('ApprovalRequestBashPanel', () => {
     expect(unreadable.byId('approval-request-bash-unreadable')).toHaveLength(1)
     expect(unreadable.byId('approval-request-bash-allow')).toHaveLength(0)
     expect(unreadable.byId('approval-request-bash-deny')).toHaveLength(1)
-    unreadable.app.unmount()
 
     // An own request in human mode: the API decides, so no button shows and the ask still reads.
     const readOnly = mountPanel(bashRequest({ actorType: 'USER', actorId: 'u2' }), { userId: 'u2' })
     expect(readOnly.byId('approval-request-bash-readonly')).toHaveLength(1)
     expect(readOnly.byId('approval-request-bash-deny')).toHaveLength(0)
     expect(readOnly.byId('approval-request-bash-command')).toHaveLength(1)
-    readOnly.app.unmount()
   })
 
   test('busy disables every choice while the decision is in flight', () => {
@@ -211,7 +208,6 @@ describe('ApprovalRequestBashPanel', () => {
     for (const id of ['approval-request-bash-allow', 'approval-request-bash-allow_for_job', 'approval-request-bash-deny']) {
       expect(m.one(id).props.disabled).toBe(true)
     }
-    m.app.unmount()
   })
 })
 
@@ -220,7 +216,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     const m = mountPanel(budgetRequest())
     expect(m.one('approval-request-candidate-j1').props.checked).toBe(true)
     expect(m.one('approval-request-candidate-j2').props.checked).toBe(true)
-    m.app.unmount()
   })
 
   test('AC-9 (edge): a refreshed detail ticks the candidates it added and forgets the ones it dropped', async () => {
@@ -249,7 +244,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     await m.type('approval-request-budget-amount', '50')
     await m.click('approval-request-budget-raise')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1', 'j3'] } }])
-    m.app.unmount()
   })
 
   test('AC-9 (edge): a candidate a refresh no longer offers is never submitted', async () => {
@@ -267,7 +261,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     await m.type('approval-request-budget-amount', '50')
     await m.click('approval-request-budget-raise')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1'] } }])
-    m.app.unmount()
   })
 
   test('AC-10: Raise sends the amount and the ticked candidates only', async () => {
@@ -276,7 +269,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     await m.change('approval-request-candidate-j2')
     await m.click('approval-request-budget-raise')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1'] } }])
-    m.app.unmount()
   })
 
   test('AC-10 (edge): nothing ticked still sends an empty requeueJobIds', async () => {
@@ -286,7 +278,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     await m.change('approval-request-candidate-j2')
     await m.click('approval-request-budget-raise')
     expect(m.decided()).toEqual([{ decision: 'approve', params: { amountUsd: 50, requeueJobIds: [] } }])
-    m.app.unmount()
   })
 
   test('AC-11: an amount not above the frozen spend sends nothing and says why', async () => {
@@ -296,7 +287,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     expect(m.decided()).toEqual([])
     expect(m.app.textOf(m.one('approval-request-budget-amount-error')))
       .toBe(T.t('approvals.fleet.budget.validation.notAbove', { spent: '$10.00' }))
-    m.app.unmount()
   })
 
   test('AC-12: Keep paused posts the bare rejection, needing no amount', async () => {
@@ -304,7 +294,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     expect(m.byId('approval-request-budget-amount-error')).toHaveLength(0)
     await m.click('approval-request-budget-keep')
     expect(m.decided()).toEqual([{ decision: 'reject' }])
-    m.app.unmount()
   })
 
   test('Keep paused still refuses a comment past the engine cap', async () => {
@@ -313,7 +302,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     await m.click('approval-request-budget-keep')
     expect(m.decided()).toEqual([])
     expect(m.byId('approval-request-budget-comment-error')).toHaveLength(1)
-    m.app.unmount()
   })
 
   test('AC-13: a truncated candidate list says so', () => {
@@ -322,11 +310,9 @@ describe('ApprovalRequestBudgetPanel', () => {
     }))
     expect(truncated.app.textOf(truncated.one('approval-request-budget-truncated')))
       .toBe(T.t('approvals.fleet.budget.truncated'))
-    truncated.app.unmount()
 
     const whole = mountPanel(budgetRequest())
     expect(whole.byId('approval-request-budget-truncated')).toHaveLength(0)
-    whole.app.unmount()
   })
 
   test('the frozen scope, window, spend and amount are shown', () => {
@@ -336,7 +322,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     expect(text).toContain(T.t('fleet.budgets.window.calendar_month_utc'))
     expect(text).toContain('$10.00')
     expect(text).toContain('$20.00')
-    m.app.unmount()
   })
 
   test('a viewer without the right reads the stop and gets no form', () => {
@@ -345,7 +330,6 @@ describe('ApprovalRequestBudgetPanel', () => {
     expect(m.byId('approval-request-budget-raise')).toHaveLength(0)
     expect(m.byId('approval-request-budget-amount')).toHaveLength(0)
     expect(m.byId('approval-request-budget-summary')).toHaveLength(1)
-    m.app.unmount()
   })
 })
 
@@ -360,7 +344,6 @@ describe('ApprovalRequestOutcome', () => {
     // Settled: nothing left to answer.
     expect(m.byId('approval-request-bash-allow')).toHaveLength(0)
     expect(m.byId('approval-request-bash-deny')).toHaveLength(0)
-    m.app.unmount()
   })
 
   test('a failed delivery names what the runner said', () => {
@@ -370,7 +353,6 @@ describe('ApprovalRequestOutcome', () => {
     }))
     expect(m.app.textOf(m.one('approval-request-outcome-delivery')))
       .toBe(T.t('approvals.fleet.delivery.failed', { detail: 'runner gone' }))
-    m.app.unmount()
   })
 
   test('AC-15: an executed budget request explains each re-queue result', () => {
@@ -386,7 +368,6 @@ describe('ApprovalRequestOutcome', () => {
     expect(m.app.textOf(row)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
     expect(m.byId('approval-request-budget-raise')).toHaveLength(0)
     expect(m.byId('approval-request-budget-keep')).toHaveLength(0)
-    m.app.unmount()
   })
 
   test('an executed budget request with nothing re-queued says so', () => {
@@ -395,14 +376,12 @@ describe('ApprovalRequestOutcome', () => {
       details: { kind: 'budget', policyId: 'pol1', resolvedBy: 'user', outcome: { resumedAmountUsd: '50.0000', requeueResults: [] } },
     }))
     expect(m.app.textOf(m.one('approval-request-requeue-none'))).toBe(T.t('approvals.fleet.requeue.none'))
-    m.app.unmount()
   })
 
   test('a settled generic request still shows no outcome block (US-003 behaviour)', () => {
     const m = mountPanel(detail({ status: 'approved' }))
     expect(m.byId('approval-request-outcome')).toHaveLength(0)
     expect(m.byId('approval-request-approve')).toHaveLength(0)
-    m.app.unmount()
   })
 })
 
@@ -426,12 +405,11 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     const app = mountSfc(inboxFile, {
       components: {
         ...uiStubs,
-        ApprovalsApprovalRequestPanel: loadSfc(panelFile, { useI18n: () => T }),
+        // Separately loaded children do not inherit mountSfc's module aliases.
+        ApprovalsApprovalRequestPanel: loadSfc(panelFile, { useI18n: () => T }, countdownAlias),
         ...specializedChildren(),
       },
-      alias: {
-        '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: ref(NOW) }) },
-      },
+      alias: countdownAlias,
       props: { base: over.base ?? { kind: 'project', slug: 'sandbox', projectId: 'p1' } },
       globals: {
         ref, computed: Vue.computed, watch: Vue.watch, nextTick: Vue.nextTick,
@@ -449,6 +427,7 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
         useProjectEvents: (_slug: string, _handlers: ProjectEventHandlers) => undefined,
       },
     })
+    mountedApps.push(app)
     const settle = async (): Promise<void> => {
       for (let i = 0; i < 6; i += 1) {
         await new Promise((resolve) => { setImmediate(resolve) })
@@ -472,7 +451,6 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     ;(m.app.find('[data-testid="approval-request-bash-allow"]')[0]?.props.onClick as () => void)()
     await m.settle()
     expect(m.api.post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve', params: { choice: 'allow' } })
-    m.app.unmount()
   })
 
   test('AC-10 (end to end): Raise posts the raised amount and the ticked ids to the engine', async () => {
@@ -484,14 +462,12 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     ;(m.app.find('[data-testid="approval-request-budget-raise"]')[0]?.props.onClick as () => void)()
     await m.settle()
     expect(m.api.post).toHaveBeenCalledWith('/approvals/r1/decisions', { decision: 'approve', params: { amountUsd: 50, requeueJobIds: ['j1'] } })
-    m.app.unmount()
   })
 
   test('AC-4 (end to end): the project inbox passes its slug, so the job link resolves', async () => {
     const m = mountInbox(bashRequest() as ApprovalRequestDetail)
     await openRow(m)
     expect(m.app.find('[data-testid="approval-request-bash-job"]')[0]?.props.to).toBe('/sandbox/fleet/jobs/j1')
-    m.app.unmount()
   })
 
   test('a raised budget stop shows its re-queue results without being reopened or reloaded', async () => {
@@ -528,7 +504,6 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     expect(row?.props['data-ok']).toBe('false')
     expect(m.app.textOf(row as never)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
     expect(m.app.find('[data-testid="approval-request-budget-raise"]')).toHaveLength(0)
-    m.app.unmount()
   })
 
   /**
@@ -584,7 +559,6 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     const row = m.app.find('[data-testid="approval-request-requeue-j2"]')[0]
     expect(row?.props['data-ok']).toBe('false')
     expect(m.app.textOf(row as never)).toContain(T.t('approvals.fleet.requeueFailure.notCancelled'))
-    m.app.unmount()
   })
 
   test('AC-15 (edge): the retry does not depend on the row still being listed or its status moving', async () => {
@@ -616,6 +590,5 @@ describe('ApprovalRequestInbox — the fleet body on the wire', () => {
     await m.settle()
     expect(detailReads).toBe(3)
     expect(m.app.find('[data-testid="approval-request-requeue-j2"]')[0]?.props['data-ok']).toBe('false')
-    m.app.unmount()
   })
 })

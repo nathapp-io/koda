@@ -25,6 +25,14 @@ describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
   test('AC-9 REVIEW: bot review receives PR number and validated profile chain', () => {
     expect(buildNaxArgv(['nax'], assign({ command: 'REVIEW', jobId: 'j1', profiles: ['native-ds'], review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }))).toEqual(['nax', 'bot', 'review', '42', '--profile', 'native-ds,koda-job-j1']);
   });
+  test('US-005 AC-1: appends the optional decisions path after the profile chain', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'REVIEW', jobId: 'j1', profiles: ['native-ds'], review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }), { decisionsPath: '/jobs/j1/review-decisions.json' })).toEqual(
+      ['nax', 'bot', 'review', '42', '--profile', 'native-ds,koda-job-j1', '--decisions', '/jobs/j1/review-decisions.json'],
+    );
+  });
+  test('US-005 AC-2: keeps the decisions flag absent for existing two-argument calls', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'REVIEW', jobId: 'j1', profiles: ['native-ds'], review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } }))).not.toContain('--decisions');
+  });
   test('AC-12 RUN preserves its exact argv', () => {
     expect(buildNaxArgv(['nax'], assign({ command: 'RUN', jobId: 'j1', feature: 'auth-flow', profiles: ['native-ds'], maxCostUsd: '5' }))).toEqual(['nax', 'run', '--headless', '--json', '-f', 'auth-flow', '--profile', 'native-ds,koda-job-j1', '--max-cost', '5']);
   });
