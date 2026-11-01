@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MemoryModule } from '../../memory/memory.module';
+import { OutboxModule } from '../../outbox/outbox.module';
 import { ReviewEventMinter } from './review-event.minter';
 import { ReviewEventMintPoller } from './review-event-mint.poller';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
@@ -14,15 +15,18 @@ import { ReviewHeadDispatcher } from './review-head-dispatcher';
 import { FleetReviewEventsService } from './fleet-review-events.service';
 import { FleetReviewEventRepository } from './fleet-review-event.repository';
 import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
+import { FixFollowUpSubscriber } from './fix-follow-up.subscriber';
 
 /**
  * Fleet auto-review (spec §"The pass and the poller"): the polling pass, the enabler gate, the
  * per-head dispatcher and the claim repository, behind the enabler gate the settings route writes.
  *
+ * Also the home of `FixFollowUpSubscriber` (K3-B1), which reuses the claim repository to settle the
+ * head a pushed `FIX` left behind; `OutboxModule` gives it the `FanOutPublisher` it registers on.
  * Exports the review-event service for bundle ingestion; repositories stay module-private.
  */
 @Module({
-  imports: [MemoryModule, FleetReposModule, FleetJobsModule, GitBrokerModule],
+  imports: [MemoryModule, FleetReposModule, FleetJobsModule, GitBrokerModule, OutboxModule],
   providers: [
     PrismaFleetPrReviewRepository,
     { provide: FLEET_PR_REVIEW_REPOSITORY, useExisting: PrismaFleetPrReviewRepository },
@@ -35,6 +39,7 @@ import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domai
     FleetReviewEventsService,
     ReviewEventMinter,
     ReviewEventMintPoller,
+    FixFollowUpSubscriber,
   ],
   exports: [FleetReviewEventsService],
 })

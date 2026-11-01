@@ -11,6 +11,7 @@ import { FLEET_PR_REVIEW_REPOSITORY, type IFleetPrReviewRepository } from './dom
 import { FleetPrReviewPass } from './fleet-pr-review.pass';
 import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { FleetReviewsModule } from './fleet-reviews.module';
+import { FixFollowUpSubscriber } from './fix-follow-up.subscriber';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
 import { ReviewEventMinter } from './review-event.minter';
 import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
@@ -67,6 +68,12 @@ describe('FleetReviewsModule', () => {
     expect(module.get(EnablerGate)).toBeInstanceOf(EnablerGate);
     expect(module.get(ReviewHeadDispatcher)).toBeInstanceOf(ReviewHeadDispatcher);
     expect(module.get<IFleetPrReviewRepository>(FLEET_PR_REVIEW_REPOSITORY)).toBeDefined();
+  });
+
+  it('US-002 AC-12: the module provides the fix follow-up subscriber', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] }).compile();
+
+    expect(module.get(FixFollowUpSubscriber)).toBeInstanceOf(FixFollowUpSubscriber);
   });
 
   it('AC-14: FleetModule imports FleetReviewsModule', () => {
