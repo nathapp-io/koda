@@ -598,6 +598,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     spawnError?: Error | null;
     breakTokenFile?: boolean;
     maxCostUsd?: string;
+    acquireFailureReason?: string;
     review?: NonNullable<AssignPayload['review']>;
   }
 
@@ -614,7 +615,9 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     const calls: SpawnCall[] = [];
     const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
     const credentials: CredentialProvider = {
-      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      acquire: async () => over.acquireFailureReason === undefined
+        ? { ok: true, credentials: { helper: null, binDir: null } }
+        : { ok: false, reason: over.acquireFailureReason },
       release: async () => undefined,
       ...(over.omitCurrentToken === true ? {} : { currentToken: () => (over.currentToken === undefined ? TOKEN : over.currentToken) }),
     };
@@ -710,6 +713,14 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     await expect(stat(w.tokenPath)).rejects.toThrow();
     await expect(stat(jobProfilePath(w.naxHome, 'rjob1'))).rejects.toThrow();
     await expect(stat(join(w.row.jobDir, 'fix.stdout'))).rejects.toThrow();
+  });
+
+  test('US-009: failed credential acquisition preserves its reason and prevents writes or start', async () => {
+    const w = await injectedWorld('FIX', { acquireFailureReason: 'broker unavailable' });
+    await expect(w.ex.spawnFixStep(w.row)).rejects.toThrow('broker unavailable');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+    await expect(stat(jobProfilePath(w.naxHome, 'rjob1'))).rejects.toThrow();
   });
 
   test('US-009 AC-6: missing current token does not write or start', async () => {

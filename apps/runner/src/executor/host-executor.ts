@@ -193,7 +193,8 @@ export class HostExecutor implements JobExecutor {
     if (remainder === null) throw new Error('budget spent');
 
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
-    const binDir = acquired.ok ? acquired.credentials.binDir : null;
+    if (!acquired.ok) throw new Error(acquired.reason);
+    const binDir = acquired.credentials.binDir;
     const token = this.deps.credentials.currentToken?.(job) ?? null;
     if (token === null) throw new Error('git token: none');
     const login = assign.review?.botLogin;
