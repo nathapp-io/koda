@@ -65,6 +65,8 @@ export type ConfigJobRun =
 export interface JobExecutor {
   prepare(job: JobRow, options?: PrepareOptions): Promise<PrepareOutcome>;
   spawn(job: JobRow): Promise<SpawnHandle>;
+  /** US-009: starts FIX's second nax process with its own output files and current brokered token. */
+  spawnFixStep(job: JobRow): Promise<SpawnHandle>;
   isAlive(pid: number): boolean;
   matchesProcess(job: JobRow): Promise<boolean>;
   /** True when the signal reached the group (mirrors `signalGroup`'s contract). */

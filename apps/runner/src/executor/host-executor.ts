@@ -14,6 +14,7 @@ import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
 import { readPlanCost } from '../verdict/plan-cost';
+import { fixBudgetRemainder } from '../verdict/fix-budget';
 import type { StatusView } from '../verdict/status-view';
 import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-result';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
@@ -26,7 +27,7 @@ import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
-import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
+import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { stashWorkflowOutputs } from './workflow-stash';
@@ -180,6 +181,37 @@ export class HostExecutor implements JobExecutor {
       return this.startNax(argv, options);
     } catch (error) {
       if (review) await this.dropReviewToken(job, jobDir);   // no nax started, so nothing else deletes the token file
+      throw error;
+    }
+  }
+
+  async spawnFixStep(job: JobRow): Promise<SpawnHandle> {
+    const { repoDir, jobDir, outDir } = this.dirs(job);
+    const assign = job.assign;
+    const spentUsd = await this.readPlanCost(job);
+    const remainder = fixBudgetRemainder(assign.maxCostUsd, spentUsd);
+    if (remainder === null) throw new Error('budget spent');
+
+    const acquired = await this.deps.credentials.acquire(job, { wait: false });
+    const binDir = acquired.ok ? acquired.credentials.binDir : null;
+    const token = this.deps.credentials.currentToken?.(job) ?? null;
+    if (token === null) throw new Error('git token: none');
+    const login = assign.review?.botLogin;
+    if (login === undefined) throw new Error('invalid review');
+
+    const argv = buildFixArgv(this.deps.config.naxCommand, assign);
+    await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), undefined, remainder);
+    const tokenPath = await writeReviewToken(jobDir, token);
+    const inherited = process.env['PATH'] ?? '';
+    const env: Record<string, string | undefined> = {
+      ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome,
+      PATH: binDir ? `${binDir}${delimiter}${inherited}` : inherited,
+      NAX_FORGE_TOKEN_FILE: tokenPath, NAX_FORGE_LOGIN: login,
+    };
+    try {
+      return this.startNax(argv, { cwd: repoDir, stdoutPath: join(jobDir, 'fix.stdout'), stderrPath: join(jobDir, 'fix.stderr'), env });
+    } catch (error) {
+      await this.dropReviewToken(job, jobDir);
       throw error;
     }
   }

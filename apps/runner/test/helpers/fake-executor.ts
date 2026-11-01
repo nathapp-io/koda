@@ -19,6 +19,8 @@ export class FakeExecutor implements JobExecutor {
   progressPush: ProgressPushOutcome = { kind: 'pushed', branch: 'feat/x', sha: 'e'.repeat(40) };
   prepareResult: PrepareOutcome = { ok: true, branch: 'feat/x' };
   spawnError: Error | null = null;
+  spawnFixStepError: Error | null = null;
+  fixHandle: SpawnHandle = { pid: 4343, pgid: 4343 };
   handle: SpawnHandle = { pid: 4242, pgid: 4242 };
   alive = false;
   aliveAfterSpawn = true;
@@ -67,6 +69,13 @@ export class FakeExecutor implements JobExecutor {
     if (this.spawnError) throw this.spawnError;
     this.alive = this.aliveAfterSpawn;
     return this.handle;
+  }
+
+  async spawnFixStep(job: JobRow): Promise<SpawnHandle> {
+    this.note('spawnFixStep', job);
+    if (this.spawnFixStepError) throw this.spawnFixStepError;
+    this.alive = this.aliveAfterSpawn;
+    return this.fixHandle;
   }
 
   isAlive(): boolean {

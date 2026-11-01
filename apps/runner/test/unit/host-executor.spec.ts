@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
@@ -11,7 +11,7 @@ import { createGit } from '../../src/executor/git';
 import { configBranchName } from '../../src/executor/config-job/commit-push';
 import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
 import type { SpawnHandle } from '../../src/executor/job-executor';
-import { buildNaxArgv, isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
+import { buildFixArgv, buildNaxArgv, isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
 import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { REVIEW_TOKEN_FILE, writeReviewToken } from '../../src/executor/review-token';
 import { REVIEW_DECISIONS_FILE } from '../../src/executor/review-decisions-file';
@@ -597,6 +597,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     omitCurrentToken?: boolean;
     spawnError?: Error | null;
     breakTokenFile?: boolean;
+    maxCostUsd?: string;
     review?: NonNullable<AssignPayload['review']>;
   }
 
@@ -607,6 +608,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
   async function injectedWorld(command: 'RUN' | 'REVIEW' | 'FIX', over: Injection = {}) {
     const w = await world(command, {
       jobId: 'rjob1',
+      ...(over.maxCostUsd === undefined ? {} : { maxCostUsd: over.maxCostUsd }),
       ...(['REVIEW', 'FIX'].includes(command) ? { feature: 'review-pr-42', review: over.review ?? { prNumber: 42, botLogin: BOT, ...(command === 'FIX' ? { decisions: [{ id: 'm1', statement: 's' }] } : {}) } } : {}),
     });
     const calls: SpawnCall[] = [];
@@ -663,6 +665,64 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
   test('US-008: FIX failed start removes token and propagates error', async () => {
     const w = await injectedWorld('FIX', { spawnError: new Error('ENOENT nax') });
     await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('US-009 AC-1, AC-2, AC-3: fix step brokers fresh token/login, argv, and separate output files', async () => {
+    const w = await injectedWorld('FIX');
+    const handle = await w.ex.spawnFixStep(w.row);
+    expect(handle).toEqual(HANDLE);
+    const call = w.calls[0];
+    expect(call?.argv).toEqual(buildFixArgv(['bun', FAKE], w.row.assign));
+    expect(call?.options.stdoutPath).toBe(join(w.row.jobDir, 'fix.stdout'));
+    expect(call?.options.stderrPath).toBe(join(w.row.jobDir, 'fix.stderr'));
+    expect(call?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
+    expect(call?.options.env['NAX_FORGE_LOGIN']).toBe(BOT);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);
+    expect((await stat(w.tokenPath)).mode & 0o777).toBe(0o600);
+  });
+
+  test('US-009 AC-4: fix step rewrites the profile with remaining budget before nax starts', async () => {
+    const w = await injectedWorld('FIX', { maxCostUsd: '1' });
+    await w.ex.prepare(w.row);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'rjob1'), 'utf8')).bot.costLimit).toBe(1);
+    const costDir = join(w.row.jobDir, 'nax-out', 'cost');
+    await mkdir(costDir, { recursive: true });
+    await writeFile(join(costDir, 'plan.jsonl'), JSON.stringify({ callId: 'review-call', costUsd: 0.3 }) + '\n');
+    let profileAtStart: Record<string, unknown> | undefined;
+    const observing = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials: { acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }), release: async () => undefined, currentToken: () => TOKEN },
+      approvals: NO_APPROVALS,
+      spawnNax: (argv, options) => { profileAtStart = JSON.parse(readFileSync(jobProfilePath(w.naxHome, 'rjob1'), 'utf8')) as Record<string, unknown>; w.calls.push({ argv, options }); return HANDLE; },
+    });
+    await observing.spawnFixStep(w.row);
+    expect((profileAtStart?.['bot'] as { costLimit?: number } | undefined)?.costLimit).toBe(0.7);
+  });
+
+  test('US-009 AC-5: exhausted remainder does not write token or start nax', async () => {
+    const w = await injectedWorld('FIX', { maxCostUsd: '1' });
+    const costDir = join(w.row.jobDir, 'nax-out', 'cost');
+    await mkdir(costDir, { recursive: true });
+    await writeFile(join(costDir, 'plan.jsonl'), JSON.stringify({ callId: 'review-call', costUsd: 1 }) + '\n');
+    await expect(w.ex.spawnFixStep(w.row)).rejects.toThrow('budget spent');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+    await expect(stat(jobProfilePath(w.naxHome, 'rjob1'))).rejects.toThrow();
+    await expect(stat(join(w.row.jobDir, 'fix.stdout'))).rejects.toThrow();
+  });
+
+  test('US-009 AC-6: missing current token does not write or start', async () => {
+    const w = await injectedWorld('FIX', { currentToken: null });
+    await expect(w.ex.spawnFixStep(w.row)).rejects.toThrow('git token: none');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+    await expect(stat(jobProfilePath(w.naxHome, 'rjob1'))).rejects.toThrow();
+  });
+
+  test('US-009 AC-7: failed fix start removes token before propagating', async () => {
+    const w = await injectedWorld('FIX', { spawnError: new Error('nax start failed') });
+    await expect(w.ex.spawnFixStep(w.row)).rejects.toThrow('nax start failed');
     await expect(stat(w.tokenPath)).rejects.toThrow();
   });
 
