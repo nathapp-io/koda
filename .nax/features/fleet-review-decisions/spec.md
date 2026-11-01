@@ -130,7 +130,7 @@ Changed. The baseline locates the code; implement the target.
 - New `apps/api/src/memory/review-decisions.service.ts`: `ReviewDecisionsService.selectForReview(projectId,
   repoId): Promise<ReviewDecision[]>`, provided and exported by `MemoryModule`.
 - `FleetJob` (`apps/api/prisma/schema.prisma`): adds `reviewDecisions Json?`; migration
-  `20261114090000_fleet_review_decisions`.
+  `20261117090000_fleet_review_decisions`.
 - `NewFleetJob` / `FleetJobRecord` (`apps/api/src/fleet/jobs/domain/fleet-job.domain.ts`): optional
   `reviewDecisions?: ReviewDecision[] | null`. In `prisma-fleet-job.repository.ts`, `toJob` casts the JSON
   column to `ReviewDecision[] | null`; `createJob` omits the key when `reviewDecisions` is undefined, writes
@@ -283,7 +283,7 @@ Workdir: apps/runner. Depends on US-005.
 
 **US-003**
 
-- `apps/api/prisma/migrations/20261114090000_fleet_review_decisions/migration.sql` — adds `FleetJob.reviewDecisions`.
+- `apps/api/prisma/migrations/20261117090000_fleet_review_decisions/migration.sql` — adds `FleetJob.reviewDecisions`.
 - `apps/api/test/integration/fleet/fleet-review-decisions-dispatch.integration.spec.ts` — dispatch route tests.
 
 **US-006**
