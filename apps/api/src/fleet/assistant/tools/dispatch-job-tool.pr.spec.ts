@@ -45,6 +45,8 @@ describe('dispatch job PR preview and DTO', () => {
     const { tool, dispatch } = setup();
     await tool.execute(ctx, { repo: 'acme/app', command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 });
     expect(dispatch.mock.calls[0]?.[2]).toEqual({ repoId: 'r1', command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 });
-    expect('prNumber' in (dispatch.mock.calls[0]?.[2] as object)).toBe(false);
+    const dto = dispatch.mock.calls[0]?.[2];
+    expect(dto).toBeDefined();
+    expect(dto).not.toHaveProperty('prNumber');
   });
 });
