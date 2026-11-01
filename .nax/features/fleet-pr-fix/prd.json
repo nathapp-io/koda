@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T06:22:24.306Z",
+  "updatedAt": "2026-11-01T06:31:51.160Z",
   "userStories": [
     {
       "id": "US-001",
@@ -192,14 +192,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "FIX reuses existing strict capability parsing, placement and assign builders without a new abstraction; forge-identity admission still requires the security strategy override."
+        "reasoning": "FIX reuses existing strict capability parsing, placement and assign builders without a new abstraction; forge-identity admission still requires the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/placement-rules.ts",
@@ -246,7 +249,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "65eb7b533c79d5d9959e5b4d4375e9cacf180265"
     },
     {
       "id": "US-004",
