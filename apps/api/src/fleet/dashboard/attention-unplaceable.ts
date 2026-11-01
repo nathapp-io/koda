@@ -36,7 +36,7 @@ export interface DryRunResult {
 
 /** Misfits the runner itself can clear (a credential, the service environment): they raise its runner_unhealthy to error. */
 const RUNNER_FIXABLE_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['provider_missing', 'provider_unavailable', 'interaction']);
-const WAITING_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['capacity', 'busy_repo']);
+const WAITING_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['capacity', 'busy_repo', 'trust_domain']);
 
 /** Runners with unreadable capabilities are never candidates (spec §1.4). */
 const toCandidate = (r: DashboardRunnerRow): PlacementRunner | null =>

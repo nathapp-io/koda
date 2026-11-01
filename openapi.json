@@ -15244,6 +15244,7 @@
           },
           "maxConcurrentTickets": {
             "type": "number",
+            "minimum": 1,
             "description": "Max concurrent tickets agent can handle"
           }
         }
@@ -18157,12 +18158,12 @@
             "description": "pushed | none | failed:<reason> (S1b §1.1)"
           },
           "fixOutcome": {
+            "nullable": true,
             "enum": [
               "pushed",
               "nothing"
             ],
             "type": "string",
-            "nullable": true,
             "description": "A FIX job's outcome, mirrored from its snapshots (US-004)"
           },
           "stories": {
@@ -18273,6 +18274,7 @@
               "busy_repo",
               "capacity",
               "config_jobs",
+              "trust_domain",
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
@@ -20329,6 +20331,7 @@
               "approvals_relay",
               "busy_repo",
               "capacity",
+              "trust_domain",
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
@@ -20980,6 +20983,7 @@
               "approvals_relay",
               "busy_repo",
               "capacity",
+              "trust_domain",
               "thread_capacity",
               "thread_backend",
               "threads_disabled",

@@ -14,7 +14,7 @@ import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import { EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
 import { withProjectRepos } from './project-repos-assign';
 import type { RunnerCapabilities } from '../common/protocol';
@@ -137,7 +137,9 @@ export class PlacementService {
         events.push(done.live);
         count += 1;
         slots -= 1;
-        load = { ...load, active: load.active + 1, repoIds: new Set([...load.repoIds, job.repoId]) };
+        // The next job in this same pass must see the load this assignment created: occupancy covers
+        // capacity, the repository and the trust domain (US-004), not only the counter.
+        load = addJobToLoad(load, { runnerId: runner.id, repoId: job.repoId, command: job.command, projectId: job.projectId, bashMode: job.bashMode });
       }
       return { live: events, assigned: count };
     });
@@ -153,7 +155,7 @@ export class PlacementService {
       if (!runner || !runner.enabled) return { live: [] as LiveFleetJobEvent[], assigned: 0 };
       const pauses = await this.budgets.snapshot(now);
       const candidate = { ...runner, budgetPaused: pauses.runnerPaused(runner.id) };
-      const load = toLoads(await this.repo.findActiveLoads([runner.id])).get(runner.id) ?? EMPTY_LOAD;
+      let load = toLoads(await this.repo.findActiveLoads([runner.id])).get(runner.id) ?? EMPTY_LOAD;
       let slots = (runner.threadCapacity ?? 0) - (load.threads ?? 0);
       const events: LiveFleetJobEvent[] = [];
       let count = 0;
@@ -170,13 +172,15 @@ export class PlacementService {
         // logged and skipped, never allowed to fail the request).
         if (!repo || !thread) continue;
         const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled, action: thread.action, kind: thread.kind });
-        const currentLoad = { ...load, threads: (runner.threadCapacity ?? 0) - slots };
-        if (firstMisfit(placementJob, candidate, currentLoad, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
+        if (firstMisfit(placementJob, candidate, load, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
         const done = await this.assign(job, repo, runner, now);
         if (!done) continue;
         events.push(done.live);
         count += 1;
         slots -= 1;
+        // Carry the assigned job into the load the next candidate is judged on, so a later turn of
+        // another project's thread (or another slot) sees it (US-004).
+        load = addJobToLoad(load, { runnerId: runner.id, repoId: job.repoId, command: job.command, projectId: job.projectId, bashMode: job.bashMode });
       }
       return { live: events, assigned: count };
     });

@@ -61,6 +61,11 @@ describe('placement rules (spec §4)', () => {
     expect(MISFIT_REASONS).toContain('bot_fix');
   });
 
+  it('US-004: trust_domain is recoverable and named by the dashboard reason list', () => {
+    expect(PERMANENT_MISFITS.has('trust_domain')).toBe(false);
+    expect(MISFIT_REASONS).toContain('trust_domain');
+  });
+
   it('fits a matching runner', () => {
     expect(misfit(job(), runner())).toBeNull();
   });
