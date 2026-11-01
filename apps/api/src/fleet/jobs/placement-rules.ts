@@ -10,7 +10,7 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -34,6 +34,7 @@ export interface PlacementThread {
 export interface PlacementJob {
   command: string;
   repoId: string;
+  projectId: string;
   provider: 'github' | 'gitlab';
   profiles: readonly string[];
   selectorLabels: readonly string[];
@@ -62,11 +63,13 @@ export interface PlacementRunner {
 export interface RunnerLoad {
   active: number;
   repoIds: ReadonlySet<string>;
+  projectIds: ReadonlySet<string>;
+  rawProjectIds: ReadonlySet<string>;
   threads?: number;
 }
 
 /** A runner with no held jobs. `threads` is always present so readers never need a `?? 0`. */
-export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Set<string>(), threads: 0 });
+export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Set<string>(), projectIds: new Set<string>(), rawProjectIds: new Set<string>(), threads: 0 });
 
 const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -109,6 +112,12 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
   return toolsMisfit(job, caps);
 }
 
+function hasTrustDomainMisfit(job: PlacementJob, load: RunnerLoad): boolean {
+  const isRawAgent = job.bashMode === 'raw' && !isConfigKind(job.command) && job.command !== 'CONFIG';
+  return [...(load.projectIds ?? [])].some((projectId) => projectId !== job.projectId && isRawAgent)
+    || [...(load.rawProjectIds ?? [])].some((projectId) => projectId !== job.projectId);
+}
+
 /** Spec §4 steps 1-3, in order. Pinned jobs ignore selector labels (the pin is the candidate set). */
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
@@ -137,11 +146,13 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
     } else if (runner.capabilities.threadWrite !== true) {
       return 'thread_write';
     }
+    if (hasTrustDomainMisfit(job, load)) return 'trust_domain';
     if ((load.threads ?? 0) >= (runner.threadCapacity ?? 0)) return 'thread_capacity';
     return null;
   }
   const capability = capabilityMisfit(job, runner.capabilities);
   if (capability) return capability;
+  if (hasTrustDomainMisfit(job, load)) return 'trust_domain';
   if (load.repoIds.has(job.repoId)) return 'busy_repo';
   if (load.active >= runner.capacity) return 'capacity';
   return null;
@@ -166,23 +177,30 @@ export function orderCandidates<T extends { runner: PlacementRunner; load: Runne
 export const QUEUED_SCAN_LIMIT = 50;
 
 /** Runner-held job refs -> per-runner load (moved from placement.service.ts, D413). */
-export const toLoads = (refs: readonly { runnerId: string; repoId: string; command?: string }[]): ReadonlyMap<string, RunnerLoad> =>
-  refs.reduce((acc, { runnerId, repoId, command }) => {
-    const prev = acc.get(runnerId) ?? EMPTY_LOAD;
-    const isThread = isThreadKind(command ?? '');
-    return new Map([...acc, [runnerId, {
-      active: prev.active + (isThread ? 0 : 1),
-      repoIds: isThread ? new Set(prev.repoIds) : new Set([...prev.repoIds, repoId]),
-      ...((prev.threads ?? 0) + (isThread ? 1 : 0) > 0 ? { threads: (prev.threads ?? 0) + (isThread ? 1 : 0) } : {}),
-    }]]);
+export function addJobToLoad(load: RunnerLoad, ref: { runnerId: string; repoId: string; command?: string; projectId: string; bashMode: string }): RunnerLoad {
+  const isThread = isThreadKind(ref.command ?? '');
+  const isRawAgent = ref.bashMode === 'raw' && !isConfigKind(ref.command ?? '') && ref.command !== 'CONFIG';
+  return {
+    active: load.active + (isThread ? 0 : 1),
+    repoIds: isThread ? new Set(load.repoIds) : new Set([...load.repoIds, ref.repoId]),
+    projectIds: new Set([...load.projectIds, ref.projectId]),
+    rawProjectIds: isRawAgent ? new Set([...load.rawProjectIds, ref.projectId]) : new Set(load.rawProjectIds),
+    threads: (load.threads ?? 0) + (isThread ? 1 : 0),
+  };
+}
+
+export const toLoads = (refs: readonly { runnerId: string; repoId: string; command?: string; projectId: string; bashMode: string }[]): ReadonlyMap<string, RunnerLoad> =>
+  refs.reduce((acc, ref) => {
+    acc.set(ref.runnerId, addJobToLoad(acc.get(ref.runnerId) ?? EMPTY_LOAD, ref));
+    return acc;
   }, new Map<string, RunnerLoad>());
 
 export const toPlacementJob = (
   job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
-  repo: Pick<FleetRepoRef, 'provider'>,
+  repo: Pick<FleetRepoRef, 'provider' | 'projectId'>,
   thread?: PlacementThread,
 ): PlacementJob => ({
-  command: job.command, repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
+  command: job.command, repoId: job.repoId, projectId: repo.projectId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
   ...(thread ? { thread } : {}),
 });
 

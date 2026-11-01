@@ -21,7 +21,7 @@ const runner = (over: Partial<PlacementRunner> = {}): PlacementRunner => ({
   labels: ['linux', 'gpu'], capacity: 1, capabilities: caps(), ...over,
 });
 const job = (over: Partial<PlacementJob> = {}): PlacementJob => ({
-  command: 'RUN', repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
+  command: 'RUN', repoId: 'repo-1', projectId: 'p1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });
 const misfit = (j: PlacementJob, r: PlacementRunner, load = EMPTY_LOAD) => firstMisfit(j, r, load, NOW, 90);
 const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
@@ -103,7 +103,7 @@ describe('placement rules (spec §4)', () => {
   });
 
   it('reports busy_repo before capacity, and capacity when full', () => {
-    expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['repo-1']) })).toBe('busy_repo');
+    expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['repo-1']), projectIds: new Set(), rawProjectIds: new Set() })).toBe('busy_repo');
     expect(misfit(job(), runner({ capacity: 2 }), { active: 2, repoIds: new Set(['other']) })).toBe('capacity');
     expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['other']) })).toBeNull();
   });
