@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T08:08:44.937Z",
+  "updatedAt": "2026-11-01T08:17:14.409Z",
   "userStories": [
     {
       "id": "US-001",
@@ -870,14 +870,17 @@
         "US-010",
         "US-011"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One ordered judge branch consumes upstream executor results and the existing snapshot merge without implementing concurrency; credential-failure and cancellation precedence retain strict security isolation."
+        "reasoning": "One ordered judge branch consumes upstream executor results and the existing snapshot merge without implementing concurrency; credential-failure and cancellation precedence retain strict security isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/job-run.ts",
@@ -902,7 +905,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "651578de30fc08320eba4ee80732b041473d0265"
     },
     {
       "id": "US-013",
