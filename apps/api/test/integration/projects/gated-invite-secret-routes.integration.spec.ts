@@ -5,7 +5,7 @@ import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/a
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { fixtureDb } from '../../helpers/action-context';
-import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
+import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -51,6 +51,22 @@ describeIntegration('gated invite create and resend secret routes (US-005)', () 
     await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
     await db.approvalPolicy.deleteMany();
+  });
+
+  it('US-002 AC-6/7: project-admin agent member additions wait with no policy and write no role binding', async () => {
+    const createdUser = data<{ id: string }>(await request(server()).post('/api/admin/users')
+      .auth(world.tokens.root, { type: 'bearer' })
+      .send({ email: email(), name: 'Pending member', password: TEST_PASSWORD }).expect(201));
+    await grantRole(db, { type: 'AGENT', id: agent.id }, 'project-admin', world.projectId);
+    await app.get(PermissionCache).invalidate();
+
+    const pending = data<Pending>(await request(server()).post('/api/projects/web/members')
+      .auth(agent.apiKey, { type: 'bearer' })
+      .send({ email: (await db.user.findUniqueOrThrow({ where: { id: createdUser.id } })).email, roleKey: 'project-admin' })
+      .expect(202));
+
+    expect(pending.permissionKey).toBe('member.add');
+    expect(await db.roleBinding.findMany({ where: { principalType: 'USER', principalId: createdUser.id, projectId: world.projectId } })).toEqual([]);
   });
 
   it('AC-1: create waits under policy without writing an invite', async () => {
@@ -111,13 +127,21 @@ describeIntegration('gated invite create and resend secret routes (US-005)', () 
     expect((await db.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } })).status).toBe('failed');
   });
 
-  it('AC-8/12: default-none create and resend execute immediately without approval rows', async () => {
-    const created = data<InviteResult>(await createAsAgent(email()).expect(201));
-    expect(created.invitePath).toMatch(/^\/invite\//);
+  it('AC-8/11/12: default-policy agent create and resend wait for human approval; root create remains immediate', async () => {
+    const createAddress = email();
+    const createPending = data<Pending>(await createAsAgent(createAddress).expect(202));
+    expect(createPending).toMatchObject({ permissionKey: 'invite.create', redeem: true });
+    expect(await db.projectInvite.count({ where: { email: createAddress } })).toBe(0);
+    expect(await db.approvalRequest.count()).toBe(1);
+
     const rootCreated = await rootCreate();
-    const result = data<InviteResult>(await request(server()).post(`/api/projects/web/invites/${rootCreated.invite.id}/resend`)
-      .auth(agent.apiKey, { type: 'bearer' }).expect(200));
-    expect(result.invitePath).toMatch(/^\/invite\//);
-    expect(await db.approvalRequest.count()).toBe(0);
+    expect(await db.approvalRequest.count()).toBe(1);
+    const before = await db.projectInvite.findUniqueOrThrow({ where: { id: rootCreated.invite.id }, select: { tokenHash: true, expiresAt: true, updatedAt: true } });
+    const resendPending = data<Pending>(await request(server()).post(`/api/projects/web/invites/${rootCreated.invite.id}/resend`)
+      .auth(agent.apiKey, { type: 'bearer' }).expect(202));
+    expect(resendPending).toMatchObject({ permissionKey: 'invite.resend', redeem: true });
+    expect(await db.approvalRequest.count()).toBe(2);
+    const after = await db.projectInvite.findUniqueOrThrow({ where: { id: rootCreated.invite.id }, select: { tokenHash: true, expiresAt: true, updatedAt: true } });
+    expect(after).toEqual(before);
   });
 });

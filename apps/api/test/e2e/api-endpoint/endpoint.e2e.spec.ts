@@ -3423,6 +3423,21 @@ describeIntegration('API Integration Tests', () => {
     it('GET /api/projects/:slug/members?principals=agents answers 400 validation', async () => {
       await membersOf(userAccessToken, '?principals=agents').expect(400);
     });
+
+    it('US-002: project-admin agent invite requests wait for human approval', async () => {
+      const prisma = prismaClient();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantRole(prisma, { type: 'AGENT', id: agentId }, 'project-admin', project.id);
+      await app.get(MembershipService).invalidatePermissions();
+
+      const response = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/invites`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ email: `agent-pending-${Date.now()}@koda.test`, roleKey: 'project-admin' })
+        .expect(202);
+
+      expect(body<{ permissionKey: string }>(response).permissionKey).toBe('invite.create');
+    });
   });
 
   describe('US-003 Disabled member guard', () => {

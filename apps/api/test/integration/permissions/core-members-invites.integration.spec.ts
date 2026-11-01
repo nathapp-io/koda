@@ -343,15 +343,29 @@ describeIntegration('member and invite route keys (US-008)', () => {
   // B4 (whole-branch review) — a project-admin agent may invite
   // -------------------------------------------------------------------------
 
-  it('B4: an agent with a project-admin binding invites an unknown address with 201, and is named as the inviter', async () => {
+  it('B4: an agent with a project-admin binding requires human approval before inviting an unknown address', async () => {
     await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'AGENT', id: agent.id }, roleKey: 'project-admin', projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
     ));
 
-    const created = await request(server)
+    const pendingResponse = await request(server)
       .post(invitesUrl)
       .set({ Authorization: `Bearer ${agent.apiKey}` })
+      .send({ email: 'agent-invited@koda.test', roleKey: 'viewer' })
+      .expect(202);
+    const pending = data<{ id: string; permissionKey: string }>(pendingResponse);
+    expect(pending.permissionKey).toBe('invite.create');
+    expect(await db.projectInvite.count({ where: { email: 'agent-invited@koda.test' } })).toBe(0);
+    await request(server)
+      .post(`/api/approvals/${pending.id}/decisions`)
+      .set(auth('root'))
+      .send({ decision: 'approve' })
+      .expect(200);
+
+    const created = await request(server)
+      .post(invitesUrl)
+      .set({ Authorization: `Bearer ${agent.apiKey}`, 'X-Koda-Approval-Request': pending.id })
       .send({ email: 'agent-invited@koda.test', roleKey: 'viewer' })
       .expect(201);
 
