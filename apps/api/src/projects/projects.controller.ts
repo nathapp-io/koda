@@ -258,9 +258,14 @@ export class ProjectsController {
       throw new NotFoundAppException({}, 'projectAgents');
     }
 
-    // Self shutdown is unconditional after roster validation and must never wait on approval.
+    // Self updates are limited to validated shutdowns and never enter the approval path.
     if (isAgentPrincipal(principal) && principal.slug === agentSlug) {
-      return JsonResponse.Ok(await this.agentsService.update(agentSlug, updateDto));
+      const patch = parseBody(UpdateAgentDto, updateDto ?? {});
+      const definedKeys = Object.keys(patch).filter((key) => patch[key as keyof UpdateAgentDto] !== undefined);
+      if (definedKeys.length !== 1 || definedKeys[0] !== 'status' || !['PAUSED', 'OFFLINE'].includes(patch.status ?? '')) {
+        throw new ForbiddenAppException({}, 'projectAgents');
+      }
+      return JsonResponse.Ok(await this.agentsService.update(agentSlug, { status: patch.status }));
     }
 
     // The action key is global; check it before entering the gate.

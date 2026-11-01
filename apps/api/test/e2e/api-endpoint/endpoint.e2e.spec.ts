@@ -1986,6 +1986,27 @@ describeIntegration('API Integration Tests', () => {
         .expect(200);
     });
 
+    it('PATCH /api/projects/:slug/agents/:agentSlug — agent cannot reactivate itself', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(200);
+
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ status: 'ACTIVE' })
+        .expect(403);
+
+      expect((await prismaClient().agent.findUniqueOrThrow({ where: { id: agentId } })).status).toBe('PAUSED');
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+    });
+
     it('PATCH /api/projects/:slug/agents/nonexistent — 404 for unknown agent slug', async () => {
       await request(httpServer)
         .patch(`/api/projects/${projectSlug}/agents/no-such-agent`)
