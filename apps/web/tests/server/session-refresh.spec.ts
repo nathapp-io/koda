@@ -2,6 +2,8 @@ import { describe, test, expect, jest, beforeEach } from '@jest/globals'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { clearAuthCookies as clearRealAuthCookies, setAuthCookies as setRealAuthCookies } from '~/server/utils/api'
+import { createEvent, deleteCookie as h3DeleteCookie, setCookie as h3SetCookie } from '../../../../node_modules/.bun/h3@1.15.11/node_modules/h3'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
 const middlewarePath = join(__dirname, '..', '..', 'server', 'middleware', 'session-refresh.ts')
 const g = globalThis as Record<string, unknown>
@@ -12,13 +14,32 @@ jest.mock('../../server/utils/session-refresh', () => ({
 }))
 type Handler = (event: unknown) => Promise<void>
 
-const event = () => ({
+type TestEvent = {
   node: {
-    req: { method: 'GET', url: '/projects', headers: { accept: 'text/html', cookie: 'koda_refresh=r1; koda_locale=zh' } },
-    res: { headers: {} as Record<string, string | string[]> },
-  },
-  context: {},
-})
+    req: { method: string; url: string; headers: { accept: string; cookie: string } }
+    res: { headers: Record<string, string | string[]>; getHeader(name: string): string | string[] | undefined; setHeader(name: string, value: string | string[]): void; appendHeader(name: string, value: string): void; removeHeader(name: string): void; headersSent: boolean }
+  }
+  context: Record<string, unknown>
+}
+
+const event = (): TestEvent => {
+  const response: TestEvent['node']['res'] = {
+    headers: {},
+    headersSent: false,
+    getHeader(name) { return this.headers[name.toLowerCase()] },
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value },
+    appendHeader(name, value) {
+      const key = name.toLowerCase()
+      const current = this.headers[key]
+      this.headers[key] = [...(Array.isArray(current) ? current : current ? [current] : []), value]
+    },
+    removeHeader(name) { delete this.headers[name.toLowerCase()] },
+  }
+  return createEvent(
+    { method: 'GET', url: '/projects', headers: { accept: 'text/html', cookie: 'koda_refresh=r1; koda_locale=zh' } } as IncomingMessage,
+    response as unknown as ServerResponse,
+  ) as unknown as TestEvent
+}
 
 function emittedCookies(req: ReturnType<typeof event>): string[] {
   const value = req.node.res.headers['set-cookie']
@@ -38,17 +59,8 @@ beforeEach(() => {
   })
   g.setAuthCookies = jest.fn(setRealAuthCookies)
   g.clearAuthCookies = jest.fn(clearRealAuthCookies)
-  g.setCookie = (target: unknown, name: string, value: string, options: { maxAge?: number }) => {
-    const res = (target as ReturnType<typeof event>).node.res
-    const current = res.headers['set-cookie']
-    const cookie = `${name}=${value}; Path=/${options.maxAge ? `; Max-Age=${options.maxAge}` : ''}`
-    res.headers['set-cookie'] = [...(Array.isArray(current) ? current : current ? [current] : []), cookie]
-  }
-  g.deleteCookie = (target: unknown, name: string) => {
-    const res = (target as ReturnType<typeof event>).node.res
-    const current = res.headers['set-cookie']
-    res.headers['set-cookie'] = [...(Array.isArray(current) ? current : current ? [current] : []), `${name}=; Path=/; Max-Age=0`]
-  }
+  g.setCookie = h3SetCookie
+  g.deleteCookie = h3DeleteCookie
 })
 
 async function loadHandler(): Promise<Handler> {
