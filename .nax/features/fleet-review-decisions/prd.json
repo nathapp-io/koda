@@ -3,7 +3,7 @@
   "feature": "fleet-review-decisions",
   "branchName": "feat/fleet-review-decisions",
   "createdAt": "2026-11-14T09:00:00.000Z",
-  "updatedAt": "2026-11-01T02:54:12.313Z",
+  "updatedAt": "2026-11-01T03:00:47.256Z",
   "userStories": [
     {
       "id": "US-001",
@@ -169,14 +169,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "The additive snapshot crosses MemoryModule, dispatch, Prisma JSON persistence, placement payloads and generated DTO contracts, warranting integration-focused three-session TDD; it reuses existing authorization and US-002's isolation-enforcing selector without changing credentials or access-control rules."
+        "reasoning": "The additive snapshot crosses MemoryModule, dispatch, Prisma JSON persistence, placement payloads and generated DTO contracts, warranting integration-focused three-session TDD; it reuses existing authorization and US-002's isolation-enforcing selector without changing credentials or access-control rules.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -230,7 +233,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "23866f1e48f1a131bfff46c3e8fdefe08395b05f"
     },
     {
       "id": "US-004",
