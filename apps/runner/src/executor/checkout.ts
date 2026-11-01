@@ -39,7 +39,7 @@ export async function prepareCheckout(input: CheckoutInput): Promise<CheckoutRes
     await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
     return { ok: true, branch: null, refSha };
   }
-  if (assign.command === 'REVIEW') {
+  if (assign.command === 'REVIEW' || assign.command === 'FIX') {
     await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
     return { ok: true, branch: null, refSha };
   }

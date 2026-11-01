@@ -299,6 +299,28 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     expect(gone.ex.watchOptions).toHaveLength(0);
   });
 
+  test('US-006 AC-10/11: FIX readopt watches an owned live process and finishes a gone process without status.json', async () => {
+    const live = build();
+    live.add({ review: { prNumber: 3, botLogin: 'koda-fleet[bot]' } }, 1, 'FIX');
+    live.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    live.ex.alive = true;
+    live.ex.dieAfterTicks(2);
+    expect(await live.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await live.supervisor.idle();
+    expect(live.ex.watchOptions).toHaveLength(1);
+
+    const gone = build();
+    gone.add({ review: { prNumber: 3, botLogin: 'koda-fleet[bot]' } }, 1, 'FIX');
+    gone.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    gone.ex.alive = false;
+    gone.ex.status = null;
+    expect(await gone.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await gone.supervisor.idle();
+    expect(gone.ex.calls).toContain('readReviewPosted:j1');
+    expect(gone.ex.calls).not.toContain('readStatus:j1');
+    expect(gone.ex.watchOptions).toHaveLength(0);
+  });
+
   test('PLAN: a live process that is this job is watched; a dead or foreign one goes to the finish path (no status.json to judge by)', async () => {
     const live = build();
     running(live, { naxRunId: null }, 'PLAN');
