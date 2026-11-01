@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-follow-up",
   "branchName": "feat/fleet-pr-fix-follow-up",
   "createdAt": "2026-11-01T00:00:00Z",
-  "updatedAt": "2026-11-01T09:54:00.516Z",
+  "updatedAt": "2026-11-01T10:05:57.133Z",
   "userStories": [
     {
       "id": "US-001",
@@ -100,14 +100,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module event dispatch, actor/onBehalfOf attribution, catalog/inventory contracts and DI wiring; system permission registration invokes the security override."
+        "reasoning": "Cross-module event dispatch, actor/onBehalfOf attribution, catalog/inventory contracts and DI wiring; system permission registration invokes the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/notifications/fleet/fleet-job-outcome.subscriber.ts",
@@ -158,7 +161,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "76785f53630c58c3a871af43cf7dbf73a90b8f8b"
     },
     {
       "id": "US-003",
