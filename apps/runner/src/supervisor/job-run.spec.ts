@@ -214,6 +214,14 @@ describe('failures before the process runs', () => {
     expect(b.ex.calls).toEqual(['prepare:j1', 'spawn:j1', 'cleanup:j1']);   // no bundle, no upload
     expect(b.uploads).toEqual([]);
   });
+  test('US-008 AC-10: a FIX with no git token is FAILED with the spawn-failed reason', async () => {
+    const b = build('FIX');
+    b.ex.spawnError = new Error('git token: none');
+    await b.run.start('prepare');
+    expect(states(b)).toEqual([{ to: 'FAILED', reason: 'spawn failed: git token: none' }]);
+    expect(b.ex.calls).toEqual(['prepare:j1', 'spawn:j1', 'cleanup:j1']);
+    expect(b.uploads).toEqual([]);
+  });
   test('a cancel while the job waits for the repo mutex ends ASSIGNED -> CANCELLED at once, holding nothing (D66)', async () => {
     const b = build();
     const release = await b.mutex.acquire('acme/app');            // another job holds the repo

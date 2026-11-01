@@ -129,6 +129,17 @@ describe('buildBundle', () => {
     expect(manifest).toMatchObject({ version: 1, command: 'PLAN' });
     expect(manifest.entries).toContain('nax.stdout');
   });
+  test('US-008 AC-8/9: archive and manifest contain fix output files', async () => {
+    const jobDir = await tmp.make('fix-output-bundle');
+    await writeFile(join(jobDir, 'fix.stdout'), 'fix standard output');
+    await writeFile(join(jobDir, 'fix.stderr'), 'fix standard error');
+    const bundle = await buildBundle({ jobDir, command: 'FIX' });
+    const names = await tarList(bundle.path);
+    expect(names).toContain('fix.stdout');
+    expect(names).toContain('fix.stderr');
+    const manifest = JSON.parse(await readFile(join(jobDir, 'bundle-manifest.json'), 'utf8'));
+    expect(manifest.entries).toEqual(['fix.stderr', 'fix.stdout']);
+  });
   test('ENH-1: a symlink to a directory is stored as a link, not followed (D27)', async () => {
     const jobDir = await jobDirWith();
     const outside = await tmp.make('outside');
