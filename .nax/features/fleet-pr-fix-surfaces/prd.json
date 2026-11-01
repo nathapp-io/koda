@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T12:30:42.078Z",
+  "updatedAt": "2026-11-01T12:34:05.268Z",
   "userStories": [
     {
       "id": "US-001",
@@ -449,14 +449,17 @@
         "prefill"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two small pure helpers in one existing module, but showFixAction explicitly gates a write action on canDispatch, triggering the access-control security override."
+        "reasoning": "Two small pure helpers in one existing module, but showFixAction explicitly gates a write action on canDispatch, triggering the access-control security override.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/fleet-jobs.ts",
@@ -475,7 +478,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b1376193065091f3e1e22ade946592cee21b911"
     },
     {
       "id": "US-009",
