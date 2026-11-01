@@ -136,6 +136,7 @@ describe('FIX step chaining (US-010)', () => {
     const b = build('FIX', 'j1', {}, { maxCostUsd });
     b.ex.reviewPosted = true;
     b.ex.planCost = '0.0100';
+    b.ex.fixOutcome = { kind: 'pushed', logPath: null, pushedSha: null, stderrLine: null };
     b.ex.dieAfterTicks(1);
     return b;
   }
@@ -357,6 +358,81 @@ describe('FIX step chaining (US-010)', () => {
     await b.run.start('prepare');
     expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'runner error: stdout unreadable' });
     expect(b.uploads).toEqual([]);
+  });
+});
+
+describe('FIX verdict (US-012)', () => {
+  async function judged(config: { outcome?: import('../verdict/fix-result').FixOutcome; cost?: string | undefined; maxCostUsd?: string; posted?: boolean; postedError?: Error; fixStep?: boolean; spawnFailure?: Error; cancel?: boolean } = {}) {
+    const b = build('FIX', 'j1', {}, { maxCostUsd: config.maxCostUsd ?? '1' });
+    b.ex.reviewPosted = config.posted ?? true;
+    b.ex.reviewPostedError = config.postedError ?? null;
+    b.ex.fixStepStarted = config.fixStep ?? !config.spawnFailure;
+    b.ex.fixOutcome = config.outcome ?? ((config.fixStep === false || config.spawnFailure)
+      ? { kind: 'none', logPath: null, pushedSha: null, stderrLine: null }
+      : { kind: 'pushed', logPath: null, pushedSha: 'a'.repeat(40), stderrLine: null });
+    b.ex.planCost = Object.hasOwn(config, 'cost') ? config.cost : '0.2500';
+    if (config.spawnFailure) b.ex.spawnFixStepError = config.spawnFailure;
+    b.ex.dieAfterTicks(1);
+    if (config.fixStep === false && !config.spawnFailure) b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    if (config.cancel) b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start(config.fixStep === false && !config.spawnFailure ? 'watch' : 'prepare');
+    return b;
+  }
+
+  test('AC-1/2: pushed result carries full sha and final cumulative cost', async () => {
+    const b = await judged();
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'pushed', resultSha: 'a'.repeat(40), costSpentUsd: '0.2500' });
+  });
+  test('AC-3: pushed without sha omits resultSha', async () => {
+    const b = await judged({ outcome: { kind: 'pushed', logPath: null, pushedSha: null, stderrLine: null } });
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'pushed' });
+    expect(lastSnapshot(b)).not.toHaveProperty('resultSha');
+  });
+  test('AC-4: nothing completes without sha', async () => {
+    const b = await judged({ outcome: { kind: 'nothing', logPath: null, pushedSha: null, stderrLine: null } });
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'nothing' });
+    expect(lastSnapshot(b)).not.toHaveProperty('resultSha');
+  });
+  test.each([
+    ['AC-5', false, '0.2500', '0.25', 'budget spent by review'],
+    ['AC-6', false, undefined, '1', 'cost ledger unreadable'],
+    ['AC-7', false, '0.5000', '1', 'interrupted before fix'],
+  ])('%s: no fix step reports reason', async (_ac, fixStep, cost, maxCostUsd, reason) => {
+    const b = await judged({ fixStep, cost, maxCostUsd });
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason });
+  });
+  test('AC-8: held fix spawn failure takes precedence', async () => {
+    const b = await judged({ spawnFailure: new Error('git token: none') });
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'fix spawn failed: git token: none' });
+  });
+  test('AC-9: missing review marker means review not posted', async () => {
+    const b = await judged({ posted: false });
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+  });
+  test('AC-10: unreadable review marker means review not posted', async () => {
+    const b = await judged({ postedError: new Error('stdout') });
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+  });
+  test('AC-11/12: unsuccessful fix reports stderr first line or fallback', async () => {
+    const bad = await judged({ outcome: { kind: 'none', logPath: null, pushedSha: null, stderrLine: 'untrusted PR: author is not a writer' } });
+    expect(states(bad).at(-1)).toEqual({ to: 'FAILED', reason: 'untrusted PR: author is not a writer' });
+    const empty = await judged({ outcome: { kind: 'none', logPath: null, pushedSha: null, stderrLine: null } });
+    expect(states(empty).at(-1)).toEqual({ to: 'FAILED', reason: 'fix not pushed' });
+  });
+  test('AC-13: unreadable fix outcome falls back to fix not pushed', async () => {
+    const b = build('FIX'); b.ex.reviewPosted = true; b.ex.fixStepStarted = true; b.ex.dieAfterTicks(1);
+    b.ex.readFixOutcome = async () => { throw new Error('fix unreadable'); };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'fix not pushed' });
+  });
+  test('AC-14: cancellation precedes readers', async () => {
+    const b = await judged({ cancel: true });
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(b.ex.calls).not.toContain('readReviewPosted:j1');
+    expect(b.ex.calls).not.toContain('readFixOutcome:j1');
   });
 });
 

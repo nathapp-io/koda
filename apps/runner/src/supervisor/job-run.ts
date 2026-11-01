@@ -459,21 +459,46 @@ export class JobRun {
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
       return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
-    if (row.command === 'REVIEW' || row.command === 'FIX') {
+    if (row.command === 'REVIEW') {
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
       if (cancelled) {
         return { verdict: { state: 'CANCELLED', reason: null }, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
       }
-      const posted = await this.readReviewPosted(row);
-      const fixStepStarted = row.command === 'FIX' && posted ? await this.deps.executor.hasFixStep(row) : true;
-      const verdict = !posted
-        ? { state: 'FAILED' as const, reason: 'review not posted' }
-        : row.command === 'FIX' && fixSpawnFailure !== undefined
-          ? { state: 'FAILED' as const, reason: `fix spawn failed: ${fixSpawnFailure}` }
-          : row.command === 'FIX' && !fixStepStarted
-            ? { state: 'FAILED' as const, reason: 'interrupted before fix' }
-            : { state: 'COMPLETED' as const, reason: null };
-      return { verdict, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
+      const posted = await this.deps.executor.readReviewPosted(row);
+      return {
+        verdict: posted ? { state: 'COMPLETED', reason: null } : { state: 'FAILED', reason: 'review not posted' },
+        snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined,
+      };
+    }
+    if (row.command === 'FIX') {
+      if (cancelled) return { verdict: { state: 'CANCELLED', reason: null }, snapshot: {}, workflow: undefined };
+      let costSpentUsd: string | undefined;
+      try { costSpentUsd = await this.deps.executor.readPlanCost(row); } catch { costSpentUsd = undefined; }
+      let posted = false;
+      try { posted = await this.deps.executor.readReviewPosted(row); } catch { posted = false; }
+      let verdict: Verdict;
+      let snapshot: SnapshotEventPayload = costSpentUsd === undefined ? {} : { costSpentUsd };
+      if (!posted) verdict = { state: 'FAILED', reason: 'review not posted' };
+      else if (fixSpawnFailure !== undefined) verdict = { state: 'FAILED', reason: `fix spawn failed: ${fixSpawnFailure}` };
+      else {
+        let hasFixStep = false;
+        try { hasFixStep = await this.deps.executor.hasFixStep(row); } catch { hasFixStep = false; }
+        if (!hasFixStep) {
+          const remainder = fixBudgetRemainder(row.assign.maxCostUsd, costSpentUsd);
+          verdict = remainder === null
+            ? { state: 'FAILED', reason: costSpentUsd === undefined ? 'cost ledger unreadable' : 'budget spent by review' }
+            : { state: 'FAILED', reason: 'interrupted before fix' };
+        } else {
+          let outcome;
+          try { outcome = await this.deps.executor.readFixOutcome(row); }
+          catch { outcome = { kind: 'none' as const, logPath: null, pushedSha: null, stderrLine: null }; }
+          if (outcome.kind === 'pushed' || outcome.kind === 'nothing') {
+            verdict = { state: 'COMPLETED', reason: null };
+            snapshot = { ...snapshot, fixOutcome: outcome.kind, ...(outcome.pushedSha ? { resultSha: outcome.pushedSha } : {}) };
+          } else verdict = { state: 'FAILED', reason: outcome.stderrLine ?? 'fix not pushed' };
+        }
+      }
+      return { verdict, snapshot, workflow: undefined };
     }
     const status = await this.deps.executor.readStatus(row);
     if (row.command === 'RUN' && status?.workflow) {
