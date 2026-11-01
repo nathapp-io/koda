@@ -378,13 +378,13 @@ describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appende
     }
   });
 
-  it('AC-8: koda_dispatch_job requires repo, command, feature and maxCostUsd', () => {
+  it('AC-8: koda_dispatch_job requires repo, command and maxCostUsd', () => {
     expect(KODA_DISPATCH_JOB.inputSchema).toMatchObject({ additionalProperties: false });
-    expect((KODA_DISPATCH_JOB.inputSchema as Schema).required).toEqual(['repo', 'command', 'feature', 'maxCostUsd']);
+    expect((KODA_DISPATCH_JOB.inputSchema as Schema).required).toEqual(['repo', 'command', 'maxCostUsd']);
   });
 
-  it('AC-9: koda_dispatch_job takes command RUN or PLAN', () => {
-    expect(propertyOf(KODA_DISPATCH_JOB, 'command').enum).toEqual(['RUN', 'PLAN']);
+  it('AC-9: koda_dispatch_job takes command RUN, PLAN, REVIEW or FIX', () => {
+    expect(propertyOf(KODA_DISPATCH_JOB, 'command').enum).toEqual(['RUN', 'PLAN', 'REVIEW', 'FIX']);
   });
 
   it('AC-10: koda_dispatch_job costs at least 0.0001', () => {
@@ -408,6 +408,7 @@ describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appende
   it('bounds the rest of the dispatch input as its parser will (2b2-D3)', () => {
     expect(propertyOf(KODA_DISPATCH_JOB, 'repo')).toMatchObject({ type: 'string', pattern: REPO_PATTERN });
     expect(propertyOf(KODA_DISPATCH_JOB, 'command')).toMatchObject({ type: 'string' });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'prNumber')).toEqual({ type: 'integer', minimum: 1, maximum: 2147483647 });
     expect(propertyOf(KODA_DISPATCH_JOB, 'feature')).toMatchObject({ type: 'string', minLength: 1, maxLength: 128 });
     expect(propertyOf(KODA_DISPATCH_JOB, 'maxCostUsd')).toMatchObject({ type: 'number' });
     expect(propertyOf(KODA_DISPATCH_JOB, 'ref')).toMatchObject({ type: 'string', minLength: 1, maxLength: 255 });

@@ -65,7 +65,9 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
 
   koda_dispatch_job:
     'Start one fleet job in this project on one of its repositories. `command` is `RUN` to work and open a PR, or ' +
-    '`PLAN` to plan only; `maxCostUsd` is the cost cap in USD, at least 0.0001, at most 10000 and at most 4 ' +
+    '`PLAN` to plan only. `REVIEW` reviews an open pull request; `FIX` reviews then fixes an open pull request. ' +
+    'For `REVIEW` and `FIX`, provide `prNumber` instead of `feature`. `maxCostUsd` is the cost cap in USD, ' +
+    'at least 0.0001, at most 10000 and at most 4 ' +
     'decimal places. The call runs at once as the calling agent, so the job is started by this call and the ' +
     `answer ends with the action id that names it. ${MCP_PROJECT_SENTENCE}`,
 
