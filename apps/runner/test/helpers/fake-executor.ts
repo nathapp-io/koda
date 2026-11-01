@@ -3,6 +3,7 @@ import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPla
 import type { ProgressPushOutcome } from '../../src/executor/progress-push';
 import type { JobRow } from '../../src/journal/types';
 import type { JobLogSources } from '../../src/logs/types';
+import type { FixOutcome } from '../../src/verdict/fix-result';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
 import type { WorkflowResult } from '../../src/verdict/workflow-result';
@@ -120,6 +121,13 @@ export class FakeExecutor implements JobExecutor {
   async hasFixStep(job: JobRow): Promise<boolean> {
     this.note('hasFixStep', job);
     return this.fixStepStarted;
+  }
+
+  fixOutcome: FixOutcome = { kind: 'none', logPath: null, pushedSha: null, stderrLine: null };
+
+  async readFixOutcome(job: JobRow): Promise<FixOutcome> {
+    this.note('readFixOutcome', job);
+    return this.fixOutcome;
   }
 
   async readStatus(job: JobRow): Promise<StatusView | null> {

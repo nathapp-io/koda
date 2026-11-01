@@ -68,6 +68,44 @@ describe('HostExecutor review verdict (US-007)', () => {
   });
 });
 
+describe('HostExecutor FIX outcome reader (US-011)', () => {
+  const sha = 'a'.repeat(40);
+  async function fixWorld() {
+    const w = await world('FIX', { review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } });
+    return w;
+  }
+
+  test('AC-7: returns the PR-specific outcome and trusted full SHA from its run directory', async () => {
+    const w = await fixWorld();
+    const resultDir = join(w.row.jobDir, 'nax-out', 'bot', 'pr-4');
+    await mkdir(resultDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stdout'), `nax bot fix: PR #4 — pushed abc1234\nnax bot fix: log ${join(resultDir, 'bot.jsonl')}\n`);
+    await writeFile(join(resultDir, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
+    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'pushed', logPath: join(resultDir, 'bot.jsonl'), pushedSha: sha, stderrLine: null });
+  });
+
+  test('AC-8: refuses to read state for a log path outside this job and PR', async () => {
+    const w = await fixWorld();
+    const outside = join(w.row.jobDir, 'nax-out', 'bot', 'pr-5');
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stdout'), `nax bot fix: PR #4 — pushed abc1234\nnax bot fix: log ${join(outside, 'bot.jsonl')}\n`);
+    await writeFile(join(outside, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
+    expect(await w.ex.readFixOutcome(w.row)).toMatchObject({ kind: 'pushed', pushedSha: null });
+  });
+
+  test('AC-9: extracts and caps the first non-empty stderr line', async () => {
+    const w = await fixWorld();
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), `  \n${'x'.repeat(300)}\nignored\n`);
+    expect(await w.ex.readFixOutcome(w.row)).toMatchObject({ stderrLine: 'x'.repeat(200) });
+  });
+
+  test('AC-10: missing fix output files produce the none outcome', async () => {
+    const w = await fixWorld();
+    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'none', logPath: null, pushedSha: null, stderrLine: null });
+  });
+});
+
 describe('HostExecutor process lookups are injected (US-001)', () => {
   /** A registry entry for this job's clone, written where `reap` reads it. */
   async function registerPid(w: { workspaceRoot: string }, pid: number, registered: Date): Promise<void> {

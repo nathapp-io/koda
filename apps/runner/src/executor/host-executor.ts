@@ -1,5 +1,5 @@
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, relative, resolve, sep } from 'node:path';
 import { isConfigKind } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
@@ -20,6 +20,7 @@ import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-res
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { reviewPosted } from '../verdict/review-posted';
+import { readFixResult, readPushedSha, type FixOutcome } from '../verdict/fix-result';
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
@@ -291,6 +292,33 @@ export class HostExecutor implements JobExecutor {
 
   async readReviewPosted(job: JobRow): Promise<boolean> {
     return reviewPosted(join(this.dirs(job).jobDir, 'nax.stdout'));
+  }
+
+  async readFixOutcome(job: JobRow): Promise<FixOutcome> {
+    const { jobDir, outDir } = this.dirs(job);
+    const prNumber = job.assign.review?.prNumber;
+    const result = prNumber === undefined
+      ? { kind: 'none' as const, logPath: null }
+      : await readFixResult(join(jobDir, 'fix.stdout'), prNumber);
+
+    let pushedSha: string | null = null;
+    if (result.logPath !== null && prNumber !== undefined) {
+      const expectedRoot = resolve(outDir, 'bot', `pr-${prNumber}`);
+      const logPath = resolve(result.logPath);
+      const rel = relative(expectedRoot, logPath);
+      if (rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`)) {
+        pushedSha = await readPushedSha(logPath);
+      }
+    }
+
+    let stderrLine: string | null = null;
+    try {
+      const stderr = await readFile(join(jobDir, 'fix.stderr'), 'utf8');
+      stderrLine = stderr.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '')?.slice(0, 200) ?? null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return { ...result, pushedSha, stderrLine };
   }
 
   async hasFixStep(job: JobRow): Promise<boolean> {

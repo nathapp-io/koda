@@ -2,6 +2,7 @@ import type { ConfigEditPayload, ConfigJobResult } from '@nathapp/fleet-protocol
 import type { BundleFile } from '../bundle/build-bundle';
 import type { JobLogSources } from '../logs/types';
 import type { JobRow } from '../journal/types';
+import type { FixOutcome } from '../verdict/fix-result';
 import type { PlanCheck } from '../verdict/plan-verdict';
 import type { StatusView } from '../verdict/status-view';
 import type { WorkflowResult } from '../verdict/workflow-result';
@@ -79,6 +80,8 @@ export interface JobExecutor {
   readReviewPosted(job: JobRow): Promise<boolean>;
   /** US-009: true when the FIX's second-step stdout marker exists. */
   hasFixStep(job: JobRow): Promise<boolean>;
+  /** US-011: reads the second nax process outcome and its PR-specific state files. */
+  readFixOutcome(job: JobRow): Promise<FixOutcome>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   /** #203: absolute spend from this PLAN attempt's cost ledgers, in snapshot decimal format. */
   readPlanCost(job: JobRow): Promise<string | undefined>;
