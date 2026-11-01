@@ -7,9 +7,9 @@ export class DispatchFleetJobDto {
   @ApiProperty() @IsString() @Length(1, 64) declare repoId: string;
   @ApiPropertyOptional({ description: 'Git ref to check out detached; defaults to the repo default branch' })
   @IsOptional() @IsString() @MaxLength(255) ref?: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW'] }) @IsIn(['RUN', 'PLAN', 'REVIEW']) declare command: 'RUN' | 'PLAN' | 'REVIEW';
-  @ApiPropertyOptional({ description: 'nax feature name; derived from prNumber for REVIEW' }) @IsOptional() @IsString() @MaxLength(128) feature?: string;
-  @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, description: 'Pull request number, REVIEW only' })
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW', 'FIX'] }) @IsIn(['RUN', 'PLAN', 'REVIEW', 'FIX']) declare command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX';
+  @ApiPropertyOptional({ description: 'nax feature name; derived from prNumber for REVIEW and FIX' }) @IsOptional() @IsString() @MaxLength(128) feature?: string;
+  @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, description: 'Pull request number, REVIEW and FIX only' })
   @ValidateIf((_object, value) => value !== undefined) @IsInt() @Min(1) @Max(2147483647) prNumber?: number;
   @ApiPropertyOptional({ description: 'Repo-relative spec path, PLAN only' }) @IsOptional() @IsString() @MaxLength(512) planFrom?: string;
   @ApiPropertyOptional({ type: [String], description: 'nax profile chain, later wins' })

@@ -23,4 +23,12 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ bashMode: 'yolo' })));
     expect(errors.map((e) => e.property)).toContain('bashMode');
   });
+  it('accepts FIX as a command', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'FIX', feature: undefined, prNumber: 7 })));
+    expect(errors).toEqual([]);
+  });
+  it('rejects lowercase fix as a command', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'fix' })));
+    expect(errors.find((e) => e.property === 'command')).toBeDefined();
+  });
 });

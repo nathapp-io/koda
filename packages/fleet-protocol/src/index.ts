@@ -88,6 +88,8 @@ export interface RunnerCapabilities {
   workspaceThreads?: true;
   /** Fleet PR review: nax supports injected bot forge identity and `nax bot review`. */
   botReview?: true;
+  /** Fleet PR fix: nax supports `nax bot fix --no-rereview` in addition to bot review. */
+  botFix?: true;
 }
 
 export interface EnrollRequest {
@@ -120,7 +122,7 @@ export interface RunnerIdentity {
 export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
-export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD' | 'REVIEW';
+export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD' | 'REVIEW' | 'FIX';
 export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER' | ThreadCommandType;
 export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
@@ -155,6 +157,8 @@ export interface SnapshotEventPayload {
   resultBranch?: string;
   resultSha?: string;
   resultPrUrl?: string;
+  /** S6 K3: outcome of a FIX job. */
+  fixOutcome?: 'pushed' | 'nothing';
   /** S1b §1.1: outcome of the runner's work-in-progress push after an unfinished RUN.
    *  `pushed` | `none` | `failed:<reason>` (printable ASCII, at most 200 chars of reason). */
   wipPush?: string;

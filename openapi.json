@@ -17651,20 +17651,21 @@
             "enum": [
               "RUN",
               "PLAN",
-              "REVIEW"
+              "REVIEW",
+              "FIX"
             ],
             "type": "string"
           },
           "feature": {
             "type": "string",
             "maxLength": 128,
-            "description": "nax feature name; derived from prNumber for REVIEW"
+            "description": "nax feature name; derived from prNumber for REVIEW and FIX"
           },
           "prNumber": {
             "type": "number",
             "minimum": 1,
             "maximum": 2147483647,
-            "description": "Pull request number, REVIEW only"
+            "description": "Pull request number, REVIEW and FIX only"
           },
           "planFrom": {
             "type": "string",
@@ -17997,7 +17998,8 @@
               "CONFIG_EDIT",
               "CONFIG_DRIFT",
               "THREAD",
-              "REVIEW"
+              "REVIEW",
+              "FIX"
             ],
             "type": "string"
           },
