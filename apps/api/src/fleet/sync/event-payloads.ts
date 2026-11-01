@@ -102,6 +102,8 @@ function mirror(p: Obj): FleetJobPatch {
     ['stories', stories],
     ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
     ['postRun', postRunStages(p.postRun)],
+    // US-004: a FIX job's outcome; any other value is dropped like every other bounded snapshot field.
+    ['fixOutcome', p.fixOutcome === 'pushed' || p.fixOutcome === 'nothing' ? p.fixOutcome : undefined],
     // D495: dormant for nax jobs (configEditFor gates on isConfigKind) — mirror() never sees the command to guard with.
     ['configResult', configResult],
   ];

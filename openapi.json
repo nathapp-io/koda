@@ -18156,6 +18156,15 @@
             "nullable": true,
             "description": "pushed | none | failed:<reason> (S1b §1.1)"
           },
+          "fixOutcome": {
+            "enum": [
+              "pushed",
+              "nothing"
+            ],
+            "type": "string",
+            "nullable": true,
+            "description": "A FIX job's outcome, mirrored from its snapshots (US-004)"
+          },
           "stories": {
             "nullable": true,
             "description": "PRD stories in PRD order (S1b §1.2). Null on list pages (D149).",

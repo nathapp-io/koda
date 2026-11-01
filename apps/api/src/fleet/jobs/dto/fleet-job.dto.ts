@@ -90,6 +90,8 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultSha: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultPrUrl: string | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'pushed | none | failed:<reason> (S1b §1.1)' }) declare wipPush: string | null;
+  @ApiPropertyOptional({ enum: ['pushed', 'nothing'], type: String, nullable: true, description: "A FIX job's outcome, mirrored from its snapshots (US-004)" })
+  declare fixOutcome: 'pushed' | 'nothing' | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
@@ -118,6 +120,7 @@ export class FleetJobDto {
       currentPhase: r.currentPhase, costSpentUsd: r.costSpentUsd, lastHeartbeatAt: iso(r.lastHeartbeatAt),
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
+      fixOutcome: r.fixOutcome ?? null,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });

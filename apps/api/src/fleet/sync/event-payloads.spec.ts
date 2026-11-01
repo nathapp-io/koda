@@ -96,6 +96,24 @@ describe('interpretEvent', () => {
   });
 });
 
+describe('snapshot fixOutcome mirror (US-004 AC-2..AC-4)', () => {
+  it('AC-2: mirrors a pushed fix outcome', () => {
+    expect(interpretEvent('snapshot', { fixOutcome: 'pushed' })).toEqual({ kind: 'mirror', patch: { fixOutcome: 'pushed' } });
+  });
+
+  it('AC-3: mirrors a nothing fix outcome', () => {
+    expect(interpretEvent('snapshot', { fixOutcome: 'nothing' })).toEqual({ kind: 'mirror', patch: { fixOutcome: 'nothing' } });
+  });
+
+  it('AC-4: drops an unknown fix outcome and keeps the rest of the snapshot', () => {
+    const effect = interpretEvent('snapshot', { fixOutcome: 'done' });
+    expect(effect).toEqual({ kind: 'mirror', patch: {} });
+    if (effect.kind !== 'mirror') throw new Error('expected a mirror effect');
+    expect(Object.keys(effect.patch)).toEqual([]);
+    expect(interpretEvent('snapshot', { fixOutcome: 'done', currentPhase: 'fix' })).toEqual({ kind: 'mirror', patch: { currentPhase: 'fix' } });
+  });
+});
+
 describe('postRunStages (S2b (j) §1.3, D429)', () => {
   it.each([
     ['all three stages', { acceptance: 'passed', regression: 'running', finish: 'not-run' }, { acceptance: 'passed', regression: 'running', finish: 'not-run' }],

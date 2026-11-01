@@ -301,7 +301,8 @@ export class FleetJobsService {
             costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null,
-            configResult: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            // US-004: a fresh attempt judges its own fix outcome.
+            configResult: null, fixOutcome: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
         await this.audit.record({ key: 'fleet.job.requeue', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `requeued from ${current.state}` });

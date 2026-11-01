@@ -86,4 +86,16 @@ describe('fleet job DTOs', () => {
     expect(row.postRun).toEqual({ acceptance: 'passed', workflowStep: 'done' });
     expect(FleetJobDto.from(row).postRun).toEqual({ acceptance: 'passed', workflowStep: 'done' });
   });
+
+  it('AC-9: a record without a fixOutcome key maps to fixOutcome null', () => {
+    const record = workflowRecord();
+    expect(record).not.toHaveProperty('fixOutcome');
+    expect(FleetJobDto.from(record)).toHaveProperty('fixOutcome', null);
+    expect(FleetJobDto.summary(record)).toHaveProperty('fixOutcome', null);
+  });
+
+  it('carries the stored fix outcome onto the DTO (US-004)', () => {
+    const row = { ...(workflowRecord() as FleetJobRecord), fixOutcome: 'nothing' as const };
+    expect(FleetJobDto.from(row).fixOutcome).toBe('nothing');
+  });
 });
