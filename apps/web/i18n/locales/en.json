@@ -1907,7 +1907,8 @@
         "labelsMax": "At most 16 labels",
         "label": "Labels use lowercase letters, digits, dot, dash or underscore",
         "labelsOrPin": "Choose labels or a runner, not both",
-        "tickets": "Use ticket refs like WEB-12, at most 20"
+        "tickets": "Use ticket refs like WEB-12, at most 20",
+        "bashMode": "Choose a valid shell approval mode"
       }
     },
     "tickets": {

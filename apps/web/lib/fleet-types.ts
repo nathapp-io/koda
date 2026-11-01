@@ -329,8 +329,9 @@ export interface DispatchResultDto {
 /** POST /projects/:slug/fleet/jobs body; a raw job sends neither bash field (server default raw / 600 s). */
 export interface DispatchBody {
   repoId: string
-  command: 'RUN' | 'PLAN'
-  feature: string
+  command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX'
+  feature?: string
+  prNumber?: number
   maxCostUsd: number
   ref?: string
   planFrom?: string

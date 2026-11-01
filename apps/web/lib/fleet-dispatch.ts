@@ -1,5 +1,5 @@
 import * as z from 'zod'
-import type { DispatchBody } from '~/lib/fleet-types'
+import type { BashMode, DispatchBody } from '~/lib/fleet-types'
 import { BASH_MODES, bashCreateFields, DEFAULT_APPROVAL_TIMEOUT_SEC, isBashTimeoutValid, minutesText } from '~/lib/fleet-bash-mode'
 import { LABEL_PATTERN } from '~/lib/fleet-validation'
 import { MAX_DISPATCH_TICKETS, TICKET_REF_RE, ticketRefsFromQuery } from '~/lib/fleet-ticket-links'
@@ -23,12 +23,11 @@ type Translate = (key: string) => string
 export function buildDispatchSchema(t: Translate) {
   return z.object({
     repoId: z.string({ required_error: t('fleet.dispatch.validation.repoRequired') }).min(1, t('fleet.dispatch.validation.repoRequired')),
-    ref: z.string().max(255, t('fleet.dispatch.validation.ref')).optional(),
-    command: z.enum(['RUN', 'PLAN']),
-    feature: z.string()
-      .regex(FEATURE_RE, t('fleet.dispatch.validation.feature'))
-      .refine(value => !value.includes('..'), t('fleet.dispatch.validation.feature')),
-    planFrom: z.string().max(512, t('fleet.dispatch.validation.planFrom')).optional(),
+    ref: z.string().optional(),
+    command: z.enum(['RUN', 'PLAN', 'REVIEW', 'FIX']),
+    feature: z.string(),
+    prNumber: z.string().optional(),
+    planFrom: z.string().optional(),
     profiles: z.array(z.string()).max(MAX_PROFILES, t('fleet.dispatch.validation.profilesMax'))
       .refine(list => list.every(p => PROFILE_NAME_RE.test(p) && !p.startsWith(RESERVED_PROFILE_PREFIX)), t('fleet.dispatch.validation.profileName'))
       .refine(list => new Set(list).size === list.length, t('fleet.dispatch.validation.profileDuplicate')),
@@ -39,19 +38,35 @@ export function buildDispatchSchema(t: Translate) {
     selectorLabels: z.array(z.string()).max(MAX_SELECTOR_LABELS, t('fleet.dispatch.validation.labelsMax'))
       .refine(list => list.every(l => LABEL_PATTERN.test(l)), t('fleet.dispatch.validation.label')),
     pinnedRunnerId: z.string().optional(),
-    ticketRefs: z.array(z.string()).max(MAX_DISPATCH_TICKETS, t('fleet.dispatch.validation.tickets'))
-      .refine(list => list.every(r => TICKET_REF_RE.test(r)), t('fleet.dispatch.validation.tickets')),
-    bashMode: z.enum(BASH_MODES),
+    ticketRefs: z.array(z.string()),
+    bashMode: z.string(),
     /** Under v-if: may be undefined when unmounted (the D182 trap). */
     approvalTimeoutMinutes: z.string().optional(),
   }).superRefine((v, ctx) => {
+    const runOrPlan = v.command === 'RUN' || v.command === 'PLAN'
+    if (runOrPlan) {
+      const issue = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: t(message) })
+      if (!FEATURE_RE.test(v.feature) || v.feature.includes('..')) issue('feature', 'fleet.dispatch.validation.feature')
+      if (v.ref !== undefined && v.ref.length > 255) issue('ref', 'fleet.dispatch.validation.ref')
+      if (v.planFrom !== undefined && v.planFrom.length > 512) issue('planFrom', 'fleet.dispatch.validation.planFrom')
+      if (v.ticketRefs.length > MAX_DISPATCH_TICKETS || !v.ticketRefs.every(ref => TICKET_REF_RE.test(ref))) {
+        issue('ticketRefs', 'fleet.dispatch.validation.tickets')
+      }
+      if (!BASH_MODES.includes(v.bashMode as (typeof BASH_MODES)[number])) issue('bashMode', 'fleet.dispatch.validation.bashMode')
+    }
+    if (v.command === 'REVIEW' || v.command === 'FIX') {
+      const prNumber = (v.prNumber ?? '').trim()
+      if (!/^[1-9][0-9]*$/.test(prNumber) || Number(prNumber) > 2_147_483_647) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['prNumber'], message: t('fleet.dispatch.validation.prNumber') })
+      }
+    }
     if (v.command === 'PLAN' && !(v.planFrom ?? '').trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['planFrom'], message: t('fleet.dispatch.validation.planFromRequired') })
     }
     if (v.pinnedRunnerId && v.selectorLabels.length > 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['selectorLabels'], message: t('fleet.dispatch.validation.labelsOrPin') })
     }
-    if (v.command === 'RUN' && !isBashTimeoutValid(v.bashMode, v.approvalTimeoutMinutes ?? '')) {
+    if (v.command === 'RUN' && !isBashTimeoutValid(v.bashMode as BashMode, v.approvalTimeoutMinutes ?? '')) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['approvalTimeoutMinutes'], message: t('fleet.bash.validation.timeout') })
     }
   })
@@ -64,6 +79,7 @@ export const DISPATCH_DEFAULTS: DispatchFormValues = {
   ref: '',
   command: 'RUN',
   feature: '',
+  prNumber: '',
   planFrom: '',
   profiles: [],
   maxCostUsd: 5,
@@ -79,6 +95,16 @@ export function toDispatchBody(v: DispatchFormValues, opts: { acknowledgeOpenPr?
   const ref = (v.ref ?? '').trim()
   const planFrom = (v.planFrom ?? '').trim()
   const pin = (v.pinnedRunnerId ?? '').trim()
+  if (v.command === 'REVIEW' || v.command === 'FIX') {
+    return {
+      repoId: v.repoId,
+      command: v.command,
+      prNumber: Number((v.prNumber ?? '').trim()),
+      maxCostUsd: v.maxCostUsd,
+      ...(v.profiles.length > 0 ? { profiles: [...v.profiles] } : {}),
+      ...(pin ? { pinnedRunnerId: pin } : v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
+    }
+  }
   return {
     repoId: v.repoId,
     command: v.command,
@@ -89,7 +115,7 @@ export function toDispatchBody(v: DispatchFormValues, opts: { acknowledgeOpenPr?
     ...(v.profiles.length > 0 ? { profiles: [...v.profiles] } : {}),
     ...(pin ? { pinnedRunnerId: pin } : v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
     ...(v.ticketRefs.length > 0 ? { ticketRefs: [...v.ticketRefs] } : {}),
-    ...(v.command === 'RUN' ? bashCreateFields(v.bashMode, v.approvalTimeoutMinutes ?? '') : {}),
+    ...(v.command === 'RUN' ? bashCreateFields(v.bashMode as BashMode, v.approvalTimeoutMinutes ?? '') : {}),
     ...(opts.acknowledgeOpenPr ? { acknowledgeOpenPr: true } : {}),
   }
 }
