@@ -15,8 +15,8 @@ describeIntegration('fleet REVIEW dispatch (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   const auth = () => ({ Authorization: `Bearer ${world.tokens.dev}` });
-  const dispatch = (repoId: string, prNumber = 42) => request(server).post('/api/projects/web/fleet/jobs')
-    .set(auth()).send({ command: 'REVIEW', repoId, prNumber, maxCostUsd: 1 });
+  const dispatch = (repoId: string, prNumber = 42, command: 'REVIEW' | 'FIX' = 'REVIEW') => request(server).post('/api/projects/web/fleet/jobs')
+    .set(auth()).send({ command, repoId, prNumber, maxCostUsd: 1 });
 
   beforeAll(async () => {
     await resetDb();
@@ -40,6 +40,28 @@ describeIntegration('fleet REVIEW dispatch (PG)', () => {
     expect(first.placement.misfits).toEqual([]);
     expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: first.job.id } })).toEqual(expect.objectContaining({ command: 'REVIEW', feature: 'review-pr-42', state: 'QUEUED' }));
     await dispatch(world.repoId).expect(409);
+  });
+
+  it('US-002 AC-2/4/6/7: FIX shares the active PR feature with REVIEW in both directions', async () => {
+    const fixed = data<{ job: { id: string; command: string; feature: string } }>(await dispatch(world.repoId, 50, 'FIX').expect(201));
+    expect(fixed.job).toEqual(expect.objectContaining({ command: 'FIX', feature: 'review-pr-50' }));
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: fixed.job.id } }))
+      .toEqual(expect.objectContaining({ command: 'FIX', feature: 'review-pr-50' }));
+    await dispatch(world.repoId, 50, 'FIX').expect(409);
+    await dispatch(world.repoId, 50, 'REVIEW').expect(409);
+    const reviewed = data<{ job: { feature: string } }>(await dispatch(world.repoId, 51, 'REVIEW').expect(201));
+    expect(reviewed.job.feature).toBe('review-pr-51');
+    await dispatch(world.repoId, 51, 'FIX').expect(409);
+  });
+
+  it('US-002 AC-1/8: rejects FIX and keeps the existing REVIEW GitLab rejection reason', async () => {
+    const repo = await prisma.fleetRepo.create({
+      data: { projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'gitlab-fix', defaultBranch: 'main', createdById: world.ids.root },
+    });
+    const fixResponse = await dispatch(repo.id, 7, 'FIX').expect(422);
+    expect(JSON.stringify(fixResponse.body)).toContain('fix is GitHub-only');
+    const reviewResponse = await dispatch(repo.id, 7, 'REVIEW').expect(422);
+    expect(JSON.stringify(reviewResponse.body)).toContain('review is GitHub-only');
   });
 
   it('US-003 AC-3/4: rejects a REVIEW for a GitLab repo before dispatch normalization', async () => {

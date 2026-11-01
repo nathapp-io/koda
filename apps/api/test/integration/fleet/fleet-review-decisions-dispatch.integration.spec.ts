@@ -43,6 +43,13 @@ describeDb('review decisions dispatch snapshot (PG)', () => {
     const { job } = data<{ job: FleetJobDto }>(await dispatch().expect(201));
     expect((await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).reviewDecisions).toEqual(decisions);
   });
+  it('US-002 AC-3 stores active decisions on FIX jobs', async () => {
+    await seed();
+    const { job } = data<{ job: FleetJobDto }>(await request(app.getHttpServer()).post(route).set(auth())
+      .send({ command: 'FIX', repoId: world.repoId, prNumber: 44, maxCostUsd: 1, profiles: ['fast'] }).expect(201));
+    expect((await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).reviewDecisions).toEqual(decisions);
+  });
+
   it('AC-2 stores [] when there are no active decisions', async () => {
     const { job } = data<{ job: FleetJobDto }>(await dispatch(43).expect(201));
     expect((await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).reviewDecisions).toEqual([]);

@@ -37,8 +37,8 @@ import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.servi
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
 class ReviewProviderException extends ValidationAppException {
-  constructor() {
-    super({ reason: 'review is GitHub-only' }, 'fleet.dispatchInput');
+  constructor(command: 'REVIEW' | 'FIX') {
+    super({ reason: `${command === FleetJobKind.FIX ? 'fix' : 'review'} is GitHub-only` }, 'fleet.dispatchInput');
   }
 
   override get httpStatus(): number {
@@ -79,8 +79,8 @@ export class FleetJobsService {
   async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    if (dto.command === FleetJobKind.REVIEW && repo.provider !== 'github') {
-      throw new ReviewProviderException();
+    if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX) && repo.provider !== 'github') {
+      throw new ReviewProviderException(dto.command);
     }
     const input = normalizeDispatch(dto, repo.defaultBranch);
     const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
@@ -106,7 +106,7 @@ export class FleetJobsService {
     await this.budgets.assertNotPaused(jobGateKeys({ projectId, repoId: repo.id, pinnedRunnerId: input.pinnedRunnerId }), new Date());
 
     // Snapshot once, before the insert transaction. Selection failures must abort dispatch.
-    const reviewDecisions = input.command === FleetJobKind.REVIEW
+    const reviewDecisions = input.command === FleetJobKind.REVIEW || input.command === FleetJobKind.FIX
       ? await this.reviewDecisions.selectForReview(projectId, repo.id)
       : undefined;
 

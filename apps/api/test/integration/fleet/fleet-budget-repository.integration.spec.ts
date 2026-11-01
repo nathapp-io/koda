@@ -108,14 +108,16 @@ describeIntegration('budget repository (PG)', () => {
   it('lists QUEUED jobs pinned to a runner scope and the ASSIGNED or RUNNING jobs it holds', async () => {
     const runner = await insertRunner(prisma);
     const pinned = await insertJob({ state: 'QUEUED', pinnedRunnerId: runner.id });
+    const fix = await insertJob({ state: 'QUEUED', command: 'FIX', feature: `review-pr-${++n}` });
     await insertJob({ state: 'QUEUED' });
     const running = await insertJob({ state: 'RUNNING', runnerId: runner.id });
     const assigned = await insertJob({ state: 'ASSIGNED', runnerId: runner.id });
     await insertJob({ state: 'UPLOADING', runnerId: runner.id });
     const scope = { scopeType: 'runner' as const, scopeId: runner.id };
     expect(await repo.findQueuedJobIds(scope)).toEqual([pinned.id]);
+    expect(await repo.findQueuedJobIds({ scopeType: 'global', scopeId: null })).toContain(fix.id);
     expect((await repo.findHeldJobIds(scope)).sort()).toEqual([running.id, assigned.id].sort());
-    expect(await repo.findQueuedJobIds({ scopeType: 'global', scopeId: null })).toHaveLength(2);
+    expect(await repo.findQueuedJobIds({ scopeType: 'global', scopeId: null })).toHaveLength(3);
   });
 
   it('shows a project its own policies and the global ones, not another project\'s', async () => {

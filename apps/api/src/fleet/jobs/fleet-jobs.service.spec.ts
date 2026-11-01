@@ -238,6 +238,28 @@ describe('review decisions dispatch snapshot', () => {
     expect(selector.selectForReview).not.toHaveBeenCalled();
     expect(repo.createJob.mock.calls[0][0]).not.toHaveProperty('reviewDecisions');
   });
+  it('US-002 AC-2/3: FIX selects and stores the decision snapshot', async () => {
+    const { service, repo, selector, tx } = setup();
+    const fix = { repoId: 'r', command: 'FIX' as const, prNumber: 42, maxCostUsd: 1 };
+    await service.dispatch('u', 'p', fix);
+    expect(selector.selectForReview).toHaveBeenCalledExactlyOnceWith('p', 'r');
+    expect(selector.selectForReview.mock.invocationCallOrder[0]).toBeLessThan(tx.run.mock.invocationCallOrder[0]);
+    expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'FIX', feature: 'review-pr-42', reviewDecisions: decisions,
+    }));
+  });
+
+  it('US-002 AC-1/8: FIX and REVIEW retain command-specific GitHub-only rejection', async () => {
+    const { service, repo, selector, tx } = setup();
+    repo.findRepo.mockResolvedValue({ id: 'r', projectId: 'p', provider: 'gitlab', defaultBranch: 'main' });
+    await expect(service.dispatch('u', 'p', { repoId: 'r', command: 'FIX', prNumber: 7, maxCostUsd: 1 } as never))
+      .rejects.toMatchObject({ response: { args: { reason: 'fix is GitHub-only' } } });
+    await expect(service.dispatch('u', 'p', { repoId: 'r', command: 'REVIEW', prNumber: 7, maxCostUsd: 1 } as never))
+      .rejects.toMatchObject({ response: { args: { reason: 'review is GitHub-only' } } });
+    expect(selector.selectForReview).not.toHaveBeenCalled();
+    expect(tx.run).not.toHaveBeenCalled();
+  });
+
   it('AC-9/10 propagates selector failure without opening a transaction or inserting', async () => {
     const { service, repo, selector, tx } = setup();
     const failure = new Error('memory unavailable');
