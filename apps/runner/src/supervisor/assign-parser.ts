@@ -1,4 +1,4 @@
-import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -130,6 +130,24 @@ function cleanProjectRepos(v: unknown): ProjectRepoAssign[] | null {
   return out;
 }
 
+function cleanReviewDecisions(v: unknown): ReviewDecision[] | null {
+  if (!Array.isArray(v) || v.length > 100) return null;
+  const out: ReviewDecision[] = [];
+  const ids = new Set<string>();
+  for (const entry of v) {
+    if (!isObj(entry)) return null;
+    const id = entry['id'];
+    const statement = entry['statement'];
+    const source = entry['source'];
+    if (typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(id) || ids.has(id)) return null;
+    if (typeof statement !== 'string' || statement.length < 1 || statement.length > 2_000) return null;
+    if (source !== undefined && (typeof source !== 'string' || source.length > 200)) return null;
+    ids.add(id);
+    out.push({ id, statement, ...(source !== undefined ? { source } : {}) });
+  }
+  return out;
+}
+
 function cleanProjectUnavailable(v: unknown): ProjectRepoUnavailable[] | null {
   if (!Array.isArray(v) || v.length > PROJECT_CODE_LIMITS.maxUnavailable) return null;
   const out: ProjectRepoUnavailable[] = [];
@@ -177,8 +195,14 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
   if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw')) return bad('bashMode');
   const rawReview = p['review'];
+  let reviewDecisions: ReviewDecision[] | undefined;
   if (isReview) {
     if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || rawReview['botLogin'].length < 1 || rawReview['botLogin'].length > 100 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(rawReview['botLogin'])) return bad('review');
+    if (rawReview['decisions'] !== undefined) {
+      const cleaned = cleanReviewDecisions(rawReview['decisions']);
+      if (cleaned === null) return bad('review');
+      reviewDecisions = cleaned;
+    }
   } else if (rawReview !== undefined) return bad('review');
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
@@ -209,7 +233,11 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isThread) {
     if (p['thread'] !== undefined) return bad('thread');
     const reviewValue = rawReview as Obj;
-    const review = isReview ? { review: { prNumber: reviewValue['prNumber'] as number, botLogin: reviewValue['botLogin'] as string } } : {};
+    const review = isReview ? { review: {
+      prNumber: reviewValue['prNumber'] as number,
+      botLogin: reviewValue['botLogin'] as string,
+      ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
+    } } : {};
     return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review } };
   }
   const t = p['thread'];
