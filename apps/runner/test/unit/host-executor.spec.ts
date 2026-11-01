@@ -14,6 +14,7 @@ import type { SpawnHandle } from '../../src/executor/job-executor';
 import { isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
 import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { REVIEW_TOKEN_FILE, writeReviewToken } from '../../src/executor/review-token';
+import { REVIEW_DECISIONS_FILE } from '../../src/executor/review-decisions-file';
 import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
@@ -571,6 +572,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     omitCurrentToken?: boolean;
     spawnError?: Error | null;
     breakTokenFile?: boolean;
+    review?: NonNullable<AssignPayload['review']>;
   }
 
   /**
@@ -580,7 +582,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
   async function injectedWorld(command: 'RUN' | 'REVIEW', over: Injection = {}) {
     const w = await world(command, {
       jobId: 'rjob1',
-      ...(command === 'REVIEW' ? { feature: 'review-pr-42', review: { prNumber: 42, botLogin: BOT } } : {}),
+      ...(command === 'REVIEW' ? { feature: 'review-pr-42', review: over.review ?? { prNumber: 42, botLogin: BOT } } : {}),
     });
     const calls: SpawnCall[] = [];
     const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
@@ -692,7 +694,58 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'review token file could not be removed' }));
   });
 
-  test('AC-13: the attempt wipe removes a token file an earlier attempt left, before the retry runs', async () => {
+  test('AC-5/6: REVIEW decisions are written and their absolute path is passed after --profile', async () => {
+    const decision = { id: 'm1', statement: 's' };
+    const w = await injectedWorld('REVIEW', { review: { prNumber: 42, botLogin: BOT, decisions: [decision] } });
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.argv.slice(-2)).toEqual(['--decisions', join(w.row.jobDir, REVIEW_DECISIONS_FILE)]);
+    expect(JSON.parse(await readFile(join(w.row.jobDir, REVIEW_DECISIONS_FILE), 'utf8'))).toEqual({ version: 1, decisions: [decision] });
+  });
+
+  test('AC-7/8: a REVIEW without decisions has no decisions flag or file', async () => {
+    const w = await injectedWorld('REVIEW');
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.argv).not.toContain('--decisions');
+    await expect(stat(join(w.row.jobDir, REVIEW_DECISIONS_FILE))).rejects.toThrow();
+  });
+
+  test('AC-9: an empty decisions array has no decisions flag', async () => {
+    const w = await injectedWorld('REVIEW', { review: { prNumber: 42, botLogin: BOT, decisions: [] } });
+    await w.ex.spawn(w.row);
+    expect(w.calls[0]?.argv).not.toContain('--decisions');
+  });
+
+  test('AC-10/11: a decisions write failure starts no nax and writes no forge token', async () => {
+    const w = await injectedWorld('REVIEW', { review: { prNumber: 42, botLogin: BOT, decisions: [{ id: 'm1', statement: 's' }] } });
+    const file = join(w.row.jobDir, REVIEW_DECISIONS_FILE);
+    await mkdir(file);
+    await expect(w.ex.spawn(w.row)).rejects.toMatchObject({ code: 'EISDIR' });
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('AC-12: prepare attempt wipe removes prior decisions file', async () => {
+    const w = await injectedWorld('REVIEW');
+    await writeFile(join(w.row.jobDir, REVIEW_DECISIONS_FILE), '{}');
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });
+    await expect(stat(join(w.row.jobDir, REVIEW_DECISIONS_FILE))).rejects.toThrow();
+  });
+
+  test('AC-14: missing token leaves the compact decisions file for the next attempt wipe', async () => {
+    const decision = { id: 'm1', statement: 's' };
+    const w = await injectedWorld('REVIEW', { omitCurrentToken: true, review: { prNumber: 42, botLogin: BOT, decisions: [decision] } });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('git token: none');
+    expect(await readFile(join(w.row.jobDir, REVIEW_DECISIONS_FILE), 'utf8')).toBe(JSON.stringify({ version: 1, decisions: [decision] }));
+  });
+
+  test('AC-15: failed nax start leaves the compact decisions file', async () => {
+    const decision = { id: 'm1', statement: 's' };
+    const w = await injectedWorld('REVIEW', { spawnError: new Error('ENOENT nax'), review: { prNumber: 42, botLogin: BOT, decisions: [decision] } });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
+    expect(await readFile(join(w.row.jobDir, REVIEW_DECISIONS_FILE), 'utf8')).toBe(JSON.stringify({ version: 1, decisions: [decision] }));
+  });
+
+  test('the attempt wipe removes a token file an earlier attempt left, before the retry runs', async () => {
     const w = await injectedWorld('REVIEW');
     await writeReviewToken(w.row.jobDir, 'tok-from-the-previous-attempt');
     expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });

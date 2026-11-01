@@ -32,6 +32,7 @@ import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { removeReviewToken, writeReviewToken } from './review-token';
+import { REVIEW_DECISIONS_FILE, writeReviewDecisions } from './review-decisions-file';
 import { cleanWorkspace, ensureClone } from './workspace';
 
 export interface HostExecutorDeps {
@@ -55,7 +56,7 @@ export interface HostExecutorDeps {
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 // US-006: `forge-token` is a REVIEW job's token file; a retry must not start with the previous attempt's.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token'];
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -158,7 +159,9 @@ export class HostExecutor implements JobExecutor {
 
   async spawn(job: JobRow): Promise<SpawnHandle> {
     const { repoDir, jobDir } = this.dirs(job);
-    const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign);
+    const decisions = job.command === 'REVIEW' ? job.assign.review?.decisions : undefined;
+    const decisionsPath = decisions !== undefined && decisions.length > 0 ? await writeReviewDecisions(jobDir, decisions) : undefined;
+    const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, decisionsPath === undefined ? {} : { decisionsPath });
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
     const binDir = acquired.ok ? acquired.credentials.binDir : null;
     const inherited = process.env['PATH'] ?? '';
