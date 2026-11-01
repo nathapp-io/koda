@@ -11,7 +11,7 @@ import { createGit } from '../../src/executor/git';
 import { configBranchName } from '../../src/executor/config-job/commit-push';
 import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
 import type { SpawnHandle } from '../../src/executor/job-executor';
-import { isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
+import { buildNaxArgv, isProcessAlive, type SpawnNaxOptions } from '../../src/executor/nax-process';
 import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { REVIEW_TOKEN_FILE, writeReviewToken } from '../../src/executor/review-token';
 import { REVIEW_DECISIONS_FILE } from '../../src/executor/review-decisions-file';
@@ -604,10 +604,10 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
    * The file's own `world()` fixture (real origin, real temp job dir) with the two US-006 injections: a provider that
    * hands back a fixed token, and a nax start that records its argv and env and starts no process.
    */
-  async function injectedWorld(command: 'RUN' | 'REVIEW', over: Injection = {}) {
+  async function injectedWorld(command: 'RUN' | 'REVIEW' | 'FIX', over: Injection = {}) {
     const w = await world(command, {
       jobId: 'rjob1',
-      ...(command === 'REVIEW' ? { feature: 'review-pr-42', review: over.review ?? { prNumber: 42, botLogin: BOT } } : {}),
+      ...(['REVIEW', 'FIX'].includes(command) ? { feature: 'review-pr-42', review: over.review ?? { prNumber: 42, botLogin: BOT, ...(command === 'FIX' ? { decisions: [{ id: 'm1', statement: 's' }] } : {}) } } : {}),
     });
     const calls: SpawnCall[] = [];
     const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
@@ -633,6 +633,38 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     await mkdir(w.row.jobDir, { recursive: true });
     return { ...w, calls, ex, tokenPath };
   }
+
+  test('US-008: FIX review spawn writes decisions, hands off token/login, and uses review argv', async () => {
+    const w = await injectedWorld('FIX');
+    await w.ex.spawn(w.row);
+    const decisionPath = join(w.row.jobDir, REVIEW_DECISIONS_FILE);
+    expect(JSON.parse(await readFile(decisionPath, 'utf8'))).toEqual({ version: 1, decisions: [{ id: 'm1', statement: 's' }] });
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBe(w.tokenPath);
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBe(BOT);
+    expect(w.calls[0]?.argv).toEqual(buildNaxArgv(['bun', FAKE], w.row.assign, { decisionsPath: decisionPath }));
+    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);
+  });
+
+  test('US-008: FIX missing token fails without spawning', async () => {
+    const w = await injectedWorld('FIX', { currentToken: null });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('git token: none');
+    expect(w.calls).toEqual([]);
+  });
+
+  test('US-008: prepare wipes stale fix stdout and stderr files', async () => {
+    const w = await injectedWorld('FIX');
+    await writeFile(join(w.row.jobDir, 'fix.stdout'), 'old');
+    await writeFile(join(w.row.jobDir, 'fix.stderr'), 'old');
+    await w.ex.prepare(w.row);
+    await expect(stat(join(w.row.jobDir, 'fix.stdout'))).rejects.toThrow();
+    await expect(stat(join(w.row.jobDir, 'fix.stderr'))).rejects.toThrow();
+  });
+
+  test('US-008: FIX failed start removes token and propagates error', async () => {
+    const w = await injectedWorld('FIX', { spawnError: new Error('ENOENT nax') });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
 
   test('AC-6: spawn calls spawnNax with NAX_FORGE_TOKEN_FILE at <jobDir>/forge-token for a REVIEW job', async () => {
     const w = await injectedWorld('REVIEW');

@@ -55,8 +55,8 @@ export interface HostExecutorDeps {
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
-// US-006: `forge-token` is a REVIEW job's token file; a retry must not start with the previous attempt's.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
+// US-008: `forge-token` is a REVIEW/FIX token file; a retry must not start with the previous attempt's.
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -160,7 +160,8 @@ export class HostExecutor implements JobExecutor {
 
   async spawn(job: JobRow): Promise<SpawnHandle> {
     const { repoDir, jobDir } = this.dirs(job);
-    const decisions = job.command === 'REVIEW' ? job.assign.review?.decisions : undefined;
+    const reviewJob = job.command === 'REVIEW' || job.command === 'FIX';
+    const decisions = reviewJob ? job.assign.review?.decisions : undefined;
     const decisionsPath = decisions !== undefined && decisions.length > 0 ? await writeReviewDecisions(jobDir, decisions) : undefined;
     const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, decisionsPath === undefined ? {} : { decisionsPath });
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
@@ -170,7 +171,7 @@ export class HostExecutor implements JobExecutor {
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     const env: Record<string, string | undefined> = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path };
     // US-006: a REVIEW overlays the stripped environment AFTER stripping, so a copy the daemon inherited cannot leak in.
-    const review = job.command === 'REVIEW';
+    const review = reviewJob;
     if (review) Object.assign(env, await this.reviewEnv(job, jobDir));
     const options: SpawnNaxOptions = {
       cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'), env,

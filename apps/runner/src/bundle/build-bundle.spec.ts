@@ -51,6 +51,19 @@ describe('listBundleEntries (D27)', () => {
     expect(entries).not.toContain('plan-logs/ignore.txt');
     expect(await listBundleEntries(await jobDirWith(), 'RUN')).not.toContain('plan-logs/plan-1.jsonl');
   });
+  test('US-008: includes fix stdout and stderr when present and preserves list when absent', async () => {
+    const jobDir = await jobDirWith();
+    expect(await collectBundleEntries(jobDir, 'REVIEW')).toMatchObject({ entries: expect.arrayContaining(['nax.stderr', 'nax.stdout']), skipped: [] });
+    const onlyLogs = await tmp.make('review-logs');
+    await writeFile(join(onlyLogs, 'nax.stdout'), 'out');
+    await writeFile(join(onlyLogs, 'nax.stderr'), 'err');
+    expect(await collectBundleEntries(onlyLogs, 'REVIEW')).toEqual({ entries: ['nax.stderr', 'nax.stdout'], skipped: [] });
+    await writeFile(join(jobDir, 'fix.stdout'), 'fix out');
+    await writeFile(join(jobDir, 'fix.stderr'), 'fix err');
+    const entries = (await collectBundleEntries(jobDir, 'REVIEW')).entries;
+    expect(entries).toContain('fix.stdout');
+    expect(entries).toContain('fix.stderr');
+  });
   test('missing pieces are simply absent', async () => {
     expect(await listBundleEntries(await tmp.make('empty'), 'RUN')).toEqual([]);
   });
