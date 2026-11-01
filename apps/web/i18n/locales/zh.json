@@ -1792,7 +1792,8 @@
         "bundle": "下载产物包",
         "bundleExpired": "产物包已过期",
         "logs": "日志",
-        "dispatchRun": "派发运行"
+        "dispatchRun": "派发运行",
+        "dispatchFix": "修复"
       },
       "confirmCancel": {
         "title": "取消这个任务？",

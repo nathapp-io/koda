@@ -4,7 +4,7 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, fixDispatchQuery, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, reviewPrNumber, safePrUrl, showFixAction, wipPushStatus } from '~/lib/fleet-jobs'
 import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -89,6 +89,13 @@ const jobTitle = computed(() => {
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canDispatch)
+const showFix = computed(() => job.value !== null && showFixAction(job.value, viewer.value.canDispatch))
+const fixDispatchHref = computed(() => {
+  const current = job.value
+  if (!current) return `/${slug}/fleet/dispatch`
+  const query = fixDispatchQuery(current)
+  return query ? { path: `/${slug}/fleet/dispatch`, query } : `/${slug}/fleet/dispatch`
+})
 const dispatchRunHref = computed(() => {
   const current = job.value
   if (!current || !current.resultBranch) return `/${slug}/fleet/dispatch`
@@ -281,6 +288,9 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
           </Button>
           <NuxtLink v-if="showDispatchRun" :to="dispatchRunHref" class="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90" data-testid="fleet-job-dispatch-run">
             {{ t('fleet.jobs.actions.dispatchRun') }}
+          </NuxtLink>
+          <NuxtLink v-if="showFix" :to="fixDispatchHref" class="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90" data-testid="fleet-job-dispatch-fix">
+            {{ t('fleet.jobs.actions.dispatchFix') }}
           </NuxtLink>
           <Button v-if="canCancel" variant="destructive" :disabled="busy" data-testid="fleet-job-cancel" @click="confirmCancel = true">
             {{ t('fleet.jobs.actions.cancel') }}

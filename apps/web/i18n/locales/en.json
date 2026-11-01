@@ -1792,7 +1792,8 @@
         "bundle": "Download bundle",
         "bundleExpired": "Bundle expired",
         "logs": "Logs",
-        "dispatchRun": "Dispatch run"
+        "dispatchRun": "Dispatch run",
+        "dispatchFix": "Fix"
       },
       "confirmCancel": {
         "title": "Cancel this job?",
