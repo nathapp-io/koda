@@ -261,7 +261,7 @@ export interface AssignPayload {
   gitIdentity: GitIdentity;
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
-  /** Fleet PR review: present only for REVIEW jobs. */
+  /** Fleet PR review and fix: present only for REVIEW and FIX jobs. */
   review?: { prNumber: number; botLogin: string; decisions?: ReviewDecision[] };
   /** PLAN only: the branch the PRD must name (a thread PLAN). */
   expectBranch?: string;
