@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T07:26:16.251Z",
+  "updatedAt": "2026-11-01T07:36:08.923Z",
   "userStories": [
     {
       "id": "US-001",
@@ -587,14 +587,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The existing REVIEW credential/spawn gates and two file allowlists are extended rather than redesigned; token-file handoff and cleanup require strict security isolation."
+        "reasoning": "The existing REVIEW credential/spawn gates and two file allowlists are extended rather than redesigned; token-file handoff and cleanup require strict security isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/host-executor.ts",
@@ -621,7 +624,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "706fe343aa27f15f4366d2534edbad8477a75027"
     },
     {
       "id": "US-009",
