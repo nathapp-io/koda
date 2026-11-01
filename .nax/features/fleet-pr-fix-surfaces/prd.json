@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T12:40:26.253Z",
+  "updatedAt": "2026-11-01T12:45:44.752Z",
   "userStories": [
     {
       "id": "US-001",
@@ -577,14 +577,17 @@
       "dependencies": [
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One page integration change with established form and conflict logic; mounted tests reuse existing API-class alias and link stub patterns."
+        "reasoning": "One page integration change with established form and conflict logic; mounted tests reuse existing API-class alias and link stub patterns.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/dispatch.vue",
@@ -610,7 +613,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d9efcdb1c7bf6a23d6ac00cf61c64add96b88447"
     },
     {
       "id": "US-011",
