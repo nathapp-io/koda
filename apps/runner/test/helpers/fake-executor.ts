@@ -74,6 +74,7 @@ export class FakeExecutor implements JobExecutor {
   async spawnFixStep(job: JobRow): Promise<SpawnHandle> {
     this.note('spawnFixStep', job);
     if (this.spawnFixStepError) throw this.spawnFixStepError;
+    this.fixStepStarted = true;
     this.alive = this.aliveAfterSpawn;
     return this.fixHandle;
   }
@@ -82,7 +83,7 @@ export class FakeExecutor implements JobExecutor {
     return this.alive;
   }
 
-  async matchesProcess(): Promise<boolean> {
+  async matchesProcess(_job: JobRow): Promise<boolean> {
     return this.alive && this.procMatches;
   }
 

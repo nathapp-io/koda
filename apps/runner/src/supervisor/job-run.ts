@@ -11,6 +11,7 @@ import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
 import type { DrainResult, LogShipping } from '../logs/types';
 import type { Now, Sleep } from '../time';
+import { fixBudgetRemainder } from '../verdict/fix-budget';
 import { planVerdict } from '../verdict/plan-verdict';
 import { runVerdict, type Verdict } from '../verdict/run-verdict';
 import type { WorkflowView } from '../verdict/status-view';
@@ -76,6 +77,8 @@ export class JobRun {
   private halted = false;
   private queued = false;
   private tickErrors = 0;
+  private fixChainAttempted = false;
+  private fixSpawnFailure: string | undefined;
 
   constructor(private readonly deps: JobRunDeps, readonly jobId: string, readonly leaseEpoch: number) {
     this.events = new JobEvents(deps.journal, jobId, leaseEpoch, deps.log);
@@ -124,13 +127,15 @@ export class JobRun {
       await this.runConfig(from, command);
       return;
     }
-    if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
+    // Only the session that spawned the review may chain a fix: readopt has no surviving token cache.
+    const spawnedHere = from === 'prepare' || from === 'reprepare';
+    if (spawnedHere && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
     this.registerLogs();
     if (from === 'watch') {
       await this.resumeCredentials();
       await this.resumeApprovals();
     }
-    if (from !== 'finish') await this.watchUntilExit();
+    if (from !== 'finish') await this.watchUntilExit(spawnedHere);
     if (this.halted) return;
     await this.finish();
   }
@@ -381,7 +386,42 @@ export class JobRun {
     this.deps.executor.kill(row.pgid, 'SIGKILL');
   }
 
-  private async watchUntilExit(): Promise<void> {
+  /** A FIX read error means no posted review; REVIEW deliberately retains its failSafe path. */
+  private async readReviewPosted(row: JobRow): Promise<boolean> {
+    try {
+      return await this.deps.executor.readReviewPosted(row);
+    } catch (error) {
+      if (row.command !== 'FIX') throw error;
+      return false;
+    }
+  }
+
+  private async chainFixStep(row: JobRow, spawnedHere: boolean): Promise<boolean> {
+    if (!spawnedHere || row.command !== 'FIX' || this.fixChainAttempted || this.halted || this.cancelRequested()) return false;
+    if (await this.deps.executor.hasFixStep(row)) return false;
+    if (!(await this.readReviewPosted(row))) return false;
+    const spentUsd = await this.deps.executor.readPlanCost(row);
+    if (fixBudgetRemainder(row.assign.maxCostUsd, spentUsd) === null) return false;
+    // File reads yield: cancellation or a halt during them must still prevent a new spawn.
+    if (this.halted || this.cancelRequested()) return false;
+    this.fixChainAttempted = true;
+    let handle;
+    try {
+      handle = await this.deps.executor.spawnFixStep(row);
+    } catch (error) {
+      // Keep the review bundle and let judge decide the outcome; never retry or enter failSafe.
+      this.fixSpawnFailure = errorMessage(error);
+      return false;
+    }
+    // Ownership must be durable BEFORE observing a halt/cancel that landed during spawn.
+    this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { pid: handle.pid, pgid: handle.pgid });
+    this.cancelSentAtMs = null;
+    this.sigkilled = false;
+    if (!this.halted && this.cancelRequested()) this.sendTerm(this.mustRow());
+    return true;
+  }
+
+  private async watchUntilExit(spawnedHere: boolean): Promise<void> {
     const start = this.mustRow();
     // BUG-2: a RUNNING row with pid === null is corrupt (journal patch missing or DB race); fall through to
     // finish() would upload a partial bundle and call it FAILED with 'no status.json' — honest, but reachable on
@@ -398,7 +438,12 @@ export class JobRun {
       await this.tick(watcher, false);
       if (this.halted) return;
       const row = this.mustRow();
-      if (row.pid === null || !this.deps.executor.isAlive(row.pid)) break;
+      if (row.pid === null || !this.deps.executor.isAlive(row.pid)) {
+        const chained = await this.chainFixStep(row, spawnedHere);
+        if (this.halted) return;
+        if (chained) continue;
+        break;
+      }
       this.escalateKill(row);
       await this.deps.sleep(this.deps.tuning.statusPollMs);
       if (this.halted) return;
@@ -407,7 +452,7 @@ export class JobRun {
     await this.reapQuietly(this.mustRow());
   }
 
-  private async judge(row: JobRow): Promise<{ verdict: Verdict; snapshot: SnapshotEventPayload; workflow: WorkflowView | undefined }> {
+  private async judge(row: JobRow, fixSpawnFailure: string | undefined): Promise<{ verdict: Verdict; snapshot: SnapshotEventPayload; workflow: WorkflowView | undefined }> {
     const cancelled = row.cancelRequestedAt !== null;
     if (row.command === 'PLAN') {
       const check = await this.deps.executor.readPlan(row);
@@ -419,13 +464,15 @@ export class JobRun {
       if (cancelled) {
         return { verdict: { state: 'CANCELLED', reason: null }, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
       }
-      const posted = await this.deps.executor.readReviewPosted(row);
+      const posted = await this.readReviewPosted(row);
       const fixStepStarted = row.command === 'FIX' && posted ? await this.deps.executor.hasFixStep(row) : true;
       const verdict = !posted
         ? { state: 'FAILED' as const, reason: 'review not posted' }
-        : row.command === 'FIX' && !fixStepStarted
-          ? { state: 'FAILED' as const, reason: 'interrupted before fix' }
-          : { state: 'COMPLETED' as const, reason: null };
+        : row.command === 'FIX' && fixSpawnFailure !== undefined
+          ? { state: 'FAILED' as const, reason: `fix spawn failed: ${fixSpawnFailure}` }
+          : row.command === 'FIX' && !fixStepStarted
+            ? { state: 'FAILED' as const, reason: 'interrupted before fix' }
+            : { state: 'COMPLETED' as const, reason: null };
       return { verdict, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
     const status = await this.deps.executor.readStatus(row);
@@ -473,7 +520,7 @@ export class JobRun {
     }
     // S2a §2.4 (R5): the logs drain while the verdict, progress push and PLAN finish run; awaited before UPLOADING.
     const drained = this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs);
-    const judged = await this.judge(row);
+    const judged = await this.judge(row, this.fixSpawnFailure);
     if (judged.verdict.state === 'FAILED' && (judged.verdict.reason === 'no prd.json produced' || judged.verdict.reason === 'no status.json')) {
       const detail = await readDiagnosticTail(this.deps.executor.logSources(row).stderrPath);
       if (detail) this.events.lifecycle('error', `nax stderr: ${detail}`);

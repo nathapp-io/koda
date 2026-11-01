@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { FleetJobKindName, SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
+import type { AssignPayload, FleetJobKindName, SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { LogShipper } from '../logs/log-shipper';
 import { Journal } from '../journal/journal';
@@ -18,7 +18,7 @@ import type { EventRow } from '../journal/types';
 import { JobRun, type BundleUploader, type JobRunDeps, type JobRunTuning } from './job-run';
 import { RepoMutex } from './repo-mutex';
 
-function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<JobRunTuning> = {}) {
+function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<JobRunTuning> = {}, assign: Partial<AssignPayload> = {}) {
   const time = fakeTime();
   const journal = Journal.open(':memory:', time.now);
   const ex = new FakeExecutor();
@@ -38,7 +38,7 @@ function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<
     tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000, ...tuning },   // 0: unit tests do not wait for acks unless they say so
     logs,
   };
-  journal.insertJob({ assign: assignFor(command, { jobId }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
+  journal.insertJob({ assign: assignFor(command, { ...assign, jobId }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
   return { time, journal, ex, outcomes, uploads, mutex, deps, log, logs, acked: [] as EventRow[], run: new JobRun(deps, jobId, 1) };
 }
 type Built = ReturnType<typeof build>;
@@ -128,6 +128,235 @@ describe('REVIEW verdicts (US-007)', () => {
     await b.run.start('prepare');
     expect(states(b).at(-1)?.to).toBe('CANCELLED');
     expect(b.ex.calls).not.toContain('readReviewPosted:j1');
+  });
+});
+
+describe('FIX step chaining (US-010)', () => {
+  function fix(maxCostUsd = '5') {
+    const b = build('FIX', 'j1', {}, { maxCostUsd });
+    b.ex.reviewPosted = true;
+    b.ex.planCost = '0.0100';
+    b.ex.dieAfterTicks(1);
+    return b;
+  }
+
+  function pendingFix(b: Built) {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const spawn = b.ex.spawnFixStep.bind(b.ex);
+    b.ex.spawnFixStep = async (row) => {
+      b.ex.calls.push('fix-pending');
+      await pending;
+      return spawn(row);
+    };
+    return release;
+  }
+
+  async function reachedHandoff(b: Built): Promise<void> {
+    await waitFor(() => b.ex.calls.includes('fix-pending') || b.journal.getJob('j1', 1)?.doneAt !== null);
+    expect(b.ex.calls).toContain('fix-pending');
+  }
+
+  test.each(['prepare', 'reprepare'] as const)('AC-1: %s chains exactly once and journals the new process', async (from) => {
+    const b = fix();
+    await b.run.start(from);
+    expect(b.ex.calls.filter((call) => call === 'spawnFixStep:j1')).toHaveLength(1);
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ pid: 4343, pgid: 4343 });
+    expect(b.ex.calls.filter((call) => call === 'spawn:j1')).toHaveLength(1);
+  });
+
+  test('AC-2: the fix stays RUNNING until its own process exits', async () => {
+    const b = fix();
+    const release = pendingFix(b);
+    let fixTickState: string | undefined;
+    b.ex.onTick = () => {
+      if (!b.ex.calls.includes('spawnFixStep:j1')) b.ex.alive = false;
+      else fixTickState = b.journal.getJob('j1', 1)?.state;
+    };
+    const started = b.run.start('prepare');
+    await reachedHandoff(b);
+    release();
+    await waitFor(() => b.ex.ticks >= 2);
+    expect(fixTickState).toBe('RUNNING');
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    expect(b.uploads).toEqual([]);
+    b.ex.alive = false;
+    await started;
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+    expect(b.uploads).toHaveLength(1);
+  });
+
+  test('AC-3: an unposted review never chains', async () => {
+    const b = fix();
+    b.ex.reviewPosted = false;
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+  });
+
+  test('AC-4: exact exhausted review budget never chains', async () => {
+    const b = fix('0.05');
+    b.ex.planCost = '0.0500';
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(stateNames(b)).toContain('UPLOADING');
+  });
+
+  test('AC-5: unreadable review marker never chains and means review not posted', async () => {
+    const b = fix();
+    b.ex.reviewPostedError = new Error('stdout unreadable');
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'review not posted' });
+    expect(b.uploads).toHaveLength(1);
+  });
+
+  test('AC-6: cancel observed during review prevents chaining', async () => {
+    const b = fix();
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+
+  test.each(['watch', 'finish'] as const)('AC-7: readopt %s never starts a fix', async (from) => {
+    const b = fix();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    await b.run.start(from);
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(b.ex.calls).not.toContain('spawn:j1');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'interrupted before fix' });
+  });
+
+  test('AC-8: a cancel during pending spawn signals the old and the newly journaled groups', async () => {
+    const b = fix();
+    const release = pendingFix(b);
+    const started = b.run.start('prepare');
+    await reachedHandoff(b);
+    b.run.requestCancel();
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }]);
+    let rowAtFixSignal: { pid: number | null; pgid: number | null } | undefined;
+    b.ex.onKill = () => {
+      rowAtFixSignal = b.journal.getJob('j1', 1) ?? undefined;
+      b.ex.alive = false;
+    };
+    release();
+    await started;
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }, { pgid: 4343, signal: 'SIGTERM' }]);
+    expect(rowAtFixSignal).toMatchObject({ pid: 4343, pgid: 4343 });
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+
+  test('AC-9: prior SIGKILL history is reset so the new group gets its own kill grace', async () => {
+    const b = fix();
+    const release = pendingFix(b);
+    const signals: Array<{ signal: string; at: number }> = [];
+    b.ex.onKill = (signal) => {
+      signals.push({ signal, at: b.time.nowMs() });
+      if (signal === 'SIGKILL') b.ex.alive = false;
+    };
+    b.ex.onTick = () => {
+      if (b.ex.killed.some((kill) => kill.pgid === 4242 && kill.signal === 'SIGKILL')) {
+        // Simulate prior signal history at a process handoff, NOT permission to chain a cancelled job.
+        // AC-6 separately enforces that a still-observed cancel must suppress the spawn.
+        b.journal.updateJob('j1', 1, { cancelRequestedAt: null });
+      } else b.run.requestCancel();
+    };
+    const started = b.run.start('prepare');
+    await reachedHandoff(b);
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGTERM' }, { pgid: 4242, signal: 'SIGKILL' }]);
+    b.ex.onTick = () => {
+      // Bound a regression's watch loop without making the missing signal pass.
+      if (b.time.nowMs() - signals[1].at > 90_000) b.ex.alive = false;
+    };
+    b.run.requestCancel();
+    release();
+    await started;
+    expect(b.ex.killed.slice(2)).toEqual([{ pgid: 4343, signal: 'SIGTERM' }, { pgid: 4343, signal: 'SIGKILL' }]);
+    expect(signals[3].at - signals[2].at).toBeGreaterThanOrEqual(30_000);
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+
+  test.each(['stop', 'abandon'] as const)('AC-10: %s during pending spawn records the new handle before returning', async (halt) => {
+    const b = fix();
+    const release = pendingFix(b);
+    const started = b.run.start('prepare');
+    await reachedHandoff(b);
+    const killedRows: Array<number | null> = [];
+    b.ex.matchesProcess = async (row) => { killedRows.push(row.pid); return b.ex.alive; };
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    const abandoned = halt === 'abandon' ? b.run.abandon() : undefined;
+    if (halt === 'stop') b.run.halt();
+    release();
+    await started;
+    if (abandoned) {
+      await abandoned;
+      expect(killedRows).toEqual([4343]);
+      expect(b.ex.killed).toEqual([{ pgid: 4343, signal: 'SIGKILL' }]);
+    } else {
+      expect(b.journal.getJob('j1', 1)).toMatchObject({ pid: 4343, pgid: 4343, state: 'RUNNING', doneAt: null });
+      expect(b.ex.killed).toEqual([]);
+    }
+    // Journal.abandon removes the row and its events after cleanup.
+    expect(stateNames(b)).toEqual(halt === 'abandon' ? [] : ['RUNNING']);
+    expect(b.uploads).toEqual([]);
+    expect(b.mutex.isLocked('acme/app')).toBe(false);
+  });
+
+  test('AC-11: a failed fix spawn is held for judging, never retried or sent to failSafe', async () => {
+    const b = fix();
+    b.ex.spawnFixStepError = new Error('git token: none');
+    await b.run.start('prepare');
+    expect(b.ex.calls.filter((call) => call === 'spawnFixStep:j1')).toHaveLength(1);
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'FAILED']);
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'fix spawn failed: git token: none' });
+    expect(b.uploads).toHaveLength(1);
+    expect(b.log.lines.some((entry) => entry.message === 'job run failed')).toBe(false);
+  });
+
+  test('AC-12: an undefined cost ledger suppresses chaining', async () => {
+    const b = fix();
+    b.ex.planCost = undefined;
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(stateNames(b)).toContain('UPLOADING');
+  });
+
+  test('AC-13: REVIEW remains a single-process lifecycle', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPosted = true;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(b.ex.calls).not.toContain('hasFixStep:j1');
+    expect(b.ex.calls.filter((call) => call === 'spawn:j1')).toHaveLength(1);
+  });
+
+  test('an existing fix marker suppresses another fix, even in a fresh lifecycle', async () => {
+    const b = fix();
+    b.ex.fixStepStarted = true;
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+  });
+
+  test('a cancel landing during the chaining file reads still suppresses spawn', async () => {
+    const b = fix();
+    b.ex.readPlanCost = async () => { b.run.requestCancel(); return '0.0100'; };
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+  });
+
+  test('REVIEW marker read errors retain the failSafe behavior', async () => {
+    const b = build('REVIEW');
+    b.ex.reviewPostedError = new Error('stdout unreadable');
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'runner error: stdout unreadable' });
+    expect(b.uploads).toEqual([]);
   });
 });
 
