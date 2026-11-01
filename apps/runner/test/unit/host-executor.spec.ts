@@ -163,6 +163,24 @@ describe('HostExecutor process lookups are injected (US-001)', () => {
   });
 });
 
+describe('HostExecutor prepare cost profiles (US-007)', () => {
+  test('AC-3: REVIEW profile carries maxCostUsd as a number', async () => {
+    const w = await world('REVIEW', { maxCostUsd: '1.5000', review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } });
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8')).bot.costLimit).toBe(1.5);
+  });
+  test('AC-4: FIX profile carries maxCostUsd as a number', async () => {
+    const w = await world('FIX', { maxCostUsd: '2', review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } });
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8')).bot.costLimit).toBe(2);
+  });
+  test('AC-5: RUN profile has no bot key', async () => {
+    const w = await world('RUN');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'))).not.toHaveProperty('bot');
+  });
+});
+
 describe('HostExecutor RUN', () => {
   test('wires the production logger into progress commit failures (#186)', async () => {
     const w = await world();

@@ -120,7 +120,8 @@ export class HostExecutor implements JobExecutor {
       await mkdir(outDir, { recursive: true });
       const relay = assign.bashMode === 'raw' ? undefined
         : { bashMode: assign.bashMode, approvalTimeoutSec: assign.approvalTimeoutSec, endpoint: await this.deps.approvals.open(job) };
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay);
+      const botCostLimitUsd = assign.command === 'REVIEW' || assign.command === 'FIX' ? Number(assign.maxCostUsd) : undefined;
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
