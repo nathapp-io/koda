@@ -1,4 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
+import { REVIEW_EVENTS_INGESTED } from '../common/review-events';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { FleetModule } from '../fleet.module';
 import { FleetReposModule } from '../repos/fleet-repos.module';
@@ -10,6 +12,9 @@ import { FleetPrReviewPass } from './fleet-pr-review.pass';
 import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
+import { ReviewEventMinter } from './review-event.minter';
+import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
+import { ReviewDecisionWriter } from '../../memory/review-decision.writer';
 
 /**
  * US-009 — the wiring of the auto-review module, without a database.
@@ -27,6 +32,26 @@ describe('FleetReviewsModule', () => {
   afterEach(async () => {
     await module?.close();
     module = undefined;
+  });
+
+  it('AC-3: event emitter discovery invokes the registered minter', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, EventEmitterModule.forRoot(), FleetReviewsModule] })
+      .overrideProvider(FLEET_REVIEW_EVENT_REPOSITORY).useValue({ claimPending: vi.fn().mockResolvedValue([]) })
+      .compile();
+    await module.init();
+    const minter = module.get(ReviewEventMinter);
+    const run = vi.spyOn(minter, 'run').mockResolvedValue(undefined);
+    module.get(EventEmitter2).emit(REVIEW_EVENTS_INGESTED, { jobId: 'job-1' });
+    expect(run).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('US-005 AC-13: resolves the minter and the exported memory writer', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] })
+      .overrideProvider(FLEET_REVIEW_EVENT_REPOSITORY).useValue({ claimPending: vi.fn().mockResolvedValue([]) })
+      .compile();
+    expect(module.get(ReviewEventMinter)).toBeInstanceOf(ReviewEventMinter);
+    expect(module.get(ReviewDecisionWriter)).toBeInstanceOf(ReviewDecisionWriter);
+    await expect(module.get(ReviewEventMinter).run()).resolves.toBeUndefined();
   });
 
   it('AC-8: compiles with FleetPrReviewPoller resolvable', async () => {

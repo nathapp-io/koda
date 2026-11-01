@@ -9,6 +9,7 @@ import { Principal } from '@nathapp/nestjs-auth';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { mcpConfig } from '../../../config/mcp.config';
 import { ApprovalMcpTools } from '../../../approvals/mcp/approval-mcp-tools';
+import { MemoryMcpTools } from '../../../memory/mcp/memory-mcp-tools';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { isAgentPrincipal, type AgentPrincipal, type KodaPrincipal } from '../../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../../permissions/permission.service';
@@ -54,6 +55,7 @@ export class McpController {
     private readonly permissions: PermissionService,
     @Inject(mcpConfig.KEY) private readonly cfg: ConfigType<typeof mcpConfig>,
     approvalTools: ApprovalMcpTools,
+    memoryTools: MemoryMcpTools,
   ) {
     this.handler = createMcpHandler(
       (ctx) => {
@@ -65,6 +67,7 @@ export class McpController {
         return createKodaMcpServer([
           ...kodaMcpToolRegistrations(executor, principal, visible),
           ...approvalTools.registrations(principal),
+          ...memoryTools.registrations(principal),
         ]);
       },
       { responseMode: 'json' },

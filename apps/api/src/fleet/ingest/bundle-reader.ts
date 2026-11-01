@@ -20,12 +20,18 @@ export interface BundleFiles {
   featureReport?: BundleFile | null;
   /** S5b 3c-2-D1: the RUN's decisions log; optional so pre-existing literals stay valid. */
   decisions?: BundleFile | null;
+  /** Review artifact(s), optional for compatibility with existing literals. */
+  botReview?: BundleFile[];
+  /** Nax stdout, optional for compatibility with existing literals. */
+  naxStdout?: BundleFile | null;
   oversized: string[];
 }
 
-type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status' | 'workflowResult' | 'featureReport' | 'decisions';
+type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status' | 'workflowResult' | 'featureReport' | 'decisions' | 'botReview' | 'naxStdout';
 
 const SLOTS: ReadonlyArray<[RegExp, Slot]> = [
+  [/^nax-out\/bot\/pr-[1-9]\d*\/[^/]+\/bot-review\.json$/, 'botReview'],
+  [/^nax\.stdout$/, 'naxStdout'],
   [/^nax-out\/cost\/[^/]+\.jsonl$/, 'cost'],
   [/^nax-out\/metrics\.json$/, 'metrics'],
   [/^nax-out\/review-audit\/[^/]+\/[^/]+\.json$/, 'reviews'],
@@ -61,7 +67,7 @@ function readEntry(entry: Readable): Promise<string> {
  */
 export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
   return new Promise((resolve, reject) => {
-    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, featureReport: null as BundleFile | null, decisions: null as BundleFile | null, oversized: [] as string[] };
+    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, featureReport: null as BundleFile | null, decisions: null as BundleFile | null, botReview: [] as BundleFile[], naxStdout: null as BundleFile | null, oversized: [] as string[] };
     const x = extract();
     const fail = (error: Error) => {
       bundle.destroy();
@@ -77,7 +83,7 @@ export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
         return;
       }
       if ((header.size ?? 0) > INGEST_LIMITS.fileBytes) {
-        acc.oversized = [...acc.oversized, name];
+        if (slot !== 'botReview' && slot !== 'naxStdout') acc.oversized = [...acc.oversized, name];
         body.resume();
         return;
       }
@@ -88,6 +94,7 @@ export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
         else if (slot === 'workflowResult') acc.workflowResult = file;
         else if (slot === 'featureReport') acc.featureReport = file;
         else if (slot === 'decisions') acc.decisions = file;
+        else if (slot === 'naxStdout') acc.naxStdout = file;
         else acc[slot] = [...acc[slot], file];
       }, (error: unknown) => x.destroy(error as Error));
     });

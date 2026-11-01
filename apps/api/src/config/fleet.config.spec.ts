@@ -11,6 +11,14 @@ describe('fleet config', () => {
     process.env = { ...saved };
   });
 
+  it('AC-7/8: defaults and reads review event mint polling interval', () => {
+    delete process.env.FLEET_REVIEW_MINT_POLL_MS;
+    expect(fleetConfig().reviewMintPollMs).toBe(300_000);
+    process.env.FLEET_REVIEW_MINT_POLL_MS = '60000';
+    expect(fleetConfig().reviewMintPollMs).toBe(60_000);
+    delete process.env.FLEET_REVIEW_MINT_POLL_MS;
+  });
+
   it('defaults PR review polling configuration and accepts a case-insensitive disable flag', () => {
     delete process.env.FLEET_PR_REVIEW_ENABLED;
     delete process.env.FLEET_PR_REVIEW_POLL_MS;

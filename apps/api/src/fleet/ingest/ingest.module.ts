@@ -8,6 +8,7 @@ import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { ArtifactStoreModule } from '../artifacts/artifact-store.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
+import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
 import { FleetTicketsModule } from '../tickets/fleet-tickets.module';
 import { BundleIngestService } from './bundle-ingest.service';
 import { BundleIngestSweeper } from './bundle-ingest.sweeper';
@@ -22,7 +23,7 @@ import { PrismaBundleIngestRepository } from './prisma-bundle-ingest.repository'
  * (S5b 3c-2-D8); this module never imports `KnowledgeModule`.
  */
 @Module({
-  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ArtifactStoreModule, FleetJobsModule, FleetActivityModule, BudgetsModule, FleetTicketsModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ArtifactStoreModule, FleetJobsModule, FleetActivityModule, BudgetsModule, FleetTicketsModule, FleetReviewsModule],
   controllers: [FleetIngestController],
   providers: [
     PrismaBundleIngestRepository, { provide: BUNDLE_INGEST_REPOSITORY, useExisting: PrismaBundleIngestRepository },

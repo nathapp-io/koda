@@ -1,0 +1,5 @@
+{
+  "notFound": { "404": "未找到记忆条目" },
+  "retireNotDecision": { "422": "只能撤销决策" },
+  "retireNotActive": { "409": "只能撤销有效的决策" }
+}

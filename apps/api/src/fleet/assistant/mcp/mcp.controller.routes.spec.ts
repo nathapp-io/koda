@@ -18,6 +18,7 @@ import { AssistantToolExecutor } from '../assistant-tool.executor';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import type { AssistantTool } from '../assistant-tool.types';
 import { ApprovalMcpTools } from '../../../approvals/mcp/approval-mcp-tools';
+import { MemoryMcpTools } from '../../../memory/mcp/memory-mcp-tools';
 import { McpController } from './mcp.controller';
 import { mcpToolDescriptors } from './mcp-tool-catalog';
 import type { McpToolRegistration } from './mcp-server.factory';
@@ -74,6 +75,7 @@ describe('McpController routes', () => {
       controllers: [McpController],
       providers: [
         { provide: ApprovalMcpTools, useValue: { registrations } },
+        { provide: MemoryMcpTools, useValue: { registrations: () => [] } },
         { provide: AssistantToolExecutor, useValue: { executeFor } },
         // US-005: the controller reads each tool's key from the registry and the agent's projects from the
         // permission service, so its isolated module provides both instead of the whole assistant graph.

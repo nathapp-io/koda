@@ -17,6 +17,7 @@ jest.mock('../generated', () => ({
   timelineControllerGetTimeline: jest.fn(),
   memoryControllerRecordDecision: jest.fn(),
   memoryControllerCreateMemory: jest.fn(),
+  memoryControllerRetireDecision: jest.fn(),
   projectsControllerFindBySlug: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
@@ -27,13 +28,14 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { memoryCommand } from './memory';
-import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, projectsControllerFindBySlug } from '../generated';
+import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
 import { resolveContext } from '../config';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockGetTimeline = timelineControllerGetTimeline as jest.Mock;
 const mockRecordDecision = memoryControllerRecordDecision as jest.Mock;
 const mockCreateMemory = memoryControllerCreateMemory as jest.Mock;
+const mockRetireDecision = memoryControllerRetireDecision as jest.Mock;
 const mockFindBySlug = projectsControllerFindBySlug as jest.Mock;
 
 const CTX = { apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api', projectSlug: 'my-proj' };
@@ -161,6 +163,53 @@ describe('memoryCommand', () => {
 
       expect(mockRecordDecision).toHaveBeenCalledWith({ body: expect.objectContaining({ actorId: undefined })});
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('retire', () => {
+    it('calls the generated retire operation with the ID and empty body without a project slug', async () => {
+      mockResolveContext.mockResolvedValueOnce({ apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api' });
+      mockRetireDecision.mockResolvedValue({ ret: 0, data: { id: 'm1' } });
+
+      await program.parseAsync(['node', 'koda', 'memory', 'retire', 'm1']);
+
+      expect(mockRetireDecision).toHaveBeenCalledWith({ path: { id: 'm1' }, body: {} });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('sends the supplied reason', async () => {
+      mockRetireDecision.mockResolvedValue({ ret: 0, data: { id: 'm1' } });
+
+      await program.parseAsync(['node', 'koda', 'memory', 'retire', 'm1', '--reason', 'wrong call']);
+
+      expect(mockRetireDecision).toHaveBeenCalledWith({ path: { id: 'm1' }, body: { reason: 'wrong call' } });
+    });
+
+    it('prints a success message by default', async () => {
+      mockRetireDecision.mockResolvedValue({ ret: 0, data: { id: 'm1' } });
+
+      await program.parseAsync(['node', 'koda', 'memory', 'retire', 'm1']);
+
+      expect(logSpy).toHaveBeenCalledWith('Decision retired.');
+    });
+
+    it('prints the response data as JSON when requested', async () => {
+      mockRetireDecision.mockResolvedValue({ ret: 0, data: { id: 'm1', status: 'rejected' } });
+
+      await program.parseAsync(['node', 'koda', 'memory', 'retire', 'm1', '--json']);
+
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'm1', status: 'rejected' }, null, 2));
+    });
+
+    it('routes a 404 response through the API error handler', async () => {
+      mockRetireDecision.mockRejectedValue(Object.assign(new Error('Not found'), {
+        response: { status: 404, data: { message: 'Not found' } },
+      }));
+
+      await program.parseAsync(['node', 'koda', 'memory', 'retire', 'm1']);
+
+      expect(exitSpy).toHaveBeenCalledWith(4);
+      expect(mockRetireDecision).toHaveBeenCalledWith({ path: { id: 'm1' }, body: {} });
     });
   });
 

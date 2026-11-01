@@ -13,7 +13,7 @@ export class AuditEntryDto {
   @ApiProperty({ type: Object }) declare approval: {
     requiredMode: string;
     satisfiedBy: string;
-    approverType: 'USER' | 'AGENT' | null;
+    approverType: 'USER' | 'AGENT' | 'FORGE_USER' | null;
     approverId: string | null;
     requestId: string | null;
   };

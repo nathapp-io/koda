@@ -23,6 +23,19 @@ describe('FleetReposService', () => {
     repo.findProject.mockResolvedValue({ id: 'p1', slug: 'p' });
   });
 
+  it('findReviewRepo returns null for an unknown id', async () => {
+    repo.findById.mockResolvedValue(null);
+    expect(await make().findReviewRepo('unknown')).toBeNull();
+    expect(repo.findById).toHaveBeenCalledWith('unknown');
+  });
+
+  it('findReviewRepo exposes only the review projection, preserving bigint and null', async () => {
+    for (const installation of [77n, null]) {
+      repo.findById.mockResolvedValue(created({ githubInstallationId: installation }));
+      expect(await make().findReviewRepo('fr1')).toEqual({ id: 'fr1', projectId: 'p1', owner: 'acme', name: 'app', githubInstallationId: installation });
+    }
+  });
+
   it('delegates the auto-review repo limit to the repository', async () => {
     const records = [created()];
     repo.findAutoReviewPage.mockResolvedValue(records);

@@ -4,6 +4,9 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { BundleIngestService } from './bundle-ingest.service';
 import { BundleIngestSweeper } from './bundle-ingest.sweeper';
 import { IngestModule } from './ingest.module';
+import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
+import { FleetReviewEventsService } from '../reviews/fleet-review-events.service';
+import { FLEET_REVIEW_EVENT_REPOSITORY } from '../reviews/domain/fleet-review-event.domain';
 
 /**
  * `BundleIngestService` emits `KNOWLEDGE_RUN_INGESTED` on the global `EventEmitter2` after a RUN ingest commits
@@ -25,6 +28,13 @@ describe('IngestModule', () => {
   it('resolves BundleIngestService against the global event emitter', () => {
     expect(module.get(BundleIngestService)).toBeInstanceOf(BundleIngestService);
     expect(module.get(BundleIngestSweeper)).toBeInstanceOf(BundleIngestSweeper);
+  });
+
+  it('imports the public review event service while keeping its repository private', () => {
+    expect(Reflect.getMetadata('imports', IngestModule) as unknown[]).toContain(FleetReviewsModule);
+    expect(module.get(FleetReviewEventsService)).toBeInstanceOf(FleetReviewEventsService);
+    expect(Reflect.getMetadata('exports', FleetReviewsModule) as unknown[]).toContain(FleetReviewEventsService);
+    expect(Reflect.getMetadata('exports', FleetReviewsModule) as unknown[]).not.toContain(FLEET_REVIEW_EVENT_REPOSITORY);
   });
 
   it('does not import KnowledgeModule', () => {

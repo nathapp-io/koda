@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { ReviewDecisionWriter } from './review-decision.writer';
 import { ApprovalEngineModule } from '../approvals/approval-engine.module';
 import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { MemoryRouteCommands } from './memory-route.commands';
@@ -22,6 +23,7 @@ import { PrismaCanonicalStateRepository } from './prisma-canonical-state.reposit
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
+import { MemoryMcpTools } from './mcp/memory-mcp-tools';
 
 @Module({
   // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
@@ -46,11 +48,13 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     // tools). It reads the repository and the global PermissionService, so it adds no import edge.
     MemoryWriteGuard,
     MemoryWriteService,
+    ReviewDecisionWriter,
     MemoryRouteCommands,
     MemoryGovernanceService,
     MemoryGovernanceProcessor,
     ExtractionService,
     MemoryOutboxSubscriber,
+    MemoryMcpTools,
   ],
   exports: [
     TimelineService,
@@ -60,7 +64,9 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     MemoryGovernanceService,
     ExtractionService,
     MemoryWriteService,
+    ReviewDecisionWriter,
     MemoryWriteGuard,
+    MemoryMcpTools,
   ],
 })
 export class MemoryModule {}

@@ -5,6 +5,22 @@ import { readBundleFiles, slotOf } from './bundle-reader';
 const stream = (b: Buffer) => Readable.from([b]);
 
 describe('readBundleFiles (spec §2.3)', () => {
+  it('AC-1 maps review artifact and stdout slots', () => {
+    expect(slotOf('nax-out/bot/pr-42/r1/bot-review.json')).toBe('botReview');
+    expect(slotOf('nax.stdout')).toBe('naxStdout');
+  });
+  it('AC-2 silently skips oversized review artifact and stdout files', async () => {
+    const big = Buffer.alloc(33_554_433, 0x61);
+    const gz = await tarGz([
+      { name: 'nax.stdout', body: big },
+      { name: 'nax-out/bot/pr-42/r1/bot-review.json', body: big },
+    ]);
+    const files = await readBundleFiles(stream(gz));
+    expect(files.oversized).toEqual([]);
+    expect(files.botReview).toEqual([]);
+    expect(files.naxStdout).toBeNull();
+  });
+
   it('AC-7 assigns the exact result path to its own slot', () => {
     expect(slotOf('workflow/result.json')).toBe('workflowResult');
   });

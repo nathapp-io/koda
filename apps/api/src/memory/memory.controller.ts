@@ -1,4 +1,5 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Param } from '@nestjs/common';
+import { RetireDecisionDto } from './dto/retire-decision.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { Requires } from '../permissions/requires.decorator';
@@ -48,6 +49,25 @@ export class MemoryController {
     const outcome = await this.routeGate.run<Awaited<ReturnType<MemoryWriteService['recordDecision']>>>({
       key: 'memory.decision.record', variant: MEMORY_ROUTE_VARIANTS.recordDecision, projectId: decision.projectId,
       input: { decision },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Post(':id/retire')
+  @ApprovalGated()
+  @Requires('memory.decision.retire', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Retire a decision (memory.decision.retire)' })
+  @ApiResponse({ status: 201, description: 'Decision retired' })
+  @ApiResponse({ status: 403, description: 'Permission or ownership refused' })
+  @ApiResponse({ status: 404, description: 'Memory item not found' })
+  @ApiResponse({ status: 409, description: 'Decision is not active' })
+  @ApiResponse({ status: 422, description: 'Memory item is not a decision' })
+  async retireDecision(@Param('id') id: string, @Body() body: RetireDecisionDto, @Principal() principal: KodaPrincipal) {
+    const { projectId } = await this.memoryWrites.retireTarget(principal, id);
+    const outcome = await this.routeGate.run<Awaited<ReturnType<MemoryWriteService['retireDecision']>>>({
+      key: 'memory.decision.retire', variant: MEMORY_ROUTE_VARIANTS.retire, projectId,
+      input: { id, body },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
