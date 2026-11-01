@@ -70,7 +70,10 @@ describeDb('review event bundle ingest (PG)', () => {
     profiles: [], selectorLabels: [], maxCostUsd: '5', requestedById: base.adminId, leaseEpoch: 1, finishedAt: now,
   } });
   async function attach(jobId: string, trusted = true, invalid = false) {
-    const body = await tarGz([{ name: 'nax-out/bot/pr-42/r1/bot-review.json', body: invalid ? 'not json' : JSON.stringify({ version: 3, pr: { number: 42 }, trusted, events: [event] }) }]);
+    const body = await tarGz([
+      { name: 'nax-out/bot/pr-42/r1/bot-review.json', body: invalid ? 'not json' : JSON.stringify({ version: 3, pr: { number: 42 }, trusted, events: [event] }) },
+      { name: 'nax.stdout', body: 'nax bot review: artifact nax-out/bot/pr-42/r1/bot-review.json\n' },
+    ]);
     const sha = createHash('sha256').update(body).digest('hex');
     const original = await db.fleetJob.findUniqueOrThrow({ where: { id: jobId } });
     // Fixture the runner's pre-verdict state; upload enqueues in its own real transaction.
@@ -109,7 +112,28 @@ describeDb('review event bundle ingest (PG)', () => {
       expect(before).toHaveLength(1);
     } finally { kick.mockRestore(); }
   });
-  it('AC-4: FAILED review never stores events', async () => {
+  it('AC-1: FAILED FIX stores a pending finding withdrawal', async () => {
+    const j = await job('FIX', 'FAILED'); await attach(j.id);
+    expect(await ingest.drain(now)).toBe(1);
+    expect(await rows(j.id)).toEqual([expect.objectContaining({ status: 'pending', findingKey: event.key, threadId: event.threadId })]);
+  });
+  it('AC-2: COMPLETED FIX stores a pending finding withdrawal', async () => {
+    const j = await job('FIX', 'COMPLETED'); await attach(j.id);
+    expect(await ingest.drain(now)).toBe(1);
+    expect(await rows(j.id)).toEqual([expect.objectContaining({ status: 'pending', findingKey: event.key, threadId: event.threadId })]);
+  });
+  it('AC-3: CANCELLED FIX stores a pending finding withdrawal', async () => {
+    const j = await job('FIX', 'CANCELLED'); await attach(j.id);
+    expect(await ingest.drain(now)).toBe(1);
+    expect(await rows(j.id)).toEqual([expect.objectContaining({ status: 'pending', findingKey: event.key, threadId: event.threadId })]);
+  });
+  it('AC-4: an older FIX lease epoch stores no review events', async () => {
+    const j = await job('FIX', 'FAILED'); await attach(j.id);
+    await db.fleetJob.update({ where: { id: j.id }, data: { leaseEpoch: 2 } });
+    expect(await ingest.drain(now)).toBe(1);
+    expect(await rows(j.id)).toEqual([]);
+  });
+  it('AC-5: FAILED review never stores events', async () => {
     const j = await job('REVIEW', 'FAILED'); await attach(j.id);
     expect(await ingest.drain(now)).toBe(1); expect(await rows(j.id)).toEqual([]);
   });

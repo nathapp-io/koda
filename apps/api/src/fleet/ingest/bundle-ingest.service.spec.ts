@@ -3,6 +3,7 @@ import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { currentContext, runWithActionContext, type ActionContext } from '../../action-context/action-context';
 import { tarGz } from '../../../test/helpers/tar-gz';
 import { BundleIngestService } from './bundle-ingest.service';
+import * as bundleParser from './parse-bundle';
 
 const now = new Date('2026-10-05T10:00:00Z');
 const claim = (attempts: number) => ({ id: 'i1', artifactId: 'a1', jobId: 'j1', leaseEpoch: 1, attempts });
@@ -190,11 +191,11 @@ describe('BundleIngestService audit coverage (permissions P2 US-007)', () => {
 });
 
 describe('review event ingest', () => {
-  async function review(opts: { pending?: number; epoch?: number; reject?: boolean; state?: string; command?: string } = {}) {
+  async function review(opts: { pending?: number; epoch?: number; reject?: boolean; state?: string; command?: string; feature?: string } = {}) {
     const order: string[] = [];
     const job = {
       id: 'j1', projectId: 'p1', repoId: 'r1', leaseEpoch: opts.epoch ?? 1, command: opts.command ?? 'REVIEW',
-      feature: 'review-pr-42', state: opts.state ?? 'COMPLETED', naxRunId: null, costSpentUsd: '0',
+      feature: opts.feature ?? 'review-pr-42', state: opts.state ?? 'COMPLETED', naxRunId: null, costSpentUsd: '0',
       stateReason: null, finishResult: null, escalationReason: null, resultPrUrl: null, resultBranch: null,
       resultSha: null, workflow: null,
     };
@@ -253,5 +254,23 @@ describe('review event ingest', () => {
     expect(t.repo.markRetry).toHaveBeenCalledWith('i1', 1, new Date(now.getTime() + 60_000), 'review storage failed');
     expect(t.repo.markOutcome).not.toHaveBeenCalled();
     expect(t.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: FAILED FIX passes its PR number to bundle parsing', async () => {
+    const t = await review({ command: 'FIX', state: 'FAILED', feature: 'review-pr-5' });
+    const parser = vi.spyOn(bundleParser, 'parseBundle');
+    try {
+      await t.svc.ingestOne(now);
+      expect(parser).toHaveBeenCalledWith(expect.anything(), null, { reviewPrNumber: 5 });
+    } finally { parser.mockRestore(); }
+  });
+
+  it('AC-7: CRASHED FIX does not pass a PR number to bundle parsing', async () => {
+    const t = await review({ command: 'FIX', state: 'CRASHED', feature: 'review-pr-5' });
+    const parser = vi.spyOn(bundleParser, 'parseBundle');
+    try {
+      await t.svc.ingestOne(now);
+      expect(parser).toHaveBeenCalledWith(expect.anything(), null, {});
+    } finally { parser.mockRestore(); }
   });
 });
