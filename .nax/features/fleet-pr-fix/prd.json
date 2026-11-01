@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T07:48:26.401Z",
+  "updatedAt": "2026-11-01T07:58:06.085Z",
   "userStories": [
     {
       "id": "US-001",
@@ -726,14 +726,17 @@
       "dependencies": [
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Concurrent spawn/cancel/halt races, durable pid ownership, signal escalation and restart credential safety span the critical lifecycle state machine."
+        "reasoning": "Concurrent spawn/cancel/halt races, durable pid ownership, signal escalation and restart credential safety span the critical lifecycle state machine.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/job-run.ts",
@@ -757,7 +760,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1d2d9ef1048a104c904acf03d1e7c4b7fce326b7"
     },
     {
       "id": "US-011",
