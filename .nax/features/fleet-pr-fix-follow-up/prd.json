@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-follow-up",
   "branchName": "feat/fleet-pr-fix-follow-up",
   "createdAt": "2026-11-01T00:00:00Z",
-  "updatedAt": "2026-11-01T10:05:57.133Z",
+  "updatedAt": "2026-11-01T10:09:30.446Z",
   "userStories": [
     {
       "id": "US-001",
@@ -194,14 +194,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Reuse established requester/repo gates and audited skip patterns; requester permission and disabled-principal enforcement require strict security-isolated TDD."
+        "reasoning": "Reuse established requester/repo gates and audited skip patterns; requester permission and disabled-principal enforcement require strict security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
@@ -217,7 +220,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8bb6cce2b238f7555c0f74f01fe854d47fab8f92"
     },
     {
       "id": "US-004",
