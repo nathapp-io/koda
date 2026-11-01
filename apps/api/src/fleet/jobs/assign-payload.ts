@@ -26,8 +26,9 @@ export function gitIdentityFor(
 }
 
 export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, cloneUrl: string, gitIdentity: GitIdentity, thread?: ThreadAssign): AssignPayload {
-  const reviewPrNumber = job.command === 'REVIEW' ? prNumberOfReviewFeature(job.feature) : null;
-  if (job.command === 'REVIEW' && reviewPrNumber === null) throw new Error('invalid review feature');
+  const hasReview = job.command === 'REVIEW' || job.command === 'FIX';
+  const reviewPrNumber = hasReview ? prNumberOfReviewFeature(job.feature) : null;
+  if (hasReview && reviewPrNumber === null) throw new Error('invalid review feature');
   return {
     jobId: job.id,
     command: job.command,

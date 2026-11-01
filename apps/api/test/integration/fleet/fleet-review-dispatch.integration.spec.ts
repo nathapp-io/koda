@@ -79,6 +79,16 @@ describeIntegration('fleet REVIEW dispatch (PG)', () => {
     expect(result.placement.misfits).toEqual([expect.objectContaining({ reason: 'bot_review' })]);
   });
 
+  it('US-003: keeps FIX queued when a botReview runner lacks botFix', async () => {
+    await insertRunner(prisma, { capabilities: {
+      nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {},
+      credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'], botReview: true,
+    } });
+    const result = data<{ job: { state: string }; placement: { misfits: Array<{ reason: string }> } }>(await dispatch(world.repoId, 45, 'FIX').expect(201));
+    expect(result.job.state).toBe('QUEUED');
+    expect(result.placement.misfits).toEqual([expect.objectContaining({ reason: 'bot_fix' })]);
+  });
+
   it('US-003 AC-7: accepts a review pinned to a runner without botReview', async () => {
     const runner = await insertRunner(prisma);
     const result = data<{ job: { state: string } }>(await request(server).post('/api/projects/web/fleet/jobs').set(auth())
