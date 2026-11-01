@@ -26,6 +26,50 @@ describe('FleetJobOutcomeRecorder (S4a §2.4, D513)', () => {
     });
   });
 
+  const pushedFix = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => job({
+    command: 'FIX', state: 'COMPLETED', fixOutcome: 'pushed', resultSha: 'a'.repeat(40), feature: 'review-pr-22',
+    requestedByType: 'USER', profiles: ['balanced'], maxCostUsd: '2.5000', ...over,
+  });
+
+  it('records a follow-up event snapshot for a completed pushed FIX', async () => {
+    await recorder.onTerminal(pushedFix());
+    expect(outbox.record).toHaveBeenCalledWith({
+      type: 'fleet_fix_follow_up',
+      payload: {
+        jobId: 'j1', leaseEpoch: 2, projectId: 'p1', repoId: 'r1', prNumber: 22, headSha: 'a'.repeat(40),
+        requestedById: 'u1', requestedByType: 'USER', profiles: ['balanced'], maxCostUsd: '2.5000',
+      },
+      metadata: { projectId: 'p1', eventId: 'j1:2:fix-follow-up' },
+    });
+  });
+
+  it('records agent-requested FIX follow-ups without a notification', async () => {
+    await recorder.onTerminal(pushedFix({ requestedByType: 'AGENT' }));
+    expect(outbox.record).toHaveBeenCalledTimes(1);
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_fix_follow_up', payload: expect.objectContaining({ requestedByType: 'AGENT' }),
+    }));
+  });
+
+  it('defaults a missing requester type to USER', async () => {
+    const { requestedByType: _requestedByType, ...withoutType } = pushedFix();
+    await recorder.onTerminal(withoutType as FleetJobRecord);
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_fix_follow_up', payload: expect.objectContaining({ requestedByType: 'USER' }),
+    }));
+  });
+
+  it.each([
+    ['nothing FIX', { command: 'FIX', state: 'COMPLETED', fixOutcome: 'nothing', resultSha: 'a'.repeat(40), feature: 'review-pr-22' }],
+    ['failed FIX', { command: 'FIX', state: 'FAILED', fixOutcome: 'pushed', resultSha: 'a'.repeat(40), feature: 'review-pr-22' }],
+    ['completed REVIEW', { command: 'REVIEW', state: 'COMPLETED', fixOutcome: 'pushed', resultSha: 'a'.repeat(40), feature: 'review-pr-22' }],
+    ['FIX without sha', { command: 'FIX', state: 'COMPLETED', fixOutcome: 'pushed', resultSha: null, feature: 'review-pr-22' }],
+    ['FIX with malformed feature', { command: 'FIX', state: 'COMPLETED', fixOutcome: 'pushed', resultSha: 'a'.repeat(40), feature: 'review-pr-x' }],
+  ] as const)('does not record follow-up for %s', async (_label, over) => {
+    await recorder.onTerminal(job({ ...over, resultPrUrl: null } as Partial<FleetJobRecord>));
+    expect(outbox.record).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fleet_fix_follow_up' }));
+  });
+
   it.each(['CANCELLED', 'COMPLETED', 'RUNNING'] as const)('enqueues nothing for %s without a PR', async (state) => {
     await recorder.onTerminal(job({ state }));
     expect(outbox.record).not.toHaveBeenCalled();

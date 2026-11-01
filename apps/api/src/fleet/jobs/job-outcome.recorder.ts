@@ -6,6 +6,8 @@ import {
 } from '../../notifications/fleet/fleet-notification-events';
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { isThreadKind } from '../common/thread-jobs';
+import { buildFixFollowUpPayload, FIX_FOLLOW_UP } from '../common/fix-follow-up-events';
+import { prNumberOfReviewFeature } from '../common/review-jobs';
 
 /** US-002: an agent requested the job, so nothing that reads a user is meaningful for its requester. */
 const isAgentRequested = (job: Pick<FleetJobRecord, 'requestedByType'>): boolean => job.requestedByType === 'AGENT';
@@ -26,6 +28,16 @@ export class FleetJobOutcomeRecorder {
   ) {}
 
   async onTerminal(job: FleetJobRecord): Promise<void> {
+    if (job.command === 'FIX' && job.state === FleetJobState.COMPLETED && job.fixOutcome === 'pushed' && job.resultSha !== null) {
+      const prNumber = prNumberOfReviewFeature(job.feature);
+      if (prNumber !== null) {
+        await this.outbox.record({
+          type: FIX_FOLLOW_UP,
+          payload: buildFixFollowUpPayload(job, prNumber, job.resultSha),
+          metadata: { projectId: job.projectId, eventId: `${job.id}:${job.leaseEpoch}:fix-follow-up` },
+        });
+      }
+    }
     if (isAgentRequested(job) || isThreadKind(job.command)) return;
     const outcome = jobOutcomeOf(job.state, job.resultPrUrl);
     if (outcome) await this.enqueue(job, outcome);
