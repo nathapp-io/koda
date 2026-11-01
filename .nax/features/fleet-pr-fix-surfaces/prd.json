@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T11:32:57.279Z",
+  "updatedAt": "2026-11-01T11:57:02.418Z",
   "userStories": [
     {
       "id": "US-001",
@@ -27,14 +27,17 @@
         "mcp"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Bounded catalog and description changes across two existing modules; approval policy and access enforcement remain untouched."
+        "reasoning": "Bounded catalog and description changes across two existing modules; approval policy and access enforcement remain untouched.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
@@ -60,7 +63,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "45cdd63869789a5bc65e94c8a107c6de31204681"
     },
     {
       "id": "US-002",
@@ -110,7 +117,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -171,7 +181,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -220,7 +233,10 @@
         }
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -268,7 +284,10 @@
         "apps/cli/src/commands/fleet-dispatch-pr-validation.spec.ts"
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -325,7 +344,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -378,7 +400,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -423,7 +448,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -489,7 +517,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -544,7 +575,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -603,7 +637,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Goal and completion: expose the already implemented REVIEW and FIX dispatch kinds through the assistant/MCP catalog and executor, Commander CLI, Nuxt dispatch form, and a permission-gated Fix link on completed REVIEW jobs. Done means all eleven binding stories deliver their specified behavior, exact request bodies and errors, with RUN/PLAN regressions preserved and the runner-tool-to-approval-to-created-job seam verified against real Postgres. No new endpoints, DTO contracts, job semantics, permissions, approval policy, audit behavior, database schema, or generated clients are needed.\n\nNavigation and guidance: codebase-memory MCP tools are unavailable in this session, so discovery used direct Read/Grep/Glob against the supplied repository root. Read .nax/mono/apps/{api,cli,web}/context.md. Those authoritative app contexts correct the supplied detector metadata: the API is NestJS 12 + Fastify, not Express; the web is Nuxt 4 SSR + Vue + vee-validate/zod, not Next.js. CLI is Commander.js with generated Axios client. API tests use Vitest, CLI/web unit tests use Jest. Implementers writing NestJS code must read the nathapp-nestjs-patterns skill when available. No source changes or tests were executed during this PRD drafting task.\n\nExisting server authority, unchanged: apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10 already declares command RUN | PLAN | REVIEW | FIX, optional feature, and prNumber integer bounds 1..2147483647 at :12-13. apps/api/src/fleet/jobs/dispatch-input.ts:27 normalizes dispatch; :30-39 derives review-pr-<n> and defaultBranch for both PR kinds, rejects feature, planFrom, ref, non-raw bashMode and nonempty ticketRefs, while :40-48 preserves RUN/PLAN checks and rejects prNumber for those kinds. apps/api/src/fleet/jobs/fleet-jobs.service.ts:79 resolves and scopes the repo, refuses non-GitHub PR commands at :82-84 before normalization, then retains ticket checks, placement, budgets, transaction, audit and review-decision selection. Do not fork these rules into a new service or relax the route. The assistant preview should call existing normalization to surface cross-field reasons, not silently drop invalid fields. Service dispatch remains the final authority after approval. REVIEW and FIX share the same derived feature and therefore the same active-job conflict domain.\n\nAssistant/MCP impact: apps/api/src/fleet/assistant/koda-tool-descriptors.ts:551 exports KODA_DISPATCH_JOB; :554-558 contains the approval/do-not-repeat description; :562 requires feature today; :572-578 exposes only RUN/PLAN and bounded feature. Add the prNumber schema property, expand command, drop feature only from required, retain all other schema bounds. apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts:381-387 pins the old required/enum values, and :408-419 pins bounds; update only the called-out expectations and add the new dedicated PR descriptor spec. apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:66 has a separate description for dispatch; :18 defines the exact MCP project sentence, and :91-95 projects workspace schemas unchanged with replacement descriptions. apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts:23-36 exposes the by-name lookup pattern and :65-85 protects workspace schema identity. Keep the assistant's approval language separate from MCP's run-at-once language. The workspace sentence is appended downstream, so test the final workspace description against 2000 characters, not just the base string. No runner inputSchema parser or MCP validator changes are required.\n\napps/api/src/fleet/assistant/tools/dispatch-job-tool.ts:25 has COMMANDS, :38 DispatchJobInput, :61 parse, :95 preview, :122 execute, :163 toDto. The parser currently requires feature for every input. Make it conditional for RUN/PLAN, bound any present feature, bound any present prNumber including on RUN/PLAN, and require prNumber for PR commands. Preserve absent-field omission, all other parsers, masking and refusal translation. Preview resolves a project-scoped repo at :147 and calls normalizeDispatch via assertDispatchable at :153. For PR commands reject non-GitHub before normalization, then emit only the specified header/repo/PR/cost/profiles lines. Execute already re-resolves the repo and dispatches as ctx.actor.id with ticketActor, so extend only the DTO mapping rather than changing requester identity or thread binding. apps/api/src/fleet/assistant/tools/fleet-write-tools.ts:24 registers this factory at bootstrap. Catalog changes also reach apps/api/src/fleet/jobs/placement.service.ts:13 and its descriptor projection tests, and MCP reaches apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts:8. Other tools import the shared descriptor/catalog modules but should retain identical behavior.\n\nAssistant tests and security seam: apps/api/src/fleet/assistant/tools/dispatch-job-tool.spec.ts:17-83 provides ctx, REPO, VALID, collaborator spies, reasonOf and async error helpers; copy the relevant helpers into the dedicated new parser and preview specs, without weakening the old RUN/PLAN tests. apps/api/test/integration/fleet/assistant-dispatch-job-tool.integration.spec.ts:48-74 contains callTool/actionOf/jobWith/decide and :76-102 boots the HTTP world, grants approval.decide, enrolls a runner and seeds its held THREAD job. Its header has stale project-route wording, but executable code uses const APPROVALS = '/api/approvals' at :37 and POST /api/approvals/:id/decisions at :74; use this real engine route. The new integration spec must copy the harness and helpers, use PR 7023 and feature review-pr-7023, inspect the stored preview, assert zero matching jobs before approval and exactly one FIX requested by the developer afterward. Keep the existing runner key and leaseEpoch=1 fence, action context and policy enforcement; do not bypass approval or insert the target job directly. This is security-sensitive approval/access-control integration and uses three-session-tdd. Per .nax/rules/api-test-isolation.md:16-18 DB runs share a schema and :58-60 shared-cache apps must close; isolate fixtures, restore env, close the Nest app, and avoid reading another spec's jobs. DB specs use canRunDbTests, KODA_DB_TESTS=1 and the shared setup. A sandbox skip is not verification: run the new test:scoped integration spec outside NAX_SANDBOXED=1 against the dedicated test PG or Testcontainers before merge, never concurrent DB-reset runs against one database.\n\nCLI impact: apps/cli/src/commands/fleet-dispatch.ts:19 has DispatchOptions, :26-31 has the obsolete DispatchRunBody narrowing, :37 finds an active job, :43 delegates invalid() to handleFleetValidation, :47 builds bodies, :69 explains conflicts, :81 registers the command. Introduce review?/fix? numeric options with parsePositiveInt, optional feature, exact ordered validation ahead of any request, disjoint PR versus RUN/PLAN payloads, and an explicit lookup feature argument for explainConflict. Ensure explicit --bash-mode raw is also a forbidden PR flag, empty/absent flag handling does not depend on truthiness where presence matters, and repeated-array defaults do not falsely count as supplied --ticket. New validation must precede bashFlagProblem, labels/pin, repo and runner lookup; apps/cli/src/utils/context.ts:32-49 confirms withContext resolves context and configures the generated client without issuing HTTP; the new semantic checks must precede resolveRepo/resolveRunner and any dispatch/list request. Keep existing output/JSON/placement/error behavior, including courtesy conflict lookup failure fallback. apps/cli/src/utils/parse-positive-int.ts:9-15 accepts trimmed digit strings representing positive safe integers, not just 32-bit values; do not add the API's 2147483647 cap to CLI parsing. apps/cli/src/generated/types.gen.ts:1211-1219 already has four commands, optional feature and prNumber; never edit/regenerate it for this work. apps/cli/src/commands/fleet.ts:5 registers the command. apps/cli/src/commands/fleet-dispatch.spec.ts:1-54 supplies generated-service mocks, repo fr1, runner r1, exitOverride and exit spies; :119-120 warns Commander retains option values across parseAsync calls. Use a fresh program per validation case. Add separate PR dispatch and PR validation specs, preserving existing RUN/PLAN/bash/JSON assertions and error exit codes.\n\nWeb library impact: apps/web/lib/fleet-dispatch.ts:23-60 builds a zod object with unconditional feature/ref/planFrom/ticketRefs checks, :65-78 holds defaults, :81-100 maps bodies, :103-135 parses query prefill and selects the notice. Make field schemas lenient and move existing checks with identical messages/paths into RUN/PLAN superRefine; otherwise stale keepValuesOnUnmount data will block PR submits before superRefine can branch. PR text normalization must consistently trim, match ^[1-9][0-9]*$, check <=2147483647 and use Number(trimmed); reject leading zeros, plus signs, exponents, zero and empty text. Carry this same rule into query prefill and dispatchFeatureOf. Shared repo/cost/profiles/placement checks stay effective for all kinds, and PR bodies never carry hidden fields or acknowledgeOpenPr. apps/web/lib/fleet-types.ts:330 currently narrows DispatchBody to RUN/PLAN with mandatory feature: widen it and add optional prNumber without changing API semantics. Grep found other library consumers of exported constants/helpers in apps/web/lib/fleet-schedules.ts:6, thread-create.ts:4, thread-handoff-form.ts:9 and components/fleet/{FleetTokenListInput,TicketPicker}.vue; preserve shared constants and token helpers. apps/web/tests/lib/fleet-dispatch.spec.ts:4-10 has valid()/messages(), :12-50 covers schema, :53-110 body/bash, :113-137 prefill, and :156 onward ticket regressions. Reuse its pattern in distinct PR schema/body and prefill specs. Query profiles must filter invalid/reserved names, deduplicate and cap at MAX_PROFILES, handling scalar and array query values without mutating inputs.\n\nWeb helpers and job action: apps/web/lib/fleet-jobs.ts:216 reviewPrNumber already parses canonical positive safe integers but accepts values above the DTO's 32-bit maximum. Do not globally tighten that existing reader; new showFixAction/fixDispatchQuery must explicitly enforce <=2147483647. showFixAction additionally requires REVIEW, COMPLETED and canDispatch. fixDispatchQuery copies nonempty profiles into a fresh array and carries no cost or placement. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:71-76 obtains viewer.canDispatch from fleet.job.dispatch, :91-98 has the PLAN Dispatch run handoff to mirror. Add the Fix NuxtLink adjacent to that action, not a new permission or direct dispatch. Permission-gated helper/action stories use three-session-tdd under the security override, even though backend authorization remains unchanged. apps/web/tests/pages/fleet-job-detail.spec.ts:308-379 has module-private mountEnginePage, request doubles, apiModule alias, inert imported components, permissions stub and a settle loop. Copy it and required helpers into the new Fix-action page spec, pass projectPermissionsStub(['fleet.job.dispatch']) or [] rather than inheriting the old empty default, and inspect uiStubs' NuxtLink to prop.\n\nWeb dispatch page: apps/web/pages/[project]/fleet/dispatch.vue:28-45 applies existing prefill; :57-61 retains unmounted values; :78-81 lists two commands; :98-122 submits and handles conflicts; :166 onward renders ref/feature/spec/ticket FormFields and :241 onward has existing RUN-only bash controls. Add REVIEW/FIX options and conditional text PR input, wrap existing RUN/PLAN FormFields in template v-if without changing their opening tags, preserve PLAN-only spec and RUN-only bash behavior, apply profiles/prNumber prefill and the review-first notice, and use dispatchFeatureOf in the 409 lookup. Open-ticket-PR confirmation remains RUN-only. apps/web/composables/useFleetJobs.ts:72-73 already posts DispatchBody, and :81-83 looks up active jobs by repo+feature: no new composable route is needed. apiInternalUrl/proxy/cookie patterns are unchanged. The existing form permission gate is retained, not redesigned.\n\nMounted-page harness constraints: apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts:13-27 defines the real useField-backed FormField double, :28-34 the token stub, and :48-79 mounts with route/repo/permissions/API doubles. New PR page tests need a visible TicketPicker stub carrying its testId, a TokenInput stub with modelValue and testId props, fleetComponents: ['FleetNativeSelect'], no uiStubs spread that would duplicate-register and shadow that real select, and a route including the per-test query. For submit/conflict tests alias '~/composables/useApi' to import * as apiModule from '../../composables/useApi' so thrown ApiError satisfies instanceof, and register a NuxtLink exposing to. The Creates list requires a separate fleet-dispatch-pr-submit.spec.ts for US-010; reuse/copy the upstream US-009 mount pattern and helpers there rather than importing a module-private helper or executing another spec module. US-009 creates fleet-dispatch-pr-page.spec.ts; US-010 reads that upstream output as context. apps/web/tests/pages/fleet-dispatch-page.spec.ts:15-18 pins the old conflict lookup source and :73 pins the old notice expression; update those exact anchors in the appropriate stories, retaining all other source and runtime assertions.\n\ni18n: US-009 updates both apps/web/i18n/locales/en.json and zh.json with the six dispatch keys, US-011 adds fleet.jobs.actions.dispatchFix to both. Existing apps/web/tests/i18n/used-keys-exist.spec.ts and fleet-locale-parity.spec.ts constrain literal key existence and parity. Keep user-facing web copy localized and do not mix API locale keys into web. No layout/navigation/token/board redesign is intended.\n\nDelivery and migration: obey the exact binding dependency graph: US-001 -> US-002 -> US-003; US-004 -> US-005; US-006 -> US-007, US-006+US-007 -> US-009 -> US-010; US-008 -> US-011. Independent app branches can proceed without API deployment ordering because the API contract already exists. Shared source files within a chain must be extended incrementally; do not revert upstream edits. There is no data migration or feature flag rollout. Main compatibility risks are loss of RUN/PLAN exact payloads or parser errors, commander required-option/exit behavior, mixed-command 409 lookup identity, stale hidden-field zod errors, workspace description caps, copied profile array identity, API error class identity in SFC tests, fixture collisions and approval bypass. Tests should be written first using each app's existing boundary mocks and real mount harness; actual DB checks belong only to US-003 integration, not general DI/unit suites. Generated acceptance files, if supplied by nax, remain untouched and run via the app-specific acceptance commands. Suggested hardening assertions are separated from the binding ACs.\n\nRefinement audit: re-read the on-disk spec and the actual parser, CLI command/context bootstrap, zod library, existing preview tests, query tests and job-page handoff. Enumerated all 76 spec AC bullets (US-001: 7; US-002: 5; US-003: 10; US-004: 7; US-005: 6; US-006: 9; US-007: 9; US-008: 6; US-009: 8; US-010: 4; US-011: 5): every assertion remains in its original story; conjunctive outputs are split only where independently assertable. The CLI exitOverride parenthetical, preview exact line order/nothing-else qualifier, and existing RUN validation anchors survive. All 14 feature-level exclusions remain verbatim, with nearby scopes echoing the relevant boundaries. All context lists include every spec-recommended file within the five-file limit, and all binding workdirs/dependencies remain unchanged. Added the specifically requested negative catalog assertion and backward-compatibility anchors for descriptor wording, RUN/PLAN parsing, preview/DTO, prefill notices, legacy bash validation, RUN conflict behavior and PLAN Dispatch run. PR page negative tests assert no dispatch request; the issue-message assertion stays at the schema boundary where issues are observable, rather than requiring a stub FormMessage to expose an error it does not render. US-003 is medium complexity because its production changes and complete HTTP harness already exist; its strict security TDD remains warranted by the approval/access seam. No source implementation, route, permission, policy or generated artifact was changed by this audit.",
