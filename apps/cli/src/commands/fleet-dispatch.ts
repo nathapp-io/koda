@@ -39,6 +39,17 @@ function invalid(message: string): null {
 }
 
 async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFleetJobDto | null> {
+  const hasPrCommand = o.review !== undefined || o.fix !== undefined;
+  if (o.review !== undefined && o.fix !== undefined) return invalid('Use --review or --fix, not both');
+  if (hasPrCommand && (
+    o.feature !== undefined || o.plan !== undefined || o.ref !== undefined || o.ticket.length > 0 ||
+    o.bashMode !== undefined || o.approvalTimeout !== undefined
+  )) {
+    return invalid('--feature, --plan, --ref, --ticket, --bash-mode and --approval-timeout are not for --review or --fix');
+  }
+  if (!hasPrCommand && o.feature === undefined) {
+    return invalid('--feature is required unless --review or --fix is given');
+  }
   const bashProblem = bashFlagProblem(o);
   if (bashProblem) return invalid(bashProblem);
   if (o.pin && o.label.length > 0) return invalid('Use --label or --pin, not both: a pinned job ignores labels');
