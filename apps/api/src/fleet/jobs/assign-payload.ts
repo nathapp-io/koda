@@ -40,7 +40,12 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     bashMode: job.bashMode,
     approvalTimeoutSec: job.approvalTimeoutSec,
     gitIdentity,
-    ...(reviewPrNumber !== null ? { review: { prNumber: reviewPrNumber, botLogin: gitIdentity.name } } : {}),
+    ...(reviewPrNumber !== null ? {
+      review: {
+        prNumber: reviewPrNumber, botLogin: gitIdentity.name,
+        ...(Array.isArray(job.reviewDecisions) && job.reviewDecisions.length > 0 ? { decisions: job.reviewDecisions } : {}),
+      },
+    } : {}),
     ...(thread ? { thread } : {}),
     ...(job.command === 'PLAN' && job.threadId ? { expectBranch: job.ref } : {}),
   };

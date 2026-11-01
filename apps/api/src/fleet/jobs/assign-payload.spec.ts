@@ -69,3 +69,13 @@ describe('buildAssignPayload', () => {
     expect(buildAssignPayload({ ...job, command: 'THREAD' }, repo, 'https://x/y.git', identity, thread).thread).toEqual(thread);
   });
 });
+
+describe('review decision snapshot wire', () => {
+  const decisions = [{ id: 'm1', statement: 'auth: tokens live in Redis', source: 'koda:memory/m1' }];
+  it('AC-11 sends the stored decisions', () => {
+    expect(buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-42', reviewDecisions: decisions }, repo, 'https://x/y.git', identity).review?.decisions).toEqual(decisions);
+  });
+  it.each([{ reviewDecisions: [] }, { reviewDecisions: null }])('AC-12/13 omits an empty snapshot $reviewDecisions', ({ reviewDecisions }) => {
+    expect(buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-42', reviewDecisions }, repo, 'https://x/y.git', identity).review).not.toHaveProperty('decisions');
+  });
+});

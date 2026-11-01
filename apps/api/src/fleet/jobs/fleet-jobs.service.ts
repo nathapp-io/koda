@@ -1,3 +1,4 @@
+import { ReviewDecisionsService } from '../../memory/review-decisions.service';
 import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
@@ -71,6 +72,7 @@ export class FleetJobsService {
     private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(CONFIG_EDIT_REPOSITORY) private readonly configEdits: Pick<IConfigEditRepository, 'findByJobId'>,
     private readonly audit: AuditRecorder,
+    private readonly reviewDecisions: ReviewDecisionsService,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -103,11 +105,17 @@ export class FleetJobsService {
     // S1b §2.3: no new job in a paused scope, the pinned runner's included.
     await this.budgets.assertNotPaused(jobGateKeys({ projectId, repoId: repo.id, pinnedRunnerId: input.pinnedRunnerId }), new Date());
 
+    // Snapshot once, before the insert transaction. Selection failures must abort dispatch.
+    const reviewDecisions = input.command === FleetJobKind.REVIEW
+      ? await this.reviewDecisions.selectForReview(projectId, repo.id)
+      : undefined;
+
     let job: FleetJobRecord;
     try {
       job = await this.txManager.run(async () => {
         if (opts.threadId && !(await this.repo.lockIdleThread(opts.threadId))) throw new ConflictAppException({}, 'threads.busy');
         const created = await this.repo.createJob({
+          ...(reviewDecisions !== undefined ? { reviewDecisions } : {}),
           ...input, projectId, requestedById: actorId, requestedByType: actorTypeFor(actorId),
           ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
           ...(opts.threadId ? { threadId: opts.threadId } : {}),

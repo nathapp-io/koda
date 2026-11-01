@@ -1,3 +1,4 @@
+import type { ReviewDecision } from '@nathapp/fleet-protocol';
 import type { ChatThreadKind } from '../../common/thread-jobs';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
@@ -60,6 +61,7 @@ export interface FleetJobRecord {
   command: FleetJobKind;
   feature: string;
   planFrom: string | null;
+  reviewDecisions?: ReviewDecision[] | null;
   profiles: string[];
   /** Decimal as string. */
   maxCostUsd: string;
@@ -129,6 +131,7 @@ export interface NewFleetJob {
   command: FleetJobKind;
   feature: string;
   planFrom: string | null;
+  reviewDecisions?: ReviewDecision[] | null;
   profiles: string[];
   maxCostUsd: string;
   bashMode: BashMode;

@@ -995,6 +995,7 @@ model FleetJob {
   command            String // RUN | PLAN | CONFIG_EDIT | CONFIG_DRIFT (S3 §1)
   feature            String
   planFrom           String? // repo-relative spec path, PLAN only
+  reviewDecisions    Json? // Immutable dispatch-time REVIEW input
   profiles           String[]
   maxCostUsd         Decimal   @db.Decimal(12, 4)
   bashMode           String    @default("raw") // raw | gated | escalate (S1.5 §1.6); PLAN is always raw
