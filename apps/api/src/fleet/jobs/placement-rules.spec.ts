@@ -198,7 +198,7 @@ describe('placement rules (spec §4)', () => {
 
     it('carries the command through toPlacementJob', () => {
       const record = { command: 'CONFIG_DRIFT', repoId: 'repo-1', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw' as const };
-      expect(toPlacementJob(record as never, { provider: 'github' }).command).toBe('CONFIG_DRIFT');
+      expect(toPlacementJob(record as never, { provider: 'github', projectId: 'p1' }).command).toBe('CONFIG_DRIFT');
     });
 
     it('never holds a config job on a job-scope budget pause', () => {
@@ -308,9 +308,9 @@ describe('placement helpers moved from PlacementService (D413)', () => {
     expect(loads.get('r3')).toBeUndefined();
   });
 
-  it('toPlacementJob copies the placement fields and the repo provider', () => {
-    expect(toPlacementJob({ command: 'RUN', repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab' }))
-      .toEqual({ command: 'RUN', repoId: 'x', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
+  it('toPlacementJob copies the placement fields, the repo provider and the project', () => {
+    expect(toPlacementJob({ command: 'RUN', repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab', projectId: 'p7' }))
+      .toEqual({ command: 'RUN', repoId: 'x', projectId: 'p7', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
   });
 
   it('keeps the placement scan window at 50', () => {

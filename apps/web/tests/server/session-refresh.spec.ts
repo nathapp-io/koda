@@ -2,8 +2,6 @@ import { describe, test, expect, jest, beforeEach } from '@jest/globals'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { clearAuthCookies as clearRealAuthCookies, setAuthCookies as setRealAuthCookies } from '~/server/utils/api'
-import { createEvent, deleteCookie as h3DeleteCookie, setCookie as h3SetCookie } from '../../../../node_modules/.bun/h3@1.15.11/node_modules/h3'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 
 const middlewarePath = join(__dirname, '..', '..', 'server', 'middleware', 'session-refresh.ts')
 const g = globalThis as Record<string, unknown>
@@ -22,6 +20,26 @@ type TestEvent = {
   context: Record<string, unknown>
 }
 
+type CookieOptions = { path?: string; maxAge?: number; httpOnly?: boolean; secure?: boolean; sameSite?: 'strict' | 'lax' | 'none' }
+
+// Nitro auto-imports h3's cookie helpers into the server build, so `~/server/utils/api` calls them as globals.
+// h3 is only a transitive dependency here (Nitro pulls it in), so the test supplies the two helpers it uses instead of
+// importing h3 from its install location; serialization mirrors h3 v1 (`Name=Value; Max-Age=…; Path=…; HttpOnly; …`).
+function setCookie(target: TestEvent, name: string, value: string, options: CookieOptions = {}): void {
+  const parts = [`${name}=${encodeURIComponent(value)}`]
+  if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(options.maxAge)}`)
+  if (options.path) parts.push(`Path=${options.path}`)
+  if (options.httpOnly) parts.push('HttpOnly')
+  if (options.secure) parts.push('Secure')
+  if (options.sameSite) parts.push(`SameSite=${options.sameSite[0].toUpperCase()}${options.sameSite.slice(1)}`)
+  target.node.res.appendHeader('set-cookie', parts.join('; '))
+}
+
+/** h3's `deleteCookie` clears the value and expires the cookie. */
+function deleteCookie(target: TestEvent, name: string, options: CookieOptions = {}): void {
+  setCookie(target, name, '', { ...options, maxAge: 0 })
+}
+
 const event = (): TestEvent => {
   const response: TestEvent['node']['res'] = {
     headers: {},
@@ -35,13 +53,16 @@ const event = (): TestEvent => {
     },
     removeHeader(name) { delete this.headers[name.toLowerCase()] },
   }
-  return createEvent(
-    { method: 'GET', url: '/projects', headers: { accept: 'text/html', cookie: 'koda_refresh=r1; koda_locale=zh' } } as IncomingMessage,
-    response as unknown as ServerResponse,
-  ) as unknown as TestEvent
+  return {
+    node: {
+      req: { method: 'GET', url: '/projects', headers: { accept: 'text/html', cookie: 'koda_refresh=r1; koda_locale=zh' } },
+      res: response,
+    },
+    context: {},
+  }
 }
 
-function emittedCookies(req: ReturnType<typeof event>): string[] {
+function emittedCookies(req: TestEvent): string[] {
   const value = req.node.res.headers['set-cookie']
   return Array.isArray(value) ? value : value ? [value] : []
 }
@@ -59,8 +80,8 @@ beforeEach(() => {
   })
   g.setAuthCookies = jest.fn(setRealAuthCookies)
   g.clearAuthCookies = jest.fn(clearRealAuthCookies)
-  g.setCookie = h3SetCookie
-  g.deleteCookie = h3DeleteCookie
+  g.setCookie = setCookie
+  g.deleteCookie = deleteCookie
 })
 
 async function loadHandler(): Promise<Handler> {
