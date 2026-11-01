@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T12:34:05.268Z",
+  "updatedAt": "2026-11-01T12:40:26.253Z",
   "userStories": [
     {
       "id": "US-001",
@@ -507,14 +507,17 @@
         "US-006",
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Uses existing form and mount patterns for conditional UI plus two locale files; existing permission enforcement is unchanged."
+        "reasoning": "Uses existing form and mount patterns for conditional UI plus two locale files; existing permission enforcement is unchanged.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/dispatch.vue",
@@ -548,7 +551,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9997a5d5fc047ee0719a4b1e6fc1447254e2992a"
     },
     {
       "id": "US-010",
