@@ -3,7 +3,7 @@
   "feature": "fleet-review-decisions",
   "branchName": "feat/fleet-review-decisions",
   "createdAt": "2026-11-14T09:00:00.000Z",
-  "updatedAt": "2026-11-01T03:00:47.256Z",
+  "updatedAt": "2026-11-01T03:05:21.396Z",
   "userStories": [
     {
       "id": "US-001",
@@ -265,14 +265,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized additive payload validation and clean-copy behavior using the existing parser pattern; no authentication, credential or authorization logic changes."
+        "reasoning": "Localized additive payload validation and clean-copy behavior using the existing parser pattern; no authentication, credential or authorization logic changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -296,7 +299,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b85b1c540caca38bfdab3d33401767ba2ec8312f"
     },
     {
       "id": "US-005",
