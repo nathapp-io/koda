@@ -97,11 +97,14 @@ export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: Knowledg
      */
     async preview(ctx: ToolContext, input: DispatchJobInput): Promise<string> {
       const repo = await resolveRepo(knowledge, ctx, input);
+      if ((input.command === 'REVIEW' || input.command === 'FIX') && repo.provider !== 'github') {
+        throw new ToolInputError(input.command === 'FIX' ? 'fix is GitHub-only' : 'review is GitHub-only');
+      }
       assertDispatchable(input, repo);
       const lines = [
         `Dispatch ${input.command} in ${ctx.projectSlug}:`,
         `repo: ${repo.owner}/${repo.name} @ ${input.ref ?? repo.defaultBranch}`,
-        `feature: ${input.feature}`,
+        ...(input.command === 'REVIEW' || input.command === 'FIX' ? [`pull request: #${input.prNumber}`] : [`feature: ${input.feature}`]),
         `max cost: $${String(input.maxCostUsd)}`,
       ];
       if (input.planFrom !== undefined) lines.push(`plan from: ${input.planFrom}`);
@@ -160,7 +163,8 @@ function toDto(input: DispatchJobInput, repoId: string): DispatchFleetJobDto {
   return {
     repoId,
     command: input.command,
-    feature: input.feature,
+    ...(input.feature === undefined ? {} : { feature: input.feature }),
+    ...(input.prNumber === undefined ? {} : { prNumber: input.prNumber }),
     maxCostUsd: input.maxCostUsd,
     ...(input.ref === undefined ? {} : { ref: input.ref }),
     ...(input.planFrom === undefined ? {} : { planFrom: input.planFrom }),
