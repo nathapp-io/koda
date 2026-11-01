@@ -94,7 +94,7 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
 
 function featureLabel(job: FleetJobDto): string {
   if (isConfigJob(job)) return t('fleet.jobs.configFeature')
-  if (job.command !== 'REVIEW') return job.feature
+  if (job.command !== 'REVIEW' && job.command !== 'FIX') return job.feature
   const prNumber = reviewPrNumber(job.feature)
   return prNumber === null ? job.feature : `PR #${prNumber}`
 }

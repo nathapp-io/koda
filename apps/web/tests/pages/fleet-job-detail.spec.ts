@@ -378,6 +378,13 @@ function mountEnginePage(over: EnginePageOver) {
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
 
 describe('review and config job headers', () => {
+  test('FIX header shows PR #42', async () => {
+    const fix = mountEnginePage({ job: jobFixture({ command: 'FIX', feature: 'review-pr-42' }), records: [] })
+    await fix.settle()
+    expect(fix.app.one('[data-stub="page-header"]')?.props.title).toBe('PR #42')
+    fix.app.unmount()
+  })
+
   test('REVIEW header shows PR #42 and config header keeps the translated nax config label', async () => {
     const review = mountEnginePage({ job: jobFixture({ command: 'REVIEW', feature: 'review-pr-42' }), records: [] })
     await review.settle()
@@ -388,6 +395,35 @@ describe('review and config job headers', () => {
     await config.settle()
     expect(config.app.one('[data-stub="page-header"]')?.props.title).toBe('nax config')
     config.app.unmount()
+  })
+})
+
+describe('FIX outcomes', () => {
+  test.each([
+    ['pushed', 'Fix pushed'],
+    ['nothing', 'Nothing to fix'],
+  ] as const)('a completed FIX with outcome %s shows its localized label', async (outcome, label) => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', state: 'COMPLETED', fixOutcome: outcome, feature: 'review-pr-42' }), records: [] })
+    await m.settle()
+    expect(m.app.text()).toContain(label)
+    m.app.unmount()
+  })
+
+  test.each([null, undefined])('a FIX without an outcome (%s) shows no outcome label', async (fixOutcome) => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixOutcome, feature: 'review-pr-42' }), records: [] })
+    await m.settle()
+    expect(m.byId('fleet-job-fix-outcome')).toHaveLength(0)
+    expect(m.app.text()).not.toContain('Fix pushed')
+    expect(m.app.text()).not.toContain('Nothing to fix')
+    m.app.unmount()
+  })
+
+  test('a RUN job does not show a fix outcome label', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'RUN', fixOutcome: 'pushed' }), records: [] })
+    await m.settle()
+    expect(m.app.text()).not.toContain('Fix pushed')
+    expect(m.app.text()).not.toContain('Nothing to fix')
+    m.app.unmount()
   })
 })
 
