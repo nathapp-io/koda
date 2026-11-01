@@ -40,6 +40,10 @@ describe('every literal translation key exists in every locale', () => {
     expect(used.length).toBeGreaterThan(100)
   })
 
+  it('has the PR-number dispatch validation message in both locales', () => {
+    expect(LOCALES.every(locale => hasKey(messages[locale], 'fleet.dispatch.validation.prNumber'))).toBe(true)
+  })
+
   it.each(LOCALES)('%s has every key the source uses', (locale) => {
     const missing = used.filter(({ key }) => !hasKey(messages[locale], key)).map(({ key, file }) => `${key} (${file})`)
     expect([...new Set(missing)]).toEqual([])
