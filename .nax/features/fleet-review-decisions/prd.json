@@ -3,7 +3,7 @@
   "feature": "fleet-review-decisions",
   "branchName": "feat/fleet-review-decisions",
   "createdAt": "2026-11-14T09:00:00.000Z",
-  "updatedAt": "2026-11-01T02:49:30.968Z",
+  "updatedAt": "2026-11-01T02:54:12.313Z",
   "userStories": [
     {
       "id": "US-001",
@@ -96,14 +96,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard bounded Prisma queries and DI wiring across a few files; security override applies because the query enforces project-scoped decision disclosure and must exclude other tenants."
+        "reasoning": "Standard bounded Prisma queries and DI wiring across a few files; security override applies because the query enforces project-scoped decision disclosure and must exclude other tenants.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -132,7 +135,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a0f35d2de2ba3c07b98d406de4bb2a2743523ae0"
     },
     {
       "id": "US-003",
