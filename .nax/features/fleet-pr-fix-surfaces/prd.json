@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T12:00:48.319Z",
+  "updatedAt": "2026-11-01T12:10:03.935Z",
   "userStories": [
     {
       "id": "US-001",
@@ -158,14 +158,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Preview and DTO branches reuse an existing tool and complete HTTP/approval fixture harness without new abstractions; strict TDD remains required because the route-to-approval test exercises runner access, fencing and requester identity."
+        "reasoning": "Preview and DTO branches reuse an existing tool and complete HTTP/approval fixture harness without new abstractions; strict TDD remains required because the route-to-approval test exercises runner access, fencing and requester identity.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
@@ -188,7 +191,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e9580783461a5797b57c5464054ea4fab3c3655a"
     },
     {
       "id": "US-004",
