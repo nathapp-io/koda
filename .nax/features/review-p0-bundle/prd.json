@@ -1,0 +1,677 @@
+{
+  "project": "koda",
+  "feature": "review-p0-bundle",
+  "branchName": "feat/review-p0-bundle",
+  "createdAt": "2026-11-01T00:00:00.000Z",
+  "updatedAt": "2026-11-01T16:10:25.217Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Agent self-update is shutdown-only",
+      "description": "**Goal** — Restrict roster self-updates to validated shutdown patches and require positive integer concurrency limits.\n\n**Motivation** — An admin pauses a misbehaving agent; the agent sends `PATCH /api/projects/p/agents/<self> {\"status\":\"ACTIVE\",\"maxConcurrentTickets\":1000}` and is active again, with no approval request and no audit of an approver.\n\n**Approach** — 1. **Self path = shutdown only.** In `updateProjectAgent`, when the principal is an agent whose slug equals\n   `agentSlug`, the body is parsed with `parseBody(UpdateAgentDto, ...)`. A body that fails validation (for example\n   `status: 'GONE'` or `maxConcurrentTickets: 0`) keeps the existing 400 from `parseBody`. `parseBody` strips unknown\n   keys (`whitelist: true`), so `{ status: 'OFFLINE', junk: 1 }` parses to a clean shutdown. Only keys whose value\n   is not `undefined` count (`parseBody` returns `instanceToPlain` output, which may carry declared fields as\n   `undefined`). If the parsed patch has exactly one defined key, `status`, with value `PAUSED` or `OFFLINE`, then\n   `{ status }` is applied through `agentsService.update` with no\n   permission check and no approval, as today. Any other parsed patch on the self path (another status, any other\n   DTO field, or an empty body) throws `ForbiddenAppException({}, 'projectAgents')`, the existing i18n key, and\n   changes nothing. The self path\n   never falls through to the gated path: the redesign's rule is that a principal does not hold `agent.update` over\n   itself.\n2. **`maxConcurrentTickets` validation.** `UpdateAgentDto.maxConcurrentTickets` changes from `@IsNumber()` to\n   `@IsInt() @Min(1)`. This is the shared DTO, so the global `PATCH /api/agents/:slug` route gets the same rule.\n\n**Scope** — In: projects.controller.ts self branch, update-agent.dto.ts, dedicated controller/DTO units and agent-self-update DB integration, plus one own-key ACTIVE-to-self 403 case beside the existing project-agent PATCH cases in test/e2e/api-endpoint/endpoint.e2e.spec.ts; existing cases stay. Preserve roster validation and non-self gate behavior. Out: role-grant floor changes (US-002), fleet and session work (US-003–009). An upper bound on `maxConcurrentTickets`: only integer and at-least-1 validation is added. Blocking PAUSED agents at the auth guard (review ruling 10): PAUSED agents still authenticate; only the self path is closed.\n\n**Interface** — `ProjectsController.updateProjectAgent` self branch: parse, accept only `{ status: 'PAUSED' | 'OFFLINE' }`, else `ForbiddenAppException({}, 'projectAgents')`. `UpdateAgentDto.maxConcurrentTickets`: `@IsInt() @Min(1)`. Use existing `parseBody(UpdateAgentDto, body)` and `agentsService.update(agentSlug, { status })`.",
+      "acceptanceCriteria": [
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, an agent principal with slug 'agent-a', ctx) calls agentsService.update exactly once with ('agent-a', { status: 'OFFLINE' }).",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, the agent-a principal, ctx) never calls routeGate.run.",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent('alpha', 'agent-a', { status: 'PAUSED' }, the agent-a principal, ctx) calls agentsService.update exactly once with ('agent-a', { status: 'PAUSED' }).",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE', junk: 1 }, the agent-a principal, ctx) calls agentsService.update exactly once with ('agent-a', { status: 'OFFLINE' }).",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent targeting agent-a as its own principal throws ForbiddenAppException({}, 'projectAgents') for each body { status: 'ACTIVE' }, { status: 'OFFLINE', maxConcurrentTickets: 5 }, { name: 'Owner' }, and {}.",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent targeting agent-a as its own principal never calls agentsService.update for each forbidden body { status: 'ACTIVE' }, { status: 'OFFLINE', maxConcurrentTickets: 5 }, { name: 'Owner' }, and {}.",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent targeting agent-a as its own principal with { status: 'GONE' } throws the existing 400 validation exception raised by parseBody.",
+        "[unit] Given agent-a is on alpha's roster, updateProjectAgent targeting agent-a as its own principal with { status: 'GONE' } does not call agentsService.update.",
+        "[integration] When a rostered PAUSED agent sends PATCH /api/projects/:slug/agents/<its own slug> with its API key and { status: 'ACTIVE' }, the response is HTTP 403.",
+        "[integration] When a rostered PAUSED agent sends PATCH /api/projects/:slug/agents/<its own slug> with its API key and { status: 'ACTIVE' }, its persisted status remains PAUSED afterwards.",
+        "[unit] Validating UpdateAgentDto with { maxConcurrentTickets: 1.5 } yields a validation error on maxConcurrentTickets.",
+        "[unit] Validating UpdateAgentDto with { maxConcurrentTickets: 0 } yields a validation error on maxConcurrentTickets.",
+        "[unit] Validating UpdateAgentDto with { maxConcurrentTickets: 3 } yields no validation errors.",
+        "[unit] Given a rostered target agent and a non-self principal granted global agent.update, updateProjectAgent with { status: 'PAUSED' } calls routeGate.run with the existing rest:project-agents.update variant, key 'agent.update', projectId:null, keyCheck:false and the parsed patch in input, preserving the non-self approval path."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "agents",
+        "access-control"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Localized controller/DTO change with a critical self-authorization bypass; strict isolated security TDD plus real-key HTTP regression is required."
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/projects/projects.controller.spec.ts",
+        "apps/api/src/agents/dto/update-agent.dto.ts",
+        "apps/api/src/approvals/route/parse-body.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/projects.controller.self-update.spec.ts",
+        "apps/api/test/integration/projects/agent-self-update.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a rostered self agent submits an otherwise valid shutdown patch, permissions.can is never called.",
+        "When a self agent not on the project roster submits { status: 'OFFLINE' }, the existing projectAgents 403 is preserved and the agent row is unchanged.",
+        "When PATCH /api/agents/:slug receives maxConcurrentTickets: 1.5 or 0, it returns HTTP 400 under the same shared DTO rule."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.controller.ts",
+          "reason": "the self branch of `updateProjectAgent` parses the body and accepts only a patch whose single defined key is `status` with `PAUSED` or `OFFLINE`, else throws `ForbiddenAppException({}, 'projectAgents')`; a body failing validation keeps the 400."
+        },
+        {
+          "path": "apps/api/src/agents/dto/update-agent.dto.ts",
+          "reason": "`maxConcurrentTickets` becomes `@IsInt() @Min(1)` instead of `@IsNumber()`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add one case beside the existing project-agent PATCH tests: the agent's own API key sending `{ \"status\": \"ACTIVE\" }` for itself gets 403 (rule: endpoint changes are reflected here). Existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Role-granting keys carry the human approval floor",
+      "description": "**Goal** — Require human approval for agent member additions, invite creation and invite resends through the existing catalog floor.\n\n**Motivation** — An agent with Project Admin invites an address it controls as Project Admin, gets the raw `invitePath` back, and accepts it.\n\n**Approach** — 3. **Role-granting keys are critical.** `classifyRisk` in `permissions/catalog.ts` returns `'critical'` for the keys in\n   a new exported set `ROLE_GRANT_KEYS = new Set(['member.add', 'invite.create', 'invite.resend'])`. It checks this\n   set first, beside the existing `role.` and `approval.policy.` prefix rule. The existing `buildEntry` formula then\n   gives these keys `approval.floor: 'human'` and `approval.default: 'human'` with no other change. Effects:\n   - Existing approval policies below the floor are clamped up by the resolver, which already happens for every key.\n   - A human acting directly satisfies a `human` requirement (design: \"a human acting directly satisfies any mode\"),\n     so the web and owner flows are unchanged.\n   - An agent caller gets `202` with a pending request. After a human approves, the agent redeems the result through\n     the existing redeem flow (`@ApprovalGated({ redeem: true })`). The raw link is shown once to the requester, whose\n     action a human has now approved.\n\nSource clarification: invite create/resend use the quoted secret-redeem flow; member.add currently uses @ApprovalGated() and executes through its existing non-secret approval command, not a newly introduced redeem route. Preserve both established mechanisms; do not change controller business rules or approval storage.\n\n**Scope** — In: permissions/catalog.ts exported set and classification, catalog.spec.ts expectedRisk oracle (import set or inline its three keys; keep generic floor/default formula), dedicated no-policy integration cases. Modify core-members-invites.integration.spec.ts B4 from immediate 201 to 202 with permissionKey invite.create, root approval and agent redeem via X-Koda-Approval-Request yielding 201, preserving invite row and inviterName assertions as before. Modify gated-invite-secret-routes.integration.spec.ts 'AC-8/12: default-none create and resend execute immediately without approval rows' to two default-policy agent 202 requests with one ApprovalRequest each, while root direct create stays 201; every other test stays because the root user decides those approvals. Add one project-admin agent POST invite 202 case to test/e2e/api-endpoint/endpoint.e2e.spec.ts; existing cases stay. Out: agent self branch/DTO (US-001), fleet/session changes (US-003–009). Other risk tiers the review flagged (`agent.key.rotate`, `agent.create`, `user.create`, CI token rotation, review A/SEC-6): a separate fix.\n\n**Interface** — `ROLE_GRANT_KEYS = new Set(['member.add', 'invite.create', 'invite.resend'])`; `classifyRisk(key)` returns `'critical'` for every key in the exported `ROLE_GRANT_KEYS`. The existing `buildEntry` derives `approval.floor: 'human'` and `approval.default: 'human'`.",
+      "acceptanceCriteria": [
+        "[unit] Importing ROLE_GRANT_KEYS from permissions/catalog yields exactly the set { 'member.add', 'invite.create', 'invite.resend' }.",
+        "[unit] For each key in ROLE_GRANT_KEYS, PERMISSION_CATALOG reports risk 'critical'.",
+        "[unit] For each key in ROLE_GRANT_KEYS, PERMISSION_CATALOG reports approval.floor 'human'.",
+        "[integration] Given a project-admin agent in a project with no approval policy rows, POST /api/projects/:slug/invites for a new address with roleKey 'project-admin' returns HTTP 202 with permissionKey 'invite.create'.",
+        "[integration] Given a project-admin agent in a project with no approval policy rows, posting an invite for a new address with roleKey 'project-admin' leaves no ProjectInvite row for that address while approval is pending.",
+        "[integration] Given a project-admin agent in a project with no approval policy rows, POST /api/projects/:slug/members for an existing non-member user returns HTTP 202 with permissionKey 'member.add'.",
+        "[integration] Given a project-admin agent in a project with no approval policy rows, posting member.add for an existing non-member user leaves the user with no role binding in that project while approval is pending.",
+        "[integration] Given a project-admin agent in a project with no approval policy rows and a pending invite created by root, POST /api/projects/:slug/invites/:id/resend returns HTTP 202 with permissionKey 'invite.resend'.",
+        "[integration] When the root user (Owner, JWT) directly posts an invite for a new address, POST /api/projects/:slug/invites returns HTTP 201.",
+        "[integration] When the root user (Owner, JWT) directly creates an invite for a new address, no ApprovalRequest row is created.",
+        "[integration] Given an agent invite.resend request pending under the default policy, the persisted ProjectInvite { tokenHash, expiresAt, updatedAt } snapshot remains equal to its pre-request snapshot before a human approves.",
+        "[integration] Given a project-admin agent's pending invite.create request, when root approves and the requester redeems using X-Koda-Approval-Request, the response is HTTP 201, preserving the existing approved redeem flow.",
+        "[integration] Given an agent invite.create request approved by root and redeemed by its requester, response.invite.inviterName equals the requesting agent's name, preserving inviterName attribution as before.",
+        "[integration] Given an agent invite.create request approved by root and redeemed by its requester, the persisted ProjectInvite inviter fields equal { invitedById: null, invitedByAgentId: agent.id }, preserving the invite row assertions as before."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "permissions",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Catalog-driven access-control escalation fix reuses established approval mechanisms but changes live grant endpoint outcomes; security override requires strict TDD isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/catalog.spec.ts",
+        "apps/api/test/integration/projects/gated-invite-secret-routes.integration.spec.ts",
+        "apps/api/src/projects/invites/project-invites.controller.ts",
+        "apps/api/src/projects/members/project-members.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/role-grant-human-floor.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ApprovalPolicyResolver.resolve returns mode 'human' for each ROLE_GRANT_KEYS permission even when the selected stored policy mode is 'none' or 'agent'.",
+        "When the default policy applies, each pending agent invite create/resend produces exactly one ApprovalRequest without returning a raw invitePath."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "adds the exported `ROLE_GRANT_KEYS` set and makes `classifyRisk` return `'critical'` for its keys."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the independent oracle helper `expectedRisk()` (lines ~167-174) must return `'critical'` for the keys of `ROLE_GRANT_KEYS` (import the set or inline the three literals), so the \"derives access, scope, ownable, risk, principals and approval for every catalog key\" test keeps passing; the generic floor/default formula stays."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "test \"B4: an agent with a project-admin binding invites an unknown address with 201, and is named as the inviter\" becomes: the agent's invite answers 202 with `permissionKey` `'invite.create'`; after the root user approves the request, the agent's redeem (`X-Koda-Approval-Request`) answers 201 and the invite row and `inviterName` assertions hold as before."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add one case: an agent holding `project-admin` posting a project invite gets 202 (rule: endpoint changes are reflected here). Existing cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/projects/gated-invite-secret-routes.integration.spec.ts",
+          "reason": "the test titled \"AC-8/12: default-none create and resend execute immediately without approval rows\" (an agent's create and resend under the default policy run at once with `201`/`200` and no approval rows) becomes: under the default policy an agent's create and resend answer `202` and create one approval request each; the root user's direct create still answers `201`. Every other test in the file stays, because its approvals are decided by the root user."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Trust-domain placement rule (pure)",
+      "description": "**Goal** — Make pure placement and occupancy calculations enforce cross-project raw-agent trust domains.\n\n**Motivation** — Every job runs as the same OS user, so a raw agent can read that file and connect to any job's credential socket.\n\n**Approach** — 4. **Placement trust domain.** A config job runs no agent. For production commands a raw agent job has bashMode === 'raw' and is not isConfigKind(command); the literal CONFIG helper case below is an explicit AC compatibility exception. The rule:\n   - `RunnerLoad` gains two sets: `projectIds`, the projects of all held jobs including threads, and `rawProjectIds`,\n     the projects of held raw agent jobs. `EMPTY_LOAD` gets both, empty.\n   - `PlacementJob` gains `projectId`. `toPlacementJob(job, repo, thread?)` takes it from the repo argument, whose type\n     becomes `Pick<FleetRepoRef, 'provider' | 'projectId'>`. The dispatch-time callers (`fleet-jobs.service.ts:100`,\n     `schedules.service.ts:218`) pass a normalized input with no `projectId` but a full `FleetRepoRef`, and the\n     dashboard passes a `DashboardJobRow` that carries both, so no caller changes.\n   - `firstMisfit` returns the new `MisfitReason` `'trust_domain'` in two cases:\n     - (a) the job is a raw agent job and `load.projectIds` holds a project other than `job.projectId`;\n     - (b) `load.rawProjectIds` holds a project other than `job.projectId`, whatever the job's kind (config jobs\n       included).\n   - The check runs after every permanent or capability misfit, so it can never hide one:\n     - on the non-thread path, after `capabilityMisfit` and before `busy_repo`;\n     - on the thread path, just before `thread_capacity`.\n   - `'trust_domain'` is not in `PERMANENT_MISFITS`: it clears when the other project's job ends, so a pinned dispatch\n     queues and does not get a 422.\n   - Same-project jobs never misfit on it.\n5. **Load plumbing.** `ActiveJobRef` gains `projectId: string` and `bashMode: string`.\n   - `PrismaFleetJobRepository.findActiveLoads` and `PrismaDashboardRepository.findHeldRefs` select both fields.\n   - `toLoads` folds them into the two sets through a new exported pure helper,\n     `addJobToLoad(load, ref): RunnerLoad`.\n   - `PlacementService.fillRunner` and `fillRunnerThreads` call `addJobToLoad` after each assignment inside their\n     loops, so the sets also hold the jobs placed earlier in the same pass.\n   - `fillRunnerThreads` today builds `currentLoad` from a load that never changes. It now carries the updated sets\n     forward.\n\nAC reconciliation: isConfigKind currently recognizes CONFIG_EDIT and CONFIG_DRIFT, but the explicit addJobToLoad AC uses command:'CONFIG'. Honor that exact helper input as config-like (projectIds gains p1, rawProjectIds stays empty), alongside actual config kinds, without changing runner commands. Do not mutate input sets or EMPTY_LOAD, and preserve non-thread active/repoIds and thread counter semantics.\n\n**Scope** — In: placement-rules.ts pure logic/types/EMPTY_LOAD/addJobToLoad/toLoads/toPlacementJob and fleet-job.domain.ts ActiveJobRef. Update placement-rules.spec.ts hand-built load/job/ref literals, both bare-provider toPlacementJob calls, copied projectId and new set expectations, keeping every existing misfit expectation. Update hand-built literals in dashboard/attention-unplaceable.spec.ts, dashboard/attention-rules.spec.ts and test/unit/fleet/thread-placement.spec.ts, keeping their existing verdicts. Out: repository selects, assignment loops, dashboard waiting classification, API enums and generated contracts (US-004); web labels (US-008); tokens (US-005–007). The per-job credential-socket nonce from Ruling 5: dropped by user ruling 2026-11-01, because the FIX/REVIEW token also sits in a same-user-readable file; placement isolation is the control. Isolating two jobs of the same project on one runner from each other: Ruling 5 treats one project on one runner as one trust domain. Running raw jobs as a per-job OS user or in a VM: Ruling 5's long-term option, not built here.\n\n**Interface** — `RunnerLoad`: `{ active: number; repoIds: ReadonlySet<string>; projectIds: ReadonlySet<string>; rawProjectIds: ReadonlySet<string>; threads?: number }`. `ActiveJobRef`: `{ runnerId: string; repoId: string; command?: string; projectId: string; bashMode: string }`. `PlacementJob` gains `projectId: string`. `toPlacementJob(job, repo: Pick<FleetRepoRef, 'provider' | 'projectId'>, thread?)` sets `projectId` from `repo.projectId`. `addJobToLoad(load, ref): RunnerLoad` is exported and pure. `toLoads(refs)` takes ActiveJobRef-shaped refs. `MisfitReason` includes `'trust_domain'`.",
+      "acceptanceCriteria": [
+        "[unit] firstMisfit returns 'trust_domain' for an otherwise-fitting raw RUN job of project p1 when load.projectIds is {'p2'} and load.rawProjectIds is empty.",
+        "[unit] firstMisfit returns 'trust_domain' for an otherwise-fitting non-raw RUN job of project p1 when load.rawProjectIds is {'p2'}.",
+        "[unit] firstMisfit returns null for an otherwise-fitting non-raw RUN job of project p1 when load.projectIds is {'p2'} and load.rawProjectIds is empty.",
+        "[unit] firstMisfit returns null for an otherwise-fitting raw REVIEW job of project p1 when load.projectIds and load.rawProjectIds are both {'p1'}.",
+        "[unit] firstMisfit returns null for an otherwise-fitting config-kind job with bashMode 'raw' and projectId 'p1' when load.projectIds is {'p2'} and load.rawProjectIds is empty.",
+        "[unit] firstMisfit returns 'trust_domain' for an otherwise-fitting config-kind job with bashMode 'raw' and projectId 'p1' when load.rawProjectIds is {'p2'}.",
+        "[unit] firstMisfit returns 'tools' for a raw RUN job of project p1 when the runner lacks gh and both load.projectIds and load.rawProjectIds are {'p2'}.",
+        "[unit] firstMisfit returns 'trust_domain' for a raw PROJECT THREAD job of project p1 on an otherwise-fitting thread runner when load.projectIds is {'p2'}.",
+        "[unit] toPlacementJob({ command: 'RUN', repoId: 'x', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw' }, { provider: 'github', projectId: 'p1' }).projectId returns 'p1'.",
+        "[unit] PERMANENT_MISFITS.has('trust_domain') returns false.",
+        "[unit] addJobToLoad(EMPTY_LOAD, { runnerId: 'r1', repoId: 'repo1', command: 'RUN', projectId: 'p1', bashMode: 'raw' }).rawProjectIds equals {'p1'}.",
+        "[unit] addJobToLoad(EMPTY_LOAD, { runnerId: 'r1', repoId: 'repo1', command: 'CONFIG', projectId: 'p1', bashMode: 'raw' }).projectIds equals {'p1'}.",
+        "[unit] addJobToLoad(EMPTY_LOAD, { runnerId: 'r1', repoId: 'repo1', command: 'CONFIG', projectId: 'p1', bashMode: 'raw' }).rawProjectIds is empty."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "fleet",
+        "placement",
+        "isolation"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Pure predicate and immutable-set folding changes are confined to existing placement/domain contracts plus fixture updates; the security isolation boundary still requires strict three-session TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/jobs/placement-rules.spec.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/common/config-jobs.ts",
+        "apps/api/test/unit/fleet/thread-placement.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/placement-rules.trust-domain.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "addJobToLoad leaves EMPTY_LOAD and every prior load snapshot's sets unchanged.",
+        "toLoads includes held THREAD project IDs in projectIds while preserving active:0 and the thread count for thread-only loads.",
+        "firstMisfit returns 'trust_domain' before busy_repo or capacity when isolation and those temporary limits all apply.",
+        "firstMisfit preserves a thread backend/capability misfit before trust_domain when both conditions apply.",
+        "addJobToLoad excludes CONFIG_EDIT and CONFIG_DRIFT jobs from rawProjectIds even when bashMode is 'raw'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/placement-rules.ts",
+          "reason": "`MisfitReason` gains `'trust_domain'`; `PlacementJob` gains `projectId`; `toPlacementJob`'s repo parameter becomes `Pick<FleetRepoRef, 'provider' | 'projectId'>`; `RunnerLoad` and `EMPTY_LOAD` gain `projectIds` and `rawProjectIds`; adds the exported `addJobToLoad`; `toLoads` uses it; `firstMisfit` applies the trust-domain rule after `capabilityMisfit` (before `busy_repo`) and, on the thread path, before `thread_capacity`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "`ActiveJobRef` gains `projectId` and `bashMode`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement-rules.spec.ts",
+          "reason": "every hand-built `RunnerLoad` literal gains `projectIds` and `rawProjectIds`; every `toLoads` input ref (lines ~215 and ~296) gains `projectId` and `bashMode`, and every `toLoads` expectation gains the two sets; every `PlacementJob` literal gains `projectId`; the `toPlacementJob` calls at lines ~196 and ~302-303 that pass a bare `{ provider }` repo pass `{ provider, projectId }`, and the \"copies the placement fields\" expectation gains that `projectId`. Existing misfit expectations stay."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/attention-unplaceable.spec.ts",
+          "reason": "every hand-built `RunnerLoad` gains empty `projectIds` and `rawProjectIds` so it type-checks; existing verdicts stay."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/attention-rules.spec.ts",
+          "reason": "the hand-built load at line ~22 (`{ active: 1, repoIds: ... }`) gains empty `projectIds` and `rawProjectIds` so it type-checks; its verdicts stay."
+        },
+        {
+          "path": "apps/api/test/unit/fleet/thread-placement.spec.ts",
+          "reason": "every hand-built `RunnerLoad` or `PlacementJob` literal gains the new fields; existing verdicts stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Trust-domain placement plumbing",
+      "description": "**Goal** — Enforce trust-domain occupancy during real dispatch/sync assignment and expose its temporary waiting reason consistently.\n\n**Motivation** — Placement isolation is the control that works (user ruling, 2026-11-01).\n\n**Approach** — 5. **Load plumbing.** `ActiveJobRef` gains `projectId: string` and `bashMode: string`.\n   - `PrismaFleetJobRepository.findActiveLoads` and `PrismaDashboardRepository.findHeldRefs` select both fields.\n   - `toLoads` folds them into the two sets through a new exported pure helper,\n     `addJobToLoad(load, ref): RunnerLoad`.\n   - `PlacementService.fillRunner` and `fillRunnerThreads` call `addJobToLoad` after each assignment inside their\n     loops, so the sets also hold the jobs placed earlier in the same pass.\n   - `fillRunnerThreads` today builds `currentLoad` from a load that never changes. It now carries the updated sets\n     forward.\n6. **Misfit enums.** `'trust_domain'` joins `MISFIT_REASONS` (`dashboard/dashboard.types.ts`) and the\n   `PlacementMisfitDto` enum (`jobs/dto/fleet-job.dto.ts`). The dashboard's `WAITING_REASONS` gains `'trust_domain'`,\n   so a job held only by it reads as waiting, like `capacity`. `openapi.json` is regenerated. The web adds the label.\n\nConsume the US-003 helper/type contracts, do not duplicate its rule. Preserve transactional runner locks, job SKIP LOCKED/CAS, existing thread/non-thread capacity counters, budgets and after-commit live publication. Pass actual projectId/bashMode after each successful assignment, never after a failed CAS. Occupancy must include held jobs across projects and thread slots as well as ordinary jobs. Every runner misfitting only on trust_domain leaves the job QUEUED and yields waiting_capacity on the dashboard, never pinned dispatch 422.\n\n**Scope** — In: placement.service.ts fillRunner/fillRunnerThreads, prisma-fleet-job.repository.ts findActiveLoads, dashboard/prisma-dashboard.repository.ts findHeldRefs, dashboard/domain/dashboard.domain.ts return shape, attention-unplaceable.ts WAITING_REASONS, dashboard.types.ts MISFIT_REASONS and jobs/dto/fleet-job.dto.ts enum. Update fleet-dashboard-repository.integration.spec.ts RUN/THREAD held-ref expectations with each job's projectId/bashMode and relevant held-ref stubs. Regenerate root openapi.json and apps/cli/src/generated/types.gen.ts with bun run generate from the repo root; never hand-edit generated files. The binding workdir is apps/api despite those explicitly required generated outputs. Dedicated integration enters POST /api/fleet/jobs and POST /api/fleet/runner/sync. Out: pure helper/rule ownership (US-003), web type/label (US-008), token changes (US-005–007). Isolating two jobs of the same project on one runner from each other: Ruling 5 treats one project on one runner as one trust domain. The per-job credential-socket nonce from Ruling 5: dropped by user ruling 2026-11-01, because the FIX/REVIEW token also sits in a same-user-readable file; placement isolation is the control. Running raw jobs as a per-job OS user or in a VM: Ruling 5's long-term option, not built here. CLI wording of the new `trust_domain` misfit: the CLI prints the API's reason code as it is.\n\n**Interface** — `ActiveJobRef`: `{ runnerId: string; repoId: string; command?: string; projectId: string; bashMode: string }`. `addJobToLoad(load, ref): RunnerLoad` and the RunnerLoad sets come from US-003. findHeldRefs returns refs carrying projectId and bashMode in addition to existing runnerId/repoId/command. API misfit enums include `'trust_domain'`.",
+      "acceptanceCriteria": [
+        "[unit] jobUnplaceableItems emits one job_unplaceable item with verdict 'waiting_capacity' for a queued job past the warning threshold when every runner verdict is trust_domain.",
+        "[integration] PrismaFleetJobRepository.findActiveLoads([runnerId]) returns a ref with the held job's projectId and bashMode 'raw' when the runner holds a RUNNING raw RUN job.",
+        "[integration] Given one enabled online capacity-2 runner already holding a RUNNING raw RUN job of project A, dispatching a raw RUN job of project B through POST /api/fleet/jobs leaves project B's job QUEUED.",
+        "[integration] Given one enabled online capacity-2 runner already holding a RUNNING raw RUN job of project A, POST /api/fleet/jobs dispatching a raw RUN job of project B returns a placement misfit naming that runner with reason 'trust_domain'.",
+        "[integration] Given one empty enabled online capacity-2 runner and two QUEUED raw RUN jobs from projects A and B, one POST /api/fleet/runner/sync leaves exactly one of them ASSIGNED to that runner.",
+        "[integration] Given one empty enabled online capacity-2 runner and two QUEUED raw RUN jobs from projects A and B, one POST /api/fleet/runner/sync leaves exactly one of them QUEUED while the other is ASSIGNED to that runner.",
+        "[integration] Given one empty enabled online capacity-2 runner and two otherwise-fitting QUEUED raw RUN jobs of the same project on distinct repos, one POST /api/fleet/runner/sync assigns both to that runner, preserving same-project placement.",
+        "[unit] Given a queued job past the warning threshold whose runner verdicts are only capacity or busy_repo, jobUnplaceableItems retains verdict 'waiting_capacity', preserving the existing waiting classifications."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "fleet",
+        "placement",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security isolation must survive transactional assignment loops, repository projections, dashboard interpretation and generated contracts; cross-module state and HTTP seams demand strict TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/dashboard/attention-unplaceable.ts",
+        "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
+        "apps/api/src/fleet/sync/sync.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/placement-trust-domain.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When two cross-project raw THREAD jobs are considered in one fillRunnerThreads pass, the first successful assignment prevents assignment of the second.",
+        "When a pinned runner fails only trust_domain, dispatch accepts the job into QUEUED instead of returning HTTP 422.",
+        "When the conflicting held job becomes terminal, a subsequent sync can assign the previously isolation-blocked queued job.",
+        "PrismaDashboardRepository.findHeldRefs returns projectId and bashMode for both held RUN and held THREAD jobs."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.ts",
+          "reason": "`fillRunner` and `fillRunnerThreads` update their load with `addJobToLoad` after each assignment."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "`findActiveLoads` selects and returns `projectId` and `bashMode`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
+          "reason": "`findHeldRefs` selects and returns `projectId` and `bashMode`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/domain/dashboard.domain.ts",
+          "reason": "the `findHeldRefs` return type gains `projectId` and `bashMode`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/attention-unplaceable.ts",
+          "reason": "`WAITING_REASONS` gains `'trust_domain'`."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/dashboard.types.ts",
+          "reason": "`MISFIT_REASONS` gains `'trust_domain'`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+          "reason": "the `PlacementMisfitDto` reason enum gains `'trust_domain'`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-dashboard-repository.integration.spec.ts",
+          "reason": "the `findHeldRefs` expectations at lines ~86 (`toEqual([{ runnerId, repoId, command: 'RUN' }])`) and ~129 (`toContainEqual({ ..., command: 'THREAD' })`) gain the held job's `projectId` and `bashMode`; nothing else changes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated: every misfit enum derived from `MISFIT_REASONS` and `PlacementMisfitDto` gains `trust_domain`."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` from the new API spec (the misfit enums gain `trust_domain`); never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "GitHub client review token and branch-protection check",
+      "description": "**Goal** — Add a contents-read review mint and a fail-closed GitHub default-branch protection probe.\n\n**Motivation** — A REVIEW only reads code and writes PR comments.\n\n**Approach** — 7. **REVIEW token.** `GitHubAppClient.mintReviewToken(installationId, repoName)` mints with\n   `{ contents: 'read', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' }`.\n   - `pull_requests: write` covers review comments and PR conversation comments.\n   - The broker request type gains `purpose?: 'review' | 'fix'`.\n   - `purpose: 'review'` mints through `mintReviewToken` and caches under its own key,\n     `${jobId}:${leaseEpoch}:review`.\n   - A `purpose` on a GitLab repo throws `RepoCheckException('provider_error')` and never falls back to the\n     write-capable stored GitLab token. This matches the existing read-only precedent; dispatch already refuses\n     REVIEW and FIX for non-GitHub repos (`fleet-jobs.service.ts:82`), so this path is defensive.\n8. **FIX branch guard.** For `purpose: 'fix'` the broker first mints a read-only token (`mintReadOnlyToken`), then\n   calls `GitHubAppClient.isBranchProtected(token, owner, name, repo.defaultBranch)`.\n   - When that returns `false`, the mint fails with the new `RepoCheckReason` `'default_branch_unprotected'` and no\n     write token is minted.\n   - When it returns `true`, the existing write token is minted through `mintInstallationToken` and cached under the\n     existing write key.\n   - A reused cached FIX token does not re-run the check, which runs once per job epoch per fresh mint.\n   - `isBranchProtected` returns `true` when either:\n     - `GET /repos/{owner}/{name}/rules/branches/{branch}` answers 200 with an array holding a rule whose `type` is\n       `pull_request` or `update`;\n     - or `GET /repos/{owner}/{name}/branches/{branch}` answers 200 with `protected: true`.\n   - The branch name is passed through `encodeURIComponent` in both paths, and the rules call asks for\n     `?per_page=100`; only that first page is read.\n   - It returns `false` when both answer 200 and neither condition holds. Any other status, or a network error, throws\n     `RepoCheckException('provider_error')`.\n   - This is a best-effort guard. Bypass actors on a ruleset, and classic protection whose only settings do not block\n     a push (for example only \"block force pushes\"), are not detectable with the read-only token, which lacks the\n     Administration permission. The guard catches the common case, a default branch with no protection at all.\n\nReuse private mintScopedToken, headers and repoPath. Rules success with pull_request/update can return true immediately; otherwise require a successful branch endpoint response and inspect protected:true. Non-200 or network failure is provider_error, not a permissive fallback.\n\n**Scope** — In: github-app-client.ts client methods, repo-check.exception.ts new reason, dedicated injected-HTTP unit suite. Existing write/read-only mints and attribution remain. Out: broker purpose/cache/guard orchestration (US-006), Sync purpose routing (US-007). Detecting ruleset bypass actors or classic protection that does not block a push: the read-only token cannot read either, so the FIX branch guard is best-effort and catches only an unprotected default branch. Reading more than the first 100 rules from the branch-rules endpoint. A dispatch-time check that a FIX repo's default branch is protected: the guard runs at token mint; dispatch accepts the job and the job fails with `default_branch_unprotected`.\n\n**Interface** — `GitHubAppClient.mintReviewToken(installationId, repoName)`; `GitHubAppClient.isBranchProtected(token, owner, name, repo.defaultBranch)`; `RepoCheckReason` includes `'default_branch_unprotected'`. Mirror existing mint return `{ token: string; expiresAt: Date }` and expose a boolean protection result through the existing async HTTP client pattern.",
+      "acceptanceCriteria": [
+        "[unit] GitHubAppClient.mintReviewToken(42n, 'app') sends POST /app/installations/42/access_tokens with body { repositories: ['app'], permissions: { contents: 'read', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' } }.",
+        "[unit] GitHubAppClient.mintReviewToken returns the token and expiry from the 201 response.",
+        "[unit] GitHubAppClient.mintReviewToken throws RepoCheckException with reason 'app_permissions_insufficient' when GitHub answers 403.",
+        "[unit] isBranchProtected('t', 'acme', 'app', 'main') returns true when GET /repos/acme/app/rules/branches/main?per_page=100 answers 200 with [{ type: 'pull_request' }].",
+        "[unit] isBranchProtected returns true when the rules endpoint answers 200 with [{ type: 'update' }].",
+        "[unit] isBranchProtected returns true when the rules endpoint answers 200 with [] and GET /repos/acme/app/branches/main answers 200 with { protected: true }.",
+        "[unit] isBranchProtected returns false when the rules endpoint answers 200 with [{ type: 'required_status_checks' }] and the branches endpoint answers 200 with { protected: false }.",
+        "[unit] isBranchProtected throws RepoCheckException with reason 'provider_error' when the rules endpoint answers 500.",
+        "[unit] isBranchProtected throws RepoCheckException with reason 'provider_error' when the rules endpoint answers 200 with [] and the branches endpoint answers 404.",
+        "[unit] isBranchProtected('t', 'acme', 'app', 'release/v2') requests /repos/acme/app/rules/branches/release%2Fv2?per_page=100.",
+        "[unit] GitHubAppClient.mintReviewToken preserves the existing 'app_permissions_insufficient' mapping when GitHub answers 422.",
+        "[unit] isBranchProtected throws RepoCheckException('provider_error') on a network error from either required protection endpoint.",
+        "[unit] GitHubAppClient.mintInstallationToken(42n, 'app') retains the existing POST permissions { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' } for repositories:['app'].",
+        "[unit] GitHubAppClient.mintReadOnlyToken(42n, 'app') retains the existing POST permissions { contents: 'read', metadata: 'read' } for repositories:['app']."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "github",
+        "tokens"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two client methods reuse existing HTTP/mint patterns, but token permission scope and fail-closed protection authorization invoke the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts",
+        "apps/api/src/fleet/git-broker/fleet-http-client.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.branch-protection.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When rules do not establish protection for branch release/v2, isBranchProtected requests /repos/acme/app/branches/release%2Fv2 for its classic-protection fallback.",
+        "When the rules endpoint answers a non-200 status, isBranchProtected does not return true based on a separate fallback branch response.",
+        "When a matching protection rule is on the first successful rules page, isBranchProtected makes no request for a second page."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.ts",
+          "reason": "adds `mintReviewToken` and `isBranchProtected`."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/repo-check.exception.ts",
+          "reason": "`RepoCheckReason` gains `'default_branch_unprotected'`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Token broker mints by job purpose",
+      "description": "**Goal** — Separate review credentials from write credentials and gate fresh FIX write mints on default-branch protection.\n\n**Motivation** — A FIX must push, but GitHub cannot limit an installation token to one branch, so the only server-side bound is protection on the default branch.\n\n**Approach** — 7. **REVIEW token.** `GitHubAppClient.mintReviewToken(installationId, repoName)` mints with\n   `{ contents: 'read', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' }`.\n   - `pull_requests: write` covers review comments and PR conversation comments.\n   - The broker request type gains `purpose?: 'review' | 'fix'`.\n   - `purpose: 'review'` mints through `mintReviewToken` and caches under its own key,\n     `${jobId}:${leaseEpoch}:review`.\n   - A `purpose` on a GitLab repo throws `RepoCheckException('provider_error')` and never falls back to the\n     write-capable stored GitLab token. This matches the existing read-only precedent; dispatch already refuses\n     REVIEW and FIX for non-GitHub repos (`fleet-jobs.service.ts:82`), so this path is defensive.\n8. **FIX branch guard.** For `purpose: 'fix'` the broker first mints a read-only token (`mintReadOnlyToken`), then\n   calls `GitHubAppClient.isBranchProtected(token, owner, name, repo.defaultBranch)`.\n   - When that returns `false`, the mint fails with the new `RepoCheckReason` `'default_branch_unprotected'` and no\n     write token is minted.\n   - When it returns `true`, the existing write token is minted through `mintInstallationToken` and cached under the\n     existing write key.\n   - A reused cached FIX token does not re-run the check, which runs once per job epoch per fresh mint.\n   - `isBranchProtected` returns `true` when either:\n     - `GET /repos/{owner}/{name}/rules/branches/{branch}` answers 200 with an array holding a rule whose `type` is\n       `pull_request` or `update`;\n     - or `GET /repos/{owner}/{name}/branches/{branch}` answers 200 with `protected: true`.\n   - The branch name is passed through `encodeURIComponent` in both paths, and the rules call asks for\n     `?per_page=100`; only that first page is read.\n   - It returns `false` when both answer 200 and neither condition holds. Any other status, or a network error, throws\n     `RepoCheckException('provider_error')`.\n   - This is a best-effort guard. Bypass actors on a ruleset, and classic protection whose only settings do not block\n     a push (for example only \"block force pushes\"), are not detectable with the read-only token, which lacks the\n     Administration permission. The guard catches the common case, a default branch with no protection at all.\n\nUS-005 supplies client methods; here orchestrate them in mint/fresh and preserve fixed-reason MintResult errors and no-secret logging. Any purpose on GitLab must fail before stored-token resolution or an inappropriate cached write return. On unprotected FIX, return default_branch_unprotected with no write token: the unchanged runner's credential request fails, so its FIX step cannot start and its existing token cache retries after cooldown. Preserve readOnly:true per-repo keys/result repoId, epoch reuse margins and evict(jobId).\n\n**Scope** — In: git-token.broker.ts purpose request and cache selection, fresh mint orchestration, GitLab refusal, existing git-token.broker.spec.ts GitHub stub members mintReviewToken/isBranchProtected/mintReadOnlyToken (existing assertions stay), new purpose suite. Out: GitHub HTTP implementation/reason definition (US-005), Sync classification (US-007), runner changes. A dispatch-time check that a FIX repo's default branch is protected: the guard runs at token mint; dispatch accepts the job and the job fails with `default_branch_unprotected`. Re-running the branch-protection check on a cached FIX token reused within one job epoch. The server-side review-attribution mint (`GitHubAppClient` attribution path calling `GitTokenBroker.mint` without `purpose`): it never leaves the API, so it keeps the write token. Forge-token lifetime for long FIX runs (review D/BUG-2): a separate fix. Limiting a FIX push to the PR head branch in the runner (git shim or refspec allowlist): GitHub cannot scope the token, and the user chose the branch-protection guard.\n\n**Interface** — `GitTokenBroker.mint(req, now)` takes `req` as `{ jobId; leaseEpoch; repo; readOnly?: boolean; purpose?: 'review' | 'fix' }`. Review cache key: `${jobId}:${leaseEpoch}:review`; FIX uses the existing write key. Existing `MintResult` remains the success token or fixed-reason error union.",
+      "acceptanceCriteria": [
+        "[unit] GitTokenBroker.mint({ jobId: 'j1', leaseEpoch: 1, repo, purpose: 'review' }) for a GitHub repo calls github.mintReviewToken(repo.githubInstallationId, repo.name) exactly once.",
+        "[unit] A purpose:'review' mint never calls github.mintInstallationToken.",
+        "[unit] After a purpose:'review' mint for job j1 epoch 1, a mint for the same job and epoch with no purpose calls github.mintInstallationToken, because the review token is not reused for a write request.",
+        "[unit] When github.isBranchProtected resolves false, mint({ jobId: 'j1', leaseEpoch: 1, repo, purpose: 'fix' }) returns { ok: false, error: { jobId: 'j1', reason: 'default_branch_unprotected' } }.",
+        "[unit] When github.isBranchProtected resolves false for a FIX mint, github.mintInstallationToken is never called.",
+        "[unit] A FIX mint calls github.isBranchProtected with the token returned by mintReadOnlyToken, repo.owner, repo.name and repo.defaultBranch.",
+        "[unit] When github.isBranchProtected resolves true, a FIX mint calls github.mintInstallationToken exactly once.",
+        "[unit] When github.isBranchProtected resolves true, a FIX mint returns ok:true.",
+        "[unit] When github.isBranchProtected rejects with RepoCheckException('provider_error'), a FIX mint returns an error with reason 'provider_error'.",
+        "[unit] When the protection check rejects with RepoCheckException('provider_error'), a FIX mint never calls github.mintInstallationToken.",
+        "[unit] For each purpose 'review' and 'fix' on a GitLab repo, mint returns an error with reason 'provider_error'.",
+        "[unit] For each purpose 'review' and 'fix' on a GitLab repo, mint never calls gitlab.resolve.",
+        "[unit] Given a GitHub repo and mintReadOnlyToken returning readOnlyMint, mint({ jobId: 'j1', leaseEpoch: 1, repo, readOnly: true }) without purpose returns { ok: true, token: { jobId: 'j1', repoId: repo.id, token: readOnlyMint.token, username: 'x-access-token', expiresAt: readOnlyMint.expiresAt.toISOString() } }, preserving the existing PROJECT-session repository attribution.",
+        "[unit] Given a GitHub repo and readOnly:true without purpose, a repeated mint for the same job, epoch and repository within the existing reuse margin returns the cached token without an additional GitHub mint."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "fleet",
+        "credentials",
+        "tokens"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing broker's mint/fresh branches and cache keys orchestrate client methods supplied by US-005 without a new service or integration; credential authority requires strict isolated security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/git-token.broker.ts",
+        "apps/api/src/fleet/git-broker/git-token.broker.spec.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/git-broker/git-token.broker.purpose.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a cached FIX token is reused within the existing expiry margin for the same job epoch, mint returns that token without another protection check.",
+        "When a normal write token is already cached for a job epoch, a subsequent review mint still returns a review token rather than the cached write token.",
+        "When an ordinary GitLab write token was previously cached for the same job epoch, a subsequent review or fix request still fails provider_error without returning the stored token.",
+        "After evict(jobId), a later review mint for that job calls mintReviewToken again.",
+        "When the branch-protection HTTP check reports a non-200 or network failure, the broker returns provider_error and never mints a write token."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.ts",
+          "reason": "`mint` takes `purpose`; review mints use `mintReviewToken` under key `${jobId}:${leaseEpoch}:review`; fix mints run the branch guard before `mintInstallationToken`; any `purpose` on a GitLab repo throws `RepoCheckException('provider_error')` before `gitlab.resolve`."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.spec.ts",
+          "reason": "any stub GitHub client object gains `mintReviewToken`, `isBranchProtected` and `mintReadOnlyToken` members so the broker type-checks against the stub. Existing assertions stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Sync passes the job purpose to the broker",
+      "description": "**Goal** — Derive review/fix mint purpose from the fenced held job during repo-less runner token grants.\n\n**Motivation** — `SyncService.grantTokens` mints the same `contents: write, pull_requests: write` token for REVIEW and FIX as for RUN.\n\n**Approach** — 9. **Purpose wiring.** `SyncService.grantTokens` passes `purpose: 'review'` for a REVIEW job and `purpose: 'fix'` for\n   a FIX job on the default (repo-less) token branch. The key is added by a conditional spread, so RUN, PLAN, CONFIG\n   and THREAD requests keep exactly today's shape (no `purpose` key).\n\nExtend the granted request's type as needed and consume US-006's broker purpose. Derive purpose from the persisted job.command, not runner input. Keep lock/fence/active-state checks and PROJECT per-repo readOnly grants and WORKSPACE denial unchanged. Gather mint requests inside the existing transaction, then invoke the real broker outside it so GitHub HTTP never holds a transaction open. The runner remains unchanged: when a token request returns an error, its credential request fails, so the step that needs the token cannot start.\n\n**Scope** — In: sync.service.ts grantTokens default branch and dedicated SyncService.sync seam tests modeled on sync-token-fence.spec.ts. Use a stub GitHubAppClient behind the real broker for REVIEW/FIX, and pin RUN's exact request shape. Out: client methods (US-005), broker cache/protection logic (US-006), placement load plumbing (US-004). Refusing a repo-less write token to PROJECT-thread jobs (review B/SEC-2): a separate fix. The server-side review-attribution mint (`GitHubAppClient` attribution path calling `GitTokenBroker.mint` without `purpose`): it never leaves the API, so it keeps the write token.\n\n**Interface** — `SyncService.grantTokens` adds `purpose: 'review'` or `purpose: 'fix'` only on the repo-less branch. `GitTokenBroker.mint(req, now)` accepts `{ jobId; leaseEpoch; repo; readOnly?: boolean; purpose?: 'review' | 'fix' }` from US-006. RUN/PLAN/CONFIG/THREAD requests have no purpose key, not an undefined-valued one.",
+      "acceptanceCriteria": [
+        "[unit] SyncService.sync for a runner holding an ASSIGNED REVIEW job with a repo-less token request { jobId, leaseEpoch } calls github.mintReviewToken exactly once through the real broker.",
+        "[unit] SyncService.sync for a runner holding an ASSIGNED REVIEW job with a repo-less token request { jobId, leaseEpoch } never calls github.mintInstallationToken through the real broker.",
+        "[unit] SyncService.sync for a runner holding an ASSIGNED FIX job whose repo default branch is reported unprotected, with a repo-less token request, returns gitTokenErrors containing { jobId, reason: 'default_branch_unprotected' }.",
+        "[unit] SyncService.sync for a runner holding an ASSIGNED FIX job whose repo default branch is reported unprotected, with a repo-less token request, returns an empty gitTokens array.",
+        "[unit] SyncService.sync for a runner holding an ASSIGNED RUN job with a repo-less token request calls broker.mint with a request that has no purpose key."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "api",
+        "security",
+        "fleet",
+        "sync",
+        "tokens"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small routing change at an existing fenced credential seam, but it determines token authority; strict security TDD and real-broker seam tests are required."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+        "apps/api/src/fleet/git-broker/git-token.broker.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/sync/fence.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "SyncService.sync keeps PLAN, CONFIG_EDIT, CONFIG_DRIFT and THREAD repo-less mint requests free of a purpose key.",
+        "When a PROJECT session requests a specific assigned repoId, SyncService.sync preserves the existing readOnly:true mint shape without purpose.",
+        "When the request leaseEpoch is stale, SyncService.sync queues the existing ABANDON response and calls no broker mint.",
+        "When the FIX protection probe is executed during sync, it runs outside the transaction manager's active transaction."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "`grantTokens` adds `purpose: 'review'` for REVIEW and `purpose: 'fix'` for FIX on the repo-less branch by conditional spread; other request shapes are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Web session-refresh helpers and the trust_domain label",
+      "description": "**Goal** — Provide pure SSR refresh eligibility/cookie-header helpers and render the new trust-domain reason in both web locales.\n\n**Motivation** — On a full page load the middleware calls `/api/auth/me`, which returns `{ user: null }` when the access cookie is missing and never tries the refresh cookie.\n\n**Approach** — 10. **SSR refresh middleware.** A new Nitro server middleware, `apps/web/server/middleware/session-refresh.ts`, runs on\n    each request and only acts when all of these hold:\n    - the method is `GET`;\n    - the path does not start with `/api/`, `/_nuxt/` or `/__nuxt`;\n    - the request's `accept` header includes `text/html` (a page load, not an asset or favicon fetch);\n    - the `koda_token` cookie is absent;\n    - the `koda_refresh` cookie is present.\n\n    It then calls `forwardToApi(event, '/auth/refresh', { method: 'POST', cookieName: 'refresh' })`, all inside one\n    `try/catch`:\n    - **On a 2xx whose envelope unwraps:** it reads the tokens with `unwrapAuth` and sets both cookies on the response\n      with `setAuthCookies`. It also rewrites the request's `cookie` header (`event.node.req.headers.cookie`): the\n      `koda_token` and `koda_refresh` values are replaced (added when absent), every other cookie is kept unchanged,\n      and no cookie name appears twice. SSR `useRequestFetch` calls later in the same render forward that header, so\n      they see the new session.\n    - **On a 401 or 403, or a 2xx whose envelope has `ret !== 0` (`unwrapAuth` throws):** it calls\n      `clearAuthCookies(event)` and returns. The page then renders logged out, as today.\n    - **On any other status (for example 429 or 5xx), or a thrown network error:** it leaves the cookies untouched and\n      returns, so a throttled or failing API never logs the user out.\n\n    The middleware never throws. Nitro runs `server/middleware` files in name order, so `client-ip.ts` has already set\n    `event.context.clientIp`, which `forwardToApi` reads. `me.get.ts` and `auth.global.ts` are unchanged.\n\n    Two pure helpers in a new `apps/web/server/utils/session-refresh.ts` carry the decision and the header rewrite,\n    and the middleware calls both:\n    - `shouldRefreshSession(event): boolean` returns `true` exactly when all five activation conditions above hold.\n    - `withAuthCookies(cookieHeader: string | undefined, tokens: { accessToken: string; refreshToken: string }): string`\n      returns the rewritten `cookie` header value.\n\n6. **Misfit enums.** `'trust_domain'` joins `MISFIT_REASONS` (`dashboard/dashboard.types.ts`) and the\n   `PlacementMisfitDto` enum (`jobs/dto/fleet-job.dto.ts`). The dashboard's `WAITING_REASONS` gains `'trust_domain'`,\n   so a job held only by it reads as waiting, like `capacity`. `openapi.json` is regenerated. The web adds the label.\n\nThe full middleware algorithm above explains the helpers' consumer; this story authors only the pure helpers and web label. Add 'trust_domain' to lib/fleet-types.ts MisfitReason, en fleet.misfit.trust_domain = \"Runner holds another project's job (isolation)\", zh = \"执行机正在运行其他项目的任务（隔离）\", and append trust_domain to the fleet.misfit pin list without removing other pins. Reuse ACCESS_COOKIE/REFRESH_COOKIE from server/utils/api.ts; preserve all non-auth cookie values and emit each cookie name once.\n\n**Scope** — In: new server/utils/session-refresh.ts and tests/server/session-refresh-utils.spec.ts, web misfit union, both locale entries and existing i18n parity test pin. Out: actual upstream refresh, response cookies, middleware and browser reload integration (US-009); API enums/contract generation (US-004) and placement rule (US-003). Refreshing an access cookie that is present but holds an expired JWT: the cookie's 15-minute lifetime matches the access token, so the missing-cookie case is the one that occurs.\n\n**Interface** — `shouldRefreshSession(event): boolean`; `withAuthCookies(cookieHeader: string | undefined, tokens: { accessToken: string; refreshToken: string }): string`.",
+      "acceptanceCriteria": [
+        "[unit] shouldRefreshSession returns true for GET /projects with accept:text/html, koda_refresh=r1 and no koda_token.",
+        "[unit] shouldRefreshSession returns false for GET /projects with accept:text/html and both koda_refresh=r1 and koda_token present.",
+        "[unit] shouldRefreshSession returns false for GET /projects with accept:text/html when no koda_refresh cookie exists.",
+        "[unit] shouldRefreshSession returns false for GET /api/projects with koda_refresh and no koda_token.",
+        "[unit] shouldRefreshSession returns false for POST /projects with koda_refresh and no koda_token.",
+        "[unit] shouldRefreshSession returns false for GET /favicon.ico with accept:image/*, koda_refresh and no koda_token.",
+        "[unit] withAuthCookies('koda_refresh=r1; koda_locale=zh', { accessToken: 'a2', refreshToken: 'r2' }) returns a header parsing to exactly koda_refresh=r2, koda_locale=zh and koda_token=a2, each once.",
+        "[unit] withAuthCookies(undefined, { accessToken: 'a2', refreshToken: 'r2' }) returns a header parsing to exactly koda_token=a2 and koda_refresh=r2.",
+        "[unit] The en and zh locales each resolve fleet.misfit.trust_domain to a non-empty string."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "web",
+        "security",
+        "sessions",
+        "ssr",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Pure helpers and small client label changes are straightforward, but cookie parsing and refresh activation govern session security and require strict three-session TDD."
+      },
+      "contextFiles": [
+        "apps/web/server/utils/api.ts",
+        "apps/web/server/utils/client-ip.ts",
+        "apps/web/tests/server/client-ip.spec.ts",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/tests/i18n/fleet-locale-parity.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/server/utils/session-refresh.ts",
+        "apps/web/tests/server/session-refresh-utils.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "shouldRefreshSession returns false for GET /_nuxt/app.js and GET /__nuxt_test with accept:text/html, koda_refresh and no koda_token.",
+        "shouldRefreshSession returns false when the accept header is missing, even if GET and refresh-cookie conditions hold.",
+        "withAuthCookies replaces duplicate incoming auth cookies with exactly one new access and one new refresh cookie while preserving unrelated cookie values.",
+        "withAuthCookies emits no duplicate names when unrelated incoming cookie names are repeated."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "the misfit reason union gains `'trust_domain'`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "`fleet.misfit.trust_domain`: \"Runner holds another project's job (isolation)\"."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "`fleet.misfit.trust_domain`: \"执行机正在运行其他项目的任务（隔离）\"."
+        },
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the `'fleet.misfit'` pin list gains `'trust_domain'`; every other pin stays."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Web SSR session refresh middleware",
+      "description": "**Goal** — Restore a refresh-cookie-only session before SSR so a full page reload remains authenticated.\n\n**Motivation** — So every reload more than 15 minutes after the last refresh lands on /login.\n\n**Approach** — 10. **SSR refresh middleware.** A new Nitro server middleware, `apps/web/server/middleware/session-refresh.ts`, runs on\n    each request and only acts when all of these hold:\n    - the method is `GET`;\n    - the path does not start with `/api/`, `/_nuxt/` or `/__nuxt`;\n    - the request's `accept` header includes `text/html` (a page load, not an asset or favicon fetch);\n    - the `koda_token` cookie is absent;\n    - the `koda_refresh` cookie is present.\n\n    It then calls `forwardToApi(event, '/auth/refresh', { method: 'POST', cookieName: 'refresh' })`, all inside one\n    `try/catch`:\n    - **On a 2xx whose envelope unwraps:** it reads the tokens with `unwrapAuth` and sets both cookies on the response\n      with `setAuthCookies`. It also rewrites the request's `cookie` header (`event.node.req.headers.cookie`): the\n      `koda_token` and `koda_refresh` values are replaced (added when absent), every other cookie is kept unchanged,\n      and no cookie name appears twice. SSR `useRequestFetch` calls later in the same render forward that header, so\n      they see the new session.\n    - **On a 401 or 403, or a 2xx whose envelope has `ret !== 0` (`unwrapAuth` throws):** it calls\n      `clearAuthCookies(event)` and returns. The page then renders logged out, as today.\n    - **On any other status (for example 429 or 5xx), or a thrown network error:** it leaves the cookies untouched and\n      returns, so a throttled or failing API never logs the user out.\n\n    The middleware never throws. Nitro runs `server/middleware` files in name order, so `client-ip.ts` has already set\n    `event.context.clientIp`, which `forwardToApi` reads. `me.get.ts` and `auth.global.ts` are unchanged.\n\n    Two pure helpers in a new `apps/web/server/utils/session-refresh.ts` carry the decision and the header rewrite,\n    and the middleware calls both:\n    - `shouldRefreshSession(event): boolean` returns `true` exactly when all five activation conditions above hold.\n    - `withAuthCookies(cookieHeader: string | undefined, tokens: { accessToken: string; refreshToken: string }): string`\n      returns the rewritten `cookie` header value.\n\nConsume both US-008 helpers in the handler. Mirror server/api/auth/refresh.post.ts's upstream bearer selection and existing cookie policy but not its throwing error behavior. Tests drive the middleware with stubbed helper results to prove the seam, also exercise actual forwardToApi bearer forwarding, and assert Set-Cookie plus same-render incoming Cookie mutation. The Playwright check enters Nitro through a full /projects reload after deleting only koda_token and preserving koda_refresh. Use existing webLogin/waitForHydration fixtures; never networkidle because streams remain open.\n\n**Scope** — In: server/middleware/session-refresh.ts, tests/server/session-refresh.spec.ts and tests/e2e/session-refresh.e2e.spec.ts. Out: pure helper implementation and misfit locales (US-008), API auth changes, me.get.ts/auth.global.ts changes. Making refresh tokens one-time or rotating them with reuse detection (review A/SEC-8): concurrent SSR refreshes stay valid because refresh tokens are reusable today. Refreshing an access cookie that is present but holds an expired JWT: the cookie's 15-minute lifetime matches the access token, so the missing-cookie case is the one that occurs. Logout revocation, return-to after login, and treating an API outage as a reconnect (review E/SEC-1, E/BUG-2, E/BUG-3): a separate web session fix.\n\n**Interface** — Call `forwardToApi(event, '/auth/refresh', { method: 'POST', cookieName: 'refresh' })`; use `unwrapAuth`, `setAuthCookies`, `clearAuthCookies`, `shouldRefreshSession(event): boolean` and `withAuthCookies(cookieHeader: string | undefined, tokens: { accessToken: string; refreshToken: string }): string`. Write the successful helper result to `event.node.req.headers.cookie` before rendering.",
+      "acceptanceCriteria": [
+        "[unit] When shouldRefreshSession is stubbed to false, the session-refresh middleware handler makes no upstream call.",
+        "[unit] When shouldRefreshSession returns true for an event with koda_refresh=r1, the middleware calls upstream POST /api/auth/refresh exactly once with Authorization: Bearer r1.",
+        "[unit] When upstream answers 200 with { ret: 0, data: { accessToken: 'a2', refreshToken: 'r2' } }, the response carries Set-Cookie headers for koda_token=a2 and koda_refresh=r2.",
+        "[unit] When refresh is eligible and upstream returns 200 with { ret: 0, data: { accessToken: 'a2', refreshToken: 'r2' } }, the middleware sets event.node.req.headers.cookie to withAuthCookies(the original cookie header, { accessToken: 'a2', refreshToken: 'r2' }).",
+        "[unit] For each upstream response 401, 403, and 200 with { ret: 401, message: 'expired' }, the response carries Set-Cookie headers expiring both koda_token and koda_refresh.",
+        "[unit] When upstream answers 429, the middleware resolves without throwing.",
+        "[unit] When upstream answers 429, the middleware sets no Set-Cookie header and leaves the cookies untouched.",
+        "[unit] When upstream rejects with a network error, the middleware resolves without throwing.",
+        "[unit] When upstream rejects with a network error, the middleware sets no Set-Cookie header and leaves the cookies untouched.",
+        "[integration] Given a signed-in Playwright browser context with only koda_token deleted and koda_refresh preserved, reloading /projects ends on /projects, not /login.",
+        "[unit] When upstream answers a 5xx status, the middleware leaves cookies untouched and allows the request to continue without throwing."
+      ],
+      "tags": [
+        "review-p0-bundle",
+        "web",
+        "security",
+        "sessions",
+        "ssr",
+        "nitro"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One Nitro middleware composes the existing auth proxy/cookie functions and US-008 helpers with explicit status branches; session mutation requires strict security TDD despite this bounded implementation."
+      },
+      "contextFiles": [
+        "apps/web/server/utils/session-refresh.ts",
+        "apps/web/server/utils/api.ts",
+        "apps/web/server/api/auth/refresh.post.ts",
+        "apps/web/server/middleware/client-ip.ts",
+        "apps/web/tests/e2e/auth.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/server/middleware/session-refresh.ts",
+        "apps/web/tests/server/session-refresh.spec.ts",
+        "apps/web/tests/e2e/session-refresh.e2e.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a successful refresh preserves a locale cookie, SSR useRequestFetch during that same render forwards the new access/refresh tokens together with the unchanged locale cookie.",
+        "When upstream answers 401/403 or a successful nonzero-ret envelope, the middleware resolves without throwing after expiring the auth cookies.",
+        "When forwardToApi runs from the session middleware after client-ip middleware, it forwards the existing event.context.clientIp rather than a browser-supplied spoofed client IP.",
+        "When upstream answers a non-2xx status other than 401/403, the middleware does not rewrite the incoming Cookie header."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Architecture and discovery: This is an existing Bun/Turborepo monorepo, not greenfield. Repository guidance and source identify the API as NestJS 12/Fastify with Prisma 7 and Vitest, and the web as Nuxt 4 SSR/Nitro with Jest and Playwright; the supplied Express/Next.js detection is inaccurate (.nax/mono/apps/api/context.md:24, .nax/mono/apps/web/context.md:21). API domain and security decisions remain server-owned, web uses hand-written composables and server proxy routes, and the runner remains unchanged. Graph-first navigation was unavailable because no codebase-memory MCP tools were exposed; findings below come from direct reads and text search. The review baseline is main 61052931 and the review itself is static, not evidence of executed tests (docs/20261101-review-whole-repo.md:3-9). Read the nathapp-nestjs-patterns skill before implementing NestJS changes; that skill was not exposed in this planning session. Do not edit generated AGENTS.md or generated CLI files manually.\n\nUS-001 / agent self-update: apps/api/src/projects/projects.controller.ts:244-259 resolves project-roster membership before deciding the self branch; preserve that ordering and its existing self-403/non-self-404 behavior. At :261-264 the self branch currently forwards the unparsed body directly to AgentsService.update. The non-self path at :267-280 already checks the global agent.update key, parses the DTO and enters ApprovalRouteGate with the existing update variant. Only replace the self branch, never fall through from it to the gate. apps/api/src/approvals/route/parse-body.ts:18-37 validates objects synchronously with whitelist, returns instanceToPlain, and throws ValidationAppException({}, 'approvals.invalidInput'); declared undefined properties must not be mistaken for requested fields. Apply only a newly constructed { status } on shutdown, not the whole parsed object. apps/api/src/agents/dto/update-agent.dto.ts:15-19 currently permits any number for maxConcurrentTickets; IsInt plus Min(1) affects both project-roster and global agent PATCH consumers, intentionally rejecting fractional and sub-one limits without imposing an upper bound. Existing controller fixtures and regressions are apps/api/src/projects/projects.controller.spec.ts:506-524, including the non-self gate and OFFLINE bypass; retain them and add dedicated controller/DTO unit cases, real-key DB integration, and the endpoint e2e regression specified in the story. The PAUSED agent must still authenticate; do not fix this by rejecting PAUSED principals globally.\n\nUS-002 / approval floor: apps/api/src/permissions/catalog.ts:406-413 currently classifies only role.* and approval.policy.* as critical before read/delete/high-risk rules. buildEntry at :436-454 already derives critical floor/default as human; add the exported ROLE_GRANT_KEYS set before catalog construction and check it first rather than inventing a parallel approval mechanism. apps/api/src/approvals/approval-policy.resolver.ts:30-59 obtains candidates and clamps chosen policies through strictestMode(chosen, entry.approval.floor), so persisted none/agent policies need no data migration. apps/api/src/projects/invites/project-invites.controller.ts:52-93 already uses redeem:true for create/resend and the gate before any service mutation; preserve one-time raw invite-link redemption and redacted stored results. Source nuance: apps/api/src/projects/members/project-members.controller.ts:60-75 uses @ApprovalGated() without redeem:true, unlike the spec's blanket integration reference to that decorator. Preserve existing non-secret member execution semantics; the raw-link redeem flow applies to invites, not a new member.add endpoint contract. apps/api/src/permissions/catalog.spec.ts:167-174 has an independent expectedRisk oracle that must be updated while keeping its generic floor/default formula. apps/api/test/integration/permissions/core-members-invites.integration.spec.ts:346-375 currently expects immediate agent invitation: change it to pending, root approval, and requester redemption while preserving inviterName and invitedByAgentId assertions. apps/api/test/integration/projects/gated-invite-secret-routes.integration.spec.ts:20-55 supplies request/approval/fixture helpers; :112-122 currently assumes default-none agent create/resend execute immediately and must instead assert two pending requests, while human direct creation remains immediate. All its other secret-route tests remain. Add the dedicated no-policy role-grant integration suite and project-admin agent invite endpoint e2e case. Compatibility change is intentional: agent callers now receive 202, not immediate 201/200, and must follow existing approval semantics; direct human flows remain unchanged.\n\nUS-003 / pure trust-domain rules: apps/api/src/fleet/jobs/placement-rules.ts:10-22 defines misfit order contracts and permanent misfits; :34-43 defines PlacementJob; :62-69 defines RunnerLoad/EMPTY_LOAD; :113-146 has separate thread and non-thread evaluation paths. Insert isolation after all applicable capability/permanent checks, before thread_capacity on threads and before busy_repo/capacity otherwise. It is a temporary contention condition, never a permanent 422. At :169-186, toLoads currently tracks only active non-thread jobs, occupied non-thread repos, and threads; addJobToLoad must retain these counter semantics while independently tracking all held projects and raw-agent-held projects. Avoid mutating EMPTY_LOAD's sets or prior load snapshots: Object.freeze on the object does not freeze the Set instances. Add projectId from the repo argument rather than requiring dispatch input to contain it. apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:216-230 already has repo.projectId/defaultBranch but ActiveJobRef lacks projectId/bashMode. Consumers include placement.service.ts:62,91,118,156, dashboard/dashboard.service.ts:24-35, fleet-jobs.service.ts:100, and schedules/schedules.service.ts:218; the latter two already pass full repos. Update literals and expectations in placement-rules.spec.ts:23,196,215-218,296-305, dashboard/attention-unplaceable.spec.ts, dashboard/attention-rules.spec.ts, and test/unit/fleet/thread-placement.spec.ts:25-42 without changing existing verdicts. Important spec discrepancy resolved toward the explicit AC: apps/api/src/fleet/common/config-jobs.ts:8-11 recognizes CONFIG_EDIT and CONFIG_DRIFT, not literal CONFIG, but the addJobToLoad AC explicitly requires command:'CONFIG' to contribute projectIds only. Honor that literal helper contract as a compatibility case as well as real isConfigKind commands; do not silently replace the AC's CONFIG with CONFIG_EDIT, broaden the runner protocol, or make raw CONFIG contribute rawProjectIds. For actual dispatched jobs, use the existing production config-kind predicate.\n\nUS-004 / placement and contract plumbing: apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:222-229 reads held-state refs but selects/maps only runnerId/repoId/command. apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts:67-74 and dashboard/domain/dashboard.domain.ts:15 expose the same incomplete shape; select and return projectId/bashMode from existing FleetJob columns, with no schema migration. dashboard snapshot deliberately loads held refs across all projects (dashboard.service.ts:24-35), which is necessary to detect cross-project conflicts even for a project-scoped view; do not scope away occupancy or expose other projects' identities in responses. PlacementService already locks runner rows and uses CAS assignment under transactions (placement.service.ts:34-36,68-103). fillRunner at :110-142 increments only active/repoIds; replace that increment with addJobToLoad only after a successful assignment. fillRunnerThreads at :148-183 holds a constant load and reconstructs currentLoad from initial occupancy; carry forward the helper-produced load after each success so earlier same-pass thread assignments are not invisible. Preserve runner locking order, SKIP LOCKED job scans, counters, budgets, lease fencing, and after-commit publication. dashboard/attention-unplaceable.ts:39-50 needs trust_domain in WAITING_REASONS so an all-isolation block is waiting_capacity; it already delegates to evaluateRunners at :70. Add trust_domain to both dashboard/dashboard.types.ts:109-113 and jobs/dto/fleet-job.dto.ts:135-139; keep every existing enum entry. These feed dashboard DTOs, credential-board DTOs and dispatch responses. Update fleet-dashboard-repository.integration.spec.ts:86,129 to include the new selected fields, and dashboard.service.spec.ts:17,49,61 held-ref stubs as needed. The dedicated HTTP integration must exercise both dispatch and runner sync, not only private service helpers. Regenerate openapi.json and apps/cli/src/generated/types.gen.ts through root package.json:21-24 (bun run generate); do not hand-edit them. Binding workdir remains apps/api even though this story owns root/generated CLI outputs as an explicitly specified exception. Required-field changes in US-003 can temporarily expose producer/fixture type errors until US-004; retain the required target types and reconcile all producers in the dependent plumbing story rather than weakening the isolation contract.\n\nUS-005 / GitHub client: apps/api/src/fleet/git-broker/github-app-client.ts:68-95 already centralizes repo-scoped installation mints and maps 403/422 to app_permissions_insufficient. mintReviewToken should reuse mintScopedToken with contents read but pull_requests write and existing CI-read permissions. headers at :47-49 and repoPath at :195-197 provide existing GET conventions; listOpenPullRequests at :151-176 demonstrates per_page=100 and typed provider-body checks. isBranchProtected must encode the complete branch name as one URL component (unlike getBranchHead's split-segment behavior at :200-205), inspect only the first rules page, and fall back to classic protected:true only after a successful non-matching rules response. Non-200 and network failures fail closed as provider_error, not unprotected or permission insufficiency. Extend RepoCheckReason in repo-check.exception.ts:3-17 without changing existing fixed-reason exception behavior. Existing github-app-client.spec.ts:21-35 uses FakeForge sockets, and :88-105 pins write/read-only permissions; use an injected HTTP stub for the new pure unit suite so host networking is not required. Do not request Administration permission; the guard intentionally cannot determine bypass actors or effectiveness of all classic protection settings.\n\nUS-006 / broker: apps/api/src/fleet/git-broker/git-token.broker.ts:36-52 currently chooses either a per-repo read-only cache key or a per-job/epoch write key, reuses until the expiry margin, returns fixed RepoCheckException reasons and redacts unknown provider errors. fresh at :60-72 chooses read-only/write GitHub mints or a stored GitLab token. Add purpose to both internal request shapes; review must use its own :review cache namespace and may never reuse or supply write cache entries. FIX fresh mint performs read-only probe then defaultBranch check before any write mint, and caches success under the existing write key. Cached valid FIX mints deliberately skip repeat protection checks. Any purpose on GitLab must fail before gitlab.resolve and must not accidentally return a cached ordinary write token. Preserve readOnly per-repo token/error repoId shaping, token expiry and evict(jobId) across all cache namespaces. Existing git-token.broker.spec.ts:10-29,59-131 covers write/read-only reuse, epochs, eviction, no-secret errors and GitLab read-only refusal; extend client stubs and retain assertions. No tokens go into logs, persistent rows, outbox commands or activities. No runner change is required: failed credential requests already prevent the token-dependent step from starting.\n\nUS-007 / sync seam: apps/api/src/fleet/sync/sync.service.ts:108-148 locks/fences each request and gathers toMint inside a transaction, but calls broker.mint afterward. Keep this separation: never hold the transaction across new GitHub protection HTTP. Only extend the default repo-less granted push at :136-138 with a conditional purpose property for REVIEW/FIX; PROJECT per-repo readOnly:true and WORKSPACE denial branches at :124-135 remain identical. RUN, PLAN, actual config commands and THREAD must have no purpose own-property, rather than purpose:undefined. Existing sync-token-fence.spec.ts:18-48 constructs a SyncService harness with stubs and asserts mints occur outside a transaction; :101-112 pins the read-only request shape. The new seam suite enters SyncService.sync with the real broker and a stub GitHubAppClient for REVIEW/FIX, and a broker spy for unchanged RUN shape. Preserve lease mismatch ABANDON, active-state checks, per-repo rejection, partial sync error behavior and response shapes. Attribution is deliberately unchanged: github-app-client.ts:116-118 calls broker.mint without purpose for an API-only comment token.\n\nUS-008/009 / SSR: apps/web/server/utils/api.ts:23-35 exports cookie names and unwrapAuth, which throws on nonzero ret; :38-65 sets/clears httpOnly, sameSite strict, secure cookies with 15-minute/7-day lifetimes; :76-113 forwardToApi uses apiInternalUrl, clientIpHeaders and ignoreResponseError:true to return {status,body} even for HTTP errors. Do not replace these helpers or duplicate cookie policy. server/middleware/client-ip.ts:5-10 sets event.context.clientIp first by Nitro filename ordering; session-refresh.ts sorts after it. server/api/auth/refresh.post.ts:9-29 is a reference for refreshing via refresh bearer and writing response cookies, but the new middleware differs in failure handling and must never throw. server/api/auth/me.get.ts:10-13 returns user:null without access cookie; middleware/auth.global.ts:15-22 calls fetchUser then redirects; leave both unchanged. Rewriting only Set-Cookie is insufficient: SSR subrequests during the same render read the incoming cookie header, so withAuthCookies must replace/add auth values in event.node.req.headers.cookie while preserving other cookie values and deduplicating names. Gate on GET HTML page loads with no access cookie and a refresh cookie, excluding /api/, /_nuxt/, /__nuxt; do not refresh present expired/invalid access cookies. Keep transient upstream statuses/network failures from clearing session cookies; only 401/403 or successful nonzero-ret envelopes clear. Helpers get Jest unit coverage following tests/server/client-ip.spec.ts:1-44; middleware seam tests must execute the handler and assert forwarding, cookies/header mutation and nonthrowing failures, not merely grep its source. apps/web/lib/fleet-types.ts:153-156 is a hand-written misfit union; add trust_domain and both exact locale values, and append its pin at tests/i18n/fleet-locale-parity.spec.ts:23. Keep other pins/labels. Existing tests/e2e/auth.spec.ts:19-64 tests reload with access present or an explicitly invoked client refresh, not the missing-access SSR case; new Playwright must delete only koda_token, preserve koda_refresh, reload /projects and use waitForHydration instead of networkidle because notification streams remain open.\n\nDelivery, risk and verification: Preserve exactly nine stories and the declared dependency graph: 001/002/003/005 independent; 004 after 003; 006 after 005; 007 after 006; 008 after 003; 009 after 008. All are security-related, including trust-domain isolation and cookie helpers, so use three-session-tdd regardless of complexity. No DB migrations, new services, runner/protocol changes or new third-party dependencies are planned: existing columns, approval engine, token broker and Nitro conventions suffice. Security-sensitive compatibility changes are deliberate 403/400 self updates, 202 agent grants, queued isolation contention and fail-closed FIX mints. Mixed-project raw workloads already running at rollout are not automatically evicted; the new rule governs placement. Existing cached write credentials do not gain narrower permissions retroactively; a service restart/new mint applies the new broker behavior, without adding revocation scope to this feature. Branch protection remains best effort and can change during a token's lifetime; document the bound without pretending it is branch-scoped authorization. Deliver API enum/spec/CLI generation and web label together to avoid reason-code drift. Coordinate regression edits to shared endpoint.e2e.spec.ts (US-001/002). Use Vitest vi.* and lazy .ts imports for API, Jest for web units, Playwright for browser SSR. DB suites use canRunDbTests(), KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and real isolated test Postgres; skips do not establish verification and DB-mode runs must not share/reset one database concurrently. Run new and affected scoped suites plus repository lint/type checks through the existing scripts, regenerate contracts from root, and execute DB/browser checks on a capable host. No tests or generation commands were executed during this PRD-only session because executable shell tools were not provided.\n\nRefine-pass adversarial audit: Re-read the source contracts and the full specification rather than trusting the previous draft. The specification has 68 explicit AC bullets: 9/7/12/4/9/7/3/9/8 for US-001 through US-009. Every bullet remains in its original story. The following enumeration maps each spec bullet (left, in story-local order) to revised acceptanceCriteria positions (right); splitting joint observable outcomes has not discarded either assertion or its qualifying clause. US-001: 1->1,2 (OFFLINE update/no gate); 2->3 (PAUSED update); 3->4 (whitelisted junk); 4->5,6 (four forbidden bodies/no mutation call); 5->7,8 (existing parseBody 400/no mutation call); 6->9,10 (real-key PAUSED self-ACTIVE 403/persisted PAUSED); 7->11 (fraction rejected); 8->12 (zero rejected); 9->13 (three accepted). US-002: 1->1 (exported exact set); 2->2 (critical risk); 3->3 (human floor); 4->4,5 (no-policy admin invite 202/no invite); 5->6,7 (member 202/no binding); 6->8 (resend 202); 7->9,10 (direct Owner 201/no approval). US-003: 1->1 (raw beside other project denied); 2->2 (non-raw beside other raw denied); 3->3 (non-raw beside non-raw allowed); 4->4 (same-project REVIEW allowed); 5->5 (config beside non-raw allowed); 6->6 (config beside other raw denied); 7->7 (tools wins); 8->8 (PROJECT THREAD isolated); 9->9 (repo projectId copied); 10->10 (misfit temporary); 11->11 (raw load set); 12->12,13 (literal CONFIG project set/raw set empty). US-004: 1->1 (waiting_capacity attention); 2->2 (repository ref fields); 3->3,4 (dispatch QUEUED/misfit reason); 4->5,6 (one sync assigns exactly one and queues the other). US-005: 1->1,2 (exact review POST permissions/token and expiry); 2->3 (403 mapping); 3->4 (pull_request rule); 4->5 (update rule); 5->6 (classic fallback); 6->7 (unprotected false); 7->8 (rules 500); 8->9 (fallback 404); 9->10 (encoded branch path). US-006: 1->1,2 (review client/no write mint); 2->3 (ordinary write after review, because the review token is not reused for a write request); 3->4,5 (unprotected error/no write); 4->6 (read-only probe token/defaultBranch arguments); 5->7,8 (protected write/ok:true); 6->9,10 (provider_error/no write); 7->11,12 (both GitLab purposes fail/no stored-token resolve). US-007: 1->1,2 (real-broker REVIEW client/no write); 2->3,4 (FIX error/empty tokens); 3->5 (RUN has no purpose key). US-008: 1->1 (eligible HTML page); 2->2 (access present); 3->3 (refresh absent); 4->4 (API path); 5->5 (POST); 6->6 (non-HTML favicon); 7->7 (locale preserved/auth values replaced, each once); 8->8 (missing header); 9->9 (both locale labels). US-009: 1->1 (eligibility short-circuit); 2->2 (refresh bearer once); 3->3 (response cookies); 4->4 (helper result written to incoming header); 5->5 (401/403/nonzero-ret clears both); 6->6,7 (429 resolves/no Set-Cookie); 7->8,9 (network resolves/no Set-Cookie); 8->10 (real SSR reload stays /projects, not /login). No deprecated file-check tags were present.\n\nAll ten failure-table rows are represented: validation/non-shutdown failures in US-001, pending grant non-mutation in US-002, isolation queue/waiting in US-004, unprotected FIX/provider failure/GitLab refusal in US-005/006/007, review 403/422 mapping in US-005, and auth-invalid versus transient refresh failures in US-009. Every story has a negative path (including refusal to mutate without approval and refusal to assign across trust domains). All formal ACs observe a call/exception, response, header, return value or database state; dependent phrases such as 'that sync' were replaced with explicit preconditions. The broker's causal review-cache clause and existing parseBody validation mapping are retained. Added regression assertions preserve the non-self agent approval route, approved invite redemption and inviter attribution as before, same-project assignment and existing waiting verdicts, unchanged write/read-only client permissions, and existing readOnly broker result/cache behavior. Existing formal ACs already preserve pure placement capability precedence, RUN request shape, unrelated cookies and same-render SSR behavior.\n\nAll 19 feature exclusions remain verbatim in top-level outOfScope, in spec order: nonce; same-project isolation; per-job OS user/VM; dispatch-time FIX guard; runner branch allowlist; cached FIX rechecks; bypass/effective-protection detection; rules pagination beyond 100; attribution mint; long-run forge-token lifetime; runner hooks/config; PROJECT anchor write token; one-time refresh rotation; present-expired access cookie; upper concurrency limit; PAUSED authentication block; other risk tiers; logout/return-to/reconnect; CLI reason wording. No story-local exclusion was hoisted. Close isolation and mint boundaries are echoed in the corresponding descriptions. No binding story ID, workdir or dependency changed; all referenced upstream IDs exist. US-004 contextFiles now includes every one of the five spec-recommended files, including sync.service.ts rather than an extra pure-rule file. All other stories retain all spec-recommended context files within the five-file limit; only US-009 reads a newly created helper, produced by its declared upstream US-008. Expected files remain the spec's exact Creates lists. Required CLI generation remains in US-004's In scope despite its binding API workdir. Pure-rule US-003, broker US-006 and single-handler US-009 routing were reduced to medium because existing helpers and patterns suffice; US-004 remains complex for multi-repository/transaction/dashboard/generated-contract plumbing. Every story still requires three-session-tdd under the explicit security override. These are planning-level checks, not a claim that implementation tests or a JSON parser were executed.",
+  "outOfScope": [
+    "The per-job credential-socket nonce from Ruling 5: dropped by user ruling 2026-11-01, because the FIX/REVIEW token also sits in a same-user-readable file; placement isolation is the control.",
+    "Isolating two jobs of the same project on one runner from each other: Ruling 5 treats one project on one runner as one trust domain.",
+    "Running raw jobs as a per-job OS user or in a VM: Ruling 5's long-term option, not built here.",
+    "A dispatch-time check that a FIX repo's default branch is protected: the guard runs at token mint; dispatch accepts the job and the job fails with `default_branch_unprotected`.",
+    "Limiting a FIX push to the PR head branch in the runner (git shim or refspec allowlist): GitHub cannot scope the token, and the user chose the branch-protection guard.",
+    "Re-running the branch-protection check on a cached FIX token reused within one job epoch.",
+    "Detecting ruleset bypass actors or classic protection that does not block a push: the read-only token cannot read either, so the FIX branch guard is best-effort and catches only an unprotected default branch.",
+    "Reading more than the first 100 rules from the branch-rules endpoint.",
+    "The server-side review-attribution mint (`GitHubAppClient` attribution path calling `GitTokenBroker.mint` without `purpose`): it never leaves the API, so it keeps the write token.",
+    "Forge-token lifetime for long FIX runs (review D/BUG-2): a separate fix.",
+    "Runner git hook and config hardening (review D/SEC-2): a separate fix.",
+    "Refusing a repo-less write token to PROJECT-thread jobs (review B/SEC-2): a separate fix.",
+    "Making refresh tokens one-time or rotating them with reuse detection (review A/SEC-8): concurrent SSR refreshes stay valid because refresh tokens are reusable today.",
+    "Refreshing an access cookie that is present but holds an expired JWT: the cookie's 15-minute lifetime matches the access token, so the missing-cookie case is the one that occurs.",
+    "An upper bound on `maxConcurrentTickets`: only integer and at-least-1 validation is added.",
+    "Blocking PAUSED agents at the auth guard (review ruling 10): PAUSED agents still authenticate; only the self path is closed.",
+    "Other risk tiers the review flagged (`agent.key.rotate`, `agent.create`, `user.create`, CI token rotation, review A/SEC-6): a separate fix.",
+    "Logout revocation, return-to after login, and treating an API outage as a reconnect (review E/SEC-1, E/BUG-2, E/BUG-3): a separate web session fix.",
+    "CLI wording of the new `trust_domain` misfit: the CLI prints the API's reason code as it is."
+  ],
+  "routingProfile": "native-codex-ds"
+}
