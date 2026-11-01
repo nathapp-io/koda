@@ -220,6 +220,32 @@ export function reviewPrNumber(feature: string): number | null {
   return Number.isSafeInteger(number) ? number : null
 }
 
+const MAX_FIX_PR_NUMBER = 2147483647
+
+/** Fix is available only for a completed REVIEW with a dispatch-capable viewer and a bounded PR number. */
+export function showFixAction(
+  job: Pick<FleetJobDto, 'command' | 'state' | 'feature'>,
+  canDispatch: boolean,
+): boolean {
+  if (!canDispatch || job.command !== 'REVIEW' || job.state !== 'COMPLETED') return false
+  const prNumber = reviewPrNumber(job.feature)
+  return prNumber !== null && prNumber <= MAX_FIX_PR_NUMBER
+}
+
+/** Safe query parameters for dispatching a FIX from a review; placement and cost are intentionally not carried. */
+export function fixDispatchQuery(
+  job: Pick<FleetJobDto, 'repoId' | 'feature' | 'profiles'>,
+): { command: 'FIX'; repoId: string; prNumber: string; profiles?: string[] } | null {
+  const prNumber = reviewPrNumber(job.feature)
+  if (prNumber === null || prNumber > MAX_FIX_PR_NUMBER) return null
+  return {
+    command: 'FIX',
+    repoId: job.repoId,
+    prNumber: String(prNumber),
+    ...(job.profiles.length > 0 ? { profiles: [...job.profiles] } : {}),
+  }
+}
+
 /** S3 D465: config jobs share one fixed feature, so at most one is active per repo. */
 export const CONFIG_JOB_FEATURE = 'nax-config'
 
