@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface FixResult {
@@ -42,13 +43,18 @@ export async function readFixResult(stdoutPath: string, prNumber: number): Promi
 
 /** The run state sits beside the bot.jsonl named by nax's log marker. */
 export async function readPushedSha(logPath: string): Promise<string | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const state: unknown = JSON.parse(await readFile(join(dirname(logPath), 'bot-state.json'), 'utf8'));
+    handle = await open(join(dirname(logPath), 'bot-state.json'), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const state: unknown = JSON.parse(await handle.readFile('utf8'));
     if (state === null || typeof state !== 'object' || Array.isArray(state)) return null;
     const pushedSha = (state as Record<string, unknown>)['pushedSha'];
     return typeof pushedSha === 'string' && SHA.test(pushedSha) ? pushedSha : null;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ELOOP' || error instanceof SyntaxError) return null;
     throw error;
+  } finally {
+    await handle?.close();
   }
 }

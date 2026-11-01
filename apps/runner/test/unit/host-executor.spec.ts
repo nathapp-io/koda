@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
@@ -91,6 +91,18 @@ describe('HostExecutor FIX outcome reader (US-011)', () => {
     await writeFile(join(w.row.jobDir, 'fix.stdout'), `nax bot fix: PR #4 — pushed abc1234\nnax bot fix: log ${join(outside, 'bot.jsonl')}\n`);
     await writeFile(join(outside, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
     expect(await w.ex.readFixOutcome(w.row)).toMatchObject({ kind: 'pushed', pushedSha: null });
+  });
+
+  test('AC-8: rejects a bot-state.json symlink that escapes the assigned PR directory', async () => {
+    const w = await fixWorld();
+    const resultDir = join(w.row.jobDir, 'nax-out', 'bot', 'pr-4');
+    const externalDir = join(w.base, 'external');
+    await mkdir(resultDir, { recursive: true });
+    await mkdir(externalDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stdout'), `nax bot fix: PR #4 — pushed abc1234\nnax bot fix: log ${join(resultDir, 'bot.jsonl')}\n`);
+    await writeFile(join(externalDir, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
+    await symlink(join(externalDir, 'bot-state.json'), join(resultDir, 'bot-state.json'));
+    expect(await w.ex.readFixOutcome(w.row)).toMatchObject({ pushedSha: null });
   });
 
   test('AC-9: extracts and caps the first non-empty stderr line', async () => {

@@ -1,5 +1,5 @@
-import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
-import { delimiter, join, relative, resolve, sep } from 'node:path';
+import { chmod, copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { isConfigKind } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
@@ -304,10 +304,23 @@ export class HostExecutor implements JobExecutor {
     let pushedSha: string | null = null;
     if (result.logPath !== null && prNumber !== undefined) {
       const expectedRoot = resolve(outDir, 'bot', `pr-${prNumber}`);
-      const logPath = resolve(result.logPath);
-      const rel = relative(expectedRoot, logPath);
-      if (rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`)) {
-        pushedSha = await readPushedSha(logPath);
+      try {
+        const realOutDir = await realpath(outDir);
+        const realRoot = await realpath(expectedRoot);
+        const expectedRealRoot = resolve(realOutDir, 'bot', `pr-${prNumber}`);
+        const realLogDir = await realpath(dirname(resolve(result.logPath)));
+        const statePath = join(realLogDir, 'bot-state.json');
+        const realStatePath = await realpath(statePath);
+        const rootRel = relative(expectedRealRoot, realRoot);
+        const logRel = relative(realRoot, realLogDir);
+        const stateRel = relative(realRoot, realStatePath);
+        const inside = (rel: string): boolean => rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`));
+        if (rootRel === '' && inside(logRel) && inside(stateRel)) {
+          pushedSha = await readPushedSha(join(realLogDir, 'bot.jsonl'));
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'ELOOP') throw error;
       }
     }
 
