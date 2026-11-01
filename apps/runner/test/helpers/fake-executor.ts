@@ -105,6 +105,13 @@ export class FakeExecutor implements JobExecutor {
     return this.reviewPosted;
   }
 
+  fixStepStarted = false;
+
+  async hasFixStep(job: JobRow): Promise<boolean> {
+    this.note('hasFixStep', job);
+    return this.fixStepStarted;
+  }
+
   async readStatus(job: JobRow): Promise<StatusView | null> {
     this.note('readStatus', job);
     if (this.statusError) throw this.statusError;

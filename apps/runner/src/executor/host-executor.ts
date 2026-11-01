@@ -258,6 +258,10 @@ export class HostExecutor implements JobExecutor {
     return reviewPosted(join(this.dirs(job).jobDir, 'nax.stdout'));
   }
 
+  async hasFixStep(job: JobRow): Promise<boolean> {
+    return exists(join(this.dirs(job).jobDir, 'fix.stdout'));
+  }
+
   /** D61: once the write-once stash exists it is the PRD; the checkout may have been switched back to the ref's stale one. */
   async readPlan(job: JobRow): Promise<PlanCheck> {
     const { repoDir, jobDir } = this.dirs(job);

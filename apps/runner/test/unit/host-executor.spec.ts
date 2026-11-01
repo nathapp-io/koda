@@ -35,7 +35,7 @@ afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAK
 /** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
 const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
 
-async function world(command: 'RUN' | 'PLAN' | 'REVIEW' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
+async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -58,6 +58,13 @@ describe('HostExecutor review verdict (US-007)', () => {
     await mkdir(w.row.jobDir, { recursive: true });
     await writeFile(join(w.row.jobDir, 'nax.stdout'), 'nax bot review: artifact /out/bot/pr-42/r1/bot-review.json\n');
     expect(await w.ex.readReviewPosted(w.row)).toBe(true);
+  });
+  test('detects whether the FIX step stdout marker exists', async () => {
+    const w = await world('FIX', { review: { prNumber: 42, botLogin: 'koda-fleet[bot]' } });
+    expect(await w.ex.hasFixStep(w.row)).toBe(false);
+    await mkdir(w.row.jobDir, { recursive: true });
+    await writeFile(join(w.row.jobDir, 'fix.stdout'), '');
+    expect(await w.ex.hasFixStep(w.row)).toBe(true);
   });
 });
 

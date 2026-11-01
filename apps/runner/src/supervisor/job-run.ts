@@ -420,9 +420,12 @@ export class JobRun {
         return { verdict: { state: 'CANCELLED', reason: null }, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
       }
       const posted = await this.deps.executor.readReviewPosted(row);
-      const verdict = posted
-        ? { state: 'COMPLETED' as const, reason: null }
-        : { state: 'FAILED' as const, reason: 'review not posted' };
+      const fixStepStarted = row.command === 'FIX' && posted ? await this.deps.executor.hasFixStep(row) : true;
+      const verdict = !posted
+        ? { state: 'FAILED' as const, reason: 'review not posted' }
+        : row.command === 'FIX' && !fixStepStarted
+          ? { state: 'FAILED' as const, reason: 'interrupted before fix' }
+          : { state: 'COMPLETED' as const, reason: null };
       return { verdict, snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
     const status = await this.deps.executor.readStatus(row);

@@ -131,6 +131,17 @@ describe('REVIEW verdicts (US-007)', () => {
   });
 });
 
+describe('FIX readopt finish (US-006)', () => {
+  test('a posted review without a started fix fails as interrupted before fix', async () => {
+    const b = build('FIX');
+    b.ex.reviewPosted = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'interrupted before fix' });
+    expect(b.ex.calls).toContain('readReviewPosted:j1');
+  });
+});
+
 describe('verdicts', () => {
   test.each(['PLAN', 'RUN'] as const)('%s missing output reports nax stderr through a lifecycle event (#207)', async (command) => {
     const b = build(command);

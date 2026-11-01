@@ -75,6 +75,8 @@ export interface JobExecutor {
   logSources(job: JobRow): JobLogSources;
   readStatus(job: JobRow): Promise<StatusView | null>;
   readReviewPosted(job: JobRow): Promise<boolean>;
+  /** US-009: true when the FIX's second-step stdout marker exists. */
+  hasFixStep(job: JobRow): Promise<boolean>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   /** #203: absolute spend from this PLAN attempt's cost ledgers, in snapshot decimal format. */
   readPlanCost(job: JobRow): Promise<string | undefined>;
