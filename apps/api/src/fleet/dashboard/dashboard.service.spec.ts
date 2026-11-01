@@ -14,7 +14,7 @@ const rawRunner = (over: Partial<RawRunnerRow> = {}): RawRunnerRow => ({
 function fakeRepo(over: Partial<IDashboardRepository> = {}): Mocked<IDashboardRepository> {
   return {
     findRunners: vi.fn().mockResolvedValue([rawRunner(), rawRunner({ id: 'r2', name: 'corrupt', capabilities: { broken: true } })]),
-    findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'RUN' }]),
+    findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'RUN', projectId: 'p1', bashMode: 'raw' }]),
     findActiveJobs: vi.fn().mockResolvedValue([dashJob({ lastHeartbeatAt: secAgo(700) })]),
     findQueuedWindow: vi.fn().mockResolvedValue([]),
     findRecentJobs: vi.fn().mockResolvedValue([]),
@@ -46,7 +46,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     const offline = rawRunner({ lastSeenAt: secAgo(10_000) });
     const repo = fakeRepo({
       findRunners: vi.fn().mockResolvedValue([offline]),
-      findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'THREAD' }]),
+      findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]),
       findActiveJobs: vi.fn().mockResolvedValue([]),
     });
     const view = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
@@ -59,8 +59,8 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
   it('counts only RUN jobs as runner activeJobs when RUN and THREAD are both held', async () => {
     const repo = fakeRepo({
       findHeldRefs: vi.fn().mockResolvedValue([
-        { runnerId: 'r1', repoId: 'repo1', command: 'RUN' },
-        { runnerId: 'r1', repoId: 'repo1', command: 'THREAD' },
+        { runnerId: 'r1', repoId: 'repo1', command: 'RUN', projectId: 'p1', bashMode: 'raw' },
+        { runnerId: 'r1', repoId: 'repo1', command: 'THREAD', projectId: 'p1', bashMode: 'raw' },
       ]),
       findActiveJobs: vi.fn().mockResolvedValue([]),
     });

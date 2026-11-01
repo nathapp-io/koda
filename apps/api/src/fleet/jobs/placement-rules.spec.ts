@@ -211,11 +211,11 @@ describe('THREAD placement (US-006)', () => {
   const threadJob = (over: Partial<PlacementJob> = {}) => job({ command: 'THREAD', profiles: [], thread: { backend: { kind: 'native' }, enabled: true }, ...over });
   const threadRunner = (over: Partial<PlacementRunner> = {}) => runner({ protocolVersion: 4, threadCapacity: 2, capabilities: caps({ threadBackends: { native: ['m1'], acp: [] } }), ...over });
 
-  it('counts THREAD refs in their own load class', () => {
-    expect(toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1')).toEqual({ active: 0, repoIds: new Set(), threads: 1 });
+  it('counts THREAD refs in their own load class and preserves their project trust domain', () => {
+    expect(toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]).get('r1')).toEqual({ active: 0, repoIds: new Set(), projectIds: new Set(['p1']), rawProjectIds: new Set(['p1']), threads: 1 });
   });
   it('does not block a RUN job on a repo held by THREAD', () => {
-    const threadLoad = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1');
+    const threadLoad = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]).get('r1');
     expect(misfit(job({ repoId: 'rA' }), runner(), threadLoad ?? EMPTY_LOAD)).toBeNull();
   });
   it('fits THREAD despite finite capacity, same-repo load, and broken interaction/sandbox', () => {
@@ -293,9 +293,13 @@ describe('evaluateRunners (S2b (c) §2.3)', () => {
 
 describe('placement helpers moved from PlacementService (D413)', () => {
   it('toLoads counts held jobs and their repos per runner', () => {
-    const loads = toLoads([{ runnerId: 'r1', repoId: 'a' }, { runnerId: 'r1', repoId: 'b' }, { runnerId: 'r2', repoId: 'a' }]);
-    expect(loads.get('r1')).toEqual({ active: 2, repoIds: new Set(['a', 'b']) });
-    expect(loads.get('r2')).toEqual({ active: 1, repoIds: new Set(['a']) });
+    const loads = toLoads([
+      { runnerId: 'r1', repoId: 'a', projectId: 'p1', bashMode: 'gated' },
+      { runnerId: 'r1', repoId: 'b', projectId: 'p2', bashMode: 'raw' },
+      { runnerId: 'r2', repoId: 'a', projectId: 'p1', bashMode: 'gated' },
+    ]);
+    expect(loads.get('r1')).toEqual({ active: 2, repoIds: new Set(['a', 'b']), projectIds: new Set(['p1', 'p2']), rawProjectIds: new Set(['p2']), threads: 0 });
+    expect(loads.get('r2')).toEqual({ active: 1, repoIds: new Set(['a']), projectIds: new Set(['p1']), rawProjectIds: new Set(), threads: 0 });
     expect(loads.get('r3')).toBeUndefined();
   });
 
