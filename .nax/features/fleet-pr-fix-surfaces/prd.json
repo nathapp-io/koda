@@ -1,0 +1,627 @@
+{
+  "project": "koda",
+  "feature": "fleet-pr-fix-surfaces",
+  "branchName": "feat/fleet-pr-fix-surfaces",
+  "createdAt": "2026-10-29T00:00:00.000Z",
+  "updatedAt": "2026-11-01T11:32:57.279Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Advertise REVIEW and FIX in assistant and MCP dispatch catalogs",
+      "description": "**Goal** — Extend the koda_dispatch_job descriptor and its assistant/MCP descriptions to advertise the existing PR commands.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — Assistant tool descriptor. `koda_dispatch_job`'s descriptor `command` enum becomes `['RUN', 'PLAN', 'REVIEW', 'FIX']`, it gains an optional `prNumber` property (`type: 'integer'`, `minimum: 1`, `maximum: 2147483647`) and `required` becomes `['repo', 'command', 'maxCostUsd']`. The catalog description names `REVIEW` (review an open pull request) and `FIX` (review then fix an open pull request) and says they take `prNumber` instead of `feature`; it keeps its \"only after the user approves\" and \"do not call this tool again\" sentences and stays within the 2000-character cap with the workspace sentence appended. `MCP_DESCRIPTIONS.koda_dispatch_job` names the same three terms and keeps its run-at-once sentence and `MCP_PROJECT_SENTENCE`. Neither side validates the schema itself (MCP delegates validation to the executor; the runner's assign parser checks only that `inputSchema` is an object), so the new property and `required` list need no other change.\n\nUpdate the existing descriptor spec's AC-8 required list and AC-9 command enum, and extend its bounds assertion with prNumber; every other assertion stays. Add the dedicated PR descriptor spec, using the MCP catalog's existing by-name lookup and workspace projection patterns.\n\n**Scope** — In: KODA_DISPATCH_JOB schema, assistant wording, MCP wording and descriptor regression anchors. Out: parser changes (US-002), preview/execute/approval integration (US-003), and runner/MCP schema-validation changes.\n\n**Interface** — `KODA_DISPATCH_JOB.inputSchema.properties.command.enum = ['RUN', 'PLAN', 'REVIEW', 'FIX']`; `prNumber: { type: 'integer', minimum: 1, maximum: 2147483647 }`; `required: ['repo', 'command', 'maxCostUsd']`.",
+      "acceptanceCriteria": [
+        "[unit] KODA_DISPATCH_JOB.inputSchema property command has enum ['RUN', 'PLAN', 'REVIEW', 'FIX'].",
+        "[unit] KODA_DISPATCH_JOB.inputSchema property prNumber matches { type: 'integer', minimum: 1, maximum: 2147483647 }.",
+        "[unit] KODA_DISPATCH_JOB.inputSchema.required equals ['repo', 'command', 'maxCostUsd'].",
+        "[unit] KODA_DISPATCH_JOB.description mentions each of REVIEW, FIX and prNumber.",
+        "[unit] The description kodaToolDescriptorsFor('WORKSPACE') gives koda_dispatch_job is at most 2000 characters long.",
+        "[unit] The MCP tool catalog's description of koda_dispatch_job mentions each of REVIEW, FIX and prNumber.",
+        "[unit] The MCP tool catalog's description of koda_dispatch_job ends with the MCP project sentence naming the project argument.",
+        "[unit] KODA_DISPATCH_JOB.description retains 'The job is started only after the user approves it: this call proposes it and the user decides it, so tell the user it is waiting for their approval and do not call this tool again for the same job.', preserving the existing thread approval wording.",
+        "[unit] The MCP tool catalog's description of koda_dispatch_job retains 'The call runs at once as the calling agent', preserving the existing immediate-execution wording."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "api",
+        "assistant",
+        "mcp"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Bounded catalog and description changes across two existing modules; approval policy and access enforcement remain untouched."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.pr.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+          "reason": "`KODA_DISPATCH_JOB` command enum gains `REVIEW` and `FIX`, gains the `prNumber` integer property, `required` drops `feature`, and its description names REVIEW, FIX and `prNumber` while keeping its approval and do-not-call-again sentences."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+          "reason": "AC-8 (`required` equals `['repo', 'command', 'feature', 'maxCostUsd']`) becomes `['repo', 'command', 'maxCostUsd']`, and AC-9 (`command` enum equals `['RUN', 'PLAN']`) becomes `['RUN', 'PLAN', 'REVIEW', 'FIX']`; the bounds test gains `prNumber` as `{ type: 'integer', minimum: 1, maximum: 2147483647 }`. Every other assertion stays."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+          "reason": "`MCP_DESCRIPTIONS.koda_dispatch_job` names REVIEW, FIX and `prNumber`; it keeps the run-at-once sentence and `MCP_PROJECT_SENTENCE`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Parse assistant REVIEW and FIX dispatch input",
+      "description": "**Goal** — Extend dispatchJobTool's input union and parser to accept PR commands without changing RUN/PLAN parsing.\n\n**Motivation** — K3-A shipped the `FIX` job kind and K3-B1 (PR #365) the follow-up review after a pushed fix, both live-checked (§9.155, §9.156) only through `curl` against the REST route.\n\n**Approach** — The tool's `COMMANDS` list becomes `['RUN', 'PLAN', 'REVIEW', 'FIX']`. `DispatchJobInput` becomes `command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX'`, `feature?: string`, `prNumber?: number`. `parse` keeps every existing check and adds: for `RUN` and `PLAN` a missing `feature` refuses with reason `feature` (the existing rule, now conditional); a present `feature` on any command keeps its existing string bounds (reason `feature`); for `REVIEW` and `FIX` a missing `prNumber` refuses with reason `prNumber`; a present `prNumber` on any command that is not an integer from 1 to 2147483647 refuses with reason `prNumber`. Cross-field refusals (a `feature` on `FIX`, a `prNumber` on `RUN`, a `ref` on `REVIEW`) are left to `normalizeDispatch` in `preview`, which already turns its reason into a `ToolInputError`.\n\nKeep repo, maxCostUsd, ref, planFrom, profiles, bashMode and ticketRefs checks and omission of absent optional properties unchanged. The RUN/PLAN parse results are unchanged, so every assertion in the existing tool spec keeps holding. Copy the existing harness, VALID fixture and reasonOf pattern into the new parser spec.\n\n**Scope** — In: COMMANDS, DispatchJobInput, parse and parser behavior tests. Out: descriptor wording (US-001), GitHub preview refusal, preview text, DTO mapping and approval-route integration (US-003).\n\n**Interface** — `command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX'`, `feature?: string`, `prNumber?: number` on `DispatchJobInput`; `parse(input: unknown): DispatchJobInput`.",
+      "acceptanceCriteria": [
+        "[unit] parse({ repo: 'acme/app', command: 'FIX', prNumber: 23, maxCostUsd: 1 }) returns { repo: 'acme/app', command: 'FIX', prNumber: 23, maxCostUsd: 1 }.",
+        "[unit] Table-driven: parse with command REVIEW and prNumber absent, 0, 1.5, '23' or 2147483648 throws ToolInputError with reason prNumber.",
+        "[unit] parse with command RUN, a valid feature and prNumber 0 throws ToolInputError with reason prNumber.",
+        "[unit] parse with command PLAN and no feature throws ToolInputError with reason feature.",
+        "[unit] parse with command FIX, prNumber 23 and a feature of 129 characters throws ToolInputError with reason feature.",
+        "[unit] parse({ repo: 'acme/app', command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 }) returns exactly { repo: 'acme/app', command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 }, preserving the existing RUN parse result and omission of absent optional fields.",
+        "[unit] parse({ repo: 'acme/app', command: 'PLAN', feature: 'add-auth', planFrom: 'docs/spec.md', maxCostUsd: 0.5 }) returns exactly { repo: 'acme/app', command: 'PLAN', feature: 'add-auth', planFrom: 'docs/spec.md', maxCostUsd: 0.5 }, preserving the existing PLAN parse result.",
+        "[unit] Table-driven: parse with command FIX and prNumber absent, 0, 1.5, '23' or 2147483648 throws ToolInputError with reason prNumber.",
+        "[unit] parse with command RUN and no feature throws ToolInputError with reason feature, preserving the existing missing-feature refusal."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "api",
+        "assistant",
+        "validation"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One existing parser and input interface gain bounded optional data; cross-field and authorization policy stay downstream."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.spec.ts",
+        "apps/api/src/fleet/jobs/dispatch-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.pr-parse.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+          "reason": "`COMMANDS` and `DispatchJobInput` gain `REVIEW`/`FIX` and `prNumber`, `feature` becomes optional, and `parse` gains the rules of call 4; the RUN/PLAN parse results are unchanged, so every assertion in the existing tool spec keeps holding."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Preview and dispatch approved assistant PR jobs",
+      "description": "**Goal** — Preview REVIEW/FIX requests before approval and dispatch the existing PR DTO as the approving workflow's requester.\n\n**Motivation** — The K3 design goal 1 says a `FIX` can be dispatched \"from REST, CLI, MCP and web (agent-first: no surface special-cased)\", and §D7 notes K1 shipped `REVIEW` without a CLI flag.\n\n**Approach** — Cross-field refusals (a `feature` on `FIX`, a `prNumber` on `RUN`, a `ref` on `REVIEW`) are left to `normalizeDispatch` in `preview`, which already turns its reason into a `ToolInputError`. Before that, `preview` refuses a `REVIEW` or `FIX` on a repo whose `provider` is not `github` with `ToolInputError` reason `review is GitHub-only` or `fix is GitHub-only` (the service's own wording), so the user is never asked to approve a dispatch that would be refused. `preview` for `REVIEW` and `FIX` answers `Dispatch <command> in <slug>:`, then `repo: <owner>/<name> @ <defaultBranch>`, then `pull request: #<prNumber>`, then `max cost: $<maxCostUsd>`, then one `profiles:` line when profiles are given; the `RUN`/`PLAN` preview is unchanged. `toDto` carries `prNumber` when present and `feature` only when present.\n\n`normalizeDispatch(dto, defaultBranch)` for `REVIEW`/`FIX` refuses a missing `prNumber` (`prNumber required for <command>`), a `feature` (`feature is derived for <command>`), a `planFrom`, a `ref`, a non-`raw` `bashMode` and `ticketRefs`; for `RUN`/`PLAN` refuses a `prNumber` (`prNumber is only for REVIEW and FIX`). Keep this server function unchanged. Preserve fleetWriteRefusal, maskSecrets, jobPath, project-scoped repository resolution, re-resolution on execute, and existing actor identity. The RUN/PLAN preview and DTO are unchanged, so every assertion in the existing tool spec keeps holding.\n\nAdd unit tests in dispatch-job-tool.pr.spec.ts and an integration test through the real runner tool route and the approval decide route `POST /api/approvals/:id/decisions`, in a new file that copies the harness of `assistant-dispatch-job-tool.integration.spec.ts` (copy the helpers it uses). The test uses pull request number 7023, so its feature `review-pr-7023` is used by no other spec (`.nax/rules/api-test-isolation.md`). Enter `POST /api/fleet/runner/jobs/:jobId/tools/koda_dispatch_job?leaseEpoch=1` using the runner holding the THREAD job, inspect the stored action preview, then approve through the engine route and inspect actual FleetJob rows. Keep the shared DB gate, environment restoration and app teardown; run the real-DB test outside the sandbox.\n\n**Scope** — In: GitHub-only preview refusal, PR preview lines, optional DTO fields, and the runner/proposal/approval/persisted-job seam. Out: parser implementation (US-002), catalog descriptions (US-001), API route/DTO/permission/approval policy/audit changes, CLI and web surfaces.\n\n**Interface** — `preview(ctx: ToolContext, input: DispatchJobInput): Promise<string>`; `execute(ctx: ToolContext, input: DispatchJobInput): Promise<string>`; `toDto(input: DispatchJobInput, repoId: string): DispatchFleetJobDto`.",
+      "acceptanceCriteria": [
+        "[unit] preview for { repo: 'acme/app', command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['native-codex'] } in project web with the repo's default branch main returns the lines 'Dispatch FIX in web:', 'repo: acme/app @ main', 'pull request: #23', 'max cost: $1', 'profiles: native-codex', in that order and nothing else.",
+        "[unit] Table-driven: preview on a resolved repo with provider 'gitlab' throws ToolInputError with reason 'fix is GitHub-only' for a FIX and 'review is GitHub-only' for a REVIEW.",
+        "[unit] preview for { repo: 'acme/app', command: 'REVIEW', prNumber: 23, feature: 'x', maxCostUsd: 1 } throws ToolInputError with reason 'feature is derived for REVIEW'.",
+        "[unit] preview for { repo: 'acme/app', command: 'REVIEW', prNumber: 23, ref: 'dev', maxCostUsd: 1 } throws ToolInputError with reason 'ref is the default branch for REVIEW'.",
+        "[unit] preview for { repo: 'acme/app', command: 'RUN', feature: 'login', prNumber: 23, maxCostUsd: 1 } throws ToolInputError with reason 'prNumber is only for REVIEW and FIX'.",
+        "[unit] execute for { repo: 'acme/app', command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['native-codex'] } calls FleetJobsService.dispatch with a DTO deep-equal to { repoId: <resolved repo id>, command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['native-codex'] }.",
+        "[integration] On the real test database, a koda_dispatch_job call { repo: 'acme/app', command: 'FIX', prNumber: 7023, maxCostUsd: 1 } posted to POST /api/fleet/runner/jobs/:jobId/tools/koda_dispatch_job?leaseEpoch=1 by the runner holding the thread job stores an action whose preview's third line is 'pull request: #7023'.",
+        "[integration] After that call and before any decision, no FleetJob with feature review-pr-7023 exists.",
+        "[integration] After the developer approves that action through POST /api/approvals/:id/decisions, exactly one FleetJob with feature review-pr-7023 exists.",
+        "[integration] That job's command is FIX.",
+        "[integration] That job's requestedById is the developer's id.",
+        "[integration] When REVIEW or FIX targets a resolved project repo with provider 'gitlab' through the runner tool route, the count of stored actions for that jobId/toolCallId is zero.",
+        "[unit] preview for { repo: 'acme/app', command: 'PLAN', feature: 'add-auth', planFrom: 'docs/spec.md', maxCostUsd: 0.5 } in project web with default branch trunk returns exactly the lines 'Dispatch PLAN in web:', 'repo: acme/app @ trunk', 'feature: add-auth', 'max cost: $0.5', 'plan from: docs/spec.md', preserving the existing PLAN preview and line order.",
+        "[unit] execute for { repo: 'acme/app', command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 } calls FleetJobsService.dispatch with a DTO deep-equal to { repoId: <resolved repo id>, command: 'RUN', feature: 'add-auth', maxCostUsd: 0.5 }, preserving the existing RUN DTO with no prNumber key.",
+        "[unit] preview for { repo: 'acme/app', command: 'FIX', prNumber: 23, feature: 'x', maxCostUsd: 1 } on a GitHub repo throws ToolInputError with reason 'feature is derived for FIX'."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "api",
+        "assistant",
+        "approval",
+        "security",
+        "integration"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Preview and DTO branches reuse an existing tool and complete HTTP/approval fixture harness without new abstractions; strict TDD remains required because the route-to-approval test exercises runner access, fencing and requester identity."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.spec.ts",
+        "apps/api/src/fleet/jobs/dispatch-input.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/test/integration/fleet/assistant-dispatch-job-tool.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.pr.spec.ts",
+        "apps/api/test/integration/fleet/assistant-dispatch-job-tool-pr.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+          "reason": "`preview` gains the GitHub-only refusal and the REVIEW/FIX lines, and `toDto` carries `prNumber`, per call 4; the RUN/PLAN preview and DTO are unchanged, so every assertion in the existing tool spec keeps holding."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Dispatch REVIEW and FIX from CLI flags",
+      "description": "**Goal** — Add CLI PR dispatch options, exact PR payload construction and canonical active-job conflict lookup.\n\n**Motivation** — The K3 design goal 1 says a `FIX` can be dispatched \"from REST, CLI, MCP and web (agent-first: no surface special-cased)\", and §D7 notes K1 shipped `REVIEW` without a CLI flag.\n\n**Approach** — `koda fleet dispatch` gains `--review <pr>` and `--fix <pr>`, each parsed with the existing `parsePositiveInt` (a malformed value fails inside commander with exit 1, as `--max-cost` does today). `--feature` changes from a required option to an optional one. The narrow `DispatchRunBody` type (`feature: string`) and its \"only ever sends PLAN or RUN\" comment go; `explainConflict` takes the lookup feature as an argument. A 409 on a `REVIEW` or `FIX` dispatch looks up the active job with feature `review-pr-<n>` (REVIEW and FIX of one PR share that feature, so the active job may be either kind) and prints the existing conflict message with that feature.\n\nOne field, two commands, every surface. `REVIEW` and `FIX` take a `prNumber` (an integer from 1 to 2147483647, the DTO's bounds) and no `feature`, `ref`, `planFrom`, `ticketRefs` or non-`raw` `bashMode`; the server derives the feature `review-pr-<prNumber>` and checks out the default branch (`normalizeDispatch`, unchanged), and refuses a non-GitHub repo (`FleetJobsService.dispatch`, reason `review is GitHub-only` / `fix is GitHub-only`). Each surface sends `{ repoId, command, prNumber, maxCostUsd }` plus the optional `profiles` and placement fields, and nothing else.\n\nDispatchOptions gains `review?: number` and `fix?: number`, `feature?: string`. Use the existing generated DispatchFleetJobDto without editing generated code. Keep RUN/PLAN bodies, placement flags, output, JSON and API-error fallback unchanged. The three ordered semantic exit-3 checks belong to US-005; existing bashFlagProblem, label/pin, repo and runner checks still follow them in the final command. Do not add a CLI 32-bit upper-bound validator: parsePositiveInt accepts positive safe integers above 2147483647, and the API reports 400/exit 1.\n\n**Scope** — In: options, numeric parsing, PR body, existing RUN body preservation and 409 feature/message/exit behavior. Out: the three ordered semantic validation branches (US-005), generated client changes, job show/list display and deployment-document examples. CLI: rejecting `--review`/`--fix` values above 2147483647 on the client: `parsePositiveInt` accepts them and the API answers 400, which the CLI reports as an API error (exit 1). CLI: exit code 3 for a malformed `--review`/`--fix` value: commander's option parser exits 1, as it already does for `--max-cost`. Choosing the pull request from a list of open pull requests on the web form or the CLI: the number is typed.\n\n**Interface** — `DispatchOptions` gains `review?: number` and `fix?: number`, `feature?: string`; `findActiveJob(slug, repoId, feature)` remains unchanged; `explainConflict` takes the lookup feature as an argument.",
+      "acceptanceCriteria": [
+        "[cli] koda fleet dispatch --repo acme/app --fix 23 --max-cost 1 --profile native-codex calls fleetJobsControllerDispatch with body deep-equal to { repoId: 'fr1', command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['native-codex'] }.",
+        "[cli] koda fleet dispatch --repo acme/app --review 23 --max-cost 1 calls fleetJobsControllerDispatch with body deep-equal to { repoId: 'fr1', command: 'REVIEW', prNumber: 23, maxCostUsd: 1 }.",
+        "[cli] koda fleet dispatch --repo acme/app --fix 23 --max-cost 1 --pin box-1 sends a body whose pinnedRunnerId is 'r1'.",
+        "[cli] koda fleet dispatch --repo acme/app --feature login --max-cost 1 sends a body deep-equal to { repoId: 'fr1', command: 'RUN', feature: 'login', maxCostUsd: 1 }.",
+        "[cli] koda fleet dispatch --repo acme/app --fix 0 --max-cost 1 rejects with a commander error whose code is commander.invalidArgument (the test program uses exitOverride).",
+        "[cli] koda fleet dispatch --repo acme/app --fix 0 --max-cost 1 makes no fleetJobsControllerDispatch call.",
+        "[cli] A 409 from a --fix 23 dispatch calls fleetJobsControllerList with a query containing repoId: 'fr1' and feature: 'review-pr-23'.",
+        "[cli] When that lookup finds an active job j9 in state RUNNING, stderr contains 'An active job already runs review-pr-23 on this repo: j9 (RUNNING)'.",
+        "[cli] When REVIEW or FIX dispatch receives 409, the command exits 1."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "cli",
+        "dispatch"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends one Commander command using existing parsers, generated services and conflict helpers; no new endpoint or domain abstraction."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-dispatch.ts",
+        "apps/cli/src/commands/fleet-dispatch.spec.ts",
+        "apps/cli/src/commands/fleet-shared.ts",
+        "apps/cli/src/utils/parse-positive-int.ts",
+        "apps/cli/src/generated/types.gen.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/fleet-dispatch-pr.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/fleet-dispatch.ts",
+          "reason": "`--review` and `--fix` options, `--feature` optional, the REVIEW/FIX body, `DispatchRunBody` removed, and `explainConflict` taking the lookup feature, per call 2; the RUN/PLAN body is unchanged, so every assertion in the existing dispatch command spec keeps holding."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Reject incompatible CLI PR dispatch flags before requests",
+      "description": "**Goal** — Add the ordered CLI semantic validations for mutually exclusive PR commands and RUN/PLAN-only flags.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — Before any request, these validation failures exit 3 through the command's existing `invalid()` helper, in this order:\n- `--review` and `--fix` together: `Use --review or --fix, not both`.\n- `--review` or `--fix` with any of `--feature`, `--plan`, `--ref`, `--ticket`, `--bash-mode` or `--approval-timeout`: `--feature, --plan, --ref, --ticket, --bash-mode and --approval-timeout are not for --review or --fix`.\n- Neither `--review` nor `--fix`, and no `--feature`: `--feature is required unless --review or --fix is given`.\nAfter those, the existing checks run unchanged (`bashFlagProblem`, `--label` with `--pin`, unknown repo, unknown runner).\n\nExtend fleet-dispatch.ts from US-004 and add fleet-dispatch-pr-validation.spec.ts, using the upstream PR command spec's mocks and program setup as a pattern. Make a fresh Commander program for each test case because option values persist across parseAsync calls. Explicit flags, including --bash-mode raw and --approval-timeout, count as incompatible; default empty ticket arrays do not. Numeric parse errors still belong to commander with exit 1, not invalid().\n\n**Scope** — In: three ordered invalid() branches, messages, exit 3 and no-request behavior. Out: PR flag registration, body construction, malformed numeric parser behavior and conflict lookup (US-004).\n\n**Interface** — `invalid(message)` remains the command's existing helper; `DispatchOptions` is the optional-feature/review/fix interface introduced by US-004.",
+      "acceptanceCriteria": [
+        "[cli] koda fleet dispatch --repo acme/app --review 23 --fix 23 --max-cost 1 exits 3.",
+        "[cli] That run writes 'Use --review or --fix, not both' to stderr.",
+        "[cli] That run makes no fleetJobsControllerDispatch call.",
+        "[cli] --fix 23 --feature login (with --repo acme/app --max-cost 1) exits 3.",
+        "[cli] Table-driven: --fix 23 with each of --feature login, --ref dev and --bash-mode gated writes 'are not for --review or --fix' to stderr.",
+        "[cli] Table-driven: --fix 23 with each of --feature login, --ref dev and --bash-mode gated makes no dispatch call.",
+        "[cli] koda fleet dispatch --repo acme/app --max-cost 1 with neither --feature nor a PR flag exits 3.",
+        "[cli] That run writes '--feature is required unless --review or --fix is given' to stderr.",
+        "[cli] That run makes no dispatch call.",
+        "[cli] Table-driven: --review or --fix combined with any of --feature, --plan, --ref, --ticket, --bash-mode or --approval-timeout exits 3.",
+        "[cli] Table-driven: those incompatible PR flag combinations write '--feature, --plan, --ref, --ticket, --bash-mode and --approval-timeout are not for --review or --fix' to stderr.",
+        "[cli] Table-driven: those incompatible PR flag combinations make no request.",
+        "[cli] koda fleet dispatch --repo acme/app --feature login --max-cost 1 --approval-timeout 60 without --bash-mode exits 3, preserving the existing bashFlagProblem validation after the new PR checks.",
+        "[cli] Table-driven: with --repo acme/app --max-cost 1, each of --review 23 --fix 23, --fix 23 --feature login, and neither PR flag nor --feature produces zero calls across projectFleetReposControllerList, projectFleetRunnersControllerList, fleetJobsControllerDispatch and fleetJobsControllerList."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "cli",
+        "validation"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Adds ordered local validation branches through an existing error helper in one command."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-dispatch.ts",
+        "apps/cli/src/commands/fleet-dispatch-pr.spec.ts",
+        "apps/cli/src/commands/fleet-shared.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/fleet-dispatch-pr-validation.spec.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Validate and serialize web PR dispatch forms",
+      "description": "**Goal** — Extend the shared web dispatch schema and body type for PR commands while ignoring stale hidden RUN/PLAN values.\n\n**Motivation** — K3-A shipped the `FIX` job kind and K3-B1 (PR #365) the follow-up review after a pushed fix, both live-checked (§9.155, §9.156) only through `curl` against the REST route.\n\n**Approach** — Web PR number format. The form's `prNumber` is text. It is accepted when, after trimming, it matches `^[1-9][0-9]*$` and its value is at most 2147483647; `' 23 '` is accepted, `'023'`, `'+5'`, `'1e3'`, `'0'` and `''` are not. Everywhere the value is used it is `Number(trimmed)`, so the body, the 409 lookup feature and the prefill agree with the server's `review-pr-<n>`.\n\nWeb form library: schema, body, lookup feature. `buildDispatchSchema` accepts `command` `RUN`, `PLAN`, `REVIEW` or `FIX` and a new optional text field `prNumber`. For `RUN` and `PLAN` every existing check applies unchanged, and an empty `feature` still yields `fleet.dispatch.validation.feature`. For `REVIEW` and `FIX` the schema checks `prNumber` (call 5; otherwise the issue `fleet.dispatch.validation.prNumber` on path `prNumber`) and does not check `feature`, `ref`, `planFrom`, `ticketRefs`, `bashMode` or `approvalTimeoutMinutes`: those fields are hidden for the PR commands and keep stale values (`keepValuesOnUnmount`), so a stale invalid value must not block the submit. `repoId`, `profiles`, `maxCostUsd`, `selectorLabels` and the pin keep their checks for every command. Mechanism: zod runs field-level checks before the object's `superRefine` regardless of `command`, so the field schemas of `feature` (`.regex(FEATURE_RE)` and the `..` refine), `ref` (`.max(255)`), `planFrom` (`.max(512)`) and `ticketRefs` (`.max(MAX_DISPATCH_TICKETS)` and the `TICKET_REF_RE` refine) become lenient (`z.string()` / `z.string().optional()` / `z.array(z.string())`), and each of those checks moves into `superRefine` under `command === 'RUN' || command === 'PLAN'`, adding the same message on the same path with `ctx.addIssue`. The existing `approvalTimeoutMinutes` guard already follows this pattern.\n`DISPATCH_DEFAULTS.prNumber` is `''`. `toDispatchBody` for `REVIEW`/`FIX` returns `{ repoId, command, prNumber: Number(trimmed prNumber), maxCostUsd }` plus `profiles` and the placement field when set, and never `feature`, `ref`, `planFrom`, `ticketRefs`, `bashMode`, `approvalTimeoutSec` or `acknowledgeOpenPr`. The `DispatchBody` type's `command` becomes the four-kind union, and it gains `prNumber?: number` with `feature` optional.\n\nThe RUN/PLAN results are unchanged, so the existing dispatch library spec's assertions keep holding (an empty feature on a RUN still yields fleet.dispatch.validation.feature). Reuse valid() and messages() patterns in the new PR library spec. The lookup-feature helper described alongside these changes is implemented by US-007, not this story.\n\n**Scope** — In: buildDispatchSchema, defaults, toDispatchBody, DispatchBody and exact omission of hidden fields. Out: dispatchFeatureOf/query prefill/notice (US-007), page rendering/locales (US-009), mounted submit/conflict behavior (US-010). Do not clear hidden fields on command change.\n\n**Interface** — `DispatchBody.command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX'`; `feature?: string`; `prNumber?: number`; `toDispatchBody(v: DispatchFormValues, opts: { acknowledgeOpenPr?: boolean } = {}): DispatchBody`.",
+      "acceptanceCriteria": [
+        "[unit] buildDispatchSchema accepts { ...DISPATCH_DEFAULTS, repoId: 'r1', command: 'FIX', feature: '', prNumber: '23' } with no issues.",
+        "[unit] buildDispatchSchema accepts prNumber ' 23 ' for command REVIEW.",
+        "[unit] Table-driven: with command REVIEW, a prNumber of '', '0', '023', '1e3' or '2147483648' yields the issue message fleet.dispatch.validation.prNumber.",
+        "[unit] With command FIX, prNumber '23', feature 'a/b', ref of 300 characters and ticketRefs ['bad'], the schema yields no issues.",
+        "[unit] With command RUN and feature '' the schema still yields the issue message fleet.dispatch.validation.feature.",
+        "[unit] With command RUN and ref of 300 characters the schema still yields the issue message fleet.dispatch.validation.ref.",
+        "[unit] DISPATCH_DEFAULTS.prNumber equals ''.",
+        "[unit] toDispatchBody for command FIX, prNumber ' 23 ', feature 'login', ref 'dev', ticketRefs ['KD-1'], bashMode 'escalate', profiles ['fast'] and maxCostUsd 1 returns exactly { repoId: 'r1', command: 'FIX', prNumber: 23, maxCostUsd: 1, profiles: ['fast'] }.",
+        "[unit] toDispatchBody for command REVIEW with the option { acknowledgeOpenPr: true } returns a body with no acknowledgeOpenPr key."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "validation",
+        "dispatch"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Conditional validation and exact serialization across two existing pure library/type files; stale field retention is the main regression risk."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-dispatch.ts",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/lib/fleet-bash-mode.ts",
+        "apps/web/tests/lib/fleet-dispatch.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/fleet-dispatch-pr.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "With command FIX and valid prNumber '23', invalid profiles still yield fleet.dispatch.validation.profileName.",
+        "With command FIX and valid prNumber '23', selectorLabels combined with pinnedRunnerId still yield fleet.dispatch.validation.labelsOrPin."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-dispatch.ts",
+          "reason": "schema (lenient field schemas with the RUN/PLAN checks moved into `superRefine`), defaults and body per calls 5 and 6. The RUN/PLAN results are unchanged, so the existing dispatch library spec's assertions keep holding (an empty `feature` on a RUN still yields `fleet.dispatch.validation.feature`)."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`DispatchBody.command` becomes `'RUN' | 'PLAN' | 'REVIEW' | 'FIX'`, `feature` becomes optional and `prNumber?: number` is added."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Normalize PR query prefill, notice and conflict feature",
+      "description": "**Goal** — Add safe PR/profile query prefill, the review notice discriminator and canonical dispatch feature lookup.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — `dispatchPrefillFromQuery` accepts `command` `REVIEW` and `FIX`, a `prNumber` query (kept as `String(Number(trimmed))` only when it passes call 5 and the query's `command` is `REVIEW` or `FIX`) and a `profiles` query (one value or an array; each kept only when it matches `PROFILE_NAME_RE` and does not start with `RESERVED_PROFILE_PREFIX`, duplicates dropped, at most `MAX_PROFILES` kept). `DispatchQuery` gains `prNumber?: unknown` and `profiles?: unknown`. `prefillNotice` returns `'review'` when the prefill's `command` is `REVIEW` or `FIX`, before its existing rules, so its type is `'ticket' | 'plan' | 'review' | null`.\n\nA new `dispatchFeatureOf(values)` returns `review-pr-<Number(trimmed prNumber)>` for `REVIEW`/`FIX` and the trimmed `feature` otherwise.\n\nThe form's `prNumber` is text. It is accepted when, after trimming, it matches `^[1-9][0-9]*$` and its value is at most 2147483647; `' 23 '` is accepted, `'023'`, `'+5'`, `'1e3'`, `'0'` and `''` are not. Everywhere the value is used it is `Number(trimmed)`, so the body, the 409 lookup feature and the prefill agree with the server's `review-pr-<n>`.\n\nExisting prefill assertions keep holding because a query without prNumber or profiles yields the same result as today. Mirror ticketRefsFromQuery's scalar/array-query handling where relevant. Add fleet-dispatch-pr-prefill.spec.ts using the existing valid() pattern; keep filters and deduplication deterministic and do not change shared profile constants.\n\n**Scope** — In: DispatchQuery, dispatchPrefillFromQuery, prefillNotice and dispatchFeatureOf. Out: schema/body (US-006), Fix-link helpers (US-008), page prefill rendering (US-009) and page 409 handling (US-010).\n\n**Interface** — `dispatchFeatureOf(values: DispatchFormValues): string`; `prefillNotice` returns `'ticket' | 'plan' | 'review' | null`; `DispatchQuery` gains `prNumber?: unknown` and `profiles?: unknown`.",
+      "acceptanceCriteria": [
+        "[unit] dispatchPrefillFromQuery({ command: 'FIX', repoId: 'r1', prNumber: '23', profiles: ['native-codex', 'fast'] }) returns { command: 'FIX', repoId: 'r1', prNumber: '23', profiles: ['native-codex', 'fast'] }.",
+        "[unit] Table-driven: dispatchPrefillFromQuery with command FIX returns an object with no prNumber key for a prNumber of '0', '023', '2.5' or '2147483648'.",
+        "[unit] dispatchPrefillFromQuery({ command: 'RUN', prNumber: '23' }) returns an object with no prNumber key.",
+        "[unit] dispatchPrefillFromQuery({ profiles: ['bad name', 'koda-job-1', 'fast', 'fast'] }) returns { profiles: ['fast'] }.",
+        "[unit] dispatchPrefillFromQuery({ profiles: 'fast' }) returns { profiles: ['fast'] }.",
+        "[unit] prefillNotice({ command: 'FIX', repoId: 'r1', prNumber: '23' }) returns 'review'.",
+        "[unit] prefillNotice({ command: 'FIX', repoId: 'r1' }) returns 'review'.",
+        "[unit] dispatchFeatureOf returns 'review-pr-23' for command FIX with prNumber ' 23 '.",
+        "[unit] dispatchFeatureOf returns 'login' for command RUN with feature ' login '.",
+        "[unit] dispatchPrefillFromQuery({ command: 'RUN', repoId: 'r1', feature: 'login', ref: 'feat/login' }) returns exactly { command: 'RUN', repoId: 'r1', feature: 'login', ref: 'feat/login' }, preserving the existing PLAN-to-RUN handoff when no prNumber or profiles query is present.",
+        "[unit] prefillNotice({ command: 'PLAN', ticketRefs: ['WEB-3'], feature: 'web-3-add-csv-export' }) returns 'ticket', preserving the existing ticket-prefill notice.",
+        "[unit] prefillNotice({ command: 'RUN', repoId: 'r1', feature: 'f', ref: 'feat/f', ticketRefs: ['WEB-3'] }) returns 'plan', preserving the existing handoff notice."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "prefill",
+        "dispatch"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends existing pure query/notice helpers and adds a deterministic feature formatter in one module."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-dispatch.ts",
+        "apps/web/lib/fleet-ticket-links.ts",
+        "apps/web/tests/lib/fleet-dispatch.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/fleet-dispatch-pr-prefill.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-dispatch.ts",
+          "reason": "`DispatchQuery`, `dispatchPrefillFromQuery`, `prefillNotice` and the new `dispatchFeatureOf` per calls 6 and 7; the existing prefill assertions keep holding because a query without `prNumber` or `profiles` yields the same result as today."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Derive permission-gated Fix action and dispatch query",
+      "description": "**Goal** — Provide pure helpers deciding Fix-action visibility and constructing its safe copied prefill query.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — `lib/fleet-jobs.ts` gains `showFixAction(job, canDispatch): boolean` (true only for a `REVIEW` job in `COMPLETED` whose feature `reviewPrNumber` parses to at most 2147483647, when `canDispatch`) and `fixDispatchQuery(job): { command: 'FIX', repoId, prNumber, profiles? } | null` (`prNumber` the decimal string, `profiles` a new array copied from the job's profiles when non-empty, never the job's own array; `null` when the feature does not parse or exceeds 2147483647).\n\nUse existing reviewPrNumber(feature), which validates canonical positive safe integers but is not itself restricted to 32 bits; enforce the extra maximum inside the new helpers without changing the existing reader's behavior. Carry only repo, pull request and optional profile chain, not cost or placement. Add fleet-jobs-fix-action.spec.ts for the pure helper outputs and array identity.\n\n**Scope** — In: two new fleet-jobs helpers and permission/state/feature gates. Out: query parsing and notice (US-007), job-page rendering/locales (US-011), carrying review cost/placement, and a Review action on FIX jobs.\n\n**Interface**\n```typescript\nshowFixAction(job: Pick<FleetJobDto, 'command' | 'state' | 'feature'>, canDispatch: boolean): boolean\nfixDispatchQuery(job: Pick<FleetJobDto, 'repoId' | 'feature' | 'profiles'>): { command: 'FIX'; repoId: string; prNumber: string; profiles?: string[] } | null\n```",
+      "acceptanceCriteria": [
+        "[unit] showFixAction({ command: 'REVIEW', state: 'COMPLETED', feature: 'review-pr-23' }, true) returns true.",
+        "[unit] Table-driven: showFixAction returns false for that job with canDispatch false, with state FAILED, with command FIX, with feature login and with feature review-pr-2147483648.",
+        "[unit] fixDispatchQuery({ repoId: 'r1', feature: 'review-pr-23', profiles: ['native-codex'] }) returns { command: 'FIX', repoId: 'r1', prNumber: '23', profiles: ['native-codex'] }.",
+        "[unit] The profiles array fixDispatchQuery returns is not the same array object as the job's profiles.",
+        "[unit] fixDispatchQuery({ repoId: 'r1', feature: 'review-pr-23', profiles: [] }) returns { command: 'FIX', repoId: 'r1', prNumber: '23' }.",
+        "[unit] fixDispatchQuery returns null for feature login."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "security",
+        "permissions",
+        "prefill"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two small pure helpers in one existing module, but showFixAction explicitly gates a write action on canDispatch, triggering the access-control security override."
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/lib/fleet-types.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/fleet-jobs-fix-action.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-jobs.ts",
+          "reason": "adds `showFixAction` and `fixDispatchQuery`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Render PR dispatch commands, input and prefilled notice",
+      "description": "**Goal** — Extend the mounted web dispatch form with PR commands, conditional fields and review/profile prefill.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — Web dispatch page. The command select lists `RUN`, `PLAN`, `REVIEW` (label `fleet.dispatch.commandReview`) and `FIX` (label `fleet.dispatch.commandFix`). For `REVIEW` and `FIX` the page shows a pull request number input (`data-testid=\"dispatch-pr-number\"`, label `fleet.dispatch.prNumber`, hint `fleet.dispatch.prNumberHint`) and hides the ref, feature, spec path and tickets fields. Hiding wraps each existing `FormField` in a `<template v-if>` and leaves the `FormField` tags as they are. The bash fields are already `RUN`-only. The prefill applies `prNumber` and `profiles` from the query. The page's `prefilled` ref widens to `'ticket' | 'plan' | 'review' | null`, and the notice reads `prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')`.\n\nNew keys in both `en.json` and `zh.json`; the existing `used-keys-exist` spec requires every literal `t('...')` key to exist, and the fleet locale parity spec keeps the locales aligned. Dispatch page: `fleet.dispatch.commandReview`, `fleet.dispatch.commandFix`, `fleet.dispatch.prNumber`, `fleet.dispatch.prNumberHint`, `fleet.dispatch.prefilledReview`, `fleet.dispatch.validation.prNumber`.\n\nIts tests live in a new file that copies the dispatch page mount from `fleet-dispatch-placement-runtime.spec.ts` together with the helpers it uses (the `useField` and `FormField` doubles), with these changes: `TicketPicker.vue` is stubbed by a component that renders an element carrying `data-testid` equal to its `testId` prop; the `FleetTokenListInput` stub declares a `modelValue` prop as well as `testId`, so the profile chain can be read from it; `fleetComponents: ['FleetNativeSelect']` is passed so the command select renders its options (`uiStubs` is not spread into `components`, because a duplicate registration is ignored); and `useRoute` returns `{ params: { project: 'koda' }, query: <the test's query> }`.\n\nCreate fleet-dispatch-pr-page.spec.ts. Update only the C9 notice expectation in fleet-dispatch-page.spec.ts to the new review-first expression; its tickets FormField regex must keep holding because the field is wrapped, not edited. Keep all other source assertions, keepValuesOnUnmount, existing permission gate, placement controls and cost input. Do not hide PR commands based on repo provider or clear hidden values.\n\n**Scope** — In: rendered options, text PR input, hidden RUN/PLAN fields, query application, review notice and six keys in both locales. Out: mounted submit/empty-PR/conflict behavior and dispatchFeatureOf lookup wiring (US-010), job-page Fix action/key (US-011). Hiding the web `Fix` action or the PR commands for a non-GitHub repo: the API refuses the dispatch with 422 and the form shows the API message. Choosing the pull request from a list of open pull requests on the web form or the CLI: the number is typed. Clearing the hidden RUN/PLAN form fields when the command changes: they keep their values and are simply not checked or sent for `REVIEW`/`FIX`.\n\n**Interface** — `prefilled: 'ticket' | 'plan' | 'review' | null`; PR field `data-testid=\"dispatch-pr-number\"`; prefill notice `data-testid=\"dispatch-prefilled\"`.",
+      "acceptanceCriteria": [
+        "[unit] The mounted dispatch page's command select offers the option values RUN, PLAN, REVIEW and FIX.",
+        "[unit] With command FIX selected, the mounted dispatch page renders an element with data-testid=\"dispatch-pr-number\".",
+        "[unit] Table-driven: with command FIX selected, the mounted dispatch page renders no element with data-testid dispatch-feature, dispatch-ref, dispatch-plan-from or dispatch-tickets.",
+        "[unit] With command RUN selected, the mounted dispatch page renders dispatch-feature.",
+        "[unit] With command RUN selected, the mounted dispatch page renders dispatch-tickets.",
+        "[unit] With command RUN selected, the mounted dispatch page renders no dispatch-pr-number.",
+        "[unit] The dispatch page mounted with route query { command: 'FIX', repoId: <a listed repo id>, prNumber: '23', profiles: 'native-codex' } sets the prNumber field to '23'.",
+        "[unit] That mount passes ['native-codex'] as the profile chain stub's modelValue.",
+        "[unit] That mount renders data-testid=\"dispatch-prefilled\" with the text of fleet.dispatch.prefilledReview."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "ui",
+        "i18n",
+        "prefill"
+      ],
+      "dependencies": [
+        "US-006",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Uses existing form and mount patterns for conditional UI plus two locale files; existing permission enforcement is unchanged."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/dispatch.vue",
+        "apps/web/lib/fleet-dispatch.ts",
+        "apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts",
+        "apps/web/tests/pages/fleet-dispatch-page.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-dispatch-pr-page.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/dispatch.vue",
+          "reason": "REVIEW/FIX command options, the PR number field, the `<template v-if>` wrappers that hide the RUN/PLAN fields, the prNumber/profiles prefill, and the widened `prefilled` ref and review notice, per call 8."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-dispatch-page.spec.ts",
+          "reason": "the C9 tickets test's expected notice text `prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')` becomes `prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')`. The tickets `FormField` regex keeps holding because the field is wrapped, not edited. Every other assertion stays."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "the six dispatch keys of call 10."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same six dispatch keys in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Submit web PR dispatches and resolve active-job conflicts",
+      "description": "**Goal** — Connect the mounted PR form to dispatch, block empty PR numbers and resolve 409 conflicts by canonical PR feature.\n\n**Motivation** — K3-A shipped the `FIX` job kind and K3-B1 (PR #365) the follow-up review after a pushed fix, both live-checked (§9.155, §9.156) only through `curl` against the REST route.\n\n**Approach** — A 409 looks up the active job with `jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues))`; the ticket open-PR confirmation stays `RUN`-only.\n\nA new `dispatchFeatureOf(values)` returns `review-pr-<Number(trimmed prNumber)>` for `REVIEW`/`FIX` and the trimmed `feature` otherwise. Consume the helper from US-007, do not independently format a feature or send it in the PR body. Use the existing handleSubmit/buildDispatchSchema/toDispatchBody pipeline from US-006/US-009 for actual submit and empty-number blocking.\n\nIts tests reuse the US-009 test file's mount, adding `alias: { '~/composables/useApi': apiModule }` (with `import * as apiModule from '../../composables/useApi'`), as `fleet-job-detail.spec.ts` does, so the `ApiError` the test throws is the class the page checks with `instanceof`, and registering a `NuxtLink` stub that exposes its `to` prop so `dispatch-conflict-link` resolves.\n\nCreate the specified separate fleet-dispatch-pr-submit.spec.ts using the upstream mount pattern and its helpers; copy module-private helpers rather than importing and executing another spec. Update the existing 409 source expectation from `jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim())` to `jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues))`; the test still asserts the 409 branch, the conflict link and the toast. Keep general API-error toasts, failed courtesy lookup behavior and existing RUN ticket confirmation unchanged.\n\n**Scope** — In: dispatchFeatureOf wiring, mounted valid submit/invalid blocking and active-job conflict link. Out: schema/body algorithms (US-006), query helpers (US-007), options/fields/prefill/locales (US-009), and job-page action (US-011).\n\n**Interface** — `dispatchFeatureOf(values: DispatchFormValues): string`; `useFleetJobs(slug).findActiveJob(repoId, feature)`; conflict link `data-testid=\"dispatch-conflict-link\"` points to `/<slug>/fleet/jobs/<id>`.",
+      "acceptanceCriteria": [
+        "[unit] Submitting the mounted dispatch page with command FIX, a repo and PR number 23 calls useFleetJobs(slug).dispatch with a body whose command is 'FIX'.",
+        "[unit] That dispatch body has prNumber 23.",
+        "[unit] Submitting the mounted dispatch page with command FIX, a repo and an empty PR number makes no dispatch call.",
+        "[unit] When the FIX dispatch rejects with an ApiError of code 409, the page calls findActiveJob with the repo id and 'review-pr-23'.",
+        "[unit] When that lookup resolves an active job j9, the page renders data-testid=\"dispatch-conflict-link\" whose to is /<slug>/fleet/jobs/j9.",
+        "[unit] Table-driven: submitting REVIEW or FIX with prNumber '', '0', '023', '+5', '1e3' or '2147483648' makes no dispatch request.",
+        "[unit] When a RUN dispatch for repo r1 and feature login rejects with ApiError code 409, findActiveJob is called with 'r1' and 'login', preserving the existing RUN active-job lookup.",
+        "[unit] When a RUN dispatch with ticketRefs ['KD-1'] rejects with ApiError code 409 and findActiveJob resolves null, the page renders data-testid=\"dispatch-pr-conflict\", preserving the existing RUN-only ticket open-PR confirmation."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "dispatch",
+        "conflict"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One page integration change with established form and conflict logic; mounted tests reuse existing API-class alias and link stub patterns."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/dispatch.vue",
+        "apps/web/tests/pages/fleet-dispatch-pr-page.spec.ts",
+        "apps/web/tests/pages/fleet-job-detail.spec.ts",
+        "apps/web/tests/pages/fleet-dispatch-page.spec.ts",
+        "apps/web/lib/fleet-dispatch.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-dispatch-pr-submit.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/dispatch.vue",
+          "reason": "the 409 lookup uses `dispatchFeatureOf(formValues)` per call 8."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-dispatch-page.spec.ts",
+          "reason": "the 409 test's expected source text `jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim())` becomes `jobsApi.findActiveJob(formValues.repoId, dispatchFeatureOf(formValues))`; the test still asserts the 409 branch, the conflict link and the toast."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Offer Fix dispatch from completed REVIEW jobs",
+      "description": "**Goal** — Add the permission-gated Fix link beside Dispatch run on completed REVIEW job pages.\n\n**Motivation** — Today an agent in a koda thread or over MCP cannot ask for a review or a fix (the tool's `command` enum is `RUN` and `PLAN`), a CLI user cannot either (`--feature` is required and there is no PR flag), and a person reading a finished review on the web has no way to act on it except by hand.\n\n**Approach** — Web `Fix` action. The job page renders a `NuxtLink` (`data-testid=\"fleet-job-dispatch-fix\"`, text `fleet.jobs.actions.dispatchFix`) to `{ path: '/<slug>/fleet/dispatch', query: fixDispatchQuery(job) }` when `showFixAction(job, viewer.canDispatch)`, next to the existing `Dispatch run` link. The cost cap is not carried: the person sets it on the form.\n\nNew keys in both `en.json` and `zh.json`; the existing `used-keys-exist` spec requires every literal `t('...')` key to exist, and the fleet locale parity spec keeps the locales aligned. Job page: `fleet.jobs.actions.dispatchFix`.\n\nIts tests live in a new file that copies `mountEnginePage` from `fleet-job-detail.spec.ts` together with the helpers it uses (`jobFixture`, the `useApi` module alias and the request doubles), with `useProjectPermissions` returning `projectPermissionsStub(['fleet.job.dispatch'])` (or `[]` for the negative case), and reads the link's `to` prop from the `NuxtLink` stub that `uiStubs` provides.\n\nConsume showFixAction/fixDispatchQuery from US-008; do not duplicate their validation or infer permission from a role name. Reuse viewer.canDispatch, which is already derived from the fleet.job.dispatch key. The only prefill is repo, PR and copied profiles: no cost or placement, no direct API dispatch on click. Leave existing Dispatch run, job headers, fixOutcome display and existing actions unchanged.\n\n**Scope** — In: Fix NuxtLink, helper wiring, permission/state negative rendering, preservation of the existing Dispatch run handoff, and one key in each locale. Out: pure helper implementation (US-008), dispatch-page behavior (US-009/US-010). A `Review` action on a `FIX` job page, or a `Fix` action on a `REVIEW` job that is not `COMPLETED`: a follow-up review already runs after a pushed fix (K3-B1). Carrying the review job's placement (labels, pinned runner) into the prefilled `Fix` dispatch: only repo, pull request and profiles are prefilled. A CLI flag or web field for the cost cap of a `Fix` action prefilled from a review: the person or agent sets `maxCostUsd` on every dispatch. Hiding the web `Fix` action or the PR commands for a non-GitHub repo: the API refuses the dispatch with 422 and the form shows the API message.\n\n**Interface**\n```typescript\nshowFixAction(job: Pick<FleetJobDto, 'command' | 'state' | 'feature'>, canDispatch: boolean): boolean\nfixDispatchQuery(job: Pick<FleetJobDto, 'repoId' | 'feature' | 'profiles'>): { command: 'FIX'; repoId: string; prNumber: string; profiles?: string[] } | null\n```",
+      "acceptanceCriteria": [
+        "[unit] The job page mounted with a COMPLETED REVIEW job (feature review-pr-23, repo r1, profiles ['native-codex']) and a viewer holding fleet.job.dispatch renders data-testid=\"fleet-job-dispatch-fix\".",
+        "[unit] That link's to is { path: '/<slug>/fleet/dispatch', query: { command: 'FIX', repoId: 'r1', prNumber: '23', profiles: ['native-codex'] } }.",
+        "[unit] That link's text is the English value of fleet.jobs.actions.dispatchFix.",
+        "[unit] The job page mounted with the same job and a viewer without fleet.job.dispatch renders no fleet-job-dispatch-fix.",
+        "[unit] The job page mounted with a FAILED REVIEW job and a viewer holding fleet.job.dispatch renders no fleet-job-dispatch-fix.",
+        "[unit] The job page mounted with a COMPLETED PLAN job, repoId r1, feature login, resultBranch feat/login, tickets [] and a viewer holding fleet.job.dispatch retains fleet-job-dispatch-run with to { path: '/<slug>/fleet/dispatch', query: { command: 'RUN', repoId: 'r1', feature: 'login', ref: 'feat/login' } }, preserving the existing PLAN-to-RUN handoff."
+      ],
+      "tags": [
+        "fleet-pr-fix-surfaces",
+        "web",
+        "ui",
+        "i18n",
+        "security",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small page/helper/locale integration, but exposing a write handoff based on project permissions invokes the access-control security override."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/tests/pages/fleet-job-detail.spec.ts",
+        "apps/web/tests/helpers/permission-nav.ts",
+        "apps/web/tests/helpers/fleet-harness.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-job-fix-action.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "the `Fix` link beside `Dispatch run`, shown by `showFixAction` and pointing at `fixDispatchQuery` per call 9."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "the key `fleet.jobs.actions.dispatchFix`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the key `fleet.jobs.actions.dispatchFix` in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Goal and completion: expose the already implemented REVIEW and FIX dispatch kinds through the assistant/MCP catalog and executor, Commander CLI, Nuxt dispatch form, and a permission-gated Fix link on completed REVIEW jobs. Done means all eleven binding stories deliver their specified behavior, exact request bodies and errors, with RUN/PLAN regressions preserved and the runner-tool-to-approval-to-created-job seam verified against real Postgres. No new endpoints, DTO contracts, job semantics, permissions, approval policy, audit behavior, database schema, or generated clients are needed.\n\nNavigation and guidance: codebase-memory MCP tools are unavailable in this session, so discovery used direct Read/Grep/Glob against the supplied repository root. Read .nax/mono/apps/{api,cli,web}/context.md. Those authoritative app contexts correct the supplied detector metadata: the API is NestJS 12 + Fastify, not Express; the web is Nuxt 4 SSR + Vue + vee-validate/zod, not Next.js. CLI is Commander.js with generated Axios client. API tests use Vitest, CLI/web unit tests use Jest. Implementers writing NestJS code must read the nathapp-nestjs-patterns skill when available. No source changes or tests were executed during this PRD drafting task.\n\nExisting server authority, unchanged: apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10 already declares command RUN | PLAN | REVIEW | FIX, optional feature, and prNumber integer bounds 1..2147483647 at :12-13. apps/api/src/fleet/jobs/dispatch-input.ts:27 normalizes dispatch; :30-39 derives review-pr-<n> and defaultBranch for both PR kinds, rejects feature, planFrom, ref, non-raw bashMode and nonempty ticketRefs, while :40-48 preserves RUN/PLAN checks and rejects prNumber for those kinds. apps/api/src/fleet/jobs/fleet-jobs.service.ts:79 resolves and scopes the repo, refuses non-GitHub PR commands at :82-84 before normalization, then retains ticket checks, placement, budgets, transaction, audit and review-decision selection. Do not fork these rules into a new service or relax the route. The assistant preview should call existing normalization to surface cross-field reasons, not silently drop invalid fields. Service dispatch remains the final authority after approval. REVIEW and FIX share the same derived feature and therefore the same active-job conflict domain.\n\nAssistant/MCP impact: apps/api/src/fleet/assistant/koda-tool-descriptors.ts:551 exports KODA_DISPATCH_JOB; :554-558 contains the approval/do-not-repeat description; :562 requires feature today; :572-578 exposes only RUN/PLAN and bounded feature. Add the prNumber schema property, expand command, drop feature only from required, retain all other schema bounds. apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts:381-387 pins the old required/enum values, and :408-419 pins bounds; update only the called-out expectations and add the new dedicated PR descriptor spec. apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:66 has a separate description for dispatch; :18 defines the exact MCP project sentence, and :91-95 projects workspace schemas unchanged with replacement descriptions. apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts:23-36 exposes the by-name lookup pattern and :65-85 protects workspace schema identity. Keep the assistant's approval language separate from MCP's run-at-once language. The workspace sentence is appended downstream, so test the final workspace description against 2000 characters, not just the base string. No runner inputSchema parser or MCP validator changes are required.\n\napps/api/src/fleet/assistant/tools/dispatch-job-tool.ts:25 has COMMANDS, :38 DispatchJobInput, :61 parse, :95 preview, :122 execute, :163 toDto. The parser currently requires feature for every input. Make it conditional for RUN/PLAN, bound any present feature, bound any present prNumber including on RUN/PLAN, and require prNumber for PR commands. Preserve absent-field omission, all other parsers, masking and refusal translation. Preview resolves a project-scoped repo at :147 and calls normalizeDispatch via assertDispatchable at :153. For PR commands reject non-GitHub before normalization, then emit only the specified header/repo/PR/cost/profiles lines. Execute already re-resolves the repo and dispatches as ctx.actor.id with ticketActor, so extend only the DTO mapping rather than changing requester identity or thread binding. apps/api/src/fleet/assistant/tools/fleet-write-tools.ts:24 registers this factory at bootstrap. Catalog changes also reach apps/api/src/fleet/jobs/placement.service.ts:13 and its descriptor projection tests, and MCP reaches apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts:8. Other tools import the shared descriptor/catalog modules but should retain identical behavior.\n\nAssistant tests and security seam: apps/api/src/fleet/assistant/tools/dispatch-job-tool.spec.ts:17-83 provides ctx, REPO, VALID, collaborator spies, reasonOf and async error helpers; copy the relevant helpers into the dedicated new parser and preview specs, without weakening the old RUN/PLAN tests. apps/api/test/integration/fleet/assistant-dispatch-job-tool.integration.spec.ts:48-74 contains callTool/actionOf/jobWith/decide and :76-102 boots the HTTP world, grants approval.decide, enrolls a runner and seeds its held THREAD job. Its header has stale project-route wording, but executable code uses const APPROVALS = '/api/approvals' at :37 and POST /api/approvals/:id/decisions at :74; use this real engine route. The new integration spec must copy the harness and helpers, use PR 7023 and feature review-pr-7023, inspect the stored preview, assert zero matching jobs before approval and exactly one FIX requested by the developer afterward. Keep the existing runner key and leaseEpoch=1 fence, action context and policy enforcement; do not bypass approval or insert the target job directly. This is security-sensitive approval/access-control integration and uses three-session-tdd. Per .nax/rules/api-test-isolation.md:16-18 DB runs share a schema and :58-60 shared-cache apps must close; isolate fixtures, restore env, close the Nest app, and avoid reading another spec's jobs. DB specs use canRunDbTests, KODA_DB_TESTS=1 and the shared setup. A sandbox skip is not verification: run the new test:scoped integration spec outside NAX_SANDBOXED=1 against the dedicated test PG or Testcontainers before merge, never concurrent DB-reset runs against one database.\n\nCLI impact: apps/cli/src/commands/fleet-dispatch.ts:19 has DispatchOptions, :26-31 has the obsolete DispatchRunBody narrowing, :37 finds an active job, :43 delegates invalid() to handleFleetValidation, :47 builds bodies, :69 explains conflicts, :81 registers the command. Introduce review?/fix? numeric options with parsePositiveInt, optional feature, exact ordered validation ahead of any request, disjoint PR versus RUN/PLAN payloads, and an explicit lookup feature argument for explainConflict. Ensure explicit --bash-mode raw is also a forbidden PR flag, empty/absent flag handling does not depend on truthiness where presence matters, and repeated-array defaults do not falsely count as supplied --ticket. New validation must precede bashFlagProblem, labels/pin, repo and runner lookup; apps/cli/src/utils/context.ts:32-49 confirms withContext resolves context and configures the generated client without issuing HTTP; the new semantic checks must precede resolveRepo/resolveRunner and any dispatch/list request. Keep existing output/JSON/placement/error behavior, including courtesy conflict lookup failure fallback. apps/cli/src/utils/parse-positive-int.ts:9-15 accepts trimmed digit strings representing positive safe integers, not just 32-bit values; do not add the API's 2147483647 cap to CLI parsing. apps/cli/src/generated/types.gen.ts:1211-1219 already has four commands, optional feature and prNumber; never edit/regenerate it for this work. apps/cli/src/commands/fleet.ts:5 registers the command. apps/cli/src/commands/fleet-dispatch.spec.ts:1-54 supplies generated-service mocks, repo fr1, runner r1, exitOverride and exit spies; :119-120 warns Commander retains option values across parseAsync calls. Use a fresh program per validation case. Add separate PR dispatch and PR validation specs, preserving existing RUN/PLAN/bash/JSON assertions and error exit codes.\n\nWeb library impact: apps/web/lib/fleet-dispatch.ts:23-60 builds a zod object with unconditional feature/ref/planFrom/ticketRefs checks, :65-78 holds defaults, :81-100 maps bodies, :103-135 parses query prefill and selects the notice. Make field schemas lenient and move existing checks with identical messages/paths into RUN/PLAN superRefine; otherwise stale keepValuesOnUnmount data will block PR submits before superRefine can branch. PR text normalization must consistently trim, match ^[1-9][0-9]*$, check <=2147483647 and use Number(trimmed); reject leading zeros, plus signs, exponents, zero and empty text. Carry this same rule into query prefill and dispatchFeatureOf. Shared repo/cost/profiles/placement checks stay effective for all kinds, and PR bodies never carry hidden fields or acknowledgeOpenPr. apps/web/lib/fleet-types.ts:330 currently narrows DispatchBody to RUN/PLAN with mandatory feature: widen it and add optional prNumber without changing API semantics. Grep found other library consumers of exported constants/helpers in apps/web/lib/fleet-schedules.ts:6, thread-create.ts:4, thread-handoff-form.ts:9 and components/fleet/{FleetTokenListInput,TicketPicker}.vue; preserve shared constants and token helpers. apps/web/tests/lib/fleet-dispatch.spec.ts:4-10 has valid()/messages(), :12-50 covers schema, :53-110 body/bash, :113-137 prefill, and :156 onward ticket regressions. Reuse its pattern in distinct PR schema/body and prefill specs. Query profiles must filter invalid/reserved names, deduplicate and cap at MAX_PROFILES, handling scalar and array query values without mutating inputs.\n\nWeb helpers and job action: apps/web/lib/fleet-jobs.ts:216 reviewPrNumber already parses canonical positive safe integers but accepts values above the DTO's 32-bit maximum. Do not globally tighten that existing reader; new showFixAction/fixDispatchQuery must explicitly enforce <=2147483647. showFixAction additionally requires REVIEW, COMPLETED and canDispatch. fixDispatchQuery copies nonempty profiles into a fresh array and carries no cost or placement. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:71-76 obtains viewer.canDispatch from fleet.job.dispatch, :91-98 has the PLAN Dispatch run handoff to mirror. Add the Fix NuxtLink adjacent to that action, not a new permission or direct dispatch. Permission-gated helper/action stories use three-session-tdd under the security override, even though backend authorization remains unchanged. apps/web/tests/pages/fleet-job-detail.spec.ts:308-379 has module-private mountEnginePage, request doubles, apiModule alias, inert imported components, permissions stub and a settle loop. Copy it and required helpers into the new Fix-action page spec, pass projectPermissionsStub(['fleet.job.dispatch']) or [] rather than inheriting the old empty default, and inspect uiStubs' NuxtLink to prop.\n\nWeb dispatch page: apps/web/pages/[project]/fleet/dispatch.vue:28-45 applies existing prefill; :57-61 retains unmounted values; :78-81 lists two commands; :98-122 submits and handles conflicts; :166 onward renders ref/feature/spec/ticket FormFields and :241 onward has existing RUN-only bash controls. Add REVIEW/FIX options and conditional text PR input, wrap existing RUN/PLAN FormFields in template v-if without changing their opening tags, preserve PLAN-only spec and RUN-only bash behavior, apply profiles/prNumber prefill and the review-first notice, and use dispatchFeatureOf in the 409 lookup. Open-ticket-PR confirmation remains RUN-only. apps/web/composables/useFleetJobs.ts:72-73 already posts DispatchBody, and :81-83 looks up active jobs by repo+feature: no new composable route is needed. apiInternalUrl/proxy/cookie patterns are unchanged. The existing form permission gate is retained, not redesigned.\n\nMounted-page harness constraints: apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts:13-27 defines the real useField-backed FormField double, :28-34 the token stub, and :48-79 mounts with route/repo/permissions/API doubles. New PR page tests need a visible TicketPicker stub carrying its testId, a TokenInput stub with modelValue and testId props, fleetComponents: ['FleetNativeSelect'], no uiStubs spread that would duplicate-register and shadow that real select, and a route including the per-test query. For submit/conflict tests alias '~/composables/useApi' to import * as apiModule from '../../composables/useApi' so thrown ApiError satisfies instanceof, and register a NuxtLink exposing to. The Creates list requires a separate fleet-dispatch-pr-submit.spec.ts for US-010; reuse/copy the upstream US-009 mount pattern and helpers there rather than importing a module-private helper or executing another spec module. US-009 creates fleet-dispatch-pr-page.spec.ts; US-010 reads that upstream output as context. apps/web/tests/pages/fleet-dispatch-page.spec.ts:15-18 pins the old conflict lookup source and :73 pins the old notice expression; update those exact anchors in the appropriate stories, retaining all other source and runtime assertions.\n\ni18n: US-009 updates both apps/web/i18n/locales/en.json and zh.json with the six dispatch keys, US-011 adds fleet.jobs.actions.dispatchFix to both. Existing apps/web/tests/i18n/used-keys-exist.spec.ts and fleet-locale-parity.spec.ts constrain literal key existence and parity. Keep user-facing web copy localized and do not mix API locale keys into web. No layout/navigation/token/board redesign is intended.\n\nDelivery and migration: obey the exact binding dependency graph: US-001 -> US-002 -> US-003; US-004 -> US-005; US-006 -> US-007, US-006+US-007 -> US-009 -> US-010; US-008 -> US-011. Independent app branches can proceed without API deployment ordering because the API contract already exists. Shared source files within a chain must be extended incrementally; do not revert upstream edits. There is no data migration or feature flag rollout. Main compatibility risks are loss of RUN/PLAN exact payloads or parser errors, commander required-option/exit behavior, mixed-command 409 lookup identity, stale hidden-field zod errors, workspace description caps, copied profile array identity, API error class identity in SFC tests, fixture collisions and approval bypass. Tests should be written first using each app's existing boundary mocks and real mount harness; actual DB checks belong only to US-003 integration, not general DI/unit suites. Generated acceptance files, if supplied by nax, remain untouched and run via the app-specific acceptance commands. Suggested hardening assertions are separated from the binding ACs.\n\nRefinement audit: re-read the on-disk spec and the actual parser, CLI command/context bootstrap, zod library, existing preview tests, query tests and job-page handoff. Enumerated all 76 spec AC bullets (US-001: 7; US-002: 5; US-003: 10; US-004: 7; US-005: 6; US-006: 9; US-007: 9; US-008: 6; US-009: 8; US-010: 4; US-011: 5): every assertion remains in its original story; conjunctive outputs are split only where independently assertable. The CLI exitOverride parenthetical, preview exact line order/nothing-else qualifier, and existing RUN validation anchors survive. All 14 feature-level exclusions remain verbatim, with nearby scopes echoing the relevant boundaries. All context lists include every spec-recommended file within the five-file limit, and all binding workdirs/dependencies remain unchanged. Added the specifically requested negative catalog assertion and backward-compatibility anchors for descriptor wording, RUN/PLAN parsing, preview/DTO, prefill notices, legacy bash validation, RUN conflict behavior and PLAN Dispatch run. PR page negative tests assert no dispatch request; the issue-message assertion stays at the schema boundary where issues are observable, rather than requiring a stub FormMessage to expose an error it does not render. US-003 is medium complexity because its production changes and complete HTTP harness already exist; its strict security TDD remains warranted by the approval/access seam. No source implementation, route, permission, policy or generated artifact was changed by this audit.",
+  "outOfScope": [
+    "Any API route, DTO, permission key, approval policy or audit change: the dispatch route already accepts `REVIEW` and `FIX`.",
+    "A CLI flag or web field for the cost cap of a `Fix` action prefilled from a review: the person or agent sets `maxCostUsd` on every dispatch.",
+    "Carrying the review job's placement (labels, pinned runner) into the prefilled `Fix` dispatch: only repo, pull request and profiles are prefilled.",
+    "A `Review` action on a `FIX` job page, or a `Fix` action on a `REVIEW` job that is not `COMPLETED`: a follow-up review already runs after a pushed fix (K3-B1).",
+    "Hiding the web `Fix` action or the PR commands for a non-GitHub repo: the API refuses the dispatch with 422 and the form shows the API message.",
+    "Choosing the pull request from a list of open pull requests on the web form or the CLI: the number is typed.",
+    "Checking on the client that the pull request is open, belongs to the repo or is not from a fork: the runner's nax refuses those and the job fails with nax's reason.",
+    "CLI: rejecting `--review`/`--fix` values above 2147483647 on the client: `parsePositiveInt` accepts them and the API answers 400, which the CLI reports as an API error (exit 1).",
+    "CLI: exit code 3 for a malformed `--review`/`--fix` value: commander's option parser exits 1, as it already does for `--max-cost`.",
+    "CLI `koda fleet job show` and `job list` display of `fixOutcome`: the job page already shows it (K3-A); the CLI prints the API's fields as they are.",
+    "Regenerating the CLI client: the generated types already carry `REVIEW`, `FIX` and `prNumber`.",
+    "Updating the CLI examples in `docs/deployment/runner.md`.",
+    "The assistant tool's `RUN`/`PLAN` behaviour, preview lines and refusal reasons: unchanged.",
+    "Clearing the hidden RUN/PLAN form fields when the command changes: they keep their values and are simply not checked or sent for `REVIEW`/`FIX`."
+  ],
+  "routingProfile": "native-codex-ds"
+}
