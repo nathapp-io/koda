@@ -71,7 +71,7 @@ describe('dispatch page', () => {
     expect(dispatch).toMatch(/<FormField name="ticketRefs">[\s\S]*?<FleetTicketPicker[\s\S]*?:model-value="values\.ticketRefs \?\? \[\]"[\s\S]*?test-id="dispatch-tickets"[\s\S]*?@update:model-value="setFieldValue\('ticketRefs', \$event\)"/)
     expect(dispatch).toContain("setFieldValue('ticketRefs', prefill.ticketRefs)")
     expect(dispatch).toContain('prefilled.value = applied ? prefillNotice(prefill) : null')
-    expect(dispatch).toContain("prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
+    expect(dispatch).toContain("prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
   })
 
   test('#231: a non-active-job 409 on a RUN with tickets asks to confirm the open PR, then resends acknowledged', () => {

@@ -39,6 +39,8 @@ onMounted(async () => {
   if (prefill.command !== undefined) { setFieldValue('command', prefill.command); applied = true }
   if (prefill.repoId !== undefined && options.repos.value.some((r) => r.id === prefill.repoId)) { setFieldValue('repoId', prefill.repoId); applied = true }
   if (prefill.feature !== undefined) { setFieldValue('feature', prefill.feature); applied = true }
+  if (prefill.prNumber !== undefined) { setFieldValue('prNumber', prefill.prNumber); applied = true }
+  if (prefill.profiles !== undefined) { setFieldValue('profiles', prefill.profiles); applied = true }
   if (prefill.ref !== undefined) { setFieldValue('ref', prefill.ref); applied = true }
   if (prefill.ticketRefs !== undefined) { setFieldValue('ticketRefs', prefill.ticketRefs); applied = true }
   prefilled.value = applied ? prefillNotice(prefill) : null
@@ -76,6 +78,8 @@ const repoOptions = computed(() => options.repos.value.map(r => ({ value: r.id, 
 const commandOptions = computed(() => [
   { value: 'RUN', label: t('fleet.dispatch.commandRun') },
   { value: 'PLAN', label: t('fleet.dispatch.commandPlan') },
+  { value: 'REVIEW', label: t('fleet.dispatch.commandReview') },
+  { value: 'FIX', label: t('fleet.dispatch.commandFix') },
 ])
 const bashOptions = computed(() => BASH_MODES.map(mode => ({ value: mode, label: t(`fleet.bash.mode.${mode}`) })))
 function runnerOptionLabel(runner: FleetRunnerSummary): string {
@@ -134,7 +138,7 @@ async function confirmPrConflict(): Promise<void> {
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
 
     <form v-else class="space-y-5" data-testid="dispatch-form" @submit="onSubmit">
-      <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled') }}</p>
+      <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ prefilled === 'review' ? t('fleet.dispatch.prefilledReview') : prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled') }}</p>
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.dispatch.repo') }}</FormLabel>
@@ -156,52 +160,70 @@ async function confirmPrConflict(): Promise<void> {
             <FormMessage />
           </FormItem>
         </FormField>
-        <FormField v-slot="{ componentField }" name="ref">
+        <template v-if="values.command === 'RUN' || values.command === 'PLAN'">
+          <FormField v-slot="{ componentField }" name="ref">
+            <FormItem>
+              <FormLabel>{{ t('fleet.dispatch.ref') }}</FormLabel>
+              <FormControl>
+                <Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="dispatch-ref" />
+              </FormControl>
+              <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.refHint') }}</p>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+        </template>
+        <FormField v-if="values.command === 'REVIEW' || values.command === 'FIX'" v-slot="{ componentField }" name="prNumber">
           <FormItem>
-            <FormLabel>{{ t('fleet.dispatch.ref') }}</FormLabel>
+            <FormLabel>{{ t('fleet.dispatch.prNumber') }}</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="dispatch-ref" />
+              <Input v-bind="componentField" inputmode="numeric" data-testid="dispatch-pr-number" />
             </FormControl>
-            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.refHint') }}</p>
+            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.prNumberHint') }}</p>
             <FormMessage />
           </FormItem>
         </FormField>
       </div>
 
-      <FormField v-slot="{ componentField }" name="feature">
-        <FormItem>
-          <FormLabel>{{ t('fleet.dispatch.feature') }}</FormLabel>
-          <FormControl>
-            <Input v-bind="componentField" data-testid="dispatch-feature" />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
-      </FormField>
+      <template v-if="values.command === 'RUN' || values.command === 'PLAN'">
+        <FormField v-slot="{ componentField }" name="feature">
+          <FormItem>
+            <FormLabel>{{ t('fleet.dispatch.feature') }}</FormLabel>
+            <FormControl>
+              <Input v-bind="componentField" data-testid="dispatch-feature" />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+      </template>
 
-      <FormField v-if="values.command === 'PLAN'" v-slot="{ componentField }" name="planFrom">
-        <FormItem>
-          <FormLabel>{{ t('fleet.dispatch.planFrom') }}</FormLabel>
-          <FormControl>
-            <Input v-bind="componentField" data-testid="dispatch-plan-from" />
-          </FormControl>
-          <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.planFromHint') }}</p>
-          <FormMessage />
-        </FormItem>
-      </FormField>
+      <template v-if="values.command === 'PLAN'">
+        <FormField v-if="values.command === 'PLAN'" v-slot="{ componentField }" name="planFrom">
+          <FormItem>
+            <FormLabel>{{ t('fleet.dispatch.planFrom') }}</FormLabel>
+            <FormControl>
+              <Input v-bind="componentField" data-testid="dispatch-plan-from" />
+            </FormControl>
+            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.planFromHint') }}</p>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+      </template>
 
-      <FormField name="ticketRefs">
-        <FormItem>
-          <FormLabel>{{ t('fleet.dispatch.tickets') }}</FormLabel>
-          <FleetTicketPicker
-            :slug="slug"
-            :model-value="values.ticketRefs ?? []"
-            test-id="dispatch-tickets"
-            @update:model-value="setFieldValue('ticketRefs', $event)"
-          />
-          <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.ticketsHint') }}</p>
-          <FormMessage />
-        </FormItem>
-      </FormField>
+      <template v-if="values.command === 'RUN' || values.command === 'PLAN'">
+        <FormField name="ticketRefs">
+          <FormItem>
+            <FormLabel>{{ t('fleet.dispatch.tickets') }}</FormLabel>
+            <FleetTicketPicker
+              :slug="slug"
+              :model-value="values.ticketRefs ?? []"
+              test-id="dispatch-tickets"
+              @update:model-value="setFieldValue('ticketRefs', $event)"
+            />
+            <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.ticketsHint') }}</p>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+      </template>
 
       <FormField name="profiles">
         <FormItem>
