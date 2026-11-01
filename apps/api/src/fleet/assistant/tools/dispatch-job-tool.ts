@@ -13,8 +13,8 @@ import { fleetWriteRefusal } from './fleet-write-refusal';
 import { asRecord, jobPath } from './tool-input';
 
 /**
- * Fleet S5b 2b2 US-003: `koda_dispatch_job` proposes one RUN or PLAN job on one of the thread's project repositories
- * and, once the user approves the proposal, dispatches it as the requester. A preview never dispatches anything; the
+ * Fleet S5b 2b2 US-003: `koda_dispatch_job` proposes one RUN, PLAN, REVIEW or FIX job on one of the thread's project
+ * repositories and, once the user approves the proposal, dispatches it as the requester. A preview never dispatches anything; the
  * repository the preview resolved is resolved again by `execute`, and the job is never bound to the calling thread
  * (2b2-R1), so the thread keeps running its own turn while the job is placed.
  */
@@ -22,10 +22,11 @@ import { asRecord, jobPath } from './tool-input';
 /** 2b2-D3: `owner/name`, the same rule the knowledge tools spell (`koda_kb_search`). */
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 /** 2b2-D3: the commands this tool dispatches. CONFIG_EDIT, CONFIG_DRIFT and THREAD are not among them. */
-const COMMANDS: readonly string[] = ['RUN', 'PLAN'];
+const COMMANDS: readonly string[] = ['RUN', 'PLAN', 'REVIEW', 'FIX'];
 /** 2b2-D3: the three bash modes a dispatch may carry (`BashMode`), and the field bounds the DTO spells. */
 const BASH_MODES: readonly string[] = ['raw', 'gated', 'escalate'];
 const MAX_FEATURE_CHARS = 128;
+const MAX_PR_NUMBER = 2_147_483_647;
 const MAX_REF_CHARS = 255;
 const MAX_PLAN_FROM_CHARS = 512;
 const MAX_PROFILES = 8;
@@ -37,8 +38,9 @@ const MAX_COST_USD = 10_000;
 /** One proposed dispatch, as the parser accepted it. Every field is kept as written. */
 export interface DispatchJobInput {
   repo: string;
-  command: 'RUN' | 'PLAN';
-  feature: string;
+  command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX';
+  feature?: string;
+  prNumber?: number;
   maxCostUsd: number;
   ref?: string;
   planFrom?: string;
@@ -48,8 +50,8 @@ export interface DispatchJobInput {
 }
 
 /**
- * `koda_dispatch_job` (2b2-D1): one RUN or PLAN job on one repository of the thread's project. `parse` bounds the
- * input, `preview` refuses a request that cannot run and words what the user approves, and `execute` — what an
+ * `koda_dispatch_job` (2b2-D1): one RUN, PLAN, REVIEW or FIX job on one repository of the thread's project. `parse`
+ * bounds the input, `preview` refuses a request that cannot run and words what the user approves, and `execute` — what an
  * approve runs — dispatches it through `FleetJobsService` as the requester.
  */
 export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeIndexService): AssistantTool<DispatchJobInput> {
@@ -64,7 +66,10 @@ export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: Knowledg
       if (typeof repo !== 'string' || !REPO_PATTERN.test(repo)) throw new ToolInputError('repo');
       const command = raw['command'];
       if (typeof command !== 'string' || !COMMANDS.includes(command)) throw new ToolInputError('command');
-      const feature = requiredString(raw['feature'], 'feature', 1, MAX_FEATURE_CHARS);
+      const feature = optionalString(raw['feature'], 'feature', 1, MAX_FEATURE_CHARS);
+      if ((command === 'RUN' || command === 'PLAN') && feature === undefined) throw new ToolInputError('feature');
+      const prNumber = optionalPrNumber(raw['prNumber']);
+      if ((command === 'REVIEW' || command === 'FIX') && prNumber === undefined) throw new ToolInputError('prNumber');
       const maxCostUsd = requiredCost(raw['maxCostUsd']);
       const ref = optionalString(raw['ref'], 'ref', 1, MAX_REF_CHARS);
       const planFrom = optionalString(raw['planFrom'], 'planFrom', 1, MAX_PLAN_FROM_CHARS);
@@ -74,7 +79,8 @@ export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: Knowledg
       return {
         repo,
         command: command as DispatchJobInput['command'],
-        feature,
+        ...(feature === undefined ? {} : { feature }),
+        ...(prNumber === undefined ? {} : { prNumber }),
         maxCostUsd,
         ...(ref === undefined ? {} : { ref }),
         ...(planFrom === undefined ? {} : { planFrom }),
@@ -167,6 +173,15 @@ function toDto(input: DispatchJobInput, repoId: string): DispatchFleetJobDto {
 /** A required string between its bounds; anything else is the named refusal (2b2-D3). */
 function requiredString(value: unknown, reason: string, minChars: number, maxChars: number): string {
   if (typeof value !== 'string' || value.length < minChars || value.length > maxChars) throw new ToolInputError(reason);
+  return value;
+}
+
+/** An absent field, or a bounded PR number; anything else is the named refusal. */
+function optionalPrNumber(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_PR_NUMBER) {
+    throw new ToolInputError('prNumber');
+  }
   return value;
 }
 
