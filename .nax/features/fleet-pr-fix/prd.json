@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T07:36:08.923Z",
+  "updatedAt": "2026-11-01T07:48:26.401Z",
   "userStories": [
     {
       "id": "US-001",
@@ -653,14 +653,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two executor methods compose upstream budget/argv helpers with the existing detached start and file marker; fresh-token handling requires strict security TDD despite the standard implementation pattern."
+        "reasoning": "Two executor methods compose upstream budget/argv helpers with the existing detached start and file marker; fresh-token handling requires strict security TDD despite the standard implementation pattern.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/host-executor.ts",
@@ -691,7 +694,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8e06d5b282a9f45715278f08e89a1fe76d23888d"
     },
     {
       "id": "US-010",
