@@ -226,7 +226,7 @@ Changed. The baseline locates the code; implement the target.
   `fix.stdout`, `pushedSha` from `readPushedSha` of that `logPath`, `stderrLine` the first non-empty `fix.stderr`
   line trimmed to 200 characters);
   `HostExecutor` implements all three and `JobRun` reads the fix files only through them.
-- New runner `apps/runner/src/verdict/fix-budget.ts`: `fixBudgetRemainder(maxCostUsd: string, spentUsd: number):
+- New runner `apps/runner/src/verdict/fix-budget.ts`: `fixBudgetRemainder(maxCostUsd: string, spentUsd: string | undefined):
   number | null` per call 3.
 - New runner `apps/runner/src/verdict/fix-result.ts`: `readFixResult(stdoutPath, prNumber): Promise<FixResult>`,
   `FixResult = { kind: 'pushed' | 'nothing' | 'none'; logPath: string | null }`, and
