@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix-surfaces",
   "branchName": "feat/fleet-pr-fix-surfaces",
   "createdAt": "2026-10-29T00:00:00.000Z",
-  "updatedAt": "2026-11-01T12:26:51.483Z",
+  "updatedAt": "2026-11-01T12:30:42.078Z",
   "userStories": [
     {
       "id": "US-001",
@@ -396,14 +396,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends existing pure query/notice helpers and adds a deterministic feature formatter in one module."
+        "reasoning": "Extends existing pure query/notice helpers and adds a deterministic feature formatter in one module.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/fleet-dispatch.ts",
@@ -423,7 +426,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7e937c9fd98f0a651704f38c5d19c32de239e675"
     },
     {
       "id": "US-008",
