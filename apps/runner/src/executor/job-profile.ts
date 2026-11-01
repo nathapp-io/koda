@@ -28,10 +28,11 @@ export interface RelayOverlay {
 }
 
 /** Spec §4.1 / plan D275. Profiles deep-merge after the repo config, so these keys win; callbackPort 0 overrides a pinned one. */
-export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay): Record<string, unknown> {
-  if (!relay) return { outputDir, name: projectName };
+export function jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number): Record<string, unknown> {
+  const bot = botCostLimitUsd === undefined ? {} : { bot: { costLimit: botCostLimitUsd } };
+  if (!relay) return { outputDir, name: projectName, ...bot };
   return {
-    outputDir, name: projectName,
+    outputDir, name: projectName, ...bot,
     execution: { bashApproval: relay.bashMode, approvalTimeout: relay.approvalTimeoutSec * 1000 },
     interaction: {
       plugin: 'webhook',
@@ -42,11 +43,11 @@ export function jobProfileContent(outputDir: string, projectName: string, relay?
 }
 
 /** A raw overlay is appended last to the chain; it must exist until nax exits (SP-1). Mode 0600: it may hold the relay secret. */
-export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay): Promise<string> {
+export async function writeJobProfile(naxHome: string, jobId: string, outputDir: string, projectName: string, relay?: RelayOverlay, botCostLimitUsd?: number): Promise<string> {
   const path = jobProfilePath(naxHome, jobId);
   await mkdir(join(naxHome, 'profiles'), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay), null, 2)}\n`, { mode: 0o600 });
+  await writeFile(tmp, `${JSON.stringify(jobProfileContent(outputDir, projectName, relay, botCostLimitUsd), null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, path);
   return path;
 }

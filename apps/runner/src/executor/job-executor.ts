@@ -2,6 +2,7 @@ import type { ConfigEditPayload, ConfigJobResult } from '@nathapp/fleet-protocol
 import type { BundleFile } from '../bundle/build-bundle';
 import type { JobLogSources } from '../logs/types';
 import type { JobRow } from '../journal/types';
+import type { FixOutcome } from '../verdict/fix-result';
 import type { PlanCheck } from '../verdict/plan-verdict';
 import type { StatusView } from '../verdict/status-view';
 import type { WorkflowResult } from '../verdict/workflow-result';
@@ -65,6 +66,8 @@ export type ConfigJobRun =
 export interface JobExecutor {
   prepare(job: JobRow, options?: PrepareOptions): Promise<PrepareOutcome>;
   spawn(job: JobRow): Promise<SpawnHandle>;
+  /** US-009: starts FIX's second nax process with its own output files and current brokered token. */
+  spawnFixStep(job: JobRow): Promise<SpawnHandle>;
   isAlive(pid: number): boolean;
   matchesProcess(job: JobRow): Promise<boolean>;
   /** True when the signal reached the group (mirrors `signalGroup`'s contract). */
@@ -75,6 +78,10 @@ export interface JobExecutor {
   logSources(job: JobRow): JobLogSources;
   readStatus(job: JobRow): Promise<StatusView | null>;
   readReviewPosted(job: JobRow): Promise<boolean>;
+  /** US-009: true when the FIX's second-step stdout marker exists. */
+  hasFixStep(job: JobRow): Promise<boolean>;
+  /** US-011: reads the second nax process outcome and its PR-specific state files. */
+  readFixOutcome(job: JobRow): Promise<FixOutcome>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   /** #203: absolute spend from this PLAN attempt's cost ledgers, in snapshot decimal format. */
   readPlanCost(job: JobRow): Promise<string | undefined>;

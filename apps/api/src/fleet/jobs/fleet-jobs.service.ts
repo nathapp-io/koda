@@ -37,8 +37,8 @@ import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.servi
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
 class ReviewProviderException extends ValidationAppException {
-  constructor() {
-    super({ reason: 'review is GitHub-only' }, 'fleet.dispatchInput');
+  constructor(command: 'REVIEW' | 'FIX') {
+    super({ reason: `${command === FleetJobKind.FIX ? 'fix' : 'review'} is GitHub-only` }, 'fleet.dispatchInput');
   }
 
   override get httpStatus(): number {
@@ -79,8 +79,8 @@ export class FleetJobsService {
   async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    if (dto.command === FleetJobKind.REVIEW && repo.provider !== 'github') {
-      throw new ReviewProviderException();
+    if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX) && repo.provider !== 'github') {
+      throw new ReviewProviderException(dto.command);
     }
     const input = normalizeDispatch(dto, repo.defaultBranch);
     const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
@@ -106,7 +106,7 @@ export class FleetJobsService {
     await this.budgets.assertNotPaused(jobGateKeys({ projectId, repoId: repo.id, pinnedRunnerId: input.pinnedRunnerId }), new Date());
 
     // Snapshot once, before the insert transaction. Selection failures must abort dispatch.
-    const reviewDecisions = input.command === FleetJobKind.REVIEW
+    const reviewDecisions = input.command === FleetJobKind.REVIEW || input.command === FleetJobKind.FIX
       ? await this.reviewDecisions.selectForReview(projectId, repo.id)
       : undefined;
 
@@ -301,7 +301,8 @@ export class FleetJobsService {
             costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null,
-            configResult: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            // D475, US-004: every attempt reports its own result — the config edit's, and the FIX outcome's.
+            configResult: null, fixOutcome: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
         await this.audit.record({ key: 'fleet.job.requeue', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `requeued from ${current.state}` });

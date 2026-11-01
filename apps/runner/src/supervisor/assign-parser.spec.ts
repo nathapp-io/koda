@@ -75,6 +75,20 @@ describe('REVIEW assignment (US-005)', () => {
   });
 });
 
+describe('FIX assignment (US-006)', () => {
+  const fix = (over: Record<string, unknown> = {}) => ({ ...assignFor('RUN'), command: 'FIX', bashMode: 'raw', review: { prNumber: 3, botLogin: 'koda-fleet[bot]' }, ...over });
+  test('AC-6 accepts FIX with review and raw bash mode', () => {
+    expect(parseAssign(cmd(fix()))).toMatchObject({ ok: true, assign: { command: 'FIX', review: { prNumber: 3, botLogin: 'koda-fleet[bot]' }, bashMode: 'raw' } });
+  });
+  test('AC-7 rejects FIX without review', () => {
+    const { review: _review, ...payload } = fix();
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('AC-8 rejects FIX with gated bash mode', () => {
+    expect(parseAssign(cmd(fix({ bashMode: 'gated' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+  });
+});
+
 describe('REVIEW decisions (US-004)', () => {
   const decision = (over: Record<string, unknown> = {}) => ({ id: 'm1', statement: 's', source: 'koda:memory/m1', ...over });
   const withDecisions = (decisions: unknown) => ({ ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]', decisions } });

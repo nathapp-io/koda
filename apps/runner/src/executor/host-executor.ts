@@ -1,5 +1,5 @@
-import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { chmod, copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { isConfigKind } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
@@ -14,11 +14,13 @@ import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
 import { readPlanCost } from '../verdict/plan-cost';
+import { fixBudgetRemainder } from '../verdict/fix-budget';
 import type { StatusView } from '../verdict/status-view';
 import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-result';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { reviewPosted } from '../verdict/review-posted';
+import { readFixResult, readPushedSha, type FixOutcome } from '../verdict/fix-result';
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
@@ -26,7 +28,7 @@ import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
-import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
+import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { stashWorkflowOutputs } from './workflow-stash';
@@ -55,8 +57,8 @@ export interface HostExecutorDeps {
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
-// US-006: `forge-token` is a REVIEW job's token file; a retry must not start with the previous attempt's.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
+// US-008: `forge-token` is a REVIEW/FIX token file; a retry must not start with the previous attempt's.
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -120,7 +122,8 @@ export class HostExecutor implements JobExecutor {
       await mkdir(outDir, { recursive: true });
       const relay = assign.bashMode === 'raw' ? undefined
         : { bashMode: assign.bashMode, approvalTimeoutSec: assign.approvalTimeoutSec, endpoint: await this.deps.approvals.open(job) };
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay);
+      const botCostLimitUsd = assign.command === 'REVIEW' || assign.command === 'FIX' ? Number(assign.maxCostUsd) : undefined;
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
@@ -159,7 +162,8 @@ export class HostExecutor implements JobExecutor {
 
   async spawn(job: JobRow): Promise<SpawnHandle> {
     const { repoDir, jobDir } = this.dirs(job);
-    const decisions = job.command === 'REVIEW' ? job.assign.review?.decisions : undefined;
+    const reviewJob = job.command === 'REVIEW' || job.command === 'FIX';
+    const decisions = reviewJob ? job.assign.review?.decisions : undefined;
     const decisionsPath = decisions !== undefined && decisions.length > 0 ? await writeReviewDecisions(jobDir, decisions) : undefined;
     const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, decisionsPath === undefined ? {} : { decisionsPath });
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
@@ -169,7 +173,7 @@ export class HostExecutor implements JobExecutor {
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     const env: Record<string, string | undefined> = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path };
     // US-006: a REVIEW overlays the stripped environment AFTER stripping, so a copy the daemon inherited cannot leak in.
-    const review = job.command === 'REVIEW';
+    const review = reviewJob;
     if (review) Object.assign(env, await this.reviewEnv(job, jobDir));
     const options: SpawnNaxOptions = {
       cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'), env,
@@ -178,6 +182,38 @@ export class HostExecutor implements JobExecutor {
       return this.startNax(argv, options);
     } catch (error) {
       if (review) await this.dropReviewToken(job, jobDir);   // no nax started, so nothing else deletes the token file
+      throw error;
+    }
+  }
+
+  async spawnFixStep(job: JobRow): Promise<SpawnHandle> {
+    const { repoDir, jobDir, outDir } = this.dirs(job);
+    const assign = job.assign;
+    const spentUsd = await this.readPlanCost(job);
+    const remainder = fixBudgetRemainder(assign.maxCostUsd, spentUsd);
+    if (remainder === null) throw new Error('budget spent');
+
+    const acquired = await this.deps.credentials.acquire(job, { wait: false });
+    if (!acquired.ok) throw new Error(acquired.reason);
+    const binDir = acquired.credentials.binDir;
+    const token = this.deps.credentials.currentToken?.(job) ?? null;
+    if (token === null) throw new Error('git token: none');
+    const login = assign.review?.botLogin;
+    if (login === undefined) throw new Error('invalid review');
+
+    const argv = buildFixArgv(this.deps.config.naxCommand, assign);
+    await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), undefined, remainder);
+    const tokenPath = await writeReviewToken(jobDir, token);
+    const inherited = process.env['PATH'] ?? '';
+    const env: Record<string, string | undefined> = {
+      ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome,
+      PATH: binDir ? `${binDir}${delimiter}${inherited}` : inherited,
+      NAX_FORGE_TOKEN_FILE: tokenPath, NAX_FORGE_LOGIN: login,
+    };
+    try {
+      return this.startNax(argv, { cwd: repoDir, stdoutPath: join(jobDir, 'fix.stdout'), stderrPath: join(jobDir, 'fix.stderr'), env });
+    } catch (error) {
+      await this.dropReviewToken(job, jobDir);
       throw error;
     }
   }
@@ -256,6 +292,50 @@ export class HostExecutor implements JobExecutor {
 
   async readReviewPosted(job: JobRow): Promise<boolean> {
     return reviewPosted(join(this.dirs(job).jobDir, 'nax.stdout'));
+  }
+
+  async readFixOutcome(job: JobRow): Promise<FixOutcome> {
+    const { jobDir, outDir } = this.dirs(job);
+    const prNumber = job.assign.review?.prNumber;
+    const result = prNumber === undefined
+      ? { kind: 'none' as const, logPath: null }
+      : await readFixResult(join(jobDir, 'fix.stdout'), prNumber);
+
+    let pushedSha: string | null = null;
+    if (result.logPath !== null && prNumber !== undefined) {
+      const expectedRoot = resolve(outDir, 'bot', `pr-${prNumber}`);
+      try {
+        const realOutDir = await realpath(outDir);
+        const realRoot = await realpath(expectedRoot);
+        const expectedRealRoot = resolve(realOutDir, 'bot', `pr-${prNumber}`);
+        const realLogDir = await realpath(dirname(resolve(result.logPath)));
+        const statePath = join(realLogDir, 'bot-state.json');
+        const realStatePath = await realpath(statePath);
+        const rootRel = relative(expectedRealRoot, realRoot);
+        const logRel = relative(realRoot, realLogDir);
+        const stateRel = relative(realRoot, realStatePath);
+        const inside = (rel: string): boolean => rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`));
+        if (rootRel === '' && inside(logRel) && inside(stateRel)) {
+          pushedSha = await readPushedSha(join(realLogDir, 'bot.jsonl'));
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'ELOOP') throw error;
+      }
+    }
+
+    let stderrLine: string | null = null;
+    try {
+      const stderr = await readFile(join(jobDir, 'fix.stderr'), 'utf8');
+      stderrLine = stderr.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '')?.slice(0, 200) ?? null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return { ...result, pushedSha, stderrLine };
+  }
+
+  async hasFixStep(job: JobRow): Promise<boolean> {
+    return exists(join(this.dirs(job).jobDir, 'fix.stdout'));
   }
 
   /** D61: once the write-once stash exists it is the PRD; the checkout may have been switched back to the ref's stale one. */

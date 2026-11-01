@@ -37,6 +37,30 @@ describe('placement rules (spec §4)', () => {
     expect(MISFIT_REASONS).toContain('bot_review');
   });
 
+  it('US-003 AC-3: FIX without either capability reports bot_review first', () => {
+    expect(misfit(job({ command: 'FIX' }), runner())).toBe('bot_review');
+  });
+
+  it('US-003 AC-4: FIX with botReview but no botFix reports bot_fix', () => {
+    expect(misfit(job({ command: 'FIX' }), runner({ capabilities: caps({ botReview: true }) }))).toBe('bot_fix');
+  });
+
+  it('US-003 AC-5: FIX fits a runner with both capabilities and matching profiles', () => {
+    expect(misfit(job({ command: 'FIX' }), runner({ capabilities: caps({ botReview: true, botFix: true }) }))).toBeNull();
+  });
+
+  it('US-003 AC-6: REVIEW remains compatible with botReview alone', () => {
+    expect(misfit(job({ command: 'REVIEW' }), runner({ capabilities: caps({ botReview: true }) }))).toBeNull();
+  });
+
+  it('US-003 AC-7: bot_fix is recoverable and does not cancel the queued job', () => {
+    expect(PERMANENT_MISFITS.has('bot_fix')).toBe(false);
+  });
+
+  it('US-003 AC-8: dashboard misfit reasons include bot_fix', () => {
+    expect(MISFIT_REASONS).toContain('bot_fix');
+  });
+
   it('fits a matching runner', () => {
     expect(misfit(job(), runner())).toBeNull();
   });

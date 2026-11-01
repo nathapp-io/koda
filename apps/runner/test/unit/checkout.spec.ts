@@ -152,6 +152,16 @@ describe('prepareCheckout REVIEW (US-005)', () => {
   });
 });
 
+describe('prepareCheckout FIX (US-006)', () => {
+  test('AC-9 checks out the default ref detached without reading prd.json', async () => {
+    const { repoDir } = await setup({ 'README.md': 'fix target' });
+    const sha = await sh(repoDir, 'rev-parse', 'origin/main');
+    const result = await prepareCheckout({ git: g, repoDir, assign: assign({ command: 'FIX', feature: 'review-pr-3', review: { prNumber: 3, botLogin: 'koda-fleet[bot]' } }) });
+    expect(result).toEqual({ ok: true, branch: null, refSha: sha });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+  });
+});
+
 describe('prepareCheckout PLAN', () => {
   const plan = (over: Partial<AssignPayload> = {}) => assign({ command: 'PLAN', planFrom: 'docs/spec.md', ...over });
   test('checks out the ref detached', async () => {

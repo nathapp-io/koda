@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
+import { PathError } from '../paths/safe-segment';
 import { waitFor } from '../../test/helpers/wait';
-import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
+import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -20,6 +21,16 @@ describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
   test('PLAN: plan --from <spec> with the same chain rule; naxCommand may have several words', () => {
     expect(buildNaxArgv(['bun', '/x/fake.ts'], assign({ command: 'PLAN', planFrom: 'docs/spec.md', profiles: [] }))).toEqual(
       ['bun', '/x/fake.ts', 'plan', '--from', 'docs/spec.md', '-f', 'feat', '--profile', 'koda-job-cj1'],
+    );
+  });
+  test('AC-10 FIX review uses full review and decisions', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'FIX', jobId: 'j1', profiles: ['native-codex'], review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } }), { decisionsPath: '/decisions.json' })).toEqual(
+      ['nax', 'bot', 'review', '4', '--full', '--profile', 'native-codex,koda-job-j1', '--decisions', '/decisions.json'],
+    );
+  });
+  test('AC-13 REVIEW preserves its exact argv without --full', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'REVIEW', jobId: 'j1', profiles: ['native-codex'], review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } }), { decisionsPath: '/decisions.json' })).toEqual(
+      ['nax', 'bot', 'review', '4', '--profile', 'native-codex,koda-job-j1', '--decisions', '/decisions.json'],
     );
   });
   test('AC-9 REVIEW: bot review receives PR number and validated profile chain', () => {
@@ -47,6 +58,23 @@ describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {
     ['a job id with a slash', { jobId: 'a/b' }],
   ])('rejects %s', (_label, over) => {
     expect(() => buildNaxArgv(['nax'], assign(over as Partial<AssignPayload>))).toThrow();
+  });
+});
+
+describe('buildFixArgv', () => {
+  test('AC-11: builds the fix command with a validated profile chain', () => {
+    expect(buildFixArgv(['nax'], assign({ command: 'FIX', jobId: 'j1', profiles: ['native-codex'], review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } }))).toEqual(
+      ['nax', 'bot', 'fix', '4', '--no-rereview', '--profile', 'native-codex,koda-job-j1'],
+    );
+  });
+  test('AC-12: rejects an invalid review login with PathError invalid review', () => {
+    try {
+      buildFixArgv(['nax'], assign({ command: 'FIX', review: { prNumber: 4, botLogin: 'koda-fleet' } }));
+      throw new Error('expected invalid review to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PathError);
+      expect((error as Error).message).toBe('invalid review');
+    }
   });
 });
 

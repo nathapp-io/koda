@@ -28,6 +28,11 @@ describe('normalizeDispatch (spec §5.1)', () => {
       .toEqual(expect.objectContaining({ command: 'REVIEW', feature: 'review-pr-42', ref: 'main', planFrom: null, bashMode: 'raw' }));
   });
 
+  it('normalizes FIX inputs from the PR number and default branch', () => {
+    expect(normalizeDispatch(dto({ command: 'FIX', feature: undefined, prNumber: 7 } as Partial<DispatchFleetJobDto>), 'main'))
+      .toEqual(expect.objectContaining({ command: 'FIX', feature: 'review-pr-7', ref: 'main', planFrom: null, bashMode: 'raw' }));
+  });
+
   it.each([
     ['missing PR number', { command: 'REVIEW', feature: undefined }, 'prNumber required for REVIEW'],
     ['null PR number', { command: 'REVIEW', feature: undefined, prNumber: null }, 'prNumber required for REVIEW'],
@@ -37,8 +42,16 @@ describe('normalizeDispatch (spec §5.1)', () => {
     ['bash mode', { command: 'REVIEW', feature: undefined, prNumber: 42, bashMode: 'escalate' }, 'bashMode must be raw for REVIEW'],
     ['ticket refs', { command: 'REVIEW', feature: undefined, prNumber: 42, ticketRefs: ['KD-1'] }, 'ticketRefs is not for REVIEW'],
     ['missing RUN feature', { command: 'RUN', feature: undefined }, 'feature'],
-    ['reserved feature', { command: 'RUN', feature: 'review-pr-5' }, 'feature is reserved for REVIEW'],
-    ['PR number on RUN', { command: 'RUN', prNumber: 3 }, 'prNumber is only for REVIEW'],
+    ['reserved feature', { command: 'RUN', feature: 'review-pr-5' }, 'feature is reserved for REVIEW and FIX'],
+    ['PR number on RUN', { command: 'RUN', prNumber: 3 }, 'prNumber is only for REVIEW and FIX'],
+    ['missing FIX PR number', { command: 'FIX', feature: undefined }, 'prNumber required for FIX'],
+    ['FIX feature', { command: 'FIX', feature: 'custom', prNumber: 7 }, 'feature is derived for FIX'],
+    ['FIX ref', { command: 'FIX', feature: undefined, prNumber: 7, ref: 'other' }, 'ref is the default branch for FIX'],
+    ['FIX bash mode', { command: 'FIX', feature: undefined, prNumber: 7, bashMode: 'gated' }, 'bashMode must be raw for FIX'],
+    ['FIX ticket refs', { command: 'FIX', feature: undefined, prNumber: 7, ticketRefs: ['KD-1'] }, 'ticketRefs is not for FIX'],
+    ['FIX planFrom', { command: 'FIX', feature: undefined, prNumber: 7, planFrom: 'docs/a.md' }, 'planFrom is only for PLAN'],
+    ['FIX with RUN feature', { command: 'RUN', feature: 'review-pr-3' }, 'feature is reserved for REVIEW and FIX'],
+    ['PR number on PLAN', { command: 'PLAN', prNumber: 3 }, 'prNumber is only for REVIEW and FIX'],
   ])('rejects %s', (_label, input, reason) => {
     expect(() => normalizeDispatch(dto(input as Partial<DispatchFleetJobDto>), 'main'))
       .toThrow(expect.objectContaining({ args: { reason } }));

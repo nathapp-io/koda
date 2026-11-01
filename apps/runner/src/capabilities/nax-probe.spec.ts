@@ -73,6 +73,32 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
     expect(nax.calls.find((call) => call.args[0] === '--version' && call.env?.['NAX_FORGE_TOKEN'] === 'probe')).toBeDefined();
   });
 
+  test('US-006 AC-1: reports botFix only when full review and no-rereview fix are supported', async () => {
+    const home = await naxHome([]);
+    const nax = new FakeNaxCli({ botReview: { code: 0, stdout: '--decisions --full', stderr: '', timedOut: false }, botFix: { code: 0, stdout: '--no-rereview', stderr: '', timedOut: false }, k0Version: { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false } });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect(capabilities).toMatchObject({ botReview: true, botFix: true });
+  });
+
+  test('US-006 AC-2/3: omits botFix unless fix help succeeds and lists no-rereview', async () => {
+    const home = await naxHome([]);
+    for (const botFix of [{ code: 0, stdout: 'usage fix', stderr: '', timedOut: false }, { code: 1, stdout: '--no-rereview', stderr: '', timedOut: false }]) {
+      const nax = new FakeNaxCli({ botReview: { code: 0, stdout: '--decisions --full', stderr: '', timedOut: false }, botFix, k0Version: { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false } });
+      expect('botFix' in (await probeWith(home, nax).run()).capabilities).toBe(false);
+    }
+  });
+
+  test('US-006 AC-4/5: requires --full and does not probe fix when review support fails', async () => {
+    const home = await naxHome([]);
+    const common = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };
+    const lacksFull = new FakeNaxCli({ botReview: { code: 0, stdout: '--decisions', stderr: '', timedOut: false }, k0Version: common });
+    expect((await probeWith(home, lacksFull).run()).capabilities).toMatchObject({ botReview: true });
+    expect('botFix' in (await probeWith(home, lacksFull).run()).capabilities).toBe(false);
+    const failed = new FakeNaxCli({ botReview: { code: 1, stdout: '--decisions --full', stderr: '', timedOut: false }, k0Version: common });
+    await probeWith(home, failed).run();
+    expect(failed.calls.some((c) => c.args.join(' ') === 'bot fix --help')).toBe(false);
+  });
+
   test('US-005 AC-3: advertises botReview only with decisions help and the ambient-token safety check', async () => {
     const home = await naxHome([]);
     const unsupported = { code: 1, stdout: '', stderr: 'NAX_FORGE_TOKEN is not supported', timedOut: false };

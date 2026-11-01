@@ -15,7 +15,7 @@ import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assi
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
-  ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
+  ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
   FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
 } from './domain/fleet-job.domain';
 
@@ -33,6 +33,8 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   postRun: r.postRun as unknown as FleetJobPostRun | null,
   workflow: r.workflow as unknown as FleetJobWorkflow | null,
   configResult: r.configResult as unknown as ConfigJobResult | null,
+  // US-004: a `String?` column, mapped to the two outcomes the runner may report.
+  fixOutcome: fixOutcomeOf(r.fixOutcome),
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });

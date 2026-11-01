@@ -18,7 +18,7 @@ const liveHandlers = (source: string): string => {
 }
 
 describe('fleet jobs list', () => {
-  test('renders REVIEW as PR review and PR #42 while RUN keeps its feature text', async () => {
+  test('renders RUN, REVIEW, and FIX rows with the appropriate feature title and command label', async () => {
     const fixture = (id: string, command: FleetJobDto['command'], feature: string): FleetJobDto => ({
       id, projectId: 'p1', repoId: 'r1', ref: 'main', command, feature, planFrom: null, profiles: [], maxCostUsd: '1',
       bashMode: 'raw', approvalTimeoutSec: 600, pendingApprovals: 0, selectorLabels: [], pinnedRunnerId: null,
@@ -29,7 +29,7 @@ describe('fleet jobs list', () => {
       wipPush: null, stories: null, storiesTruncated: false, postRun: null, scheduleId: null, coalescedCount: 0,
       configEdit: null, workflow: null,
     })
-    const jobs = ref([fixture('review', 'REVIEW', 'review-pr-42'), fixture('run', 'RUN', 'login')])
+    const jobs = ref([fixture('review', 'REVIEW', 'review-pr-42'), fixture('fix', 'FIX', 'review-pr-42'), fixture('run', 'RUN', 'login')])
     const noop = async (): Promise<void> => undefined
     const mounted = mountSfc(path.join(__dirname, '../../pages/[project]/fleet/index.vue'), {
       globals: {
@@ -49,6 +49,13 @@ describe('fleet jobs list', () => {
       expect(rows).toHaveLength(1)
       expect(mounted.textOf(rows[0])).toContain('PR #42')
       expect(mounted.textOf(rows[0])).toContain('PR review')
+      const fixRow = mounted.one('[data-testid="fleet-job-row-fix"]')
+      expect(fixRow).toBeDefined()
+      if (fixRow) {
+        expect(mounted.textOf(fixRow)).toContain('PR #42')
+        expect(mounted.textOf(fixRow)).toContain('PR fix')
+        expect(mounted.textOf(fixRow)).not.toContain('review-pr-42')
+      }
       const runRow = mounted.one('[data-testid="fleet-job-row-run"]')
       expect(runRow).toBeDefined()
       if (runRow) expect(mounted.textOf(runRow)).toContain('login')
@@ -57,6 +64,23 @@ describe('fleet jobs list', () => {
       mounted.unmount()
     }
   })
+  test('renders the bot_fix placement reason in English', () => {
+    const mounted = mountSfc(webFile('components', 'fleet', 'FleetPlacementResult.vue'), {
+      props: {
+        slug: 'demo', runnerName: () => null,
+        result: { job: { id: 'j1' }, placement: { assigned: false, runnerId: null, misfits: [{ runnerId: 'r1', name: 'runner', reason: 'bot_fix' }] } },
+      },
+      globals: { useI18n: () => enI18n() },
+      components: uiStubs,
+    })
+    try {
+      expect(mounted.text()).toContain('nax on this runner cannot run PR fixes')
+    }
+    finally {
+      mounted.unmount()
+    }
+  })
+
   test('renders the bot_review placement reason in English', () => {
     const mounted = mountSfc(webFile('components', 'fleet', 'FleetPlacementResult.vue'), {
       props: {
@@ -148,10 +172,9 @@ describe('fleet jobs list', () => {
     expect(liveHandlers(list)).toContain('onApprovalRequest: () => liveReload.trigger()')
   })
 
-  test('S3 §6: the command column shows translated kinds and config jobs show a readable feature', () => {
-    expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
+  test('S3 §6: config jobs show a readable feature without changing RUN/REVIEW/FIX rendering', () => {
     expect(list).toContain("if (isConfigJob(job)) return t('fleet.jobs.configFeature')")
-    expect(list).toContain("if (job.command !== 'REVIEW') return job.feature")
+    expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
   })
 
   test('S3 §6: the fleet page shows the Repos card from the loaded dispatch options', () => {

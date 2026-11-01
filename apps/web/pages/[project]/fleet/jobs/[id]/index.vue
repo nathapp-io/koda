@@ -82,7 +82,7 @@ const jobTitle = computed(() => {
   const current = job.value
   if (!current) return ''
   if (configJob.value) return t('fleet.jobs.configFeature')
-  if (current.command !== 'REVIEW') return current.feature
+  if (current.command !== 'REVIEW' && current.command !== 'FIX') return current.feature
   const prNumber = reviewPrNumber(current.feature)
   return prNumber === null ? current.feature : `PR #${prNumber}`
 })
@@ -292,6 +292,8 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <div class="flex flex-wrap items-center gap-3">
         <FleetJobStateBadge :state="job.state" />
+        <span v-if="job.command === 'FIX' && job.fixOutcome === 'pushed'" data-testid="fleet-job-fix-outcome">{{ t('fleet.fixOutcome.pushed') }}</span>
+        <span v-else-if="job.command === 'FIX' && job.fixOutcome === 'nothing'" data-testid="fleet-job-fix-outcome">{{ t('fleet.fixOutcome.nothing') }}</span>
         <span v-if="job.stateReason" class="text-sm text-muted-foreground" :title="job.stateReason" data-testid="fleet-job-state-reason">
           <template v-if="budgetPolicyId">
             {{ t('fleet.jobs.detail.budgetStop') }}

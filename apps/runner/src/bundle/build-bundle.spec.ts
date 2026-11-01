@@ -51,6 +51,19 @@ describe('listBundleEntries (D27)', () => {
     expect(entries).not.toContain('plan-logs/ignore.txt');
     expect(await listBundleEntries(await jobDirWith(), 'RUN')).not.toContain('plan-logs/plan-1.jsonl');
   });
+  test('US-008: includes fix stdout and stderr when present and preserves list when absent', async () => {
+    const jobDir = await jobDirWith();
+    expect(await collectBundleEntries(jobDir, 'REVIEW')).toMatchObject({ entries: expect.arrayContaining(['nax.stderr', 'nax.stdout']), skipped: [] });
+    const onlyLogs = await tmp.make('review-logs');
+    await writeFile(join(onlyLogs, 'nax.stdout'), 'out');
+    await writeFile(join(onlyLogs, 'nax.stderr'), 'err');
+    expect(await collectBundleEntries(onlyLogs, 'REVIEW')).toEqual({ entries: ['nax.stderr', 'nax.stdout'], skipped: [] });
+    await writeFile(join(jobDir, 'fix.stdout'), 'fix out');
+    await writeFile(join(jobDir, 'fix.stderr'), 'fix err');
+    const entries = (await collectBundleEntries(jobDir, 'REVIEW')).entries;
+    expect(entries).toContain('fix.stdout');
+    expect(entries).toContain('fix.stderr');
+  });
   test('missing pieces are simply absent', async () => {
     expect(await listBundleEntries(await tmp.make('empty'), 'RUN')).toEqual([]);
   });
@@ -115,6 +128,17 @@ describe('buildBundle', () => {
     const manifest = JSON.parse(await readFile(join(jobDir, 'bundle-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({ version: 1, command: 'PLAN' });
     expect(manifest.entries).toContain('nax.stdout');
+  });
+  test('US-008 AC-8/9: archive and manifest contain fix output files', async () => {
+    const jobDir = await tmp.make('fix-output-bundle');
+    await writeFile(join(jobDir, 'fix.stdout'), 'fix standard output');
+    await writeFile(join(jobDir, 'fix.stderr'), 'fix standard error');
+    const bundle = await buildBundle({ jobDir, command: 'FIX' });
+    const names = await tarList(bundle.path);
+    expect(names).toContain('fix.stdout');
+    expect(names).toContain('fix.stderr');
+    const manifest = JSON.parse(await readFile(join(jobDir, 'bundle-manifest.json'), 'utf8'));
+    expect(manifest.entries).toEqual(['fix.stderr', 'fix.stdout']);
   });
   test('ENH-1: a symlink to a directory is stored as a link, not followed (D27)', async () => {
     const jobDir = await jobDirWith();

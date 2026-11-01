@@ -27,19 +27,20 @@ function checkPlanFrom(path: string): string {
 export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: string): Omit<NewFleetJob, 'projectId' | 'requestedById'> {
   let feature: string;
   let ref: string;
-  if (dto.command === 'REVIEW') {
-    if (dto.prNumber === undefined || dto.prNumber === null) fail('prNumber required for REVIEW');
-    if (dto.feature !== undefined) fail('feature is derived for REVIEW');
+  if (dto.command === 'REVIEW' || dto.command === 'FIX') {
+    const command = dto.command;
+    if (dto.prNumber === undefined || dto.prNumber === null) fail(`prNumber required for ${command}`);
+    if (dto.feature !== undefined) fail(`feature is derived for ${command}`);
     if (dto.planFrom !== undefined) fail('planFrom is only for PLAN');
-    if (dto.ref !== undefined) fail('ref is the default branch for REVIEW');
-    if (dto.bashMode !== undefined && dto.bashMode !== 'raw') fail('bashMode must be raw for REVIEW');
-    if ((dto.ticketRefs?.length ?? 0) > 0) fail('ticketRefs is not for REVIEW');
+    if (dto.ref !== undefined) fail(`ref is the default branch for ${command}`);
+    if (dto.bashMode !== undefined && dto.bashMode !== 'raw') fail(`bashMode must be raw for ${command}`);
+    if ((dto.ticketRefs?.length ?? 0) > 0) fail(`ticketRefs is not for ${command}`);
     feature = reviewFeature(dto.prNumber);
     ref = defaultBranch;
   } else {
     if (!dto.feature) fail('feature');
-    if (dto.feature.startsWith(REVIEW_FEATURE_PREFIX)) fail('feature is reserved for REVIEW');
-    if (dto.prNumber !== undefined) fail('prNumber is only for REVIEW');
+    if (dto.feature.startsWith(REVIEW_FEATURE_PREFIX)) fail('feature is reserved for REVIEW and FIX');
+    if (dto.prNumber !== undefined) fail('prNumber is only for REVIEW and FIX');
     feature = dto.feature;
     if (!FEATURE_RE.test(feature) || feature.includes('..')) fail('feature');
     if (dto.command === 'PLAN' && !dto.planFrom) fail('planFrom required for PLAN');

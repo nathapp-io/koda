@@ -70,6 +70,18 @@ describe('buildAssignPayload', () => {
   });
 });
 
+describe('FIX assign review payload (US-003)', () => {
+  const decision = { id: 'm1', statement: 'auth: tokens live in Redis', source: 'koda:memory/m1' };
+  it('AC-9: includes PR, bot identity and stored decisions for FIX', () => {
+    const payload = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-9', reviewDecisions: [decision] }, repo, 'https://x/y.git', identity);
+    expect(payload.review).toEqual({ prNumber: 9, botLogin: 'koda-fleet[bot]', decisions: [decision] });
+  });
+  it('AC-10: rejects malformed FIX features', () => {
+    expect(() => buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-x' }, repo, 'https://x/y.git', identity))
+      .toThrow('invalid review feature');
+  });
+});
+
 describe('review decision snapshot wire', () => {
   const decisions = [{ id: 'm1', statement: 'auth: tokens live in Redis', source: 'koda:memory/m1' }];
   it('AC-11 sends the stored decisions', () => {

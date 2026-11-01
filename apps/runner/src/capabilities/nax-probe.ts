@@ -152,6 +152,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       const [scan, base, sandbox, protocols, tools, botReview] = await Promise.all([
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
       ]);
+      const botFix = botReview && await this.botFix(empty.dir);
       const nativeConfig = await readNativeModelConfig(this.deps.naxHome);
       const providers = [...new Set([...scan.providers, ...nativeConfig.providers])].sort();
       const credentials = await this.credentials(empty.dir, providers);
@@ -176,6 +177,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         kodaTools: true,
         projectCode: true,
         ...(botReview ? { botReview: true as const } : {}),
+        ...(botFix ? { botFix: true as const } : {}),
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
       });
@@ -260,6 +262,14 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     if (help.code !== 0 || help.timedOut || help.spawnError !== undefined || !help.stdout.includes('--decisions')) return false;
     const version = await this.deps.nax.run(['--version'], { cwd, env: { NAX_FORGE_TOKEN: 'probe' } });
     return version.code === 1 && !version.timedOut && version.stderr.includes('NAX_FORGE_TOKEN is not supported');
+  }
+
+  /** Advertise FIX only when the same nax supports full decision-aware review and no-rereview fixing. */
+  private async botFix(cwd: string): Promise<boolean> {
+    const review = await this.deps.nax.run(['bot', 'review', '--help'], { cwd });
+    if (review.code !== 0 || review.timedOut || review.spawnError !== undefined || !review.stdout.includes('--full')) return false;
+    const fix = await this.deps.nax.run(['bot', 'fix', '--help'], { cwd });
+    return fix.code === 0 && !fix.timedOut && fix.spawnError === undefined && fix.stdout.includes('--no-rereview');
   }
 
   private async protocols(): Promise<NaxProtocol[]> {

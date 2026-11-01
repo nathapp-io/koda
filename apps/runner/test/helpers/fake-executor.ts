@@ -3,6 +3,7 @@ import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPla
 import type { ProgressPushOutcome } from '../../src/executor/progress-push';
 import type { JobRow } from '../../src/journal/types';
 import type { JobLogSources } from '../../src/logs/types';
+import type { FixOutcome } from '../../src/verdict/fix-result';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
 import type { WorkflowResult } from '../../src/verdict/workflow-result';
@@ -19,6 +20,8 @@ export class FakeExecutor implements JobExecutor {
   progressPush: ProgressPushOutcome = { kind: 'pushed', branch: 'feat/x', sha: 'e'.repeat(40) };
   prepareResult: PrepareOutcome = { ok: true, branch: 'feat/x' };
   spawnError: Error | null = null;
+  spawnFixStepError: Error | null = null;
+  fixHandle: SpawnHandle = { pid: 4343, pgid: 4343 };
   handle: SpawnHandle = { pid: 4242, pgid: 4242 };
   alive = false;
   aliveAfterSpawn = true;
@@ -69,11 +72,19 @@ export class FakeExecutor implements JobExecutor {
     return this.handle;
   }
 
+  async spawnFixStep(job: JobRow): Promise<SpawnHandle> {
+    this.note('spawnFixStep', job);
+    if (this.spawnFixStepError) throw this.spawnFixStepError;
+    this.fixStepStarted = true;
+    this.alive = this.aliveAfterSpawn;
+    return this.fixHandle;
+  }
+
   isAlive(): boolean {
     return this.alive;
   }
 
-  async matchesProcess(): Promise<boolean> {
+  async matchesProcess(_job: JobRow): Promise<boolean> {
     return this.alive && this.procMatches;
   }
 
@@ -103,6 +114,20 @@ export class FakeExecutor implements JobExecutor {
     this.note('readReviewPosted', job);
     if (this.reviewPostedError) throw this.reviewPostedError;
     return this.reviewPosted;
+  }
+
+  fixStepStarted = false;
+
+  async hasFixStep(job: JobRow): Promise<boolean> {
+    this.note('hasFixStep', job);
+    return this.fixStepStarted;
+  }
+
+  fixOutcome: FixOutcome = { kind: 'none', logPath: null, pushedSha: null, stderrLine: null };
+
+  async readFixOutcome(job: JobRow): Promise<FixOutcome> {
+    this.note('readFixOutcome', job);
+    return this.fixOutcome;
   }
 
   async readStatus(job: JobRow): Promise<StatusView | null> {

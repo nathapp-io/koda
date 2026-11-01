@@ -3,7 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
-import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem } from '../domain/fleet-job.domain';
+import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -53,7 +53,7 @@ export class FleetJobDto {
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare ref: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD', 'REVIEW'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD' | 'REVIEW';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD', 'REVIEW', 'FIX'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD' | 'REVIEW' | 'FIX';
   @ApiProperty() declare feature: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
@@ -90,6 +90,8 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultSha: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultPrUrl: string | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'pushed | none | failed:<reason> (S1b §1.1)' }) declare wipPush: string | null;
+  @ApiPropertyOptional({ enum: ['pushed', 'nothing'], type: String, nullable: true, description: "A FIX job's outcome, mirrored from its snapshots (US-004)" })
+  declare fixOutcome: FixOutcome | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
@@ -118,6 +120,7 @@ export class FleetJobDto {
       currentPhase: r.currentPhase, costSpentUsd: r.costSpentUsd, lastHeartbeatAt: iso(r.lastHeartbeatAt),
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
+      fixOutcome: r.fixOutcome ?? null,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });
@@ -132,7 +135,7 @@ export class FleetJobDto {
 export class PlacementMisfitDto {
   @ApiProperty() declare runnerId: string;
   @ApiProperty() declare name: string;
-  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads', 'bot_review'] })
+  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads', 'bot_review', 'bot_fix'] })
   declare reason: MisfitReason;
 }
 

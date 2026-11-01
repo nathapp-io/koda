@@ -153,10 +153,10 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review'
+  | 'config_jobs' | 'bot_review' | 'bot_fix'
 
 /** Fleet job kinds, including config jobs and PR reviews. */
-export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
+export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
 
 /** S3 §1: what a config job was asked to do. */
 export type ConfigEditModeDto = 'edit' | 'regenerate' | 'drift'
@@ -286,6 +286,8 @@ export interface FleetJobDto {
   resultBranch: string | null
   resultSha: string | null
   resultPrUrl: string | null
+  /** US-013: outcome reported by the FIX runner step; absent on older DTO fixtures. */
+  fixOutcome?: 'pushed' | 'nothing' | null
   wipPush: string | null
   stories: FleetJobStoryDto[] | null
   storiesTruncated: boolean

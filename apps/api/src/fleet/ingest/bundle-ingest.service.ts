@@ -100,8 +100,10 @@ export class BundleIngestService {
     const result = await this.txManager.run(async () => {
       const job = await this.jobs.lockById(claim.jobId);
       if (!job) return null;
-      const reviewPrNumber = job.command === 'REVIEW' && job.state === 'COMPLETED' && job.leaseEpoch === claim.leaseEpoch
-        ? prNumberOfReviewFeature(job.feature) : null;
+      const reviewEligible = job.leaseEpoch === claim.leaseEpoch
+        && ((job.command === 'REVIEW' && job.state === 'COMPLETED')
+          || (job.command === 'FIX' && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.state)));
+      const reviewPrNumber = reviewEligible ? prNumberOfReviewFeature(job.feature) : null;
       const parsed = parseBundle(files, job.leaseEpoch === claim.leaseEpoch ? job.naxRunId : null,
         reviewPrNumber === null ? {} : { reviewPrNumber });
       const pending = parsed.botReview

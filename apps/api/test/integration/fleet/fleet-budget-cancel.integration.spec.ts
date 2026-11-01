@@ -66,6 +66,13 @@ describeIntegration('cancelForBudget (PG)', () => {
     expect(await reload(job.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: 'budget:pol-1', cancelReason: 'budget:pol-1' }));
   });
 
+  it('US-002 AC-5: budget cancellation includes a queued FIX job', async () => {
+    const job = await insertJob({ command: 'FIX', feature: `review-pr-budget-${++n}` });
+    const result = await cancel([job.id]);
+    expect(result.cancelled).toContain(job.id);
+    expect(await reload(job.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: 'budget:pol-1' }));
+  });
+
   it('cancels a never-acked ASSIGNED job on the server, bumping the epoch and withdrawing the ASSIGN', async () => {
     const job = await held('ASSIGNED');
     const assign = await assignCommand(job.id, false);

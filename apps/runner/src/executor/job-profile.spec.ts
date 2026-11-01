@@ -44,6 +44,16 @@ describe('relay overlay (spec §4.1, plan D275)', () => {
     expect(jobProfileContent('/out', 'acme-app-1234abcd')).toEqual({ outputDir: '/out', name: 'acme-app-1234abcd' });
   });
 
+  test('AC-1: includes the bot cost limit', () => {
+    expect(jobProfileContent('/out', 'p', undefined, 2.5)).toEqual({ outputDir: '/out', name: 'p', bot: { costLimit: 2.5 } });
+  });
+
+  test('a cost limit preserves relay overlay keys', () => {
+    expect(jobProfileContent('/out', 'p', relay, 2.5)).toMatchObject({
+      bot: { costLimit: 2.5 }, execution: { bashApproval: 'escalate', approvalTimeout: 90_000 }, interaction: { plugin: 'webhook' },
+    });
+  });
+
   test('a relayed job sets bash approval, the webhook plugin and silences every trigger', () => {
     expect(jobProfileContent('/out', 'p', relay)).toEqual({
       outputDir: '/out', name: 'p',

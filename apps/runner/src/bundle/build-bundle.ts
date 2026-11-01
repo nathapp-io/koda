@@ -40,7 +40,7 @@ const isListSafe = (name: string): boolean => !/[\n\r\\]/.test(name);
 /** D27: nax-out minus prompt-audit, stdout and stderr, and for PLAN the plan logs. Sorted; unsafe names reported (D68). */
 export async function collectBundleEntries(jobDir: string, command: FleetJobKindName): Promise<{ entries: string[]; skipped: string[] }> {
   const all = await walk(join(jobDir, 'nax-out'), 'nax-out');
-  for (const name of ['nax.stdout', 'nax.stderr']) if (await exists(join(jobDir, name))) all.push(name);
+  for (const name of ['nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr']) if (await exists(join(jobDir, name))) all.push(name);
   if (command === 'PLAN') {
     const logs = (await readdir(join(jobDir, 'plan-logs')).catch(() => [] as string[])).filter((n) => n.endsWith('.jsonl'));
     all.push(...logs.map((n) => `plan-logs/${n}`));

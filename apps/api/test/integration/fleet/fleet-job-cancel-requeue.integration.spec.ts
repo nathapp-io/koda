@@ -99,6 +99,16 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     expect(after.costSpentUsd.toString()).toBe('0');
   });
 
+  it('US-004 AC-8: requeueing a FAILED FIX job clears its stored fixOutcome', async () => {
+    const job = await insertJob('rq-fix', { command: 'FIX', state: 'FAILED', fixOutcome: 'nothing', finishedAt: new Date() });
+    expect((await reload(job.id)).fixOutcome).toBe('nothing');
+    await post('dev', job.id, 'requeue').expect(200);
+    // A fresh attempt starts queued (no runner in this fixture can take a FIX job), with the attempt's end and its outcome cleared.
+    expect(await reload(job.id)).toEqual(expect.objectContaining({
+      command: 'FIX', state: 'QUEUED', finishedAt: null, fixOutcome: null, leaseEpoch: job.leaseEpoch + 1,
+    }));
+  });
+
   it('carries the attempt spend into costCarriedUsd on requeue and keeps firstStartedAt (S1b §2.1)', async () => {
     const runner = await insertRunner(prisma);
     const first = new Date('2026-10-01T08:00:00.000Z');

@@ -174,10 +174,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
   const kind = p['command'];
-  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && kind !== 'REVIEW' && !isConfigKind(kind))) return bad('command');
+  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && kind !== 'REVIEW' && kind !== 'FIX' && !isConfigKind(kind))) return bad('command');
   const isConfig = isConfigKind(kind);
   const isThread = kind === 'THREAD';
-  const isReview = kind === 'REVIEW';
+  const isReview = kind === 'REVIEW' || kind === 'FIX';
   const repo = p['repo'];
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');

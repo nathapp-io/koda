@@ -246,4 +246,32 @@ describeIntegration('runner sync (PG)', () => {
     await sync({ jobs: [{ ...e, events: [ev(3, 'snapshot', { postRun: { acceptance: 'passed', workflowStep: 'publish' } })] }] });
     expect((await job(j.id)).postRun).toEqual({ acceptance: 'passed', workflowStep: 'publish' });
   });
+
+  it('US-004 AC-7: stores a FIX job snapshot fixOutcome next to its 40-hex resultSha, and GET serves it', async () => {
+    await prisma.fleetJob.updateMany({ where: { runnerId: runner.runnerId, state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } }, data: { state: 'FAILED' } });
+    const fixJob = await prisma.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'FIX', feature: 'review-pr-7',
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev,
+      runnerId: runner.runnerId, state: 'RUNNING', leaseEpoch: 4, startedAt: new Date(),
+    } });
+    const sha40 = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const e = { jobId: fixJob.id, leaseEpoch: fixJob.leaseEpoch };
+
+    const res = await sync({ jobs: [{ ...e, events: [ev(1, 'snapshot', { fixOutcome: 'pushed', resultSha: sha40 })] }] });
+    expect(res.jobAcks).toEqual([{ jobId: fixJob.id, ackedSeq: 1 }]);
+    expect(await job(fixJob.id)).toEqual(expect.objectContaining({ state: 'RUNNING', fixOutcome: 'pushed', resultSha: sha40 }));
+
+    const dto = data<Record<string, unknown>>(
+      await request(server).get(`/api/projects/web/fleet/jobs/${fixJob.id}`).set({ Authorization: `Bearer ${world.tokens.dev}` }).expect(200),
+    );
+    expect(dto).toEqual(expect.objectContaining({ id: fixJob.id, command: 'FIX', fixOutcome: 'pushed', resultSha: sha40 }));
+
+    // An unknown value is dropped: the stored outcome is left alone, and the rest of the snapshot still applies.
+    await sync({ jobs: [{ ...e, events: [ev(2, 'snapshot', { fixOutcome: 'done', currentPhase: 'fix' })] }] });
+    expect(await job(fixJob.id)).toEqual(expect.objectContaining({ fixOutcome: 'pushed', currentPhase: 'fix' }));
+
+    // The other outcome the runner may report replaces it.
+    await sync({ jobs: [{ ...e, events: [ev(3, 'snapshot', { fixOutcome: 'nothing' })] }] });
+    expect((await job(fixJob.id)).fixOutcome).toBe('nothing');
+  });
 });

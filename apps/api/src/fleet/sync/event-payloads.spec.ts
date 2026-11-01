@@ -152,3 +152,23 @@ describe('snapshot postRun mirror', () => {
       .toEqual({ kind: 'mirror', patch: { costSpentUsd: '0.5' } });
   });
 });
+
+describe('snapshot fixOutcome mirror (US-004 AC-2..AC-4)', () => {
+  it('AC-2: mirrors a pushed fix outcome', () => {
+    expect(interpretEvent('snapshot', { fixOutcome: 'pushed' })).toEqual({ kind: 'mirror', patch: { fixOutcome: 'pushed' } });
+  });
+
+  it('AC-3: mirrors a nothing fix outcome', () => {
+    expect(interpretEvent('snapshot', { fixOutcome: 'nothing' })).toEqual({ kind: 'mirror', patch: { fixOutcome: 'nothing' } });
+  });
+
+  it('AC-4: drops an unknown fix outcome and keeps the rest of the snapshot', () => {
+    const effect = interpretEvent('snapshot', { fixOutcome: 'done' });
+    expect(effect).toEqual({ kind: 'mirror', patch: {} });
+    if (effect.kind !== 'mirror') throw new Error('expected a mirror effect');
+    expect(Object.keys(effect.patch)).toEqual([]);
+    for (const value of [undefined, null, '', 'PUSHED', 'pushed ', true, 1, ['pushed'], { fixOutcome: 'pushed' }]) {
+      expect(interpretEvent('snapshot', { fixOutcome: value, currentPhase: 'fix' })).toEqual({ kind: 'mirror', patch: { currentPhase: 'fix' } });
+    }
+  });
+});

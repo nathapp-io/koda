@@ -1077,7 +1077,12 @@
       "PLAN": "规划",
       "CONFIG_EDIT": "配置修改",
       "CONFIG_DRIFT": "漂移检查",
-      "REVIEW": "PR 评审"
+      "REVIEW": "PR 评审",
+      "FIX": "PR 修复"
+    },
+    "fixOutcome": {
+      "pushed": "修复已推送",
+      "nothing": "没有需要修复的内容"
     },
     "misfit": {
       "disabled": "执行机已停用",
@@ -1095,7 +1100,8 @@
       "busy_repo": "执行机已在运行此仓库的任务",
       "capacity": "执行机已满载",
       "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）",
-      "bot_review": "此运行器上的 nax 无法执行 PR 评审"
+      "bot_review": "此运行器上的 nax 无法执行 PR 评审",
+      "bot_fix": "此运行器上的 nax 无法执行 PR 修复"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",

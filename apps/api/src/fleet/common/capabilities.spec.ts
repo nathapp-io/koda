@@ -135,6 +135,16 @@ describe('parseCapabilitiesCore', () => {
     });
   });
 
+  describe('botFix (fleet PR fix)', () => {
+    it('AC-1: keeps botFix: true and omits it for legacy reports', () => {
+      expect(parseCapabilitiesCore({ ...valid, botFix: true }).botFix).toBe(true);
+      expect(parseCapabilitiesCore(valid)).not.toHaveProperty('botFix');
+    });
+    it("AC-2: rejects a non-true botFix value with reason 'botFix'", () => {
+      expect(() => parseCapabilitiesCore({ ...valid, botFix: 'yes' })).toThrow(/botFix/);
+    });
+  });
+
   describe('configJobs (fleet S3 §3)', () => {
     it('keeps configJobs: true', () => {
       expect(parseCapabilitiesCore({ ...valid, configJobs: true }).configJobs).toBe(true);
