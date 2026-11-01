@@ -3,7 +3,7 @@
   "feature": "fleet-pr-fix",
   "branchName": "feat/fleet-pr-fix",
   "createdAt": "2026-11-18T00:00:00.000Z",
-  "updatedAt": "2026-11-01T07:08:40.178Z",
+  "updatedAt": "2026-11-01T07:26:16.251Z",
   "userStories": [
     {
       "id": "US-001",
@@ -511,14 +511,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One pure decimal helper and optional profile/argv extensions use existing seams with no new integration; bot-identity argv validation keeps the mandatory security test strategy."
+        "reasoning": "One pure decimal helper and optional profile/argv extensions use existing seams with no new integration; bot-identity argv validation keeps the mandatory security test strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/job-profile.ts",
@@ -552,7 +555,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bb9159bbb12837a417deffd1a3b249ab6fa16d77"
     },
     {
       "id": "US-008",
