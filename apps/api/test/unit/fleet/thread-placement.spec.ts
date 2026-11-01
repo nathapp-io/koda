@@ -23,7 +23,7 @@ const runner = (overrides: Record<string, unknown> = {}): PlacementRunner => ({
   labels: [], capacity: 1, capabilities: capabilities(), ...overrides,
 } as PlacementRunner);
 const job = (overrides: Record<string, unknown> = {}): PlacementJob => ({
-  command: 'RUN', repoId: 'rA', provider: 'github', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', ...overrides,
+  command: 'RUN', repoId: 'rA', projectId: 'p1', provider: 'github', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', ...overrides,
 } as PlacementJob);
 const threadJob = (overrides: Record<string, unknown> = {}) => job({
   command: 'THREAD', thread: { backend: { kind: 'native' }, enabled: true }, ...overrides,
@@ -33,13 +33,13 @@ const misfit = (j: PlacementJob, r: PlacementRunner, l = EMPTY_LOAD) => firstMis
 const threadCaps = (threadBackends: { native: string[]; acp: string[] }) => capabilities({ threadBackends });
 
 describe('US-006 THREAD placement rules', () => {
-  it('US-006 AC1: counts held THREAD jobs only in the thread load', () => {
-    const loads = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' } as { runnerId: string; repoId: string }]);
-    expect(loads.get('r1')).toEqual({ active: 0, repoIds: new Set(), threads: 1 });
+  it('US-006 AC1: counts held THREAD jobs only in the thread load while retaining trust-domain sets', () => {
+    const loads = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]);
+    expect(loads.get('r1')).toEqual({ active: 0, repoIds: new Set(), projectIds: new Set(['p1']), rawProjectIds: new Set(['p1']), threads: 1 });
   });
 
   it('US-006 AC2: a THREAD job does not block a RUN job in the same repository', () => {
-    const loads = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' } as { runnerId: string; repoId: string }]);
+    const loads = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]);
     expect(misfit(job(), runner(), loads.get('r1') ?? EMPTY_LOAD)).toBeNull();
   });
 
