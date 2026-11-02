@@ -3,6 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
 import type { ICanonicalStateRepository } from './domain/canonical-state.domain';
 import { compareEventsDesc } from './event-order';
+import { REVIEW_EVENT_SOURCE } from './review-decisions';
 import type {
   CanonicalDecision,
   CanonicalEvent,
@@ -11,6 +12,7 @@ import type {
 } from './canonical-state.service';
 
 export const DEFAULT_CANONICAL_EVENT_LIMIT = 20;
+export const ACTIVE_DECISIONS_LIMIT = 100;
 
 @Injectable()
 export class PrismaCanonicalStateRepository implements ICanonicalStateRepository {
@@ -138,7 +140,10 @@ export class PrismaCanonicalStateRepository implements ICanonicalStateRepository
         kind: 'DECISION',
         status: 'active',
         deletedAt: null,
+        OR: [{ sourceType: null }, { sourceType: { not: REVIEW_EVENT_SOURCE } }],
       },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: ACTIVE_DECISIONS_LIMIT,
       select: {
         id: true,
         predicate: true,

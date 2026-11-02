@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaCanonicalStateRepository } from './prisma-canonical-state.repository';
+import { ACTIVE_DECISIONS_LIMIT, PrismaCanonicalStateRepository } from './prisma-canonical-state.repository';
 
 const makeTicketRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'ticket-1',
@@ -271,6 +271,10 @@ describe('PrismaCanonicalStateRepository', () => {
   });
 
   describe('findActiveDecisions', () => {
+    it('exports a limit of 100 active decisions', () => {
+      expect(ACTIVE_DECISIONS_LIMIT).toBe(100);
+    });
+
     it('returns mapped CanonicalDecision objects from active DECISION memory items', async () => {
       const rows = [
         makeMemoryItemRow({ id: 'mem-1', predicate: 'architecture', object: 'microservices' }),
@@ -286,7 +290,10 @@ describe('PrismaCanonicalStateRepository', () => {
           kind: 'DECISION',
           status: 'active',
           deletedAt: null,
+          OR: [{ sourceType: null }, { sourceType: { not: 'review_event' } }],
         },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 100,
         select: expect.objectContaining({ id: true, predicate: true, object: true }),
       });
       expect(result).toHaveLength(2);
