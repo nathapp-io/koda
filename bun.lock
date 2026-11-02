@@ -117,7 +117,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@nathapp/fleet-protocol": "workspace:*",
-        "@nathapp/nax-agent": "0.91.6",
+        "@nathapp/nax-agent": "0.91.7",
         "commander": "^12.0.0",
       },
       "devDependencies": {
@@ -434,9 +434,9 @@
 
     "@dxup/unimport": ["@dxup/unimport@0.1.2", "", {}, "sha512-/B8YJGPzaYq1NbsQmwgP8EZqg40NpTw4ZB3suuI0TplbxKHeK94jeaawLmVhCv+YwUnOpiWEz9U6SeThku/8JQ=="],
 
-    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.1.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.129.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "^1.1.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-1T7LAkc/5Bvc0v6w4vAGVdCrli0o/E0pEmYKTnixu95vSFArBjvbhS/G4ZwI0RUePgf0Imcu0VyqlM4EcXxqfw=="],
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.4.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.129.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "1.4.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-hQM/C4+1w8rHYACzDDf+0vQMnEnpzIop1tptIERVgR3ZeT/hHSzBNG8PaWPgxWQjqSeKCyBZSyp8uTT6eKK1pQ=="],
 
-    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.1.0", "", {}, "sha512-8gAK05/2pPozZZz6hCLOi8x2vsqzvsmO9gG92kbvuvTPm0qMHaFlaXX98ndXsrOi5pmzha7vNLguuG4+0Rgxjw=="],
+    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.4.0", "", {}, "sha512-MLIfowwUYIY65jSjMX82paZOrX/NTvLk6D08h+3Jq42a99RzUOewzuCR0zOlPul3D6UBfddat76VT6LvsHEs1w=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.4.3", "", {}, "sha512-ichuWTgtd4mOM1G4SpyGJa5trT03lWbMypDV0fUXUCXg5hiHqVAz/bZyV68NqmkLB7WcYmj1RMJVSp8HV/v/ZQ=="],
 
@@ -812,9 +812,9 @@
 
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
-    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.91.6", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.91.6", "zod": "^4.3.6" } }, "sha512-MBvSiGWLDUTewiqeUoaiZ+PTzuWu6XKP3fzmmpBSTMcK9+MdiVglv9mrzOCGiLL/CJwWCCoW38izla1wDrdWjQ=="],
+    "@nathapp/nax-agent": ["@nathapp/nax-agent@0.91.7", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.91.7", "zod": "^4.3.6" } }, "sha512-TkcIfRJr2IBC7MRBvf4sw1bB1qGrJIC1q7hrwSaCrYQ8OyMT6zXSMwvTvSB73gsFCHx1sgUA9c/d4579IJtNBw=="],
 
-    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.91.6", "", { "dependencies": { "@earendil-works/pi-ai": "1.1.0", "proper-lockfile": "4.1.2" } }, "sha512-1sLdjal04OM6dnfwLads4DEHeTPWw1W3tRD/enD60xEkVvqY3FcmJ2VI/oxMiFGne7TpaaNRmFPenm6hjLbLkg=="],
+    "@nathapp/nax-ai": ["@nathapp/nax-ai@0.91.7", "", { "dependencies": { "@earendil-works/pi-ai": "1.4.0", "proper-lockfile": "4.1.2" } }, "sha512-LwwqQyQ4lBpyMeawV8ONhN4OmtCXY3fAZU1bTW6BqH2nOiytrNwJD0fWqSWZyIpJKToS+viO8Hmr6nnTs0YPsA=="],
 
     "@nathapp/nestjs-app": ["@nathapp/nestjs-app@4.2.3", "", { "dependencies": { "@nathapp/nestjs-auth": "^4.2.3", "@nathapp/nestjs-common": "^4.2.3", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@fastify/helmet": "*", "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^4.0.0-rc.0", "@nathapp/nestjs-microservices": "^4.0.0-rc.0", "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/config": "^3.0.0 || ^4.0.0 || ^12.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/microservices": "*", "@nestjs/passport": "^10.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/platform-express": "*", "@nestjs/platform-fastify": "*", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0 || ^12.0.0", "@nestjs/websockets": "*", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "helmet": "*", "rxjs": "*" }, "optionalPeers": ["@fastify/helmet", "@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "@nestjs/microservices", "@nestjs/platform-express", "@nestjs/platform-fastify", "@nestjs/websockets", "cache-manager", "helmet"] }, "sha512-8IQ3M1cHZN+ZZ8HVuFkxdEeR0cniJsyIIxgtwvVPboCRdc1f2sI+UBKxuOJQPT3ILKCGs1OLm6PiSRMnv5DLzw=="],
 
