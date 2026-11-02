@@ -3,7 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { currentContext, runWithActionContext, type ActionApproval, type ActionContext } from '../action-context/action-context';
-import { findCatalogEntry } from '../permissions/catalog';
+import { findCatalogEntry, type ApprovalMode } from '../permissions/catalog';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import type { ApprovalCommand } from './approval-command.registry';
@@ -62,7 +62,7 @@ export class ApprovalGate {
   async gate<TResult>(
     key: string,
     input: unknown,
-    opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[] },
+    opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[]; minMode?: ApprovalMode },
     now?: Date,
   ): Promise<GateOutcome<TResult>> {
     const command = this.registry.get(key, opts.variant);
@@ -98,9 +98,16 @@ export class ApprovalGate {
     ));
     // Reduce strictly on rank so ties retain the primary (first) resolution and all policy flags
     // come from the same winning resolution as its mode.
-    const resolved = resolutions.reduce((winner, candidate) =>
+    let resolved = resolutions.reduce((winner, candidate) =>
       APPROVAL_MODE_RANK[candidate.mode] > APPROVAL_MODE_RANK[winner.mode] ? candidate : winner,
     );
+    if (
+      opts.minMode !== undefined &&
+      resolved.source !== 'not-approvable' &&
+      APPROVAL_MODE_RANK[opts.minMode] > APPROVAL_MODE_RANK[resolved.mode]
+    ) {
+      resolved = { mode: opts.minMode, floor: resolved.floor, policy: null, source: 'default' };
+    }
     let approval: ActionApproval;
     if (resolved.mode === 'none') {
       approval = { requiredMode: 'none', satisfiedBy: 'none' };

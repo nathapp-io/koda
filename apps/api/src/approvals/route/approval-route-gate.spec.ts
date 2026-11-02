@@ -136,6 +136,22 @@ describe('ApprovalRouteGate', () => {
     });
   });
 
+  it('US-001 AC-9: forwards minMode when provided', async () => {
+    const h = harness(['role.manage']);
+    await asActor(agent, () => h.routeGate.run(call({ minMode: 'agent' })));
+    expect(h.gate.gate).toHaveBeenCalledExactlyOnceWith('role.manage', input, {
+      projectId: null, variant: 'rest:roles.create', minMode: 'agent',
+    });
+  });
+
+  it('US-001 AC-10: omits minMode from legacy gate options when absent', async () => {
+    const h = harness(['role.manage']);
+    await asActor(agent, () => h.routeGate.run(call()));
+    const options = h.gate.gate.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(options).not.toHaveProperty('minMode');
+    expect(options).toEqual({ projectId: null, variant: 'rest:roles.create' });
+  });
+
   it('AC-14: leaves alsoKeys out of the legacy gate options shape', async () => {
     const h = harness(['ticket.update']);
 

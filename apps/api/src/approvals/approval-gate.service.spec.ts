@@ -246,6 +246,84 @@ describe('ApprovalGate', () => {
     expect(requests.create).not.toHaveBeenCalled();
   });
 
+  describe('US-001 — minimum approval mode', () => {
+    const gateMin = (mode: ResolvedApproval['mode'], source: ResolvedApproval['source']) => {
+      resolve.mockResolvedValue({ mode, floor: 'none', policy: null, source });
+      return agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+    };
+
+    it('AC-1: raises a default none mode to agent for an agent actor', async () => {
+      await expect(gateMin('none', 'default')).resolves.toMatchObject({
+        status: 'pending', request: { requiredMode: 'agent' },
+      });
+      expect(requests.create).toHaveBeenCalledWith(expect.objectContaining({ requiredMode: 'agent' }));
+    });
+
+    it('AC-2: drops a weaker policy when the minimum raises its mode', async () => {
+      const policy: ApprovalPolicyRecord = {
+        id: 'p-1', selector: 'x', projectId: 'p1', permissionPattern: 'label.delete', principalType: null,
+        roleId: null, principalId: null, mode: 'self', timeoutSec: 600, onTimeout: 'approve',
+        requiredApprovals: 1, approverMustHoldAction: false, requireDistinctApprover: true,
+        updatedByType: 'USER', updatedById: 'u1', createdAt: now, updatedAt: now,
+      };
+      resolve.mockResolvedValue({ mode: 'self', floor: 'none', policy, source: 'policy' });
+      await agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+      expect(requests.create).toHaveBeenCalledWith(expect.objectContaining({
+        requiredMode: 'agent', policyId: null, onTimeout: 'reject',
+        approverMustHoldAction: true, requireDistinctApprover: false,
+        expiresAt: new Date(now.getTime() + DEFAULT_APPROVAL_TIMEOUT_SEC * 1000),
+      }));
+    });
+
+    it('AC-3: preserves the existing no-minimum none path', async () => {
+      await expect(agent(() => gate.gate('label.delete', input, opts, now))).resolves.toMatchObject({
+        status: 'executed', approval: { requiredMode: 'none' },
+      });
+      expect(testCommand.state.calls).toEqual([input]);
+    });
+
+    it('AC-4: retains a stronger policy and its policy id', async () => {
+      const policy = { id: 'p-1' } as ApprovalPolicyRecord;
+      resolve.mockResolvedValue({ mode: 'human', floor: 'none', policy, source: 'policy' });
+      await agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+      expect(requests.create).toHaveBeenCalledWith(expect.objectContaining({ requiredMode: 'human', policyId: 'p-1' }));
+    });
+
+    it('AC-5: a user executes under the minimum approval requirement', async () => {
+      resolve.mockResolvedValue({ mode: 'none', floor: 'none', policy: null, source: 'default' });
+      const outcome = await asActor({ type: 'USER', id: 'u1' }, () => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+      expect(outcome).toMatchObject({ status: 'executed', approval: {
+        requiredMode: 'agent', satisfiedBy: 'human', approverType: 'USER', approverId: 'u1',
+      } });
+      expect(testCommand.state.calls).toEqual([input]);
+    });
+
+    it('AC-6/7: applies the minimum after reducing all keys without lowering a stricter extra key', async () => {
+      resolve.mockImplementation(async ({ key }: { key: string }) => ({
+        mode: key === 'extra' ? 'self' : 'none', floor: 'none', policy: null, source: 'default',
+      }));
+      await agent(() => gate.gate('label.delete', input, { ...opts, alsoKeys: ['extra'], minMode: 'agent' }, now));
+      expect(requests.create).toHaveBeenCalledWith(expect.objectContaining({ requiredMode: 'agent' }));
+      resolve.mockImplementation(async ({ key }: { key: string }) => ({
+        mode: key === 'extra' ? 'human' : 'none', floor: 'none', policy: null, source: 'default',
+      }));
+      await agent(() => gate.gate('label.delete', input, { ...opts, alsoKeys: ['extra'], minMode: 'agent' }, now));
+      expect(requests.create).toHaveBeenLastCalledWith(expect.objectContaining({ requiredMode: 'human' }));
+    });
+
+    it('AC-8: never raises a not-approvable resolution', async () => {
+      resolve.mockResolvedValue({ mode: 'none', floor: 'none', policy: null, source: 'not-approvable' });
+      await expect(gateMin('none', 'not-approvable')).resolves.toMatchObject({ status: 'executed' });
+      expect(requests.create).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: retains the unsupported actor refusal with a minimum', async () => {
+      await expect(asActor({ type: 'RUNNER', id: 'r1' }, () => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now)))
+        .rejects.toThrow('approval gate cannot gate actor RUNNER/r1');
+      untouched();
+    });
+  });
+
   describe('US-006 — strictest resolution across extra keys', () => {
     const primaryKey = 'ticket.transition.start';
     const extraKey = 'ticket.update';
