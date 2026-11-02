@@ -3,7 +3,7 @@
   "feature": "review-p1-bundle",
   "branchName": "feat/review-p1-bundle",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T07:16:53.241Z",
+  "updatedAt": "2026-11-02T07:33:56.438Z",
   "userStories": [
     {
       "id": "US-001",
@@ -27,14 +27,17 @@
         "tokens"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small existing branch change plus unit/HTTP regressions, but credential scope is security-critical and requires strict isolated TDD."
+        "reasoning": "Small existing branch change plus unit/HTTP regressions, but credential scope is security-critical and requires strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/sync.service.ts",
@@ -56,7 +59,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "de1429c5a36dc6826b1eacae14a3cd158fba7f00"
     },
     {
       "id": "US-002",
@@ -123,7 +130,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -189,7 +199,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -263,7 +276,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -323,7 +339,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -390,7 +409,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -472,7 +494,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -525,7 +550,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -570,7 +598,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Existing-system security/reliability bundle closing #382 and eight holes from the 2026-11-01 review; exactly nine stories, eight in apps/api and one in apps/runner. Graph-first navigation was requested but codebase-memory MCP is unavailable in this session; findings below come from direct source reads, Glob and Grep. No application code is changed by this planning task. The auto-detected Express/Next.js labels are inaccurate: authoritative .nax/mono/apps/api/context.md:17 describes NestJS 12 + Fastify, Prisma 7 and Vitest; .nax/mono/apps/runner/context.md:15 describes Bun-only ESM, bun:sqlite and bun:test. Web is Nuxt per root guidance and is untouched. Follow Nathapp NestJS patterns before implementation, strict repository auth/transaction conventions, and app contexts; do not edit generated AGENTS.md or generated clients.\n\nUS-001 baseline and impact: apps/api/src/fleet/sync/sync.service.ts:109 grants tokens under short fenced transactions, with minting outside the transaction at :146. The explicit-repo branch at :127 recomputes PROJECT SESSION fetchable repos and grants readOnly, while :135 only refuses WORKSPACE for missing repoId; PROJECT therefore reaches findRepo(job.repoId) at :138. Extend only the missing-repo THREAD refusal to PROJECT for all turn actions, preserving fencing, held-state checks, explicit-repo scope, REPO and RUN behavior. apps/api/src/fleet/sync/sync-token-fence.spec.ts:23 has a reusable PROJECT THREAD harness, :79 already anchors WORKSPACE denial and :162 anchors legacy RUN mint shape. apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts:45 seeds real PROJECT/REPO held thread jobs, :76 always attaches repoId in requestFor; add an intentionally repo-less request without that helper. Existing HTTP + fake forge tests prove the real repository projection and runner guard. No protocol field changes or migration.\n\nUS-002 baseline and impact: SyncService.sync processes reports independently (:72), catches boot reconciliation (:87), then calls fillRunner and fillRunnerThreads unguarded at apps/api/src/fleet/sync/sync.service.ts:93-94 before afterTerminal, grantTokens and deliver. Preserve the freeSlots predicate for ordinary placement and protocol >=4 predicate for threads, with independent catches so one call cannot suppress the other. Use error.name only (unknown for non-Error), never messages, in the exact specified class logger error. apps/api/src/fleet/sync/fleet-sweeper.ts:56 loops silent ids; each transaction locks skipLocked, rechecks held state and runner heartbeat, applies CRASHED and records audit (:58-66). Publication and fire-and-forget attribution/ticket effects follow at :69-73. Put each transaction AND its post-commit effects inside the per-item catch; count only successful items. Do not move effects into the transaction, remove audit, change system actor context, or change interval behavior. apps/api/src/fleet/sync/fleet-sweeper.spec.ts:23 tests system context and :49 tests committed transition/publication. Extend this and sync-token-fence.spec.ts, exposing placement from its harness and spying on Nest Logger.prototype.warn/error, restoring spies. Both US-001 and US-002 modify sync.service.ts and its unit spec despite having no declared dependency; coordinate edits to avoid overwriting one another.\n\nUS-003 baseline and impact: apps/api/src/fleet/ingest/bundle-reader.ts:31 lists allowlisted slots, :47 rejects unsafe entry names, :54 buffers an accepted entry, and :68 reads a tar.gz sequentially. Existing per-file skip is at :85, body.resume drains a skip, close advances tar-stream at :78, and :91 appends arrays/sets singletons. Cap BEFORE readEntry, count header.size only for kept entries, and include all singleton and array slots in aggregate accounting. The five array slots are cost, reviews, finishResults, finishLast, botReview; only botReview/naxStdout suppress oversized reporting. Keep archive order, regular-file filtering, unsafe-name behavior, error handling and close-based stream progression. Header-sized accounting bounds kept payload bytes, not all process overhead or parser allocations; do not claim a hard RSS bound. apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts:17 defines existing as-const limits, including fileBytes=33554432; retain all values and add aggregate 67108864/per-slot 5000. Parameter type must use numeric Record, not literal-type Pick. apps/api/src/fleet/ingest/bundle-ingest.service.ts:91 consumes the reader with one argument; no production caller change. apps/api/src/fleet/ingest/parse-bundle.ts:59 already marks nonempty oversized as partial; no parser rewrite. Extend bundle-reader.spec.ts with small tar fixtures so tests do not allocate production-sized bombs; skipped entries must allow later smaller entries. No change to retry attempt logic, parser version, database schema or array copy strategy is required.\n\nUS-004 baseline and impact: apps/api/src/fleet/knowledge/knowledge-chunk-store.ts:75, :87 and :94 implement replace/delete/read. They currently select by source_id alone; replace validates row.source_id but not row.source. Preserve signatures, MAX_FILE_ROWS=2000, chunkIndex ordering, write mutex, availability checks before/after lazy table initialization (:150-175), and filter-value rejection. Derive reserved source only after safe-filter validation, before any table call, and validate every replacement row source before deletion. apps/api/src/rag/lance-table-manager.ts:38 rejects quotes/control chars, :54 supplies sourceRowFilter returning source = '<source>' AND source_id = '<id>'; :113 and :121 define repo/outcome sources. The in-memory fallback supports AND predicates, and VectorStore already uses the same pair filter (vector-store.service.ts:261, :580, :604); reuse the helper rather than inventing SQL quoting. Consumers include knowledge-search.service.ts:239 and knowledge-repo-indexer.ts:57; their signatures and search leg predicates remain intact. apps/api/src/rag/dto/add-document.dto.ts:12 already restricts REST sources to doc/manual but :22 permits arbitrary nonempty sourceId; add reserved-start validation with the exact message, preserving notes:repo:x. Existing planted doc rows are retained but invisible to reserved-source reads and cannot be deleted by the indexer. Update knowledge-chunk-store.spec.ts predicate fakes and knowledge-store.integration.spec.ts:86-94: its surviving ticket row must be queried directly from the manager, not through readFile('ticket:t1'), which now refuses it. Native LanceDB tests in that file run with a real temp directory independently of its PG-gated sections (:49). Add shared-id repo/doc and outcome/doc round trips, DTO unit spec (new), gated-kb-add-route integration refusal/no-write checks, and one reserved-id endpoint e2e beside existing KB adds. Do not migrate/delete old KB rows.\n\nUS-005 baseline and impact: apps/api/src/approvals/mcp/approval-mcp-tools.ts:18 has two constructor collaborators; :56 validates decide inputs and :66-72 directly decides after visibility. Preserve all input rules, own-property distinction for params, actor context origin=mcp, list tool behavior and four existing error mappings (:74-77). Mirror apps/api/src/approvals/approval-requests.controller.ts:113-126: visible project -> assertMayDecide -> routeGate with keyCheck:false -> execute original request after approve, or return reject result. Unlike REST's DTO object, MCP must omit params entirely unless supplied. Pending must return non-error text without executing the original. ForbiddenAppException becomes forbidden: permissions. apps/api/src/approvals/approval-engine.module.ts:31-40 already provides and exports route gate and execution, so constructor additions need no new module abstraction or dependency import cycle. MCP controller injects tools at apps/api/src/fleet/assistant/mcp/mcp.controller.ts:57. Direct constructor sites in both tools helpers at approval-mcp-tools.spec.ts:12 and :65 must receive all four stubs, get must return projectId, and routeGate.run replaces direct-decide expectations/rejections. Keep no-call input-validation/list regressions and existing HTTP integration AC-14 (<id> executed) at test/integration/approvals/approval-mcp-decide.integration.spec.ts:61. Its RPC helper at :24 supports JSON and SSE. Add a real global AGENT/human approval.decide policy park, original request unchanged and new approval.decide request persisted. No MCP endpoint schema changes.\n\nUS-006 baseline and impact: apps/api/src/approvals/approval-gate.service.ts:62 takes projectId/variant, :92 parses the registered primary command, :98 resolves one policy, :106 opens a request or executes for a human. Extend options with readonly alsoKeys and select the entire strictest ResolvedApproval, not just its mode, so policyId, timeout, distinctness and other flags copied by newRequest (:185-219) come from the winner. apps/api/src/approvals/domain/approval-mode.ts:3 ranks none < self < agent < human; its strictestMode reduces ties toward the later mode, so selection of resolutions must explicitly preserve primary on equal rank rather than accidentally overwriting its policy. Keep primary key/variant/command, parse/freeze/hash, dedupe, subject rules, direct-human satisfaction, request transaction/events and no-extra-key behavior unchanged. apps/api/src/approvals/route/approval-route-gate.ts:11 defines RouteGateCall; :55 proves principal/key authority before redemption or gate call at :87. Forward alsoKeys only when present, maintaining existing opts object for unrelated routes. alsoKeys affects approval policy resolution, not extra authorization bypasses or alternate command execution. Modify approval-gate.service.spec.ts and approval-route-gate.spec.ts, retaining exact legacy option-shape assertions. US-007 depends on this seam; US-005 uses the same route gate without extra keys.\n\nUS-007 baseline and impact: apps/api/src/tickets/state-machine/transition-keys.ts:13 owns the six edge values and :36 exports transitionKeyFor, but no distinct-list export. apps/api/src/tickets/ticket-route.commands.ts:20 defines variants, :54-63 registers ordinary update parsing UpdateTicketDto then invoking service.update with a freshly loaded principal. Add updateStatus variant registered under each distinct edge, reusing that parse/run behavior rather than transition-route commands that require comments. apps/api/src/tickets/tickets.controller.ts:232-251 gates all PATCH under ticket.update after DTO parsing; retain membership/Requires('ticket.update') guards, CurrentProject scope and response envelope, but resolve live ticket status for status-bearing patches and gate a valid edge under its primary key plus alsoKeys ticket.update. No-edge/no-status falls back to existing update gate and invalid transition remains service-owned. apps/api/src/tickets/tickets.service.ts:268-303 already routes status changes through assertTransitionAllowed and executeTransitionPublic, with additional fields in the same transition transaction and live edge rechecks. Do not replace or weaken these invariants; initial controller read is not authoritative at deferred execution time. Preserve title-only controller expectation and add findByRef to its harness. Extend ticket-route.commands.spec.ts, tickets.controller.spec.ts, add ticket-patch-status-gate.integration.spec.ts, and adjust the existing gated-ticket-write-routes.integration.spec.ts AC-4 from parked-then-refused to immediate 403/no request when edge permission is absent. Include one root-user CREATED->IN_PROGRESS endpoint e2e. Other PATCH edges remain comment-refused by existing service. US-004 and US-007 share endpoint.e2e.spec.ts and must preserve each other's additions despite no dependency.\n\nUS-008 baseline and impact: apps/api/src/fleet/git-broker/github-app-client.ts:89-108 probes rulesets then classic branch, validates array/boolean, encodes branch and maps all failures to provider_error. Add exactly the 404 and message-matching plan-upgrade 403 exceptions; malformed 200, unrelated 403, 5xx and transport/classic failures still fail closed. Do not interpret missing protection as permission to mint FIX tokens. Existing GitTokenBroker remains unchanged: false is a resolved default_branch_unprotected failure, not a rejection. github-app-client.branch-protection.spec.ts:44-66 anchors supported rules, classic fallback and encoded branches; :69-79 fail-closed table must remain. Add sequential mocked HTTP responses and request-order assertions, no live GitHub dependency or GitLab changes. This is a security-sensitive credential eligibility probe even though the edit is small.\n\nUS-009 baseline and impact: apps/runner/src/executor/git.ts:60-64 defines immutable no-prompt env and credential helper clearing, :82-99 wraps Bun.spawn and returns raw stdout from ok. Prefix every spawn with the three fixed -c settings before helper args, preserving args, env, timeout, error/secret sanitization, helper empty reset and raw trailing newline. Public Git and GitOptions interfaces are unchanged. daemon.ts:102 creates the shared Git implementation used across workspace/checkout/plan-commit/progress-push/config jobs and thread worktree/mirror paths, so this one spawn seam hardens them without editing each consumer. Existing git.spec.ts:5-40 runs real git/no-prompt/version tests and :44-66 anchors auth failures. Add isolated real git-init repos with configured user.name/user.email/commit.gpgsign=false and cleanup; test executable pre-commit marker suppression, config override observations and untrimmed helper output. Do not disable file:// protocol, change nax's git subprocesses, add an OS sandbox requirement or redesign token refresh.\n\nImplementation/testing/migration: US-006 must precede US-007; other dependency arrays remain empty as specified. All listed existing context paths were checked; only add-document.dto.spec.ts and ticket-patch-status-gate.integration.spec.ts are new outputs. Shared files require merge discipline, not invented dependencies. Use Vitest vi mocks, not Jest, with unit tests co-located in src; no DB-backed DI tests. Run API unit tests with bun run test or scoped specs; DB/HTTP integration and endpoint e2e require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and scoped-test/globalSetup provisioning. A skipped DB test is not verification. Never run concurrent DB-reset suites on the same test database; a second checkout uses KODA_TEST_DB_CONTAINER=1/private container. Native LanceDB collision tests must use real local tables, not the fallback. Runner tests use Bun and real isolated git, no installed-nax dependency. Strict three-session-tdd is mandatory for token scope, knowledge isolation, both approval bypass fixes, gate semantics, ticket edge authorization, branch protection and daemon git hardening; reliability-only US-002 and bounded-reader US-003 use tdd-simple. No schema/migration or data backfill, no UI/CLI business-rule changes, no client protocol changes. DTO/controller contract changes should follow root OpenAPI export/client-generation policy if their exported contract changes; never manually edit generated files or add a cross-package story. Done means the nine behavioral fixes and their preserved regressions, integration and endpoint cases are verified, without expanding into deferred review rulings.\n\nRefinement audit: enumerated all 79 explicit spec AC bullets (US-001:9, US-002:10, US-003:7, US-004:10, US-005:11, US-006:9, US-007:11, US-008:7, US-009:5). Every assertion remains in its original story, with compound observations split and qualifying regression clauses preserved; the per-file skipped-byte qualifier and untrimmed helper-output qualifier are explicit. All 15 feature-level Out of Scope items remain verbatim. Binding ids, workdirs and dependencies remain unchanged. Corrected US-002's command-delivery assertion to match apps/api/src/fleet/sync/sync.service.ts:166-170: repository records expose id, but the wire response exposes commandId and omits delivery metadata. Added failure-table delivery checks for thread placement errors and an explicit primary-placement error log assertion. US-006 now includes resolver-error propagation/no-side-effect negative cases and an exact legacy opts forwarding assertion. Register a local primary command with the rest:tickets.update-status variant in US-006 unit fixtures using the existing registry pattern (approval-gate.service.spec.ts:39-49); this requires no US-007 production registration or reverse dependency. The phrase unchanged policy flags means use the winning resolution's existing flags, not retain a losing primary policy's flags. Source resolver behavior is confirmed at apps/api/src/approvals/approval-policy.resolver.ts:30-60. US-007 now explicitly anchors title-only routing and the missing-edge 403/no-request behavior. US-008 exercises the unchanged broker's FIX refusal as a consumer check in the same branch-protection spec: apps/api/src/fleet/git-broker/git-token.broker.ts:68-79 first mints read-only, probes protection, and throws internally on false; mint catches that at :48-58 and resolves the error, never allowing a write mint. US-009 fixtures point hooksPath to a directory, not the hook file; configuration reads assert strings, whereas provider protection results are booleans. Spec-recommended memory MCP context (memory-mcp-tools.ts:34-58, an existing project-aware gated MCP example) and approval-policy.resolver.ts now replace less-critical test context entries, keeping each list within five. US-004 and US-007 are medium complexity because both reuse existing source-filter/DTO and command-registration/controller seams with no new architecture; their strict security TDD overrides stay unchanged. Every story has an observable negative path and a compatibility/removal-of-bypass anchor. No schema, protocol, UI or deferred-ruling scope was added.",
