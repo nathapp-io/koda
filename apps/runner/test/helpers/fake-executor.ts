@@ -26,6 +26,7 @@ export class FakeExecutor implements JobExecutor {
   alive = false;
   aliveAfterSpawn = true;
   procMatches = true;
+  identityUnknown = false;
   status: StatusView | null = { run: { id: 'run-1', status: 'completed' }, postRun: { finish: { status: 'passed', result: 'opened', url: 'https://example.test/pr/1' } } };
   statusError: Error | null = null;
   plan: PlanCheck = { ok: true, reason: null, branchName: 'feat/x' };
@@ -82,6 +83,12 @@ export class FakeExecutor implements JobExecutor {
 
   isAlive(): boolean {
     return this.alive;
+  }
+
+  async processIdentity(_job: JobRow): Promise<'ours' | 'other' | 'unknown'> {
+    if (this.identityUnknown) return 'unknown';
+    if (!this.alive || !this.procMatches) return 'other';
+    return 'ours';
   }
 
   async matchesProcess(_job: JobRow): Promise<boolean> {

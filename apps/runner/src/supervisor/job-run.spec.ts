@@ -62,6 +62,66 @@ const lifecycles = (b: Built) => everything(b).filter((e) => e.type === 'lifecyc
 const tmpLogs = makeTempDirs();
 afterAll(() => tmpLogs.cleanup());
 
+describe('readopted process identity (US-003)', () => {
+  test('AC-5: stops a readopted watch when the pid belongs to another process', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.procMatches = false;
+    await b.run.start('watch');
+    expect(b.ex.alive).toBe(true);
+    expect(b.ex.ticks).toBe(2);
+  });
+
+  test('AC-6: checks identity after each live watch tick', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    let identityChecks = 0;
+    const processIdentity = b.ex.processIdentity.bind(b.ex);
+    b.ex.processIdentity = async (job) => { identityChecks += 1; return processIdentity(job); };
+    b.ex.dieAfterTicks(4);
+    await b.run.start('watch');
+    expect(identityChecks).toBe(3);
+  });
+
+  test('AC-7: unknown identity fails closed and continues until liveness ends', async () => {
+    const b = build();
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.identityUnknown = true;
+    let identityChecks = 0;
+    const processIdentity = b.ex.processIdentity.bind(b.ex);
+    b.ex.processIdentity = async (job) => { identityChecks += 1; return processIdentity(job); };
+    const started = b.run.start('watch');
+    await waitFor(() => b.ex.ticks >= 5);
+    expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+    expect(identityChecks).toBeGreaterThanOrEqual(5);
+    b.ex.alive = false;
+    await started;
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+
+  test('AC-8: does not check identity for a process spawned here', async () => {
+    const b = build();
+    b.ex.aliveAfterSpawn = true;
+    let checks = 0;
+    b.ex.processIdentity = async () => { checks += 1; return 'ours'; };
+    b.ex.dieAfterTicks(4);
+    await b.run.start('prepare');
+    expect(checks).toBe(0);
+  });
+
+  test('AC-9: does not chain a FIX step after a readopted pid is identified as other', async () => {
+    const b = build('FIX');
+    b.ex.alive = true;
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.procMatches = false;
+    await b.run.start('watch');
+    expect(b.ex.calls).not.toContain('spawnFixStep:j1');
+  });
+});
+
 describe('RUN happy path (D35)', () => {
   test('RUNNING -> UPLOADING -> COMPLETED, pid recorded with RUNNING, final snapshot with the ledger result, cleanup and done', async () => {
     const b = build();

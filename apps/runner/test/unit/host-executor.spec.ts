@@ -52,6 +52,23 @@ async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' = 'RUN', over: P
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
 
+describe('HostExecutor process identity (US-003)', () => {
+  test('AC-10: identifies the job profile in argv as ours', async () => {
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => '/usr/bin/nax --profile koda-job-cjob1' };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.processIdentity({ ...w.row, pid: 4242 })).toBe('ours');
+  });
+  test('AC-11: identifies another command as other', async () => {
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => '/usr/bin/vim notes.txt' };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.processIdentity({ ...w.row, pid: 4242 })).toBe('other');
+  });
+  test('AC-12: returns unknown when process information is unavailable', async () => {
+    const w = await world('RUN');
+    expect(await w.ex.processIdentity({ ...w.row, pid: 4242 })).toBe('unknown');
+  });
+});
+
 describe('HostExecutor review verdict (US-007)', () => {
   test('reads the posted marker from <jobDir>/nax.stdout', async () => {
     const w = await world('REVIEW');

@@ -259,13 +259,19 @@ export class HostExecutor implements JobExecutor {
     return isProcessAlive(pid);
   }
 
-  async matchesProcess(job: JobRow): Promise<boolean> {
-    if (job.pid === null) return false;
+  async processIdentity(job: JobRow): Promise<'ours' | 'other' | 'unknown'> {
+    if (job.pid === null) return 'unknown';
     const command = await this.processInfo().command(job.pid);
-    if (command === null) return false;
-    // D486: a config job's nax calls carry `-d <clone>`; its gh / glab calls carry the job branch.
-    if (isConfigKind(job.command)) return command.includes(this.dirs(job).repoDir) || command.includes(configBranchName(job.jobId));
-    return command.includes(jobProfileName(job.jobId));
+    if (command === null) return 'unknown';
+    // Keep the identity rule in one place so READOPT and watch-time checks cannot drift.
+    const matches = isConfigKind(job.command)
+      ? command.includes(this.dirs(job).repoDir) || command.includes(configBranchName(job.jobId))
+      : command.includes(jobProfileName(job.jobId));
+    return matches ? 'ours' : 'other';
+  }
+
+  async matchesProcess(job: JobRow): Promise<boolean> {
+    return (await this.processIdentity(job)) === 'ours';
   }
 
   kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
