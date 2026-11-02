@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T12:14:04.789Z",
+  "updatedAt": "2026-11-02T12:45:48.119Z",
   "userStories": [
     {
       "id": "US-001",
@@ -441,14 +441,17 @@
         "rag"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module transaction/effect ordering and required DI changes span workflow, indexing, VCS and approval execution; the behavior is transaction consistency rather than a new authorization or credential rule."
+        "reasoning": "Cross-module transaction/effect ordering and required DI changes span workflow, indexing, VCS and approval execution; the behavior is transaction consistency rather than a new authorization or credential rule.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
@@ -523,7 +526,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cca88fbf21642e373403106711f8d2d4169ae03e"
     },
     {
       "id": "US-007",
