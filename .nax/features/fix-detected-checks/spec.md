@@ -226,6 +226,7 @@ Depends on US-001. Workdir: apps/web. Adds `FleetRepo.fixTrustDetectedChecks`, `
 
 - `apps/web/tests/pages/admin-fleet-repos.spec.ts` — the page mounts real `fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview']`; add `FleetRepoFixChecks`, and the assertion that one `[data-stub="switch"]` renders for the single GitHub repo with an installation becomes two (auto-review and fix-checks). The repo fixture gains `fixTrustDetectedChecks: false`.
 - `apps/web/tests/components/repo-auto-review.spec.ts` — its `FleetRepo` fixture gains `fixTrustDetectedChecks: false` so it still matches the type.
+- `apps/web/tests/helpers/mount-sfc.ts` — add FleetRepoFixChecks: 'RepoFixChecks.vue' to both component-file maps (lines 273 and 291, beside FleetRepoAutoReview) and 'FleetRepoFixChecks' to the FleetComponentName union (line 431), so page and component tests can mount the real component; existing entries are unchanged.
 - `apps/web/tests/composables/useFleetRepos.spec.ts` — gains the US-004 `setFixChecks` cases beside the existing `setAutoReview` case; a `FleetRepo` fixture there, if any, gains `fixTrustDetectedChecks: false`.
 
 ### Seams
