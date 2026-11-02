@@ -3,7 +3,7 @@
   "feature": "review-p1-bundle",
   "branchName": "feat/review-p1-bundle",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T07:58:39.561Z",
+  "updatedAt": "2026-11-02T08:02:37.037Z",
   "userStories": [
     {
       "id": "US-001",
@@ -387,14 +387,17 @@
         "policy"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing gate and route seam gain optional multi-key policy resolution; central approval-policy enforcement is security-critical."
+        "reasoning": "Existing gate and route seam gain optional multi-key policy resolution; central approval-policy enforcement is security-critical.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-gate.service.ts",
@@ -428,7 +431,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5bec4869dd121463cf5544e4200921515539d0eb"
     },
     {
       "id": "US-007",
