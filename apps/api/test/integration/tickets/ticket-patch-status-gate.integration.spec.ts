@@ -23,9 +23,18 @@ describeIntegration('ticket PATCH status approval gate', () => {
   const rootAuth = () => auth(world.tokens.root);
   const agentAuth = () => auth(agent.apiKey);
   const path = (ref: string) => `/api/projects/${project.slug}/tickets/${ref}`;
-  const create = async (): Promise<{ id: string; ref: string }> => data(await request(server())
-    .post(`/api/projects/${project.slug}/tickets`).set(rootAuth())
-    .send({ type: 'BUG', title: `status gate ${++counter}` }).expect(201));
+  const create = async (): Promise<{ id: string; ref: string }> => {
+    const title = `status gate ${++counter}`;
+    const previous = await db.ticket.aggregate({ where: { projectId: project.id }, _max: { number: true } });
+    const ticket = await db.ticket.create({ data: {
+      projectId: project.id,
+      number: (previous._max.number ?? 0) + 1,
+      type: 'BUG',
+      title,
+      createdByUserId: world.ids.root,
+    }, select: { id: true, number: true } });
+    return { id: ticket.id, ref: `SG-${ticket.number}` };
+  };
   const addEdgeGrant = async () => {
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['ticket.transition.start'], project.id);
     await app.get(PermissionCache).invalidate();
