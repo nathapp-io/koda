@@ -3,7 +3,7 @@
   "feature": "fix-detected-checks",
   "branchName": "feat/fix-detected-checks",
   "createdAt": "2026-11-19T09:00:00.000Z",
-  "updatedAt": "2026-11-02T03:43:26.919Z",
+  "updatedAt": "2026-11-02T03:49:04.221Z",
   "userStories": [
     {
       "id": "US-001",
@@ -171,14 +171,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A bounded parser-and-argv extension with an existing injected spawn seam; strict security TDD is required because accepting the flag authorizes execution of nax-detected repository checks."
+        "reasoning": "A bounded parser-and-argv extension with an existing injected spawn seam; strict security TDD is required because accepting the flag authorizes execution of nax-detected repository checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -210,7 +213,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "35f00276694036a9cc323cfc96cb676d6e9148e2"
     },
     {
       "id": "US-004",
