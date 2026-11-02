@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T13:06:32.772Z",
+  "updatedAt": "2026-11-02T13:24:10.253Z",
   "userStories": [
     {
       "id": "US-001",
@@ -748,14 +748,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing runner modules gain a per-entry lifetime minimum, error accessor and one serialized option while retaining their established epoch/cooldown model; token state requires security-isolated TDD."
+        "reasoning": "Two existing runner modules gain a per-entry lifetime minimum, error accessor and one serialized option while retaining their established epoch/cooldown model; token state requires security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/credentials/token-cache.ts",
@@ -792,7 +795,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8aa164fe94ad8fb91822225a2dd8e40ad7d2d423"
     },
     {
       "id": "US-010",
