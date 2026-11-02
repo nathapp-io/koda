@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { RUNNER_LOG_MAX_BYTES, rotateLogFile } from './log-rotate';
@@ -73,5 +73,17 @@ describe('rotateLogFile', () => {
     await writeFile(file, 'x');
     // ENOTDIR, not ENOENT: only a missing log is silent; a broken path must reach the daemon's warning.
     await expect(rotateLogFile(join(file, 'runner.log'), 1)).rejects.toThrow();
+  });
+
+  test('F1: a symlink in place of the log is refused, and its target is neither copied nor truncated', async () => {
+    const dir = await tmp.make('rotate');
+    const path = join(dir, 'runner.log');
+    const victim = join(dir, 'victim.txt');
+    await writeFile(victim, BYTES);
+    await symlink(victim, path);
+    await expect(rotateLogFile(path, 10)).rejects.toThrow(/not a regular file/);
+    expect(await readFile(victim, 'utf8')).toBe(BYTES);                    // untouched
+    expect(await readFile(path, 'utf8')).toBe(BYTES);                      // the link still resolves
+    await expect(stat(`${path}.1`)).rejects.toThrow();                     // nothing was written
   });
 });

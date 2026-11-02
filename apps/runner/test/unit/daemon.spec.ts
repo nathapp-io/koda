@@ -471,9 +471,10 @@ describe('startDaemon, runner.log rotation (OPS-1)', () => {
   /**
    * A unix socket path is at most 100 bytes and the socket name is 21 of them, so a socket dir nested inside a temp
    * home has ~78 bytes. The rotation assertions never touch a socket, so they point the socket dir one level up
-   * from the temp home and stay runnable wherever $TMPDIR is deep.
+   * from the temp home and stay runnable wherever $TMPDIR is deep. The pid keeps two concurrent runs of this file
+   * (a dev's `bun test` beside a CI run) out of each other's sockets while staying inside that budget.
    */
-  const SOCKET_DIR = join(tmpdir(), 's');
+  const SOCKET_DIR = join(tmpdir(), `s-${process.pid}`);
 
   test('AC-13: an oversized runner.log is rotated by the time startDaemon resolves', async () => {
     const server = fakeServer();
