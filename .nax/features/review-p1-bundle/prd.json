@@ -3,7 +3,7 @@
   "feature": "review-p1-bundle",
   "branchName": "feat/review-p1-bundle",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T07:39:23.495Z",
+  "updatedAt": "2026-11-02T07:43:50.071Z",
   "userStories": [
     {
       "id": "US-001",
@@ -167,14 +167,17 @@
         "resource-limits"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Bounded stream accounting and existing-slot limits use standard patterns across reader/domain/tests; no auth, token or credential changes."
+        "reasoning": "Bounded stream accounting and existing-slot limits use standard patterns across reader/domain/tests; no auth, token or credential changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/ingest/bundle-reader.ts",
@@ -206,7 +209,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "65d84868449d04d19d5f2fac5522080ca6fdab4c"
     },
     {
       "id": "US-004",
