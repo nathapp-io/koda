@@ -1,0 +1,839 @@
+{
+  "project": "koda",
+  "feature": "review-p1-rest",
+  "branchName": "feat/review-p1-rest",
+  "createdAt": "2026-11-02T00:00:00.000Z",
+  "updatedAt": "2026-11-02T11:33:29.433Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Approval gate takes a minimum mode",
+      "description": "**Goal** — Add a contextual minimum approval mode to the engine and REST route gate without lowering existing policy or multi-key requirements.\n\n**Motivation** — The permission redesign (`docs/superpowers/specs/2026-10-18-permission-approval-redesign-design.md`, \"Shipped defaults\") lists the self-fix rule; no code implements it.\n\n**Approach** — `ApprovalGate.gate` and `RouteGateCall` take an optional `minMode: ApprovalMode`. The gate composes in this order:\n1. resolve the primary key and every `alsoKeys` key, and keep the strictest resolution (unchanged, #384);\n2. if `minMode` is present, the kept resolution's `source` is not `'not-approvable'`, and `minMode` is stricter than its mode, replace it with `{ mode: minMode, floor: <the kept resolution's floor>, policy: null, source: 'default' }`.\nStep 2 never lowers a mode and never applies to a non-approvable key. Replacing the policy with `null` means a request opened only because of `minMode` uses the no-policy defaults (`onTimeout: 'reject'`, timeout `DEFAULT_APPROVAL_TIMEOUT_SEC`, `approverMustHoldAction: true`, `requireDistinctApprover: false`), so a policy that allows auto-approve on timeout cannot release it. The rest of the gate is unchanged: `none` executes, a USER subject executes with `satisfiedBy: 'human'`, any other subject gets a pending request whose `requiredMode` is the final mode. `ApprovalRouteGate.run` forwards `minMode` only when the call carries it.\n\n**Scope** — In: gate option composition, RouteGateCall and conditional forwarding, existing gate and route-gate unit specs. Out: the ticket identity lookup (US-002), ticket route floors (US-003), credential tiers and CI route floor (US-004); no catalog-wide permanent floor is introduced.\n\n**Interface** — Target gate options: `opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[]; minMode?: ApprovalMode }`. `RouteGateCall` gains `minMode?: ApprovalMode`. Read `APPROVAL_MODE_RANK`, `modeAtLeast`, `strictestMode` and `ResolvedApproval = { mode, floor, policy, source }` without changing their contracts. Preserve exact option objects for calls that omit `minMode`.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalGate.gate for an AGENT actor, with the resolver answering mode 'none' (source 'default') for the key and opts.minMode 'agent', returns status 'pending' with an opened request whose requiredMode is 'agent'.",
+        "[unit] When the resolver answers mode 'self' from a policy with onTimeout 'approve' and opts.minMode is 'agent', the opened request has { policyId: null, onTimeout: 'reject' }.",
+        "[unit] ApprovalGate.gate executes the command and returns status 'executed' with approval.requiredMode 'none' for the first case without minMode, preserving the existing no-minimum path.",
+        "[unit] When the resolver answers 'human' from policy id 'p-1' and opts.minMode is 'agent', the opened request has { requiredMode: 'human', policyId: 'p-1' }.",
+        "[unit] For a USER actor with resolver mode 'none' and opts.minMode 'agent', the command executes with outcome approval { requiredMode: 'agent', satisfiedBy: 'human', approverType: 'USER', approverId: <the user's id> }.",
+        "[unit] With alsoKeys ['k2'], primary mode 'none', k2 mode 'self' and opts.minMode 'agent', the opened request's requiredMode is 'agent'.",
+        "[unit] With alsoKeys ['k2'], primary mode 'none', k2 mode 'human' and opts.minMode 'agent', the opened request's requiredMode is 'human'.",
+        "[unit] With resolver mode 'none', source 'not-approvable' and opts.minMode 'agent', ApprovalGate.gate executes the command without opening a request.",
+        "[unit] ApprovalRouteGate.run({ key, variant, projectId, input, minMode: 'agent' }) calls gate.gate once with opts.minMode 'agent'.",
+        "[unit] ApprovalRouteGate.run without minMode calls gate.gate with an opts object that has no minMode property.",
+        "[unit] ApprovalGate.gate for a registered command under actor { type: 'RUNNER', id: 'r1' } rejects with Error message 'approval gate cannot gate actor RUNNER/r1' even when opts.minMode is 'agent', preserving the existing unsupported-actor refusal."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "approvals"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small existing gate/route seam changes access-control composition and policy timeout safety; the security override requires strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts",
+        "apps/api/src/approvals/domain/approval-mode.ts",
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/approvals/approval-gate.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a policy resolves mode 'agent' and minMode is also 'agent', the opened request retains that policy's id and timeout settings.",
+        "When minMode raises a policy resolution, the opened request uses DEFAULT_APPROVAL_TIMEOUT_SEC, approverMustHoldAction true and requireDistinctApprover false."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.ts",
+          "reason": "`gate` accepts `opts.minMode` and, after the strictest-of-keys reduction, replaces a weaker approvable resolution with `{ mode: minMode, floor, policy: null, source: 'default' }`."
+        },
+        {
+          "path": "apps/api/src/approvals/route/approval-route-gate.ts",
+          "reason": "`RouteGateCall` gains `minMode?: ApprovalMode`, and `run` forwards it to `gate.gate` only when present."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.spec.ts",
+          "reason": "add the `minMode` cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/src/approvals/route/approval-route-gate.spec.ts",
+          "reason": "add the forwarding cases; existing cases stay, including those asserting the exact opts object for calls without `minMode`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "The ticket service answers the self-fix approval floor",
+      "description": "**Goal** — Resolve the latest VERIFY_FIX actor and return a contextual agent approval floor only when that actor is the current caller.\n\n**Motivation** — The Developer role holds `ticket.transition.*`, so a Developer agent closes its own ticket on a self-written review, and the audit records `requiredMode: none`.\n\n**Approach** — `ITicketRepository.findLatestStatusChangeActor(ticketId, toStatus)` reads the newest `TicketActivity` row with `action = 'STATUS_CHANGE'` and that `toStatus` (order `createdAt` desc, then `id` desc) and answers `{ type: 'AGENT', id: actorAgentId }` when `actorAgentId` is set, else `{ type: 'USER', id: actorUserId }` when that is set, else `null`; no row answers `null`. `TicketsService.selfFixApprovalFloor(projectSlug, ref, principal): Promise<'agent' | undefined>` loads the ticket the way `findByRef` does (same 404s). It answers `undefined` without reading activity when the ticket's status is not `VERIFY_FIX`. Otherwise it reads the latest `VERIFY_FIX` actor and answers `'agent'` when that actor's `type` equals the caller's kind (`principal.actorType` `'user'` -> `'USER'`, `'agent'` -> `'AGENT'`) and its `id` equals `principal.id`, else `undefined`; a `'runner'` principal (never reaches these routes) answers `undefined`.\n\n**Scope** — In: repository interface and single-query implementation, scoped service lookup, existing service unit fixtures and new real-DB repository cases. Out: gate minimum-mode composition (US-001), consuming route changes (US-003), PR-link query (US-006). A fix actor recorded as neither a user nor an agent (a system writer) never matches a caller.\n\n**Interface**\n```typescript\nfindLatestStatusChangeActor(ticketId: string, toStatus: TicketStatus): Promise<{ type: 'USER' | 'AGENT'; id: string } | null>\nselfFixApprovalFloor(projectSlug: string, ref: string, principal: KodaPrincipal): Promise<'agent' | undefined>\n```\nUse the existing loadTicket/findByRef tenancy and soft-delete semantics; repository unit mocks gain findLatestStatusChangeActor. The new DB spec is apps/api/test/integration/tickets/ticket-latest-status-actor.integration.spec.ts.",
+      "acceptanceCriteria": [
+        "[integration] PrismaTicketsRepository.findLatestStatusChangeActor(ticketId, 'VERIFY_FIX') returns { type: 'AGENT', id: A } when a STATUS_CHANGE to VERIFY_FIX by user U is followed by one by agent A.",
+        "[integration] With those rows plus a later STATUS_CHANGE to CLOSED by user U2, findLatestStatusChangeActor(ticketId, 'VERIFY_FIX') still returns { type: 'AGENT', id: A }.",
+        "[integration] findLatestStatusChangeActor(ticketId, 'VERIFY_FIX') returns null when the ticket has no STATUS_CHANGE row to VERIFY_FIX.",
+        "[unit] TicketsService.selfFixApprovalFloor('alpha', 'AL-1', <agent principal agent-1>) returns 'agent' for a VERIFY_FIX ticket whose latest actor is { type: 'AGENT', id: 'agent-1' }.",
+        "[unit] In that matching-agent case, selfFixApprovalFloor calls findLatestStatusChangeActor exactly once with the ticket's id and 'VERIFY_FIX'.",
+        "[unit] For the same ticket with latest actor { type: 'AGENT', id: 'agent-2' }, selfFixApprovalFloor returns undefined.",
+        "[unit] For the same ticket and agent principal agent-1 with latest actor { type: 'USER', id: 'agent-1' }, selfFixApprovalFloor returns undefined.",
+        "[unit] For a user principal u-1 and latest actor { type: 'USER', id: 'u-1' } on the VERIFY_FIX ticket, selfFixApprovalFloor returns 'agent'.",
+        "[unit] For the same VERIFY_FIX ticket with latest actor null, selfFixApprovalFloor returns undefined.",
+        "[unit] For an IN_PROGRESS ticket, selfFixApprovalFloor returns undefined.",
+        "[unit] For an IN_PROGRESS ticket, selfFixApprovalFloor never calls findLatestStatusChangeActor.",
+        "[unit] For a ref with no ticket in the project, selfFixApprovalFloor rejects with NotFoundAppException, as findByRef does."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "tickets"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing repository/service additions implement identity-sensitive authorization behavior with scoped persistence; security-critical despite standard query patterns."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/src/tickets/domain/ticket.domain.ts",
+        "apps/api/src/tickets/tickets.service.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/ticket-latest-status-actor.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When two matching STATUS_CHANGE rows have equal createdAt, findLatestStatusChangeActor returns the actor from the row with the greater id.",
+        "When the latest matching row has neither actorAgentId nor actorUserId, findLatestStatusChangeActor returns null instead of an earlier actor.",
+        "When principal.actorType is 'runner', selfFixApprovalFloor returns undefined even if its id matches the activity actor.",
+        "When a ref belongs to another project or a soft-deleted ticket, selfFixApprovalFloor rejects with the same NotFoundAppException as findByRef."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/domain/ticket.domain.ts",
+          "reason": "`ITicketRepository` gains `findLatestStatusChangeActor`."
+        },
+        {
+          "path": "apps/api/src/tickets/prisma-tickets.repository.ts",
+          "reason": "implements `findLatestStatusChangeActor` with one `findFirst` on `TicketActivity` ordered by `createdAt` desc then `id` desc."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.service.ts",
+          "reason": "gains `selfFixApprovalFloor`."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.service.spec.ts",
+          "reason": "the repository mock gains `findLatestStatusChangeActor`; add the service cases."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Verify-fix, verify and close apply the self-fix floor",
+      "description": "**Goal** — Prevent an agent from immediately approving, verifying or closing its own fix through any of the three closing REST paths.\n\n**Motivation** — `TicketsController.verifyFix` opens the gate under `ticket.transition.verify-fix.approve` with no reference to who submitted the fix.\n\n**Approach** — `TicketsController.verifyFix` (only when `approve` is true), `verify` and `close` call `selfFixApprovalFloor(slug, ref, principal)` before the gate. When it answers `'agent'`, their `routeGate.run` call carries `minMode: 'agent'`; otherwise the call has no `minMode` property. The return branch of `verifyFix` (`approve` false) does not call it. `PATCH /tickets/:ref` needs no floor: through PATCH only the comment-less edges CREATED/VERIFIED -> IN_PROGRESS succeed, and none of them leaves VERIFY_FIX.\n\n**Scope** — In: three controller entry points, default-undefined service mock, exact gate-call assertions and existing HTTP review-route integration suite. Out: the floor lookup itself (US-002), generic gate behavior (US-001), after-commit workflow effects (US-006). `ticket.transition.verify-fix.return` by the fix's own actor is not given a floor; the design names only the approving edge, and returning a ticket to IN_PROGRESS closes nothing.\n\n**Interface** — Consume `selfFixApprovalFloor(projectSlug: string, ref: string, principal: KodaPrincipal): Promise<'agent' | undefined>` and `minMode?: ApprovalMode` on RouteGateCall. Preserve `TICKET_ROUTE_VARIANTS.verifyFix = 'rest:tickets.verify-fix'`, `.verify`, `.close`, existing comment validation, selected keys and inputs. Approve includes the existing boolean true and string 'true' parsing. Existing review-route cases retain root-authored fixes. New self-agent cases must create the fix through the real /fix route as the calling agent, with no approval policies; the distinct-agent regression uses another agent's fix, and the root self-fix regression submits /fix as root before root approves.",
+      "acceptanceCriteria": [
+        "[unit] TicketsController.verifyFix with approve 'true' and selfFixApprovalFloor returning 'agent' calls routeGate.run once with { key: 'ticket.transition.verify-fix.approve', variant: 'rest:tickets.verify-fix', projectId: 'project-1', input: { slug, ref, body }, minMode: 'agent' }.",
+        "[unit] verifyFix with approve 'true' and selfFixApprovalFloor returning undefined calls routeGate.run with no minMode property.",
+        "[unit] verifyFix with approve 'false' never calls selfFixApprovalFloor.",
+        "[unit] verifyFix with approve 'false' calls routeGate.run with key 'ticket.transition.verify-fix.return' and no minMode property.",
+        "[unit] TicketsController.verify with selfFixApprovalFloor returning 'agent' calls routeGate.run with key 'ticket.transition.verify' and minMode 'agent'.",
+        "[unit] TicketsController.close with selfFixApprovalFloor returning 'agent' calls routeGate.run with key 'ticket.transition.close' and minMode 'agent'.",
+        "[integration] With no approval policies, a Developer agent that submitted POST /api/projects/:slug/tickets/:ref/fix on an IN_PROGRESS ticket receives HTTP 202 from POST .../verify-fix?approve=true with permissionKey 'ticket.transition.verify-fix.approve' and requiredMode 'agent'.",
+        "[integration] After that parked verify-fix request, the ticket's persisted status remains VERIFY_FIX.",
+        "[integration] With no approval policies, that fix-submitting agent receives HTTP 202 from POST .../verify on the VERIFY_FIX ticket with permissionKey 'ticket.transition.verify' and requiredMode at least 'agent'.",
+        "[integration] After that parked verify request, the ticket's persisted status remains VERIFY_FIX.",
+        "[integration] With no approval policies, that fix-submitting agent receives HTTP 202 from POST .../close on the VERIFY_FIX ticket with permissionKey 'ticket.transition.close' and requiredMode at least 'agent'.",
+        "[integration] After that parked close request, the ticket's persisted status remains VERIFY_FIX.",
+        "[integration] The fix-submitting agent, also holding approval.decide, receives HTTP 403 from POST /api/approvals/:id/decisions with { decision: 'approve' } for its own parked verify-fix request.",
+        "[integration] After that refused self-decision, the ticket's persisted status remains VERIFY_FIX.",
+        "[integration] With no approval policies, a second agent holding ticket.transition.verify-fix.approve that did not submit the fix receives HTTP 200 from the approve request.",
+        "[integration] After that second agent's successful approve request, the ticket's persisted status is CLOSED.",
+        "[integration] With no approval policies, the root user who submitted the fix receives HTTP 200 from the approve request.",
+        "[integration] After that root user's successful approve request, the ticket's persisted status is CLOSED."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "tickets",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three controller branches consume the existing gate and the upstream floor helper with conditional options; implementation is localized and standard, while access control still requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/allowed-actions.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-review-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When selfFixApprovalFloor returns undefined, verify and close each omit the minMode property from routeGate.run.",
+        "When verifyFix receives boolean true rather than string 'true', it applies the same self-fix minimum."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "`verifyFix` (approve), `verify` and `close` add `minMode: 'agent'` to the gate call when `selfFixApprovalFloor` answers `'agent'`."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "the service mock gains `selfFixApprovalFloor` answering `undefined` by default, so existing verify-fix, verify and close cases keep asserting the same gate call; add the new cases."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/gated-ticket-review-routes.integration.spec.ts",
+          "reason": "add the self-fix cases; existing cases stay, because their fixes are submitted by the root user, not by the agent that approves."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Credential writes are high risk and a CI token rotation needs agent mode",
+      "description": "**Goal** — Require the default agent approval tier for secret-returning credential writes and a contextual agent minimum for CI webhook secret patches.\n\n**Motivation** — An agent bound to global Admin (one human-approved binding) rotates another agent's key with `POST /agents/:slug/rotate-key`, receives the raw key, and impersonates that agent, with `satisfiedBy: none` in the audit.\n\n**Approach** — Credential keys: `catalog.ts` exports `CREDENTIAL_KEYS: ReadonlySet<string>` = `{'agent.create', 'agent.key.rotate', 'user.create'}`. `classifyRisk` answers `'high'` for them, after the critical and read checks and before the `'medium'` fallback. `buildEntry` is unchanged, so their `approval.default` becomes `'agent'` and their floor stays `'none'`.\n\nCI token floor: `ProjectsController.update`, when the parsed patch carries `ciWebhookToken` (any present value, `null` included: clearing the secret is a credential write too, and the route already routes a present value, `!== undefined`, to the redeem variant), adds `minMode: 'agent'` to its `routeGate.run` call (variant `rest:projects.update-ci-token`, redeem header unchanged). A patch without it is unchanged.\n\n**Scope** — In: the three-key risk set, catalog risk oracle and per-key regressions, conditional project route floor, controller exact-shape tests and the existing project CI-token and agent-key HTTP suites. Out: generic minMode mechanics (US-001), Owner-disable checks (US-005), token mint freshness (US-008 through US-010). `agent.update`, `agent.capabilities.update` and `user.update` keep their medium tier. No web, CLI or MCP copy is added for the new 202 answers beyond the feature's API i18n work.\n\n**Interface** — Export `CREDENTIAL_KEYS: ReadonlySet<string>` with exactly `{'agent.create', 'agent.key.rotate', 'user.create'}`; consume `minMode?: ApprovalMode` on RouteGateCall. Preserve `PROJECT_ROUTE_VARIANTS.updateCiToken = 'rest:projects.update-ci-token'`. Update catalog.spec.ts's independent expectedRisk rule after its read check, ProjectsController's exact mixed-secret-patch argument, and the insecure FM-1 immediate-token integration expectation. Existing explicit approval policies and redeem/redaction paths stay in force; a parked credential write must not create its target or return a raw secret.",
+      "acceptanceCriteria": [
+        "[unit] CREDENTIAL_KEYS imported from permissions/catalog equals the set {'agent.create', 'agent.key.rotate', 'user.create'}.",
+        "[unit] For each key in CREDENTIAL_KEYS, findCatalogEntry(key) has { risk: 'high', approval: { default: 'agent' } }.",
+        "[unit] findCatalogEntry('agent.update') still has risk 'medium'.",
+        "[unit] ProjectsController.update('alpha', { ciWebhookToken: 'tok' }, project) calls routeGate.run once with key 'project.update', variant 'rest:projects.update-ci-token' and minMode 'agent'.",
+        "[unit] ProjectsController.update('alpha', { ciWebhookToken: null }, project) calls routeGate.run with minMode 'agent'.",
+        "[unit] ProjectsController.update('alpha', { name: 'New' }, project) calls routeGate.run once with variant 'rest:projects.update' and no minMode property.",
+        "[integration] With no approval policies, an agent holding project.read and project.update in the project receives HTTP 202 from PATCH /api/projects/:slug with { ciWebhookToken: '<new>' }.",
+        "[integration] After that parked PATCH, the project's ciWebhookToken is unchanged.",
+        "[integration] With no approval policies, the same agent receives HTTP 200 from PATCH /api/projects/:slug with { name: '<new>' }.",
+        "[integration] With no approval policies, an agent holding global agent.create receives HTTP 202 from POST /api/agents with a pending request whose permissionKey is 'agent.create'.",
+        "[integration] After that parked create, no agent row with that slug exists.",
+        "[integration] With no approval policies, the root user's POST /api/agents returns HTTP 201 with an apiKey."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "credentials",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A fixed three-key catalog set and one conditional project-gate option reuse established risk and redeem paths; these modest code changes still require security-isolated TDD because they protect raw credentials."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/catalog.spec.ts",
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/test/integration/projects/gated-project-ci-token-route.integration.spec.ts",
+        "apps/api/test/integration/agents/gated-agent-key-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a no-policy agent calls POST /agents/:slug/rotate-key, the response is HTTP 202 and the old API key remains usable until the existing approval/redeem flow succeeds.",
+        "When a no-policy agent calls POST /admin/users, the response is HTTP 202 and no user row is created before redemption.",
+        "When CREDENTIAL_KEYS changes the default, each credential catalog entry still has approval.floor 'none'.",
+        "When an agent clears ciWebhookToken with null and no approval policies exist, PATCH returns HTTP 202 and leaves the stored secret unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "exports `CREDENTIAL_KEYS` and `classifyRisk` answers `'high'` for its keys."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "the spec's own `expectedRisk` oracle adds the `CREDENTIAL_KEYS` rule after the read check, so the catalog-wide comparison still matches; add the per-key cases."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.ts",
+          "reason": "`update` adds `minMode: 'agent'` when the patch carries `ciWebhookToken`."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "\"AC-9: routes token-bearing mixed patches through the redeem variant\" asserts the exact `routeGate.run` argument for a token-bearing patch, which now also carries `minMode: 'agent'`; add the new cases; cases for patches without a token stay."
+        },
+        {
+          "path": "apps/api/test/integration/projects/gated-project-ci-token-route.integration.spec.ts",
+          "reason": "\"FM-1: agent token patch executes immediately under the project.update default-none policy\" now expects 202 and an unchanged token, because a CI token rotation needs `agent` mode."
+        },
+        {
+          "path": "apps/api/test/integration/agents/gated-agent-key-routes.integration.spec.ts",
+          "reason": "add the no-policy agent create case; existing cases keep their explicit policies."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Only an Owner can disable an Owner",
+      "description": "**Goal** — Refuse a newly disabling Owner patch unless the acting principal also holds the global Owner binding permission.\n\n**Motivation** — `UsersAdminService.update` refuses only a self-disable and the last active admin.\n\n**Approach** — `UsersAdminService.update(actor: PrincipalRef, userId, patch)` replaces the `actorId: string` parameter; `UsersAdminService` gains `PermissionService` as a constructor dependency. Order inside `update`:\n1. self-disable refusal (`users.self`), unchanged, comparing `actor.id`;\n2. inside the transaction, after the target lookup (`users` 404 unchanged): when `patch.disabled === true` and the target is not already disabled, read `effectiveKeys({ type: 'USER', id: userId }, 'global')`; if it holds `role.binding.owner`, read `effectiveKeys(actor, 'global')`; if that does not hold `role.binding.owner`, throw `new ForbiddenAppException({}, 'users.owner')` (HTTP 403) before any write;\n3. the last-admin guard (`users.lastAdmin`), unchanged.\n`UserRouteCommands`' `user.update` command passes `{ type: principal.actorType === 'agent' ? 'AGENT' : 'USER', id: principal.id }`. New i18n key `users.owner.40003`: en \"Only an Owner can disable an Owner\", zh \"只有所有者可以停用所有者\".\n\n**Scope** — In: service actor contract, PermissionService injection and ordered transaction check, route-command mapping, English/Chinese API i18n, and existing service/command/admin-user tests. Out: credential-key re-tiering (US-004), ticket approval paths (US-001 through US-003). `user.update` other than the Owner rule is not re-tiered; only `disabled` is patchable and the Owner rule covers the reported abuse. No web, CLI or MCP copy is added for the `users.owner` refusal beyond the API i18n key.\n\n**Interface**\n```typescript\nupdate(actor: PrincipalRef, userId: string, patch: UpdateUserDto): Promise<UserAdminDto>\n```\nRead `PermissionService.effectiveKeys(principal: PrincipalRef, scope: PermissionScope): Promise<ReadonlySet<string>>` and `OWNER_BINDING_KEY = 'role.binding.owner'`. Preserve self-disable-first ordering, administration locking, target 404s, token-version and cache invalidation behavior for successful writes. Update every service-test call to PrincipalRef and add an effectiveKeys mock returning an empty set by default. In the existing mutual-disable concurrency test grant Eve global owner rather than admin, keeping its [200,409] result and lock assertions; add Owner protection cases separately.",
+      "acceptanceCriteria": [
+        "[unit] UsersAdminService.update({ type: 'USER', id: 'admin-1' }, 'owner-1', { disabled: true }) rejects with ForbiddenAppException keyed users.owner when owner-1 holds role.binding.owner and admin-1 does not.",
+        "[unit] In that refused case, the repository's updateUser is never called.",
+        "[unit] UsersAdminService.update for actor { type: 'AGENT', id: 'agent-1' } lacking role.binding.owner rejects with ForbiddenAppException keyed users.owner when disabling the same Owner target.",
+        "[unit] With actor { type: 'USER', id: 'owner-2' } holding role.binding.owner, disabling owner-1 calls updateUser with disabled true.",
+        "[unit] With actor admin-1 disabling a target whose keys do not include role.binding.owner, updateUser is called with disabled true.",
+        "[unit] With actor admin-1 sending { disabled: false } for owner-1, updateUser is called without a ForbiddenAppException.",
+        "[unit] With actor { type: 'USER', id: 'owner-1' } disabling itself, update rejects with ForbiddenAppException keyed users.self, as before.",
+        "[unit] The registered user.update command run by an agent principal agent-1 calls UsersAdminService.update with first argument { type: 'AGENT', id: 'agent-1' }.",
+        "[integration] A global admin who is not an Owner receives HTTP 403 with message 'Only an Owner can disable an Owner' from PATCH /api/admin/users/:ownerId with { disabled: true }.",
+        "[integration] After that refusal, the Owner's disabled field remains false.",
+        "[integration] A second Owner receives HTTP 200 from the same PATCH for the first Owner when another active admin is present.",
+        "[integration] After that second Owner's successful PATCH, the first Owner's disabled field is true.",
+        "[integration] When a non-Owner's Owner-disable request is refused, the target's token version is unchanged."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "users",
+        "permissions"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing locked user-update transaction needs one PermissionService guard and an actor mapping in its sole route command; established patterns limit complexity, but Owner authorization requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/users/users-admin.service.ts",
+        "apps/api/src/users/user-route.commands.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/users/users-admin.service.spec.ts",
+        "apps/api/test/integration/users/admin-users.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an Owner target is already disabled, another disabled:true patch does not raise users.owner.",
+        "When a non-Owner attempts to disable a missing user, update returns the existing users 404 rather than users.owner.",
+        "When the user.update command runs as a user principal, the service receives { type: 'USER', id: <the user's id> }."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/users/users-admin.service.ts",
+          "reason": "`update` takes `actor: PrincipalRef`, and the service injects `PermissionService` for the Owner check."
+        },
+        {
+          "path": "apps/api/src/users/user-route.commands.ts",
+          "reason": "the `user.update` command passes the caller as a `PrincipalRef`."
+        },
+        {
+          "path": "apps/api/src/users/users-admin.service.spec.ts",
+          "reason": "every `update(...)` call passes a `PrincipalRef` instead of a bare id, and the service is built with a `PermissionService` mock whose `effectiveKeys` answers an empty set by default; add the Owner cases."
+        },
+        {
+          "path": "apps/api/src/users/user-route.commands.spec.ts",
+          "reason": "the `user.update` expectation asserts the `PrincipalRef` argument instead of the bare id."
+        },
+        {
+          "path": "apps/api/src/i18n/en/users.json",
+          "reason": "adds `owner.40003`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/users.json",
+          "reason": "adds `owner.40003`."
+        },
+        {
+          "path": "apps/api/test/integration/users/admin-users.integration.spec.ts",
+          "reason": "\"two admins disabling each other at once refuse exactly one with users.lastAdmin\" has Eve (a non-Owner admin) disable root, which is the Owner (`bindOwnerIfFirst`) and is now refused with 403 `users.owner`; rewrite the case so the two concurrent writers are both Owners (grant Eve the global `owner` role instead of `admin`), keeping its `[200, 409]` expectation and its lock assertions; add the Owner cases; other cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Transition PR creation and RAG indexing run after commit",
+      "description": "**Goal** — Defer VERIFIED PR creation and CLOSED RAG indexing until the owning transaction commits and suppress classic PR creation when a PR link already exists.\n\n**Motivation** — A settle failure rolls the transition back but leaves the PR, and the stale-approved retry opens a second one.\n\n**Approach** — `TicketTransitionsService` gains `AfterCommitService` as a required constructor dependency, placed right after `audit`. A private helper runs a task after commit: `if (!this.afterCommit.defer(task)) await task();`. Both `createPrForTicket` (VERIFIED) and `autoIndexTicket` (CLOSED, in both places it is called today) go through it. The PR task uses the helper as written. The index task returns the index promise chain (still catching and logging its own failure), is deferred the same way, and when no scope is open is started without being awaited (`void task()`), so the immediate path's response does not wait on the embedding call, as today. On the deferred approval path `executeOnce` already wraps its transaction in `afterCommit.scope`, so the task runs after commit and is dropped on rollback; on the immediate path no scope is open, so the task runs right after the transition's own transaction, as today. `createPrForTicket` also checks `ITicketRepository.hasPrLink(ticketId)` (any `TicketLink` with `linkType: 'pr'`, any source) right after the fleet-ownership check, inside its own try/catch: true returns before any provider call, and a thrown lookup logs a warning and also returns before any provider call (fail closed: no possible duplicate).\n\n**Scope** — In: required constructor injection, both CLOSED index call sites, VERIFIED PR scheduling, any-source PR-link repository query, all affected positional constructors and Nest test providers, and public ApprovalExecutionService.execute composition tests. Out: minimum-mode gate changes (US-001), self-fix controller behavior (US-003), review-decision provenance (US-007). Invite emails sent from a deferred `invite.create` redeem keep their current ordering; the invite keys are critical (human floor) since #381, and moving the send after commit would change the `emailed` flag the redeem answers. The after-commit tasks are best-effort and in-process, as `committedEffect` is: a crash between commit and the PR call loses that PR, as a crash does on the immediate path today. No outbox is added.\n\n**Interface** — `ITicketRepository` gains `hasPrLink(ticketId: string): Promise<boolean>`. Target constructor order: `(ticketRepo, txManager, permissions, audit, afterCommit: AfterCommitService, ragService?, ...the same optional dependencies in the same order)`. Use existing `AfterCommitService.defer(task): boolean` and `scope(fn)`. Implement hasPrLink with one count on TicketLink where linkType is 'pr'. Preserve catching/logging inside PR and index tasks so external failure cannot undo the committed transition. Add apps/api/test/integration/tickets/ticket-pr-link.integration.spec.ts. Positional constructors, mocked ticketLink.count defaults, and direct DI test providers listed in modifiedFiles must be updated together with the implementation; use real AfterCommitService instances in scope tests. Preserve the existing TransitionResult response envelope: verify resolves a result containing ticket, not a bare TicketResponseDto. PR-path fixtures use a CREATED ticket with configured VCS dependencies and no fleet ownership or prior PR link unless the case explicitly tests that guard; verify on a VERIFY_FIX ticket still follows its existing CLOSED path.",
+      "acceptanceCriteria": [
+        "[unit] TicketTransitionsService.verify outside any AfterCommitService.scope, with a VCS provider stub for a CREATED ticket eligible for classic PR creation, calls the provider's createPullRequest once before verify resolves.",
+        "[unit] verify inside afterCommit.scope whose callback then throws calls createPullRequest zero times.",
+        "[unit] verify inside afterCommit.scope whose callback resolves calls createPullRequest exactly once after the callback has returned.",
+        "[unit] A CLOSED transition inside afterCommit.scope whose callback then throws calls ragService.indexDocument zero times with autoIndexOnClose true.",
+        "[unit] A CLOSED transition inside afterCommit.scope whose callback resolves has called ragService.indexDocument once by scope resolution with autoIndexOnClose true.",
+        "[unit] A CLOSED transition outside any scope still resolves with result.ticket.status 'CLOSED' when ragService.indexDocument returns a promise that never settles.",
+        "[unit] verify with hasPrLink true calls createPullRequest zero times.",
+        "[unit] verify with hasPrLink true still resolves with result.ticket.status 'VERIFIED'.",
+        "[unit] verify with hasPrLink rejecting calls no VCS provider method, including createPullRequest, failing closed before any provider call.",
+        "[unit] verify with hasPrLink rejecting logs a warning through the class logger.",
+        "[unit] verify with hasPrLink rejecting still resolves with result.ticket.status 'VERIFIED'.",
+        "[unit] verify with createPullRequest rejecting resolves with result.ticket.status 'VERIFIED'.",
+        "[unit] verify with createPullRequest rejecting logs a warning through the class logger.",
+        "[unit] ApprovalExecutionService.execute of an approved request whose command calls AfterCommitService.defer(task) runs task once after the request has settled executed.",
+        "[unit] ApprovalExecutionService.execute of an approved request whose command defers task never runs task when the settle transition finds the request no longer approved.",
+        "[integration] PrismaTicketsRepository.hasPrLink(ticketId) returns true for a ticket with a TicketLink whose linkType is 'pr' and source is not FLEET.",
+        "[integration] hasPrLink(ticketId) returns false for a ticket whose only TicketLink has a linkType other than 'pr'.",
+        "[integration] In the auto-create-PR suite, verifying a ticket that already has a 'pr' link creates no new TicketLink.",
+        "[integration] In that existing-PR-link verification case, createPullRequest is never called."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "tickets",
+        "transactions",
+        "vcs",
+        "rag"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module transaction/effect ordering and required DI changes span workflow, indexing, VCS and approval execution; the behavior is transaction consistency rather than a new authorization or credential rule."
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts",
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/src/approvals/approval-execution.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/ticket-pr-link.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the deferred PR task's provider rejects after commit, the approval request remains executed.",
+        "When a deferred CLOSED index task rejects, the class logger warns and the ticket remains CLOSED.",
+        "When hasPrLink is queried for a ticket without links, it returns false."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+          "reason": "injects `AfterCommitService` after `audit`, runs `createPrForTicket` and `autoIndexTicket` through the after-commit helper, and returns early from `createPrForTicket` when `hasPrLink` answers true or throws."
+        },
+        {
+          "path": "apps/api/src/tickets/domain/ticket.domain.ts",
+          "reason": "`ITicketRepository` gains `hasPrLink`."
+        },
+        {
+          "path": "apps/api/src/tickets/prisma-tickets.repository.ts",
+          "reason": "implements `hasPrLink` with one `count` on `TicketLink` where `linkType: 'pr'`."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts",
+          "reason": "the positional constructor gains an `AfterCommitService` (a real instance) right after the audit argument, and the repository mocks that carry `hasFleetOwnership` (around lines 1248 and 1305) also gain `hasPrLink` answering false; add the after-commit cases."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.audit.spec.ts",
+          "reason": "the positional constructor gains an `AfterCommitService` right after the audit argument; assertions stay."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.autoindex.spec.ts",
+          "reason": "the positional constructor gains an `AfterCommitService` right after the audit argument; add the rollback case for the index."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "add the deferred-execution after-commit cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/memory/outbox-envelope.integration.spec.ts",
+          "reason": "the positional constructor gains an `AfterCommitService` right after the audit argument; assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts",
+          "reason": "both positional constructors gain an `AfterCommitService` right after the audit argument, and both mocked Prisma clients' `ticketLink` gain a `count` mock answering 0 by default (the real repository's `hasPrLink` reads it); add the existing-PR-link case."
+        },
+        {
+          "path": "apps/api/test/integration/outbox/producer-atomicity.integration.spec.ts",
+          "reason": "its Nest testing module provides `TicketTransitionsService` directly, so its providers gain `AfterCommitService`; assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-tenancy.integration.spec.ts",
+          "reason": "its testing module's providers gain `AfterCommitService`; assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-transition-race.integration.spec.ts",
+          "reason": "its testing module's providers gain `AfterCommitService`; assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/rag/rag-close-to-search.integration.spec.ts",
+          "reason": "its testing module's providers gain `AfterCommitService`; assertions stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "A review decision's approver is verified against the thread",
+      "description": "**Goal** — Credit a forge-human approver only when a repository writer is confirmed as an author in the named review thread on the same PR and repository.\n\n**Motivation** — `disagreedBy` comes from an artifact the runner uploads from a raw job's workspace, and the K2 design says these logins are \"unverified forge logins; consumers must check artifact trust and commenter permissions\".\n\n**Approach** — Review thread lookup: `GitHubAppClient.mintThreadReadToken(installationId, repoName)` mints a token scoped `{ contents: 'read', pull_requests: 'read', metadata: 'read' }` through the existing `mintScopedToken`. `GitHubAppClient.getReviewThread(token, threadId): Promise<ReviewThreadInfo | null>`, `ReviewThreadInfo = { repoOwner: string; repoName: string; prNumber: number; authors: readonly string[] }`. It POSTs `{ query, variables: { id: threadId } }` to the GraphQL endpoint with the bearer token. The endpoint is `<githubApiUrl>/graphql`, except that a `githubApiUrl` ending in `/api/v3` maps to the same host's `/api/graphql`. The query is `query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { name owner { login } } } comments(first: 100) { nodes { author { login } } } } } }`. A 200 whose `data` is absent, or whose `data.node` is null or has no `pullRequest`, answers `null` (a `threadId` that is not a review-thread node id lands here). Any non-200 throws `RepoCheckException('provider_error')`. `authors` lists each non-null `author.login`, in order, without duplicates.\n\nVerified approver: `ReviewEventMinter.mintOne` mints its token with `mintThreadReadToken` instead of `mintReadOnlyToken`. It keeps one `getRepoRole` call per non-bot login, as today, but collects every writer (`admin`/`maintain`/`write`) in `disagreedBy` order instead of stopping at the first; a role-check error keeps today's `permission-check-failed` skip. With no writer it skips `no-writer` as today and makes no thread call. With writers, it calls `getReviewThread(token, row.threadId)` exactly once. The thread matches when its `prNumber` equals `row.prNumber` and its `repoOwner`/`repoName` equal the repo's (case-insensitive). The approver is the first writer whose login is among the thread's `authors` (case-insensitive) when the thread matches; the mint then runs under `{ requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:<login>' }`. In every other case (no writer among the authors, a null thread, a thread for another PR or repo, or a thrown lookup) the approver is the first writer and the mint runs under the same object with `satisfiedBy: 'none'`. `ReviewDecisionWriter.mint`'s audit summary ends `approver github:<login> (verified thread author)` when the context's `satisfiedBy` is `'human'` and `approver github:<login> (unverified)` otherwise, replacing the fixed \"(one of the thread's commenters)\" text.\n\n**Scope** — In: a distinct thread-read token, bounded one-call GitHub GraphQL lookup, verified/unverified mint context, writer audit wording and affected unit/integration regressions. Out: fresh runner forge tokens and broker cache bypass (US-008 through US-010). An unverified review decision (`satisfiedBy: 'none'`) is still an active memory decision that later reviews consume; only its audit provenance differs. This is the ruling-14 choice (downgrade, not drop). Existing review decisions minted before this change keep their recorded approval; nothing is re-verified. \"Verified\" in ruling 14 means the writer authored a comment in the review thread that the event's `threadId` names, on the same PR and repo. It does not prove that this comment is the disagreement, or that the runner-supplied `threadId` belongs to this finding; tying a decision to a specific comment needs nax to report comment ids and is not part of this bundle. US-007 only: `FleetReviewEvent.approverLogin` keeps recording the chosen login for an unverified mint as well; the verified/unverified distinction lives in the action approval (`satisfiedBy`) and the audit summary. US-007 only: GitLab review threads are not looked up; review decisions are GitHub-only today. US-007 only: a thread with more than 100 comments is judged on its first 100 authors. US-007 only: role checks stay one `getRepoRole` call per non-bot login, as today; ruling 14's \"one call per event\" is the thread lookup.\n\n**Interface**\n```typescript\nmintThreadReadToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }>\ngetReviewThread(token: string, threadId: string): Promise<ReviewThreadInfo | null>\n```\nExport `ReviewThreadInfo = { repoOwner: string; repoName: string; prNumber: number; authors: readonly string[] }`. Preserve existing guard, retries, role-check failure skips, bookkeeping and credential-safe logging. Update minter test fixtures to matching threads, replace old read-only-token expectations, expand AC-6 role-call logins to ['carol', 'alice', 'dave'], and update the writer integration summary under satisfiedBy human.",
+      "acceptanceCriteria": [
+        "[unit] GitHubAppClient.mintThreadReadToken(installationId, 'app') requests an installation token for repository app with permissions exactly { contents: 'read', pull_requests: 'read', metadata: 'read' }.",
+        "[unit] GitHubAppClient.getReviewThread('tok', 'PRRT_1') sends one POST to <githubApiUrl>/graphql with authorization 'Bearer tok' and body.variables { id: 'PRRT_1' }.",
+        "[unit] With githubApiUrl 'https://ghe.example/api/v3', getReviewThread posts to 'https://ghe.example/api/graphql'.",
+        "[unit] A 200 whose data.node holds PR 7 in acme/app with comment authors alice, null and alice returns { repoOwner: 'acme', repoName: 'app', prNumber: 7, authors: ['alice'] }.",
+        "[unit] getReviewThread returns null for a 200 response whose data.node is null.",
+        "[unit] getReviewThread returns null for a 200 response with an errors array and no data.",
+        "[unit] getReviewThread rejects with RepoCheckException reason provider_error for a 502 response.",
+        "[unit] ReviewEventMinter for PR 7 of acme/app with disagreedBy ['alice'], alice holding write and a matching thread with authors ['alice'], mints once under { requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: 'github:alice' }.",
+        "[unit] In that verified case, ReviewEventMinter obtains its token with mintThreadReadToken.",
+        "[unit] In that verified case, ReviewEventMinter never calls mintReadOnlyToken.",
+        "[unit] The same event with thread authors ['bob'] mints once under satisfiedBy 'none' and approverId 'github:alice'.",
+        "[unit] The same event mints once under satisfiedBy 'none' when getReviewThread returns null.",
+        "[unit] The same event mints once under satisfiedBy 'none' when getReviewThread rejects.",
+        "[unit] The same event mints once under satisfiedBy 'none' when getReviewThread returns PR 8 of acme/app with authors ['alice'].",
+        "[unit] The same event mints once under satisfiedBy 'none' when getReviewThread returns PR 7 of acme/other with authors ['alice'].",
+        "[unit] An event with disagreedBy ['bob', 'alice'], both holding write, and thread authors ['alice'] mints under satisfiedBy 'human' and approverId 'github:alice'.",
+        "[unit] An event with disagreedBy ['Alice'] and thread authors ['alice'] mints under satisfiedBy 'human'.",
+        "[unit] An event whose disagreedBy logins all hold read is skipped with reason no-writer.",
+        "[unit] For that no-writer event, getReviewThread is never called.",
+        "[unit] ReviewDecisionWriter.mint under satisfiedBy 'none' and approverId 'github:alice' records an audit entry whose summary contains 'github:alice (unverified)'."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "reviews",
+        "github",
+        "audit"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "External GraphQL identity verification, scoped token minting, role checks and durable approval provenance require security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-event.minter.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/memory/review-decision.writer.ts",
+        "apps/api/src/fleet/reviews/review-event.minter.spec.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When writers exist, ReviewEventMinter calls getReviewThread(token, row.threadId) exactly once for the event.",
+        "When a matching thread differs from the repository only in owner/name casing, the writer author is credited with satisfiedBy human.",
+        "When a role lookup throws after an earlier writer was found, ReviewEventMinter skips permission-check-failed and never mints.",
+        "When a 200 node has no pullRequest, getReviewThread returns null.",
+        "When ReviewDecisionWriter.mint runs under satisfiedBy human, its summary ends 'approver github:<login> (verified thread author)'.",
+        "When a thread lookup fails, the event is marked minted with the first writer's approverLogin rather than skipped or retried solely for the lookup failure."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.ts",
+          "reason": "gains `mintThreadReadToken`, `getReviewThread` and the exported `ReviewThreadInfo`."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+          "reason": "add the `mintThreadReadToken` and `getReviewThread` cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/src/fleet/reviews/review-event.minter.ts",
+          "reason": "mints with `mintThreadReadToken`, collects every writer, calls `getReviewThread` once, and mints verified or unverified."
+        },
+        {
+          "path": "apps/api/src/fleet/reviews/review-event.minter.spec.ts",
+          "reason": "the GitHub client mock gains `mintThreadReadToken` and `getReviewThread` (answering a matching thread whose authors include the existing cases' approver); every assertion on `mintReadOnlyToken` (the one in the test titled AC-1/2/3 around line 61, and those in AC-9, AC-10 and AC-11) asserts `mintThreadReadToken` instead; AC-6's expected `getRepoRole` logins grow to every non-bot login (`['carol', 'alice', 'dave']`) because the loop no longer stops at the first writer; other assertions stay."
+        },
+        {
+          "path": "apps/api/src/memory/review-decision.writer.ts",
+          "reason": "the audit summary reads the verified or unverified wording from the action context."
+        },
+        {
+          "path": "apps/api/src/memory/review-decision.writer.spec.ts",
+          "reason": "add the verified and unverified summary cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/memory/review-decision-writer.integration.spec.ts",
+          "reason": "the exact summary it asserts under `satisfiedBy: 'human'` changes from \"(one of the thread's commenters)\" to \"(verified thread author)\"."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "The API honours a fresh token request for FIX and REVIEW",
+      "description": "**Goal** — Preserve a validated fresh-token wire flag and bypass token reuse only for held FIX/REVIEW job requests.\n\n**Motivation** — The API reuses a cached installation token until `gitTokenReuseMarginSec` (300 s) before it expires, and the runner's `TokenCache` refreshes only inside its own margin, so `CredentialBroker.currentToken(job)` can hand nax a token with 5 to 60 minutes left.\n\n**Approach** — `TokenRequest` (`packages/fleet-protocol/src/index.ts`, types only) gains `fresh?: true`. `parseTokenRequest` accepts `fresh: true` (kept), `fresh: false` (dropped) and refuses any other present value with the parser's `tokenRequest` validation error. `SyncService.grantTokens` forwards `fresh: true` to `GitTokenBroker.mint` only for a request that carries it and whose job is `FIX` or `REVIEW`. `GitTokenBroker.mint`'s request gains `fresh?: boolean`: when true it skips the cache reuse check, mints through the existing `fresh()` path (for `purpose: 'fix'` that path ends in `mintInstallationToken`; for `'review'`, in `mintReviewToken`), and replaces the cache entry under the same key.\n\n**Scope** — In: the explicitly authorized types-only protocol package change despite this story's binding apps/api workdir, strict parser behavior, fenced sync forwarding, purpose-aware cache bypass and existing parser/sync/broker unit specs. Out: producing the runner flag (US-009), waiting and file writers (US-010), thread-read token scopes (US-007). The runner-sync integration suite gains no fresh-token case; the parser, sync and broker units cover it, and the live check exercises it end to end. Deployment is API before runner with no protocol version bump or compatibility fallback.\n\n**Interface** — `TokenRequest` target: `{ jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }`. `GitTokenBroker.mint` request gains `fresh?: boolean`. API imports from @nathapp/fleet-protocol remain type-only. Preserve exact missing-fresh request shapes, existing cache keys and error mapping, default-branch protection checks for FIX, reviewer-specific mint permissions, runnerId/leaseEpoch/state fences and minting outside the sync transaction. A fresh request on any job other than FIX/REVIEW is ignored and may reuse the broker cache.",
+      "acceptanceCriteria": [
+        "[unit] The sync parser returns token request { jobId: 'j1', leaseEpoch: 1, fresh: true } with fresh true retained.",
+        "[unit] The sync parser returns a token request with no fresh property for { jobId: 'j1', leaseEpoch: 1, fresh: false }.",
+        "[unit] The sync parser throws its tokenRequest ValidationAppException for { jobId: 'j1', leaseEpoch: 1, fresh: 'yes' }.",
+        "[unit] With purpose fix and a cached same-job/epoch token expiring in 50 minutes, GitTokenBroker.mint({ ..., fresh: true }) calls mintInstallationToken once.",
+        "[unit] That fresh fix mint returns the newly minted token rather than the cached token.",
+        "[unit] The same fix call without fresh returns the cached token.",
+        "[unit] That no-fresh cached fix call invokes neither mintInstallationToken nor mintReadOnlyToken.",
+        "[unit] After the fresh mint, a following same-job/epoch mint without fresh returns the new token without another mintInstallationToken call.",
+        "[unit] With purpose review and fresh true over a cached review token, GitTokenBroker.mint calls mintReviewToken once.",
+        "[unit] SyncService.grantTokens for a held FIX job and { jobId, leaseEpoch, fresh: true } calls broker.mint once with fresh true.",
+        "[unit] SyncService.grantTokens for a held REVIEW job and { jobId, leaseEpoch, fresh: true } calls broker.mint with fresh true.",
+        "[unit] SyncService.grantTokens for a held RUN job and fresh true calls broker.mint with no fresh property, so normal cache reuse remains possible.",
+        "[unit] A FIX token request without fresh calls broker.mint with no fresh property."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "api",
+        "security",
+        "tokens",
+        "fleet-protocol"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "An additive type-only flag, parser branch, purpose-conditioned forwarding and cache predicate reuse existing sync fencing and mint paths without new abstractions; credential handling requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync-request.parser.ts",
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/git-broker/git-token.broker.ts",
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a repo-scoped THREAD token request carries fresh true, the broker request omits fresh and retains readOnly true.",
+        "When a fresh FIX mint finds the default branch unprotected, the broker returns default_branch_unprotected without returning the cached token.",
+        "When a token request fails its lease fence, no fresh mint occurs."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "packages/fleet-protocol/src/index.ts",
+          "reason": "`TokenRequest` gains `fresh?: true` (types only)."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-request.parser.ts",
+          "reason": "`parseTokenRequest` keeps `fresh: true`, drops `fresh: false`, refuses any other value."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "`grantTokens` forwards `fresh: true` for FIX and REVIEW jobs only."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.ts",
+          "reason": "`mint` skips cache reuse when `fresh` is true and replaces the entry."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-request.parser.spec.ts",
+          "reason": "add the `fresh` cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts",
+          "reason": "add the forwarding cases; existing cases that assert the exact `mint` argument stay valid because a request without `fresh` adds no key."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/git-token.broker.spec.ts",
+          "reason": "add the fresh-mint cases; existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "The runner token cache asks for a fresh token",
+      "description": "**Goal** — Add per-job minimum token lifetime demand and retain its fresh flag through the runner's final sync-body reconstruction.\n\n**Motivation** — nax reads `forge-token` once at startup and uses it for every forge call and the push.\n\n**Approach** — `TokenCache.requireFresh(jobId, leaseEpoch, minRemainingMs)` records a minimum remaining life on the job's repo-less entry (creating a wanted entry when there is none), clears that entry's stored error, and calls the `onNeed` listeners. `minRemainingMs` 0 clears the minimum. `requests(nowMs)` composes the two thresholds as: a request is due when the entry is outside its cool-down and its token is missing or has less than `max(refreshMarginMs, minRemainingMs)` left; the request carries `fresh: true` only when `minRemainingMs > 0` and the token is missing or has less than `minRemainingMs` left. `apply` clears the minimum once it stores a token with at least that much left; a token still short of it starts the cool-down. `TokenCache.error(jobId, leaseEpoch, repoId?)` answers the entry's stored error even while a live token is cached (`state()` keeps hiding it then, unchanged). `buildSyncRequest` (`apps/runner/src/sync/batch.ts`), which rebuilds each token request for the wire, forwards `fresh: true` when the request carries it and adds no `fresh` key otherwise; today it copies only `jobId`, `leaseEpoch` and `repoId`.\n\n**Scope** — In: in-memory minimum tracking, requireFresh/error methods, request/cooldown/apply behavior, final wire forwarding and existing cache/batch unit specs. Out: API parsing/cache bypass (US-008), broker polling and forge-token writers (US-010). A token request for a repo-scoped entry (`repoId`) never carries `fresh`; only the job's own token is written to `forge-token`. No new network client or daemon transport is introduced.\n\n**Interface**\n```typescript\nrequireFresh(jobId: string, leaseEpoch: number, minRemainingMs: number): void\nerror(jobId: string, leaseEpoch: number, repoId?: string): string | null\n```\nUse upstream `TokenRequest = { jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }`. Preserve highest-epoch selection per job/repo scope, repo-less priority, the 64-request cap, response-to-request epoch correlation and state()'s live-token preference. Keep the existing exact-shape batch assertion for a request without fresh. Normal refresh boundary regressions must remain unchanged; the new minimum is satisfied by at least minRemainingMs remaining.",
+      "acceptanceCriteria": [
+        "[unit] TokenCache with a 5-minute refresh margin and a job token with 40 minutes left returns { jobId, leaseEpoch: epoch, fresh: true } from requests(now) after requireFresh(jobId, epoch, 3_000_000).",
+        "[unit] With a token at 55 minutes left after the same requireFresh, requests(now) contains no entry for that job.",
+        "[unit] With no requireFresh and a token at 40 minutes left, requests(now) contains no entry for that job.",
+        "[unit] With no requireFresh and a token at 3 minutes left, requests(now) contains a job entry with no fresh property.",
+        "[unit] After requireFresh and apply of a token with 59 minutes left, state(...) answers that token.",
+        "[unit] After requireFresh and apply of a token with 59 minutes left, requests(now) contains no entry for that job.",
+        "[unit] After requireFresh and apply of a token with 40 minutes left, requests(now + 1) contains no entry for that job.",
+        "[unit] In that short-token case, requests(now + cooldownMs + 1) contains the job entry with fresh true.",
+        "[unit] requireFresh for a job with no entry makes wanted(jobId, epoch) return true.",
+        "[unit] For an otherwise empty TokenCache, after requireFresh(jobId, epoch, 3_000_000) creates the job entry, requests(now) returns [{ jobId, leaseEpoch: epoch, fresh: true }].",
+        "[unit] requireFresh calls each onNeed listener once.",
+        "[unit] After requireFresh followed by requireFresh(jobId, epoch, 0), a token with 40 minutes left yields no job entry in requests(now).",
+        "[unit] With a live token at 40 minutes left and an apply carrying error default_branch_unprotected, error(jobId, epoch) returns 'default_branch_unprotected'.",
+        "[unit] In that live-token error case, state(...) still answers the live token, unchanged.",
+        "[unit] requireFresh clears a stored error so error(jobId, epoch) returns null afterwards.",
+        "[unit] buildSyncRequest given token requests [{ jobId: 'j1', leaseEpoch: 1, fresh: true }, { jobId: 'j2', leaseEpoch: 1 }] emits that same tokenRequests array, with no fresh property on the second entry."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "runner",
+        "security",
+        "tokens",
+        "sync"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing runner modules gain a per-entry lifetime minimum, error accessor and one serialized option while retaining their established epoch/cooldown model; token state requires security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/credentials/token-cache.ts",
+        "apps/runner/src/credentials/token-cache.spec.ts",
+        "apps/runner/src/sync/batch.ts",
+        "apps/runner/src/sync/batch.spec.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "suggestedCriteria": [
+        "When a stored token has exactly minRemainingMs remaining, requireFresh produces no fresh request for that minimum.",
+        "When a fresh minimum is active for one epoch, another epoch's token or error does not satisfy or overwrite it.",
+        "When repo-scoped and repo-less entries coexist, only the repo-less request can carry fresh true.",
+        "When requireFresh creates a new entry, each onNeed listener is invoked exactly once rather than once for creation and again for the minimum."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/credentials/token-cache.ts",
+          "reason": "gains `requireFresh`, `error`, the composed request rule and the `fresh` flag."
+        },
+        {
+          "path": "apps/runner/src/credentials/token-cache.spec.ts",
+          "reason": "add the fresh cases; existing cases stay."
+        },
+        {
+          "path": "apps/runner/src/sync/batch.ts",
+          "reason": "`buildSyncRequest` forwards `fresh: true` on a token request that carries it."
+        },
+        {
+          "path": "apps/runner/src/sync/batch.spec.ts",
+          "reason": "add the `fresh` forwarding cases; the existing exact-shape assertion for a request without `fresh` (around line 119) stays as it is."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "FIX and REVIEW write a forge token with at least 50 minutes left",
+      "description": "**Goal** — Await a token with at least 50 minutes remaining before each REVIEW/FIX nax step writes its forge-token file.\n\n**Motivation** — The user ruled on 2026-11-02 for a koda-only fresh mint; a generic nax token-refresh command is a later, separate nax feature.\n\n**Approach** — `CredentialBroker.freshToken(job, minRemainingMs, isCancelled?)` calls `requireFresh`, then polls like `firstToken` (same `waitMs`/`pollMs`) and answers `{ ok: true, token }` once the live token has at least `minRemainingMs` left, `{ ok: false, reason: 'git token: <error>' }` as soon as `tokens.error(...)` is set, `{ ok: false, reason: 'git token: timeout' }` at the deadline and `{ ok: false, reason: 'cancelled' }` when cancelled; before it returns, on success and on every refusal, it calls `requireFresh(jobId, leaseEpoch, 0)`, so no stale minimum keeps asking for fresh mints. `CredentialProvider` gains the optional `freshToken`. `HostExecutor` exports `FORGE_TOKEN_MIN_REMAINING_MS = 3_000_000` (50 minutes). Both places that write `forge-token` (`reviewEnv`, used by the REVIEW spawn and by the FIX job's review step, and `spawnFixStep`, the FIX job's fix step) call `freshToken(job, FORGE_TOKEN_MIN_REMAINING_MS)` instead of `currentToken`, throw `new Error(reason)` on a refusal before writing the file, and throw `new Error('git token: none')` when the provider has no `freshToken`.\n\n**Scope** — In: broker polling over the real token cache, optional shared credential seam, exported lifetime constant, both forge-token writer locations and all affected injected providers/test cases. Out: cache/wire request production (US-009), API fresh mint support (US-008), review provenance (US-007). A generic nax forge-token refresh command is not part of this bundle. API deploys before runner; no old-API fallback is added.\n\n**Interface**\n```typescript\nfreshToken?(job: JobRow, minRemainingMs: number, isCancelled?: () => boolean): Promise<{ ok: true; token: string } | { ok: false; reason: string }>\n```\nCredentialBroker implements this optional CredentialProvider method. Export `FORGE_TOKEN_MIN_REMAINING_MS = 3_000_000`. Use existing BrokerTiming waitMs/pollMs, injected wall clock and sleep. Preserve currentToken and existing git/socket consumers, but never fall back to currentToken in REVIEW/FIX writers. Preserve mode-0600 forge-token handling, path-only NAX_FORGE_TOKEN_FILE, deletion at spawn failure/cleanup/attempt wipe and no token logging, argv exposure or journal persistence. Unit tests drive a real TokenCache. The host-executor injected-world provider gains a default successful freshToken; currentToken-null cases become an equivalent freshToken refusal/absence, omitCurrentToken also omits freshToken, and the inline provider around line 754 gains freshToken.",
+      "acceptanceCriteria": [
+        "[unit] CredentialBroker.freshToken(job, 3_000_000) over a real TokenCache holding a token with 40 minutes left returns { ok: true, token: 'new' } once the cache receives token 'new' with 59 minutes left.",
+        "[unit] freshToken over a cache holding a live token with 40 minutes left returns { ok: false, reason: 'git token: default_branch_unprotected' } once the cache receives that error for the job.",
+        "[unit] freshToken returns { ok: false, reason: 'git token: timeout' } when no qualifying token arrives within waitMs.",
+        "[unit] After that timeout, TokenCache.requests(now) has no fresh entry for the job.",
+        "[unit] freshToken over a cache whose token already has 55 minutes left returns an ok:true result immediately.",
+        "[unit] After that immediate freshToken success, TokenCache.requests(now) has no entry for the job.",
+        "[unit] FORGE_TOKEN_MIN_REMAINING_MS imported from executor/host-executor equals 3_000_000.",
+        "[unit] Starting a REVIEW job calls the provider's freshToken once with the job and 3_000_000.",
+        "[unit] After that REVIEW start, the job's forge-token file holds the token returned by freshToken.",
+        "[unit] Starting a FIX job's review step through reviewEnv calls freshToken with the job and 3_000_000.",
+        "[unit] After that FIX review-step start, forge-token holds the token returned by freshToken.",
+        "[unit] Starting a FIX job's fix step through spawnFixStep calls freshToken with the job and 3_000_000.",
+        "[unit] After that FIX fix-step start, forge-token holds the token returned by freshToken.",
+        "[unit] Starting a FIX fix step whose freshToken returns { ok: false, reason: 'git token: timeout' } throws an error with message 'git token: timeout'.",
+        "[unit] In that refused FIX fix-step case, no forge-token file exists in the job directory.",
+        "[unit] Starting a REVIEW job with a provider that has no freshToken throws an error with message 'git token: none'.",
+        "[unit] When a fresh mint is refused with default_branch_unprotected, the FIX/REVIEW step throws 'git token: default_branch_unprotected'.",
+        "[unit] When a fresh mint is refused with default_branch_unprotected, no forge-token file is written for the FIX/REVIEW step."
+      ],
+      "tags": [
+        "review-p1-rest",
+        "runner",
+        "security",
+        "tokens",
+        "executor"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The broker mirrors firstToken polling and two existing executor writer locations switch to that method, with no new transport or file mechanism; secret lifetime and refusal cleanup require security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/credentials/broker.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/credentials/token-cache.ts",
+        "apps/runner/test/unit/host-executor.spec.ts",
+        "apps/runner/test/unit/broker.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When isCancelled returns true while freshToken waits, it returns { ok: false, reason: 'cancelled' } and clears the requested minimum.",
+        "When CredentialBroker.closeAll is called during a freshness wait, freshToken refuses as cancelled instead of waiting until the deadline.",
+        "When freshToken refuses because of a stored mint error, subsequent TokenCache.requests carries no stale fresh demand.",
+        "When the REVIEW or FIX review-step provider returns a timeout refusal, no forge-token file is created.",
+        "When the returned token has exactly 3_000_000 milliseconds left, freshToken accepts it."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/credentials/broker.ts",
+          "reason": "gains `freshToken` and the optional `CredentialProvider.freshToken`."
+        },
+        {
+          "path": "apps/runner/src/executor/host-executor.ts",
+          "reason": "`reviewEnv` and `spawnFixStep` use `freshToken(job, FORGE_TOKEN_MIN_REMAINING_MS)`; exports the constant."
+        },
+        {
+          "path": "apps/runner/test/unit/broker.spec.ts",
+          "reason": "add the `freshToken` cases; existing cases stay."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "the injected-world helper's fake provider gains `freshToken` answering `{ ok: true, token: TOKEN }` by default; its `currentToken: null` option (used by the cases around lines 704, 783 and 838 that expect `git token: none`) becomes a `freshToken` refusal or absence that keeps those expectations; its `omitCurrentToken` option also omits `freshToken`; the inline provider around line 754 that has only `currentToken` gains `freshToken`; add the new cases."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository discovery and architecture: codebase-memory MCP is unavailable in this session, so discovery used direct file reads and targeted text searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. This is an enhancement of existing production behavior, not greenfield work. The supplied detected framework labels are inaccurate: .nax/mono/apps/api/context.md:24 identifies NestJS 12 with Fastify and Nathapp platform modules, not Express; the root repository guidance identifies Nuxt 4, not Next.js, for the unaffected web client. The API owns authorization, workflow, persistence and forge integration; the runner is Bun-only ESM and calls the server through sync. Read .nax/mono/apps/api/context.md and the nathapp-nestjs-patterns skill before implementing API code; read .nax/mono/apps/runner/context.md before runner work. Generated AGENTS.md files are not authoring sources. API Prisma model/types come from src/generated/prisma/client, not @prisma/client; use local status/action constants and existing transaction/repository patterns. No schema or migration is required. Only US-008 crosses its declared apps/api workdir for the explicitly authorized types-only packages/fleet-protocol/src/index.ts change; retain the binding workdir rather than changing it to repository scope. No web or CLI implementation is needed.\n\nUS-001 impact: apps/api/src/approvals/approval-gate.service.ts:63 declares gate opts without minMode. Lines 102-111 resolve primary plus alsoKeys concurrently and reduce strictly on rank, retaining the first resolution on ties. Insert the minimum-mode composition after that reduction, never inside the resolver or before the multi-key reduction. apps/api/src/approvals/domain/approval-mode.ts:3 defines none < self < agent < human. apps/api/src/approvals/approval-policy.resolver.ts:12 defines the resolution shape and :33 returns source not-approvable for non-approvable catalog entries. Preserve the winning floor, discard policy only when the minimum actually raises the mode, and leave stronger/equal policy resolutions untouched. Gate request defaults already exist in approval-gate.service.ts:194-223: null policy produces DEFAULT_APPROVAL_TIMEOUT_SEC, reject, approverMustHoldAction true and requireDistinctApprover false. This avoids a weaker policy's auto-approve timeout releasing the new minimum. Direct USER subjects satisfy raised modes without a pending request; the mode floor does not mean humans must request agent approval. apps/api/src/approvals/route/approval-route-gate.ts:11 defines RouteGateCall and :88 builds exact gate opts using conditional spreads. Add conditional forwarding there, preserving absent-property shapes and the existing permission check and redeem bypass. Existing tests are approval-gate.service.spec.ts and route/approval-route-gate.spec.ts; gate tests already provide real registry, action contexts, resolver stubs, transaction stubs and request capture (approval-gate.service.spec.ts:24-50). No new files are needed.\n\nUS-002 impact: apps/api/src/tickets/tickets.service.ts:188 implements findByRef through loadTicket; :204-219 resolves the project and scoped ref and rejects missing/soft-deleted rows with NotFoundAppException({}, 'tickets'). Reuse this path, not a raw/global ref lookup, for the new floor service. apps/api/src/tickets/domain/ticket.domain.ts:178 currently ends the repository surface with hasFleetOwnership; US-002 and US-006 both add independent methods to this interface and to prisma-tickets.repository.ts, so coordinate shared-file changes without inventing dependencies. prisma-tickets.repository.ts:362 already creates TicketActivity rows with actorUserId, actorAgentId, action and toStatus. Add one findFirst filtered by ticketId, STATUS_CHANGE and requested toStatus, ordered createdAt descending then id descending. Map agent first, then user, else null. The floor is identity plus principal-kind equality, not id equality alone, and only reads activity while VERIFY_FIX. Existing tickets.service.spec.ts mocks must gain findLatestStatusChangeActor. Create test/integration/tickets/ticket-latest-status-actor.integration.spec.ts using real DB fixtures and the shared DB gate. Include newest matching transition rather than newest activity of any status; preserve project tenancy and soft-delete invariants.\n\nUS-003 impact: apps/api/src/tickets/tickets.controller.ts:323, :400 and :430 implement verify, verifyFix and close. All already validate required comments before routeGate.run and convert pending outcomes to ApprovalPending. verifyFix :409-416 parses both boolean true and string 'true' and chooses the approve/return permission key. Compute the floor with the principal before the gate on the approve branch, verify and close; never evaluate it on return. Preserve input body normalization, selected variants, existing permission guards and exact no-minMode call shapes. Do not move workflow execution into the controller. ticket-route.commands.ts:125/131 already registers separate approval/return execution handlers. Existing controller tests need a selfFixApprovalFloor stub returning undefined by default. apps/api/test/integration/tickets/gated-ticket-review-routes.integration.spec.ts:30-34 submits the existing fixtures' fixes as root; these regressions must continue, since the approving agents are not the fix actor. Its :53-58 clears requests, decisions and policies between cases. Add real HTTP cases submitting /fix as a Developer agent, then testing all three closing routes, persisted status, self-decision refusal, a different agent, and root self-approval. The self-fix minimum is contextual, not a permanent catalog floor, and PATCH does not acquire it.\n\nUS-004 impact: apps/api/src/permissions/catalog.ts:409 classifies critical keys, reads, deletes/removes and HIGH_RISK_PREFIXES, then defaults to medium. Export the exact CREDENTIAL_KEYS set and recognize its members as high after critical/read checks and before medium fallback. buildEntry :439-457 already maps high to approval.default agent while retaining floor none; do not change buildEntry, unrelated agent/user update tiers, permission eligibility or explicit-policy precedence. Update catalog.spec.ts's independent expectedRisk oracle as well as specific credential assertions. ProjectsController.update at apps/api/src/projects/projects.controller.ts:138-147 parses the DTO and detects ciWebhookToken with !== undefined; it already uses the CI-token redeem variant and conditionally forwards redeem. Add minMode in the same secret-bearing branch, including null, without losing the redemption header or redaction flow. ProjectsController unit exact-argument assertions for token-bearing mixed patches change; ordinary patches must keep their old shape. test/integration/projects/gated-project-ci-token-route.integration.spec.ts:118-123 explicitly pins the insecure immediate FM-1 behavior; replace it with 202 and unchanged token. Existing explicit-policy, mixed-patch, redaction and redeem cases in that file stay. test/integration/agents/gated-agent-key-routes.integration.spec.ts:15-21 documents why raw keys only return on redeem; its :93-99 gives the requesting agent global create/rotate keys and :103 onward clears approval state. Add no-policy agent creation and root credential-return regressions there. Catalog re-tiering changes defaults for agent.create, agent.key.rotate and user.create, not floors; policy-less agents now park instead of receiving raw credentials.\n\nUS-005 impact: apps/api/src/users/users-admin.service.ts:95 currently accepts actorId string, rejects self-disable at :99, enters membership.afterCommit plus txManager.run at :105-106, takes lockUserAdministration at :107, reads target at :108, runs last-admin logic at :113-117, then writes disabled/token-version at :124-127. Change actor to PrincipalRef and inject PermissionService; retain the lock, transaction, self-disable-first and target-404 ordering. Only a newly disabling patch reads the target's global effective keys; only an Owner target requires the actor's effective keys. Refuse non-Owners with ForbiddenAppException({}, 'users.owner') before any user write, token bump or audit. Re-enabling and already-disabled targets must not enter the Owner check. apps/api/src/permissions/permission.service.ts:69 already obtains effectiveKeys; :43-46 documents scope/cache semantics. Use OWNER_BINDING_KEY, not role-name string checks or isGlobalAdmin, because Admin does not imply Owner. user-route.commands.ts:56 currently passes principal.id; preserve actor kind with the specified PrincipalRef mapping. users-admin.service.spec.ts:63 positionally constructs the service and many calls still pass strings; migrate all of them and provide effectiveKeys returning an empty set by default. Update user-route.commands.spec.ts's first-argument assertions. Add owner.40003 to apps/api/src/i18n/en/users.json and zh/users.json; existing English refusal keys are visible at en/users.json:5-6. In test/integration/users/admin-users.integration.spec.ts:215-258 the mutual-disable barrier deliberately queues two writers on the administration advisory lock and expects [200,409]; grant Eve Owner rather than Admin so the new Owner refusal does not mask the last-admin serialization regression. Add independent non-Owner refusal and second-Owner success cases without disrupting that suite's stateful setup.\n\nUS-006 impact: TicketTransitionsService constructor at apps/api/src/tickets/state-machine/ticket-transitions.service.ts:90-107 puts required collaborators before optional rag/VCS/event/outbox dependencies. Insert a required AfterCommitService immediately after audit and keep every optional positional slot in order. Current autoIndexTicket :192-228 starts a caught promise chain and returns void; return that chain from the task so a deferred scope can flush it, while preserving no-scope fire-and-forget latency. Current createPrForTicket :235-334 catches provider failures; :255-267 checks fleet ownership but allows the classic path on lookup failure. Add an independent hasPrLink guard immediately after that check, fail closed on its own lookup failure, and keep provider failures warning-only. Any-source PR links count, not merely FLEET links. Main CLOSED/VERIFIED effects run at :734-738 immediately after an inner txManager.run, but an approval owns an outer joined transaction; a second index call is at :535 in close. Both index sites and the VERIFIED PR must defer to the existing scope. AfterCommitService at permissions/after-commit.service.ts:30-49 queues tasks in AsyncLocalStorage, joins nested scopes, awaits flushed tasks after a successful callback, and drops them on rejection. It is already exported by the global PermissionsModule (permissions/permissions.module.ts:41-61); use the same injected instance as ApprovalExecutionService, never a new production instance. ApprovalExecutionService.executeOnce at approvals/approval-execution.service.ts:281-324 already wraps the transaction in afterCommit.scope and settles the request before resolving; no new transaction abstraction or outbox is needed. Its existing command follow-up hook at :345 is separate from this service-level effect scheduling. Validate composition through public execute, including failed settle after command execution. Add hasPrLink to ITicketRepository and implement one ticketLink.count({where:{ticketId,linkType:'pr'}}), leaving fleet ownership semantics intact.\n\nUS-006 compatibility/test edits: update all new TicketTransitionsService(...) positional callers in src/tickets/state-machine/ticket-transitions.service.spec.ts (including :1073, :1256, :1312), ticket-transitions.audit.spec.ts:18, ticket-transitions.autoindex.spec.ts:11, test/integration/memory/outbox-envelope.integration.spec.ts:142, and both constructions in test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts:150 and :387. The service-spec repository fixtures around :1248/:1305 need hasPrLink false. Both mocked Prisma ticketLink objects in the VCS suite need count returning 0 by default. Direct Nest testing providers in test/integration/outbox/producer-atomicity.integration.spec.ts, tickets/ticket-tenancy.integration.spec.ts, tickets/ticket-transition-race.integration.spec.ts and rag/rag-close-to-search.integration.spec.ts need AfterCommitService. Keep their existing assertions. Extend approvals/approval-execution.service.spec.ts with ordering and rollback composition cases. Create test/integration/tickets/ticket-pr-link.integration.spec.ts for actual DB link queries. Existing autoindex tests protect skipping a deleted ticket (ticket-transitions.autoindex.spec.ts:35-40); retain that behavior. Best-effort in-process effects do not guarantee crash recovery or global duplicate prevention across concurrent new PR attempts; the requested guard prevents duplicates when a durable PR link already exists.\n\nUS-007 impact: apps/api/src/fleet/git-broker/github-app-client.ts:41 normalizes githubApiUrl and :45 builds bearer headers; :77 mints contents/metadata-only tokens, :82 supplies REVIEW's write scope, and :118-133 implements shared mintScopedToken and provider-error mapping. Add a distinct thread-read token, not a wider REVIEW token or changed semantics for existing read-only consumers. Add the GraphQL lookup using FleetHttpClient with the specified enterprise endpoint transformation. Preserve null-response downgrade rather than treating every 200 GraphQL errors envelope as a hard failure; deduplicate non-null author logins in order, bound to the first 100 comments. ReviewEventMinter at fleet/reviews/review-event.minter.ts:47-104 filters bots, guards duplicates/retirements before network, loads the repository, retries token failures and skips role-check errors. Lines 69-78 currently break on first writer; collect all writers in order, preserving one permission call per non-bot login. Exactly one thread lookup follows only if there are writers. Same PR number plus case-insensitive owner/repo and author login comparison determines verification. Unknown/unavailable/mismatched thread information downgrades satisfiedBy to none but still mints an active decision and records the first writer login. Never log provider payloads or raw messages; existing logFailure :101-104 logs error classes only. memory/review-decision.writer.ts:60-63 currently hardcodes commenter wording in the audit summary; derive verified/unverified wording from currentContext approval.satisfiedBy. Existing tests in github-app-client.spec.ts, review-event.minter.spec.ts, review-decision.writer.spec.ts and test/integration/memory/review-decision-writer.integration.spec.ts cover the affected surfaces. The minter fixture at review-event.minter.spec.ts:25 needs mintThreadReadToken plus matching getReviewThread; its AC-6 at :72-76 must now check all ['carol','alice','dave'] role lookups. Replace old mintReadOnlyToken expectations in AC-1/2/3, AC-9, AC-10 and AC-11 while preserving retry, guard, bookkeeping and secret-redaction regressions. Update the integration audit summary to verified thread author.\n\nUS-008 impact: packages/fleet-protocol/src/index.ts:229 currently defines TokenRequest with jobId/leaseEpoch/repoId only. Add fresh?: true as a type-only extension with no protocol-version bump or runtime package import by API. apps/api/src/fleet/sync/sync-request.parser.ts:58-62 rebuilds token requests, so simply changing the type would silently drop the flag. Validate any present fresh value as boolean; keep only true, drop false and preserve absent-property shapes. SyncService.grantTokens at fleet/sync/sync.service.ts:122-166 repeats the inline request and granted-request shapes; widen them as necessary and carry true only on repo-less FIX/REVIEW requests after existing runner/epoch/state fencing. Repo-scoped THREAD read tokens and non-FIX/REVIEW calls must keep their exact existing broker request. Minting already occurs outside the transaction at :159-160; do not move HTTP inside it. GitTokenBroker at fleet/git-broker/git-token.broker.ts:35-56 selects purpose-aware cache keys and reuses until gitTokenReuseMarginSec; skip just that reuse check for fresh true and replace the same cache entry after successful mint. The existing fresh path :66-90 must remain authoritative: review uses mintReviewToken, fix re-checks default-branch protection through a read token then mints installation-write credentials, unsupported providers fail closed. Unit edits belong in sync-request.parser.spec.ts, sync.service.token-purpose.spec.ts and git-token.broker.spec.ts. The sync-purpose harness at sync.service.token-purpose.spec.ts:16-37 already composes real SyncService with a real broker; :66-75 anchors the exact ordinary RUN request. Existing sync-token-fence.spec.ts protects stale/foreign leases and per-repo scopes; preserve those regressions. No fresh-token case is added to runner-sync DB integration.\n\nUS-009 impact: apps/runner/src/credentials/token-cache.ts:21-28 defines immutable entries keyed by job/epoch/repo; :45-57 implements listener notification and initial want; :69-74 intentionally hides errors behind live tokens in state. Add minRemainingMs on the repo-less entry and a separate error accessor rather than changing state behavior. requests :77-89 chooses highest wanted epoch independently per scope, prioritizes repo-less entries and caps 64; retain these rules while composing refresh and minimum thresholds and conditionally serializing fresh true. apply :93-110 correlates tokens/errors with the requested epoch and keeps live tokens across errors; clear a satisfied minimum, cool down short tokens, and retain errors for freshToken's refusal path. requireFresh must notify once per listener even when creating an entry; do not accidentally notify twice by composing want's notification. batch.ts:64-75 reconstructs the final wire tokenRequests and currently strips all but jobId/epoch/repoId; it must explicitly retain true and omit the property otherwise. apps/runner/src/daemon/daemon.ts:233 supplies tokens.requests(Date.now()) to sync and :245 wires onNeed to loop.wake, so no new network path or daemon transport is needed. Existing token-cache.spec.ts includes highest-epoch, unsolicited response, cooldown, hidden-error, repository-priority and cap regressions; its :20-23 pins normal refresh at the existing inclusive boundary. Preserve ordinary refresh compatibility while treating exactly minRemainingMs as sufficient for the new minimum. Add tests using the specified 5-minute refresh setting without rewriting existing 240-second fixtures. batch.spec.ts:117 already anchors request-shape reconstruction. Repo-scoped entries never set fresh.\n\nUS-010 impact: apps/runner/src/credentials/broker.ts:27 defines the shared optional CredentialProvider seam, :133 exposes currentToken, and :204-217 implements firstToken's clock/sleep/timing polling pattern. freshToken must use a real TokenCache, observe explicit stored errors even with a live short token, and clear its minimum before every success/refusal. Keep socket/git credential serving and currentToken unchanged for existing consumers. closing/cancellation must not strand a wait. HostExecutor's reviewEnv at executor/host-executor.ts:242-247 is used by REVIEW and the FIX review step; spawnFixStep at :189-222 independently writes the FIX execution step's token. Both currently use currentToken and must independently await freshToken(job,3_000_000) before file creation. Do not use an earlier successful acquire as proof of sufficient lifetime. Preserve writeReviewToken's mode-0600 file exception, NAX_FORGE_TOKEN_FILE path-only environment, spawn-failure removal, cleanup and ATTEMPT_FILES wiping (:60-61). Optional interface addition protects config-job/config-job.ts:4 and thread/thread-job-run.ts:5 consumers, but REVIEW/FIX must refuse missing freshToken rather than fall back to currentToken. test/unit/broker.spec.ts:22-36 provides real TokenCache, SQLite job rows and injectable timing; add pure freshness polling cases without sockets so they still execute in a sandbox. Existing socket cases skip only under isNaxSandboxed. Update the injected-world provider and inline credential fixtures in test/unit/host-executor.spec.ts (including the currentToken-null/omission cases around :704/:783/:838 and provider around :754) to expose freshToken by default; keep no-token expectations by refusal or omission. Test all three step entry points, no-file refusal and timeout cleanup. No generic nax refresh command, token-in-env fallback, journal persistence or token logging is permitted.\n\nImplementation order and integration risks: maintain exactly US-001 through US-010 and their declared dependencies. US-001 and US-002 precede US-003; US-004 needs US-001. US-005, US-006 and US-007 are independent API fixes. US-008 precedes runner cache/wire work US-009, which precedes broker/executor work US-010. US-002/US-006 share the ticket interface and repository; US-003/US-006 touch transition-adjacent tests; US-007/US-008 share GitHubAppClient test/mint seams without changing existing token purposes. Required constructor insertion is the largest mechanical break risk. Exact optional-property shapes, policy timeout semantics, same-instance AfterCommitService, Owner-lock ordering, failure-closed PR link reads, one thread lookup per event, lease fencing, cooldowns and live-token error visibility are the behavioral seams most likely to regress. Existing human paths and explicit stronger policies must stay intact. Regenerate committed openapi.json and downstream CLI through repository commands only if controller/DTO contract metadata changes actually require it; never hand-edit generated clients. The planned token field is an internal protocol type extension, not a DB or REST DTO migration.\n\nVerification and rollout: API unit tests use Vitest/vi and Nest metadata; add behavior cases to existing colocated specs, not integration-named module wiring tests. For DB cases use canRunDbTests(), KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, the private test Postgres rules and apps/api bun run test:scoped <paths>. Sandbox skips are not verification, and no two DB runs may reset the same test DB concurrently; second checkouts use KODA_TEST_DB_CONTAINER=1. Runner unit tests use bun test, real temp files/SQLite and injected clocks/transports; do not depend on installed nax in unit tests. Acceptance files are generated and must not be edited or copied: API runs via vitest.nax.config.ts with DB mode; runner via bun test .nax/features/review-p1-rest/.nax-acceptance.test.ts filtered to assigned AC ids. Runtime validation and live fresh-token E2E must be performed by implementation/host stages; this PRD-drafting session did not execute tests or external HTTP. Deployment is API first, then runner, with no protocol bump/fallback. An old API drops fresh, so a new runner may wait and fail FIX/REVIEW startup with git token: timeout. No backfill or re-verification of old review decisions, no migration, and no durable after-commit queue is added.\n\nRefine-pass audit: all 120 explicit spec AC bullets were enumerated by story (10, 10, 12, 12, 11, 14, 15, 11, 13, 12) and mapped to the retained acceptanceCriteria, including split compound assertions and their regression qualifiers. All 18 feature-level exclusions and the ten binding workdirs/dependency arrays remain unchanged. US-003 context now includes the spec-recommended transition service; US-006 includes the spec-recommended auto-create-PR integration suite. The ticket transition response contract is TransitionResultWithComment/TransitionResultWithoutComment, containing ticket: assertions must inspect result.ticket.status, not assume a bare ticket (ticket-transitions.service.ts:338-362). TokenCache.requests returns TokenRequest[], so the fresh-entry AC asserts an array entry, not an object return (token-cache.ts:77-89). US-003 fixture guidance distinguishes self-agent fixes from the root-human regression rather than requiring all new fixes to be agent-authored. US-001 now explicitly retains unsupported RUNNER actor rejection as a negative-path signature-extension regression (approval-gate.service.ts:87). Routing is medium for localized existing-pattern stories US-003/004/005/008/009/010, without weakening their security-mandated three-session-tdd; US-006 remains complex for transaction/effect and constructor fan-out, and US-007 remains complex for external GraphQL verification. Every story retains an observable negative path, backward-compatibility assertion and implementation scope aligned with its ACs.",
+  "outOfScope": [
+    "Deploy order is API before runner: a runner with this change against an older API, which drops `fresh` from the token request, waits `waitMs` and fails FIX and REVIEW starts with `git token: timeout`. No protocol version bump or fallback is added; koda-wk deploys both together, API first.",
+    "Invite emails sent from a deferred `invite.create` redeem keep their current ordering; the invite keys are critical (human floor) since #381, and moving the send after commit would change the `emailed` flag the redeem answers.",
+    "The after-commit tasks are best-effort and in-process, as `committedEffect` is: a crash between commit and the PR call loses that PR, as a crash does on the immediate path today. No outbox is added.",
+    "A generic nax forge-token refresh command (a nax feature request under ruling 4) is not part of this bundle.",
+    "`user.update` other than the Owner rule is not re-tiered; only `disabled` is patchable and the Owner rule covers the reported abuse.",
+    "An unverified review decision (`satisfiedBy: 'none'`) is still an active memory decision that later reviews consume; only its audit provenance differs. This is the ruling-14 choice (downgrade, not drop).",
+    "Existing review decisions minted before this change keep their recorded approval; nothing is re-verified.",
+    "\"Verified\" in ruling 14 means the writer authored a comment in the review thread that the event's `threadId` names, on the same PR and repo. It does not prove that this comment is the disagreement, or that the runner-supplied `threadId` belongs to this finding; tying a decision to a specific comment needs nax to report comment ids and is not part of this bundle.",
+    "US-007 only: `FleetReviewEvent.approverLogin` keeps recording the chosen login for an unverified mint as well; the verified/unverified distinction lives in the action approval (`satisfiedBy`) and the audit summary.",
+    "No web, CLI or MCP copy is added for the new 202 answers or the `users.owner` refusal beyond the API i18n key.",
+    "US-003 only: `ticket.transition.verify-fix.return` by the fix's own actor is not given a floor; the design names only the approving edge, and returning a ticket to IN_PROGRESS closes nothing.",
+    "US-002 only: a fix actor recorded as neither a user nor an agent (a system writer) never matches a caller.",
+    "US-004 only: `agent.update`, `agent.capabilities.update` and `user.update` keep their medium tier.",
+    "US-007 only: GitLab review threads are not looked up; review decisions are GitHub-only today.",
+    "US-007 only: a thread with more than 100 comments is judged on its first 100 authors.",
+    "US-007 only: role checks stay one `getRepoRole` call per non-bot login, as today; ruling 14's \"one call per event\" is the thread lookup.",
+    "US-008 only: the runner-sync integration suite gains no fresh-token case; the parser, sync and broker units cover it, and the live check exercises it end to end.",
+    "US-009 only: a token request for a repo-scoped entry (`repoId`) never carries `fresh`; only the job's own token is written to `forge-token`."
+  ],
+  "routingProfile": "native-codex-ds"
+}
