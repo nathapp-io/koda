@@ -3,7 +3,7 @@
   "feature": "review-p2-session-runner",
   "branchName": "feat/review-p2-session-runner",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T17:30:29.524Z",
+  "updatedAt": "2026-11-02T17:39:55.394Z",
   "userStories": [
     {
       "id": "US-001",
@@ -421,14 +421,17 @@
         "review-p2-session-runner"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Session failure classification and SSE recovery span two state machines, four composables and many mocks. Strict auth/session isolation applies; use deterministic EventSource/timer tests and actual composable delegation."
+        "reasoning": "Session failure classification and SSE recovery span two state machines, four composables and many mocks. Strict auth/session isolation applies; use deterministic EventSource/timer tests and actual composable delegation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/composables/useAuth.ts",
@@ -502,7 +505,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "45dcc14d98ed364d6101d4094d97655d190b7fbc"
     },
     {
       "id": "US-008",
