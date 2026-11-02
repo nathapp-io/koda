@@ -59,6 +59,60 @@ describe('GitHub review tokens and branch protection', () => {
     await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).resolves.toBe(false);
   });
 
+  it('AC-1: falls through plan-upgrade ruleset denial to an unprotected classic branch', async () => {
+    request.mockResolvedValueOnce({ status: 403, body: { message: 'Upgrade to GitHub Pro or make this repository public to enable this feature.' } });
+    request.mockResolvedValueOnce({ status: 200, body: { protected: false } });
+
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).resolves.toBe(false);
+  });
+
+  it('AC-2: falls through plan-upgrade ruleset denial to a protected classic branch', async () => {
+    request.mockResolvedValueOnce({ status: 403, body: { message: 'Upgrade to GitHub Pro or make this repository public to enable this feature.' } });
+    request.mockResolvedValueOnce({ status: 200, body: { protected: true } });
+
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).resolves.toBe(true);
+  });
+
+  it('AC-3: falls through a missing rules endpoint to the classic branch endpoint', async () => {
+    request.mockResolvedValueOnce({ status: 404, body: {} });
+    request.mockResolvedValueOnce({ status: 200, body: { protected: false } });
+
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).resolves.toBe(false);
+  });
+
+  it('AC-4: requests the classic branch endpoint after a plan-upgrade denial', async () => {
+    request.mockResolvedValueOnce({ status: 403, body: { message: 'Please upgrade to GitHub Pro.' } });
+    request.mockResolvedValueOnce({ status: 200, body: { protected: false } });
+
+    await client.isBranchProtected('t', 'acme', 'app', 'main');
+
+    expect(request.mock.calls[1][0]).toBe('GET');
+    expect(request.mock.calls[1][1]).toBe('https://github.test/repos/acme/app/branches/main');
+  });
+
+  it('AC-5/6: fails closed on a non-plan ruleset denial without probing classic protection', async () => {
+    request.mockResolvedValueOnce({ status: 403, body: { message: 'Resource not accessible by integration' } });
+
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).rejects.toMatchObject({ reason: 'provider_error' });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-7: still fails closed when classic protection is unavailable after plan-upgrade denial', async () => {
+    request.mockResolvedValueOnce({ status: 403, body: { message: 'Upgrade to GitHub Pro.' } });
+    request.mockResolvedValueOnce({ status: 404, body: {} });
+
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).rejects.toMatchObject({ reason: 'provider_error' });
+  });
+
+  it('AC-8: fails closed for ruleset server errors and network errors', async () => {
+    request.mockResolvedValueOnce({ status: 500, body: [] });
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).rejects.toMatchObject({ reason: 'provider_error' });
+
+    request.mockReset();
+    request.mockRejectedValueOnce(new Error('network'));
+    await expect(client.isBranchProtected('t', 'acme', 'app', 'main')).rejects.toMatchObject({ reason: 'provider_error' });
+  });
+
   it('AC-10: encodes branch slashes in the rules request', async () => {
     request.mockResolvedValueOnce({ status: 200, body: [] }).mockResolvedValueOnce({ status: 200, body: { protected: true } });
     await client.isBranchProtected('t', 'acme', 'app', 'release/v2');

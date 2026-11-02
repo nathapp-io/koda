@@ -92,11 +92,19 @@ export class GitHubAppClient {
     const encodedBranch = encodeURIComponent(branch);
     try {
       const rules = await this.http.request('GET', `${this.api}${path}/rules/branches/${encodedBranch}?per_page=100`, this.headers(token));
-      if (rules.status !== 200 || !Array.isArray(rules.body)) throw new RepoCheckException('provider_error');
-      if (rules.body.some((raw) => {
-        const type = obj(raw).type;
-        return type === 'pull_request' || type === 'update';
-      })) return true;
+      const rulesMessage = obj(rules.body).message;
+      const noRulesets = rules.status === 404 || (
+        rules.status === 403 &&
+        typeof rulesMessage === 'string' &&
+        /upgrade to github pro|make this repository public/i.test(rulesMessage)
+      );
+      if (!noRulesets) {
+        if (rules.status !== 200 || !Array.isArray(rules.body)) throw new RepoCheckException('provider_error');
+        if (rules.body.some((raw) => {
+          const type = obj(raw).type;
+          return type === 'pull_request' || type === 'update';
+        })) return true;
+      }
 
       const protection = await this.http.request('GET', `${this.api}${path}/branches/${encodedBranch}`, this.headers(token));
       if (protection.status !== 200) throw new RepoCheckException('provider_error');
