@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T11:56:22.256Z",
+  "updatedAt": "2026-11-02T12:01:59.376Z",
   "userStories": [
     {
       "id": "US-001",
@@ -261,14 +261,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A fixed three-key catalog set and one conditional project-gate option reuse established risk and redeem paths; these modest code changes still require security-isolated TDD because they protect raw credentials."
+        "reasoning": "A fixed three-key catalog set and one conditional project-gate option reuse established risk and redeem paths; these modest code changes still require security-isolated TDD because they protect raw credentials.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -313,7 +316,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "28ac788ecd83e45e7e0a3cb6fd2d3d39f7600dd0"
     },
     {
       "id": "US-005",
