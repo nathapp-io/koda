@@ -67,6 +67,14 @@ describe('HostExecutor process identity (US-003)', () => {
     const w = await world('RUN');
     expect(await w.ex.processIdentity({ ...w.row, pid: 4242 })).toBe('unknown');
   });
+  test('F1: returns unknown when the process command lookup rejects', async () => {
+    const processInfo: ProcessInfo = {
+      start: async () => null,
+      command: async () => { throw new Error('ps spawn failed'); },
+    };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.processIdentity({ ...w.row, pid: 4242 })).toBe('unknown');
+  });
 });
 
 describe('HostExecutor review verdict (US-007)', () => {

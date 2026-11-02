@@ -261,7 +261,12 @@ export class HostExecutor implements JobExecutor {
 
   async processIdentity(job: JobRow): Promise<'ours' | 'other' | 'unknown'> {
     if (job.pid === null) return 'unknown';
-    const command = await this.processInfo().command(job.pid);
+    let command: string | null;
+    try {
+      command = await this.processInfo().command(job.pid);
+    } catch {
+      return 'unknown';
+    }
     if (command === null) return 'unknown';
     // Keep the identity rule in one place so READOPT and watch-time checks cannot drift.
     const matches = isConfigKind(job.command)
