@@ -3,7 +3,7 @@
   "feature": "review-p1-bundle",
   "branchName": "feat/review-p1-bundle",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T07:52:40.208Z",
+  "updatedAt": "2026-11-02T07:58:39.561Z",
   "userStories": [
     {
       "id": "US-001",
@@ -320,14 +320,17 @@
         "mcp"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing REST gate pattern reused through MCP, but approval authority and decision execution are access-control critical."
+        "reasoning": "Existing REST gate pattern reused through MCP, but approval authority and decision execution are access-control critical.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
@@ -354,7 +357,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "82310957672f83ff3b6cea148e02123439c95d1e"
     },
     {
       "id": "US-006",
