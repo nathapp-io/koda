@@ -94,4 +94,31 @@ describeIntegration('ticket PATCH status approval gate', () => {
     expect(await db.approvalRequest.count({ where: { permissionKey: 'ticket.transition.start' } })).toBe(0);
     expect((await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe('CREATED');
   });
+
+  it('B1: a parked status PATCH that lost ticket.update writes no field and no status', async () => {
+    // A dedicated agent: this case revokes a binding, which must not leak into the cases above.
+    const waiting = await seedFleetHttpAgent(server(), world.tokens.root);
+    const updateGrant = await grantKeys(db, { type: 'AGENT', id: waiting.id }, ['project.read', 'ticket.update'], project.id);
+    await grantKeys(db, { type: 'AGENT', id: waiting.id }, ['ticket.transition.start'], project.id);
+    await app.get(PermissionCache).invalidate();
+    await seedWaitPolicy(db, 'ticket.update', project.id);
+    const ticket = await create();
+    const before = await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    const parked = data<Pending>(await request(server()).patch(path(ticket.ref)).set(auth(waiting.apiKey))
+      .send({ title: 'renamed while waiting', status: 'IN_PROGRESS' }).expect(202));
+    expect(parked.permissionKey).toBe('ticket.transition.start');
+    expect((await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).title).toBe(before.title);
+
+    // Only the edge key survives. The engine's execution re-check covers that key and passes; the parked
+    // command must still refuse, because it no longer holds `ticket.update` for the fields it carries.
+    await db.roleBinding.delete({ where: { id: updateGrant.id } });
+    await app.get(PermissionCache).invalidate();
+    await request(server()).post(`/api/approvals/${parked.id}/decisions`).set(rootAuth())
+      .send({ decision: 'approve' }).expect(200);
+
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: parked.id } }))
+      .toMatchObject({ status: 'failed', result: { error: 'execution-failed', name: 'ForbiddenAppException' } });
+    const after = await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(after).toMatchObject({ status: before.status, title: before.title, description: before.description });
+  });
 });

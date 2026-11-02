@@ -100,7 +100,16 @@ describe('FleetSweeper tick (S1.5 2a: job leaves RUNNING)', () => {
     expect(transitions.apply).toHaveBeenLastCalledWith(expect.objectContaining({ job: jobs[1], to: 'CRASHED' }));
     expect(warn).toHaveBeenCalledWith('Silent-runner crash of job j1 failed: TransitionError');
     expect(warn.mock.calls.flat().join(' ')).not.toContain('secret-detail');
-    warn.mockRestore();
+    // The global test setup owns the no-op Logger spies for the whole file (US-002 M1): restoring this
+    // one would put the real Nest logger back for every later test here, so clear it instead.
+    warn.mockClear();
+  });
+
+  it('US-002 M1: the shared no-op logger spies still guard the cases after an isolation case', () => {
+    // The suite's global setup mocks every Logger.prototype method to a no-op. A case that restores its
+    // own spy hands the real Nest logger back to everything that runs after it in this file.
+    expect(vi.isMockFunction(Logger.prototype.warn)).toBe(true);
+    expect(vi.isMockFunction(Logger.prototype.error)).toBe(true);
   });
 
   it('US-002 AC-5 continues after an item lock failure', async () => {

@@ -8,6 +8,7 @@ import { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { FleetJobRecord, FleetRepoRef, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { PrismaFleetJobRepository } from '../jobs/prisma-fleet-job.repository';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
+import { PlacementService } from '../jobs/placement.service';
 import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
@@ -43,7 +44,7 @@ function harness() {
     inTransaction = true;
     try { return await fn(); } finally { inTransaction = false; }
   } });
-  const placement = createMock();
+  const placement = createMock<PlacementService>();
   const service = new SyncService(repo, createMock(), createMock<CommandAckProcessor>({ process: async () => ({ live: [] }) }),
     placement, createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
     createMock(), createMock(), tx, createMock(), createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }));
@@ -230,7 +231,9 @@ describe('sync repository token fence', () => {
     expect(response.gitTokens).toEqual([h.token]);
     expect(error).toHaveBeenCalledWith('Sync: placement for runner runner1 failed: PlacementError');
     expect(error.mock.calls.flat().join(' ')).not.toContain('private detail');
-    error.mockRestore();
+    // The global test setup owns the no-op Logger spies for the whole file (US-002 M1): restoring this
+    // one would put the real Nest logger back for every later test here, so clear it instead.
+    error.mockClear();
   });
 
   it('US-002 AC-9 calls thread placement even when fillRunner rejects', async () => {
@@ -254,7 +257,14 @@ describe('sync repository token fence', () => {
     expect(response.gitTokens).toEqual([h.token]);
     expect(error).toHaveBeenCalledWith('Sync: placement for runner runner1 failed: PlacementError');
     expect(error.mock.calls.flat().join(' ')).not.toContain('private detail');
-    error.mockRestore();
+    // The global test setup owns the no-op Logger spies for the whole file (US-002 M1): restoring this
+    // one would put the real Nest logger back for every later test here, so clear it instead.
+    error.mockClear();
+  });
+
+  it('US-002 M1: the shared no-op logger spies still guard the cases after the placement ones', () => {
+    expect(vi.isMockFunction(Logger.prototype.error)).toBe(true);
+    expect(vi.isMockFunction(Logger.prototype.warn)).toBe(true);
   });
 });
 
