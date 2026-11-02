@@ -254,7 +254,6 @@ error stops the stream without a sixth refresh.
 - US-007 only: the live proxy keeps answering 502 on an upstream failure; a 503 with a retry hint is not added, because `EventSource` cannot read the status either way.
 - US-007 only: no single-flight for concurrent refreshes (E/PERF-1).
 - US-008 only: the invite page does not validate the token's alphabet; encoding keeps any token one path segment.
-- US-008 only: the Nitro accept route answers 400 without calling the API when the router param is missing or empty; the invite page always has a non-empty route token, so `apiPath` never sees an empty value there.
 
 ## Stories
 
@@ -548,3 +547,4 @@ the Nitro accept route, `apiPath` in `useApprovalRequests`, and the wider guard 
 - `[unit]` the Nitro accept route for router param `'../x'` calls `forwardToApi` with `'/invites/..%2Fx/accept'`.
 - `[unit]` the Nitro accept route for router param `'tok123'` calls `forwardToApi` with `'/invites/tok123/accept'`.
 - `[unit]` `useApprovalRequests().decide('a/b', 'approve')` posts to `'/approvals/a%2Fb/decisions'`.
+- `[unit]` the Nitro accept route with an empty router param answers 400 and makes no `forwardToApi` call; the invite page always has a non-empty route token, so `apiPath` never sees an empty value there.

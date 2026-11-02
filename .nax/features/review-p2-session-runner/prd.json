@@ -1,0 +1,546 @@
+{
+  "project": "koda",
+  "feature": "review-p2-session-runner",
+  "branchName": "feat/review-p2-session-runner",
+  "createdAt": "2026-11-02T00:00:00.000Z",
+  "updatedAt": "2026-11-02T16:19:16.360Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Cap context decisions and exclude review-minted rows",
+      "description": "**Goal** — Return at most the 100 most recently updated active non-review decisions in canonical context.\n\n**Motivation** — after months of auto-review, every `/context` call returns thousands of \"Not a defect: ...\" rows.\n\n**Approach** — `PrismaCanonicalStateRepository.findActiveDecisions(projectId)` (`apps/api/src/memory/prisma-canonical-state.repository.ts`): same signature; `where` adds `OR: [{ sourceType: null }, { sourceType: { not: REVIEW_EVENT_SOURCE } }]`, plus `orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]` and `take: ACTIVE_DECISIONS_LIMIT`. New export `ACTIVE_DECISIONS_LIMIT = 100` from the same file. `REVIEW_EVENT_SOURCE = 'review_event'` in `apps/api/src/memory/review-decisions.ts`. `PrismaMemoryItemRepository.findReviewDecisionRows` in `apps/api/src/memory/prisma-memory-item.repository.ts` already excludes review rows with `OR: [{ sourceType: null }, { sourceType: { not: REVIEW_EVENT_SOURCE } }]` and orders by `[{ updatedAt: 'desc' }, { id: 'desc' }]`; US-001 mirrors that shape. Prisma's `not` drops null rows, which is why the `OR` is needed. `ContextBuilderService` (`apps/api/src/context/context-builder.service.ts`) returns `canonicalState.activeDecisions` from `CanonicalStateService.getSnapshot`; `GET /api/context/:slug` is the route. Preserve select and CanonicalDecision mapping. Update the existing exact findMany assertion with OR/orderBy/take, add PostgreSQL repository cases and exercise the existing context endpoint.\n\n**Scope** — In: repository filter/order/cap and its context response. Out: runner work belongs to US-002 through US-004; web work belongs to US-005 through US-008. US-001 only: `findActiveDecisions` keeps ignoring `ttlAt`; expiring decisions in `/context` is a separate change. US-001 only: no per-call budget or separate cap for review-minted decisions in `/context`; they are left out entirely, because `findReviewDecisionRows` already hands them to the reviews that need them.\n\n**Interface** — `ACTIVE_DECISIONS_LIMIT = 100`; `findActiveDecisions(projectId: string): Promise<CanonicalDecision[]>` remains unchanged.",
+      "acceptanceCriteria": [
+        "[unit] ACTIVE_DECISIONS_LIMIT is importable from memory/prisma-canonical-state.repository and equals 100.",
+        "[unit] PrismaCanonicalStateRepository.findActiveDecisions('project-1') calls memoryItem.findMany with where { projectId: 'project-1', kind: 'DECISION', status: 'active', deletedAt: null, OR: [{ sourceType: null }, { sourceType: { not: 'review_event' } }] }.",
+        "[unit] The same call passes orderBy [{ updatedAt: 'desc' }, { id: 'desc' }] and take 100.",
+        "[integration] With three active DECISION rows in one project, sourced review_event, manual and null, findActiveDecisions returns the manual and null rows and not the review_event row.",
+        "[integration] With 105 active manual DECISION rows whose updatedAt values all differ, findActiveDecisions returns 100 rows, the 100 most recently updated, newest first.",
+        "[integration] GET /api/context/:slug for a project holding one active review_event DECISION and one active manual DECISION answers 200 with canonicalState.activeDecisions holding only the manual decision's id."
+      ],
+      "tags": [
+        "api",
+        "memory",
+        "performance",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized Prisma behavior with unchanged interfaces. Write query-shape tests first and add real PostgreSQL filtering/cap plus existing context endpoint coverage; no authorization rules change."
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-canonical-state.repository.ts",
+        "apps/api/src/memory/review-decisions.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/context/context-builder.service.ts",
+        "apps/api/src/memory/prisma-canonical-state.repository.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/memory/active-decisions.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When eligible decisions share updatedAt, findActiveDecisions returns the greater id first.",
+        "When another project's decisions, deleted decisions or inactive decisions exist, findActiveDecisions excludes those rows."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/prisma-canonical-state.repository.spec.ts",
+          "reason": "the \"returns mapped CanonicalDecision objects\" test asserts `findMany` was called with exactly `{ where: { projectId, kind, status, deletedAt }, select }`; US-001 adds the `sourceType` `OR`, `orderBy` and `take: 100`, so the expected argument gains those three fields."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Probe rejected sync batches before replacing events",
+      "description": "**Goal** — Avoid hot retries and valid-event loss by probing minimal rejected batches and backing off after each bad-batch cycle.\n\n**Motivation** — a 400 that no event causes (an API parser regression, a proxy rejecting the body, a bad `tokenRequests` entry, which halving never shrinks) turns the runner into a zero-delay loop against the API, and each cycle replaces the head event, which may be a `state` transition that is then lost.\n\n**Approach** — **US-002 bad-batch order.** `badBatch` applies its steps in this order, unchanged except for step 4 and later:\n\n1. Capabilities rejected (400 with capabilities in the request): remember the hash, return `again` (once per hash).\n2. `halveScale` gives a smaller scale: take it, return `again`.\n3. 400 at the smallest scale with command acks: exclude acks once, return `again`.\n4. No job or no event in the request: return `retry` (backoff).\n5. Otherwise send the probe `{ ...request, jobs: [] }`:\n   - probe throws `ServerError` 401 or 426: return `stop` exactly as `classify` would;\n   - probe throws after `controller.signal` was aborted (`stop()` or `wake()`): return `woken`, as `classify` does; the event is kept;\n   - probe throws anything else (another status, a network error): return `retry` from the probe's error; the event is kept;\n   - probe answers: apply its response through `apply(probe, response, report)` (token answers, commands and acks as for any sync; `apply` resets `failures` to 0 and, when acks were excluded, resends them without detail, as on any success), replace `jobs[0].events[0]` with the lifecycle error event, log it at error level with `{ jobId, seq, type }`, set the scale to `FULL_SCALE`, and return `this.retry(error)` (the original 400 or 413), which sleeps `backoffDelay(0, random)` and sets `failures` to 1.\n\n`syncOnce` returns `await this.classify(...)` inside its `try`, so `inflight` stays set (and `stop()` can abort the probe) until the probe settles. Steps 1-3 are bounded (once per capabilities hash, at most eight halvings from `FULL_SCALE`, once per ack set), so every cycle ends in `retry` within a bounded number of `again` steps, and each `retry` sleeps.\n\n`badBatch` becomes asynchronous (`classify` awaits it). Send one probe through `deps.client.sync` with the same `AbortSignal` at a 400 or 413 event-blame point. After replacement return `retry`, never `again`. `backoffDelay(attempt, random, maxMs = 60_000)` in `apps/runner/src/sync/backoff.ts`: full jitter, `floor(random() * min(maxMs, 1000 * 2^attempt))`. Preserve buildSyncRequest/halveScale/FULL_SCALE. Update D24 scripted tests for the additional probe response and retry result.\n\n**Scope** — In: sync classification, probe application, journaling, logging and cancellation. Out: process identity is US-003; service/log rotation is US-004; web sessions are US-005 through US-008. US-002 only: a dropped `state` event is not parked or retried later; it is replaced and logged at error level, as before, but only after the probe shows the event is the cause. US-002 only: the sync loop does not count consecutive bad-batch cycles separately from `failures`; the existing backoff counter bounds the rate. US-002 only: a successful probe is a success for `apply`: it resets `failures` and resends held acks without detail, even though the probe did not prove the acks were the cause.\n\n**Interface** — Async `badBatch` and `classify` resolve `SyncOutcome`; public `syncOnce(): Promise<SyncOutcome>` stays unchanged. Probe transport is existing `deps.client.sync(request, signal)`.",
+      "acceptanceCriteria": [
+        "[unit] At the smallest scale with no command acks and event seq 5 of job j1 pending, when a request carrying job j1 event seq 5 (type state) answers ServerError 400 and the next client.sync call answers 400 too, syncOnce returns kind: 'retry'.",
+        "[unit] In that case the second client.sync request has jobs [] and the same tokenRequests and bootId as the rejected request.",
+        "[unit] In that case journal.replaceEvent is never called and event seq 5 of j1 is still pending with type state.",
+        "[unit] When the rejected request is followed by a probe that answers 200, journal.replaceEvent is called once for j1 seq 5 with type lifecycle, and syncOnce returns kind: 'retry' with delayMs 500 when random is fixed at 0.5.",
+        "[unit] In that replaced case the loop logs at error level a message containing 'event 5 (state) dropped' with context { jobId: 'j1', seq: 5, type: 'state' }.",
+        "[unit] When the probe answers 200 with one command, handleCommands is called with that command.",
+        "[unit] When the probe throws ServerError 401, syncOnce returns kind: 'stop' with reason kind auth, and the event is not replaced.",
+        "[unit] When the probe throws a non-ServerError error, syncOnce returns kind: 'retry' and the event is not replaced.",
+        "[unit] With one event pending, every request answering 400 and random fixed at 0.5, once the scale is at its smallest, three consecutive syncOnce calls return retry with delayMs 500, 1000 and 2000.",
+        "[unit] In that persistent-400 case each of those three syncOnce calls makes exactly two client.sync calls.",
+        "[unit] stop() called while the probe is pending makes that syncOnce return kind: 'woken' and the event is not replaced.",
+        "[unit] A 413 at the smallest scale with an event pending sends the same jobs: [] probe as a 400 does.",
+        "[unit] SyncLoop.run with one event pending and random fixed at 0.5 over a client that answers 400 to every request calls sleep with a positive delay before its third client.sync call after the scale reaches its smallest.",
+        "[unit] When the probe throws ServerError 426, syncOnce returns kind: 'stop' with reason kind protocol and keeps the pending event."
+      ],
+      "tags": [
+        "runner",
+        "sync",
+        "reliability",
+        "security",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One existing sync-loop implementation and its colocated specs change using established transport, journal and backoff seams; no new module or architecture is needed. Auth-stop and git-token response handling still mandate strict security TDD with deterministic cancellation and sleep tests."
+      },
+      "contextFiles": [
+        "apps/runner/src/sync/sync-loop.ts",
+        "apps/runner/src/sync/batch.ts",
+        "apps/runner/src/sync/backoff.ts",
+        "apps/runner/src/sync/sync-loop.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a successful probe returns gitTokens or gitTokenErrors, onTokens receives those answers with the original tokenRequests.",
+        "When a minimal rejected batch has no job or no event, syncOnce returns retry without replacing an event.",
+        "When a successful probe follows acks exclusion, the next request resends held command acks without detail."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/sync/sync-loop.spec.ts",
+          "reason": "the D24 tests (\"a 400 at {1,1} that persists without acks still blames the event\" and the replaced-event delivery test) script one server response per `syncOnce`; the blame step now makes a second `client.sync` call (the `jobs: []` probe) and ends in `retry` instead of `again`, so their scripted step queues must answer the probe as well, and any expectation of `again` after a replacement becomes `retry`."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Detect recycled pids during readopted watches",
+      "description": "**Goal** — Treat EPERM as dead and end readopted watches only when a live pid is positively identified as another process.\n\n**Motivation** — after a daemon restart, readopted nax processes are not the daemon's children. If one exits and its pid is reused within a 2 s tick, the job stays RUNNING forever and every later job on that repo queues behind its mutex.\n\n**Approach** — **US-003 composition.** EPERM-as-dead applies everywhere `isAlive` is used (watch loop and readopt). Per tick of a `watch` start the loop checks, in order: `isAlive` false leaves; otherwise `processIdentity` `'other'` leaves; otherwise it keeps watching. This adds one `ps` per 2 s tick for a readopted job only.\n\n`isProcessAlive(pid: number, kill: (pid: number, signal: 0) => void = process.kill): boolean`; any thrown error, EPERM included, returns false. The injectable `kill` exists for tests (real `process.kill` cannot be stubbed safely under Bun).\n\n`JobRun.watchUntilExit(spawnedHere)`: when `spawnedHere` is false (a `watch` start), on every tick where `isAlive(row.pid)` is true the loop also awaits `executor.processIdentity(row)`. `'other'` is handled exactly like a dead process (leave the loop; a readopted FIX never chains). `'ours'` and `'unknown'` keep watching (fail closed: a failed `ps` never ends a live job's watch). A `JobRun` that spawned its process (`prepare` or `reprepare`) never calls `processIdentity`.\n\n`JobExecutor` gains `processIdentity(job): Promise<'ours' | 'other' | 'unknown'>`. `HostExecutor.processIdentity`: `job.pid` null or `ProcessInfo.command(pid)` null gives `'unknown'`; a command that `matchesProcess`' rule accepts gives `'ours'`; any other command gives `'other'`. `HostExecutor.matchesProcess` checks the process's argv (from `ProcessInfo.command`, which answers null when `ps` prints nothing or fails) for `jobProfileName(job.jobId)`, which every PLAN, RUN, REVIEW and FIX argv carries. The readopt path in `supervisor.ts` keeps using it unchanged. `JobRun.chainFixStep(row, spawnedHere)` returns false when `spawnedHere` is false, so a readopted FIX never chains its fix step and watches one pid only.\n\nThe fake implements `JobExecutor`, which gains `processIdentity`; it adds `processIdentity`, which does not record into `calls`, answering in this order: `'unknown'` when a new `identityUnknown` flag is set; `'other'` when `alive` is false or `procMatches` is false; `'ours'` otherwise; existing tests keep their meaning.\n\n**Scope** — In: liveness helper, executor seam/host/fake and watch-start identity behavior. Out: sync behavior belongs to US-002; service/log rotation belongs to US-004. US-003 only: a pid this daemon spawned is not identity-checked; Bun reaps its own children, and the readopt path is the reported failure. US-003 only: a readopted FIX still never chains its fix step (no surviving token cache); that is unchanged. US-003 only: no status.json heartbeat staleness check is added to the watch loop. Do not change cancel-path signaling.\n\n**Interface** — `isProcessAlive(pid: number, kill: (pid: number, signal: 0) => void = process.kill): boolean`; `processIdentity(job): Promise<'ours' | 'other' | 'unknown'>`, using JobRow for the executor parameter.",
+      "acceptanceCriteria": [
+        "[unit] isProcessAlive(4242, kill) with a kill that throws an error whose code is EPERM returns false.",
+        "[unit] isProcessAlive(4242, kill) with a kill that throws an error whose code is ESRCH returns false.",
+        "[unit] isProcessAlive(4242, kill) with a kill that returns normally returns true, and kill was called with 4242 and 0.",
+        "[unit] isProcessAlive(0, kill) returns false without calling kill.",
+        "[unit] A JobRun for a RUN job started at watch over a FakeExecutor whose processIdentity answers 'other' while alive is true resolves while alive stays true.",
+        "[unit] A RUN job started at watch whose processIdentity answers 'ours' for three ticks, then alive false, calls processIdentity three times (the fake's dieAfterTicks(4), since onTick runs before the liveness check).",
+        "[unit] A RUN job started at watch whose processIdentity answers 'unknown' keeps watching: it is still unresolved after five ticks while alive is true, and resolves once alive turns false.",
+        "[unit] A RUN job started at prepare with alive true for three ticks never calls processIdentity.",
+        "[unit] A FIX job started at watch whose processIdentity answers 'other' while alive is true resolves without calling spawnFixStep.",
+        "[unit] HostExecutor.processIdentity for a RUN job whose injected ProcessInfo.command answers a command containing the job's profile name returns 'ours'.",
+        "[unit] HostExecutor.processIdentity for a RUN job whose injected ProcessInfo.command answers '/usr/bin/vim notes.txt' returns 'other'.",
+        "[unit] HostExecutor.processIdentity for a RUN job whose injected ProcessInfo.command answers null returns 'unknown'."
+      ],
+      "tags": [
+        "runner",
+        "process-liveness",
+        "reliability",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A standard method addition to the existing executor interface, two implementations and one watch-loop branch; existing ProcessInfo injection and FakeExecutor tick scripting avoid a new process-management abstraction. Ordinary TDD can verify liveness and identity without altering authentication or signaling policy."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/nax-process.ts",
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/test/helpers/fake-executor.ts",
+        "apps/runner/src/supervisor/job-run.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When HostExecutor.processIdentity receives a job with pid null, it returns 'unknown' without calling ProcessInfo.command.",
+        "When FakeExecutor.identityUnknown is true, processIdentity returns 'unknown' even when alive or procMatches is false."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/helpers/fake-executor.ts",
+          "reason": "the fake implements `JobExecutor`, which gains `processIdentity`; it adds `processIdentity`, which does not record into `calls`, answering in this order: `'unknown'` when a new `identityUnknown` flag is set; `'other'` when `alive` is false or `procMatches` is false; `'ours'` otherwise; existing tests keep their meaning."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Stop launchd restart loops and rotate runner.log",
+      "description": "**Goal** — Stop launchd after a server refusal and bound runner.log growth with startup and periodic size rotation.\n\n**Motivation** — with a revoked key, launchd restarts the runner every 10 s forever, each time calling the API with the revoked key (systemd stops on exit 2).\n\n**Approach** — `launchdPlist(spec)`: `<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>`; `EnvironmentVariables` adds `<key>KODA_RUNNER_SUPERVISOR</key>\n    <string>launchd</string>`. `systemdUnit` is unchanged.\n\n`runCommand(homeOverride, deps)`: returns 0 instead of 2 when `deps.env.KODA_RUNNER_SUPERVISOR === 'launchd'`, still logging `stopped by the server (...)` at error level. Every other exit code is unchanged. This applies only to server stops (401/426).\n\n`Tuning` gains `runnerLogMaxBytes` (default `RUNNER_LOG_MAX_BYTES = 10 * 1024 * 1024`) and `runnerLogCheckMs` (default `300_000`; `pruneIntervalMs` is 24 h, too slow for a chatty log). `startDaemon` awaits `rotateLogFile(join(home.dir, 'runner.log'), tuning.runnerLogMaxBytes)` once before it resolves, and calls it again every `runnerLogCheckMs` (cleared on stop like the other intervals). Both the start-up call and every periodic call are wrapped in try/catch and log a warning on error; a rotation error never fails `startDaemon`. `rotateLogFile` rotates only when the file size is strictly greater than `maxBytes`.\n\nNew module: `apps/runner/src/service/log-rotate.ts` exports `RUNNER_LOG_MAX_BYTES` and `rotateLogFile(path: string, maxBytes: number): Promise<boolean>`. Missing file returns false. Copy current bytes into path+'.1', replacing an old backup, then truncate the original inode. Other filesystem errors propagate to guarded daemon warning handling. `RunnerHome.dir` in `apps/runner/src/config/runner-config.ts`; the plist writes `${runnerHome}/runner.log`. `Tuning` and `TUNING` in `apps/runner/src/daemon/tuning.ts`; `startDaemon({ tuning })` merges a partial override. Update units.spec.ts's old plain-true KeepAlive expectation and tuning.spec.ts's exact expected key set. The daemon AC triggers `startDaemon`; filesystem integration cases belong in test/unit/daemon.spec.ts with injected transport and temporary homes, not DB integration.\n\n**Scope** — In: generated launchd policy, supervisor-aware server-stop exit, rotation helper/tuning/startup/timer cleanup. Out: sync probing belongs to US-002, watch identity to US-003. Deploying the new launchd plist on koda-wk is a manual step: the live runner uses a hand-edited plist with the `run-service.sh` wrapper, and `install-service` needs sudo. The user re-installs or hand-applies `KeepAlive` and `KODA_RUNNER_SUPERVISOR` after merge. US-004 only: rotation keeps one old file (`runner.log.1`) and uses copy-then-truncate, so lines written between the copy and the truncate can be lost. US-004 only: a newsyslog.d entry is not installed; launchd holds the log file open, so rename-based rotation would keep writing to the renamed file. US-004 only: exit 1 (bad config, not enrolled) still restarts under launchd every 10 s, as systemd's `Restart=always` does. Do not fix unrelated pruneJobs errors.\n\n**Interface** — `rotateLogFile(path: string, maxBytes: number): Promise<boolean>`; `RUNNER_LOG_MAX_BYTES = 10 * 1024 * 1024`; numeric `Tuning.runnerLogMaxBytes` and `Tuning.runnerLogCheckMs` default to 10485760 and 300000. Existing service/command/daemon public signatures stay unchanged.",
+      "acceptanceCriteria": [
+        "[unit] launchdPlist(spec) returns a plist whose KeepAlive value is a dict holding <key>SuccessfulExit</key> followed by <false/>.",
+        "[unit] launchdPlist(spec) returns a plist whose EnvironmentVariables dict maps KODA_RUNNER_SUPERVISOR to launchd, next to HOME and PATH.",
+        "[unit] systemdUnit(spec) still returns a unit with RestartPreventExitStatus=2 and no KODA_RUNNER_SUPERVISOR line.",
+        "[unit] runCommand with env.KODA_RUNNER_SUPERVISOR 'launchd' and a daemon stopped by the server (401) returns 0 and logs at error level a message starting 'stopped by the server (auth)'.",
+        "[unit] runCommand without KODA_RUNNER_SUPERVISOR and a daemon stopped by the server (426) returns 2.",
+        "[unit] runCommand with env.KODA_RUNNER_SUPERVISOR 'launchd' and a missing identity returns 1.",
+        "[unit] RUNNER_LOG_MAX_BYTES is importable from service/log-rotate and equals 10485760.",
+        "[unit] rotateLogFile(path, 10) for a 25-byte file returns true, leaves path + '.1' holding those 25 bytes, and leaves path empty.",
+        "[unit] rotateLogFile(path, 10) when path + '.1' already exists replaces it with the current file's contents.",
+        "[unit] rotateLogFile(path, 10) for a missing path returns false and does not throw.",
+        "[unit] rotateLogFile(path, 25) for a 25-byte file returns false and creates no path + '.1'.",
+        "[unit] TUNING.runnerLogMaxBytes equals RUNNER_LOG_MAX_BYTES and TUNING.runnerLogCheckMs equals 300000.",
+        "[integration] startDaemon with tuning.runnerLogMaxBytes 10 and a 25-byte runner.log in the home directory leaves runner.log.1 holding those 25 bytes and an empty runner.log when startDaemon resolves (test home: apps/runner/test/unit/daemon.spec.ts).",
+        "[integration] startDaemon with tuning.runnerLogCheckMs 20 and runnerLogMaxBytes 10, after 25 bytes are appended to runner.log once it has started, creates runner.log.1 within one second.",
+        "[integration] startDaemon whose home holds a directory named runner.log still resolves and logs a warning."
+      ],
+      "tags": [
+        "runner",
+        "operations",
+        "launchd",
+        "logging",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Service rendering, runner CLI exit policy, a new filesystem helper and daemon startup/timer teardown span several modules, making complex routing appropriate. Strict TDD is retained for the server-401 authentication-refusal and enrollment-identity exit paths; tests use injected collaborators and temporary files, never live service managers."
+      },
+      "contextFiles": [
+        "apps/runner/src/service/units.ts",
+        "apps/runner/src/commands/run.ts",
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/runner/src/daemon/tuning.ts",
+        "apps/runner/test/unit/daemon.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/service/log-rotate.ts",
+        "apps/runner/src/service/log-rotate.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When periodic rotation fails, the daemon logs a warning and continues syncing.",
+        "When launchd supervises a protocol server stop, runCommand returns 0 and preserves the error-level stop log.",
+        "When daemon.stop() has completed, appending an oversized runner.log does not trigger another periodic rotation."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/service/units.spec.ts",
+          "reason": "the \"UserName, AbandonProcessGroup, KeepAlive, the program arguments and the log file\" test expects KeepAlive to be the plain true value; it now expects the dict whose SuccessfulExit key is false."
+        },
+        {
+          "path": "apps/runner/src/daemon/tuning.spec.ts",
+          "reason": "the \"carries the design constants\" test compares `TUNING` with `toEqual` over the exact key set; the expected object gains `runnerLogMaxBytes: 10485760` and `runnerLogCheckMs: 300000`."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Revoke logout sessions after access-cookie expiry",
+      "description": "**Goal** — Refresh access only to revoke the session, always clear cookies and return 502 when revocation cannot be confirmed.\n\n**Motivation** — API logout bumps `tokenVersion` to revoke every outstanding token. After 15 idle minutes the access cookie is gone, so the proxy never calls upstream and a leaked refresh JWT stays valid for 7 days.\n\n**Approach** — **US-005 logout flow.** `POST /api/auth/logout`:\n\n| access cookie | refresh cookie | upstream calls | answer |\n|:--|:--|:--|:--|\n| present | any | `POST /auth/logout` with the access cookie | 204 when upstream status < 400, else 502 |\n| absent | present | `POST /auth/refresh` (refresh cookie); on 2xx with an `accessToken`, `POST /auth/logout` with `bearer: <that token>` | 204 when logout status < 400; 204 when refresh answers 401 or 403 (nothing left to revoke); 502 otherwise, including a 2xx refresh with no `accessToken` |\n| absent | absent | none | 204 |\n\nBoth auth cookies are cleared on every row, and the tokens from the refresh step are never set as cookies. A 502 body is `{ revoked: false }`. The refresh call, the `unwrapAuth` of its body (which throws when `ret !== 0`) and the logout call all run inside one `try`, so any throw there answers 502, never 401. A thrown upstream call counts as a failure (502). `useAuth().logout()` already catches a failed call and still clears local state and goes to `/login`; it is unchanged.\n\n`forwardToApi(event, path, init)`: `init` adds `bearer?: string`; when set, the `Authorization` header is `Bearer <bearer>` and no cookie is read. Preserve default access-cookie and cookieName:'refresh' selection otherwise, URL construction and client-IP/content-type forwarding. `logout.post.ts` calls `forwardToApi` with the new `bearer` option (same story); the route ACs assert the captured `forwardToApi` calls. Reuse transport directly rather than the cookie-setting refresh route.\n\n**Scope** — In: bearer override and logout route refresh/revocation/status/cleanup. Out: cookie SameSite/redirects belong to US-006, tri-state refresh/streams to US-007, invite encoding to US-008. US-005 only: no API route that accepts the refresh token for logout is added; the web refreshes first and logs out with the new access token. US-005 only: the client shows no message for a failed revocation; the 502 is visible to the logout call only.\n\n**Interface** — `forwardToApi(event, path, init)` retains method/body/cookieName and adds `bearer?: string`. Logout returns HTTP 204 or HTTP 502 with `{ revoked: false }`, uses existing `clearAuthCookies` exactly once per request and never sets refreshed cookies.",
+      "acceptanceCriteria": [
+        "[unit] forwardToApi(event, '/auth/logout', { bearer: 'tok-1' }) sends Authorization: Bearer tok-1 even when the event carries a koda_token cookie with another value.",
+        "[unit] forwardToApi(event, '/auth/me', { method: 'GET' }) without bearer still sends the koda_token cookie value as the Bearer.",
+        "[unit] POST /api/auth/logout with a koda_token cookie and an upstream logout answering 200 calls forwardToApi once with /auth/logout and answers 204.",
+        "[unit] With a koda_token cookie and an upstream logout answering 500, the route answers 502 with body { revoked: false }.",
+        "[unit] With a koda_token cookie and an upstream logout that throws, the route answers 502 with body { revoked: false }.",
+        "[unit] With only a koda_refresh cookie, the route calls forwardToApi first with /auth/refresh and cookieName: 'refresh', then with /auth/logout and bearer equal to the accessToken the refresh returned, and answers 204.",
+        "[unit] In that refresh-then-logout case setAuthCookies is never called.",
+        "[unit] With only a koda_refresh cookie and the refresh answering 401, the route makes no /auth/logout call and answers 204.",
+        "[unit] With only a koda_refresh cookie and the refresh answering 503, the route makes no /auth/logout call and answers 502 with body { revoked: false }.",
+        "[unit] With only a koda_refresh cookie and the refresh answering 200 with no accessToken, the route makes no /auth/logout call and answers 502 with body { revoked: false }.",
+        "[unit] With only a koda_refresh cookie and the refresh call throwing, the route answers 502 with body { revoked: false }.",
+        "[unit] With neither cookie, the route makes no forwardToApi call and answers 204.",
+        "[unit] In every case above clearAuthCookies is called once, clearing both auth cookies.",
+        "[unit] With only a koda_refresh cookie and the refresh answering 403, the route clears both cookies and answers 204 without calling /auth/logout.",
+        "[unit] When unwrapAuth throws on a nonzero refresh envelope or the refresh-then-logout call throws, the route clears both cookies and answers 502 with { revoked: false }, never 401."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "auth",
+        "session",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small transport/route change but security-critical revocation and cookie lifecycle require strict isolated TDD. Capture actual transport arguments, status/body outcomes and cleanup across failures."
+      },
+      "contextFiles": [
+        "apps/web/server/api/auth/logout.post.ts",
+        "apps/web/server/utils/api.ts",
+        "apps/web/server/api/auth/refresh.post.ts",
+        "apps/web/tests/server/forward-to-api.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/server/logout-route.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a bearer override is supplied to forwardToApi, getCookie is not called.",
+        "When logout with refreshed access answers a status >= 400, the route answers 502 with { revoked: false } and clears both cookies."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Preserve validated deep links through login",
+      "description": "**Goal** — Carry protected fullPath through login and allow emailed top-level deep links with a lax access cookie.\n\n**Motivation** — notification emails link to `WEB_PUBLIC_URL` pages. A link opened from a mail client is a cross-site navigation, so Strict cookies are not sent, SSR bounces to `/login`, and after hydration the user lands on `/`.\n\n**Approach** — **US-006 redirect rule.** `safeRedirectPath(value)` returns `value` when it is a string that starts with `/`, whose second character is neither `/` nor `\\`, that has no ASCII control character, and whose path (before `?` or `#`) is not `/login` or `/register`. Anything else returns `/`. The middleware sends an unauthenticated visitor of a protected route to `{ path: '/login', query: { redirect: to.fullPath } }`, or to `{ path: '/login' }` when `to.fullPath` is `/`. An authenticated visitor of `/login` or `/register` goes to `safeRedirectPath(to.query.redirect)`. `login.vue` goes to `safeRedirectPath(route.query.redirect)` after a successful login.\n\nNew module: `apps/web/lib/safe-redirect.ts` exports `safeRedirectPath(value: unknown): string`. `setAuthCookies`: `koda_token` gets `sameSite: 'lax'`; `koda_refresh` keeps `sameSite: 'strict'`. Every other cookie option is unchanged. Preserve fetchUser hydration and public invite bypass. The auth middleware and `login.vue` call `safeRedirectPath` (same story); the middleware ACs trigger the middleware with a route. Update middleware tests and navigateTo mocks/result assertions to object redirects for unauthenticated protected visits, including root without query and projects with fullPath. The unauthenticated /login case asserts no calls. Authenticated guest visits fall back home only without a valid redirect. Mount actual login.vue with mountSfc and the specified form/Nuxt seams.\n\n**Scope** — In: helper, middleware return-to query, authenticated guest navigation, login completion and access SameSite. Out: revocation/bearer work is US-005, refresh/streams are US-007, invite encoding is US-008. US-006 only: the refresh cookie keeps `sameSite: 'strict'` and `path: '/'`; path-scoping it (E/SEC-10) is not part of this bundle. US-006 only: CSRF behaviour of the `lax` access cookie is not re-tested; `lax` still withholds the cookie on cross-site POST and fetch requests. US-006 only: `register.vue` keeps navigating to `/` after registration. `.nax/rules/web.md` says guest-only routes redirect authenticated users to `/`; after US-006 they go to a validated `redirect` or `/`. The rule file is read-only to the run; the user updates it after merge.\n\n**Interface** — `safeRedirectPath(value: unknown): string`. Protected visitors use navigateTo's login object form; authenticated guest visitors and successful login use the helper's string result.",
+      "acceptanceCriteria": [
+        "[unit] safeRedirectPath('/demo/tickets/KODA-12?tab=activity') returns '/demo/tickets/KODA-12?tab=activity'.",
+        "[unit] safeRedirectPath('//evil.example/x') returns '/'.",
+        "[unit] safeRedirectPath('/\\\\evil.example') returns '/' (the argument's second character is a backslash).",
+        "[unit] safeRedirectPath('https://evil.example/') returns '/'.",
+        "[unit] safeRedirectPath(undefined) and safeRedirectPath(['/a']) each return '/'.",
+        "[unit] safeRedirectPath('/login?redirect=/x') and safeRedirectPath('/register') each return '/'.",
+        "[unit] safeRedirectPath('/a\\nb'), where the argument contains a line feed between 'a' and 'b', returns '/'.",
+        "[unit] The auth middleware for an unauthenticated visit to a route whose fullPath is /demo/tickets/KODA-12 returns navigateTo({ path: '/login', query: { redirect: '/demo/tickets/KODA-12' } }).",
+        "[unit] The auth middleware for an unauthenticated visit to / returns navigateTo({ path: '/login' }).",
+        "[unit] The auth middleware for an authenticated visit to /login with query.redirect '/demo/fleet' returns navigateTo('/demo/fleet').",
+        "[unit] The auth middleware for an authenticated visit to /login with query.redirect '//evil.example' returns navigateTo('/').",
+        "[unit] login.vue mounted through mountSfc (with vee-validate aliased so useForm().handleSubmit(fn) returns a function calling fn with valid values, and globals useRoute, useRegistrationStatus, useHead, useAuth, useAppToast, navigateTo) on a route whose query.redirect is '/demo/fleet': its submit handler, after auth.login resolves, calls navigateTo('/demo/fleet').",
+        "[unit] setAuthCookies(event, { accessToken: 'a', refreshToken: 'r' }) sets koda_token with sameSite: 'lax' and koda_refresh with sameSite: 'strict'."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "auth",
+        "navigation",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A bounded helper and standard Nuxt seams, but redirect validation and session cookie policy are security-critical. Isolated tests exercise actual helper/middleware/cookies and mounted login completion."
+      },
+      "contextFiles": [
+        "apps/web/middleware/auth.global.ts",
+        "apps/web/pages/login.vue",
+        "apps/web/server/utils/api.ts",
+        "apps/web/tests/middleware/auth.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/safe-redirect.ts",
+        "apps/web/tests/lib/safe-redirect.spec.ts",
+        "apps/web/tests/pages/login-redirect.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When safeRedirectPath receives '/register#details', it returns '/'.",
+        "When safeRedirectPath receives a local path containing ASCII DEL or a tab, it returns '/'.",
+        "When an authenticated visitor reaches /register with redirect '/demo/fleet', middleware navigates to '/demo/fleet'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/middleware/auth.spec.ts",
+          "reason": "the AC3 test expects navigateTo with the bare login path string for an unauthenticated visit to the home route; with the redirect rule that visit sends the object form with path set to the login route and no query, so the expected argument becomes that object; the \"no redirect when on /login\" case asserts `navigateTo` was not called at all; every other test in this file that expects navigateTo with the bare login path for an unauthenticated visit to a protected route (the second AC3 test and the AC5 test use the projects route) now expects the object form whose query redirect is that route's full path, the navigateTo mock and the result assertions are updated to the object form, and any authenticated guest-route case expects navigation to the home route only when no valid redirect query is present."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Keep sessions and live streams through API outages",
+      "description": "**Goal** — Distinguish expired/rejected sessions from outages so live streams keep retrying without clearing the user.\n\n**Motivation** — during an API deploy or restart, `refresh()` fails, sets the user to null and the stream stops for good; the layout hides user-only UI until the next navigation.\n\n**Approach** — **US-007 refresh outcome.** `refreshSession()` calls `POST /api/auth/refresh`. Resolved: `'ok'`. Rejected with a status of 401 or 403 (read from the error's `statusCode`, then `status`, then `response.status`): `'unauthorized'`, and `user` is set to null. Any other rejection: `'unavailable'`, and `user` is kept.\n\n**US-007 stream recovery.** Each stream keeps `failures` (drives the delay) and `authedFailures`. `recover()`:\n\n1. If `authedFailures >= MAX_TERMINAL_FAILURES`: stop.\n2. `delay = backoffMs(failures)`; `failures += 1`.\n3. `outcome = await refreshAuth()`; if the stream was closed meanwhile, return.\n4. `'unauthorized'`: stop (no reopen).\n5. `'ok'`: `authedFailures += 1`, schedule a reopen after `delay`.\n6. `'unavailable'`: schedule a reopen after `delay`; `authedFailures` is not changed, so an outage never stops the stream; the delay is capped at 30 s by `backoffMs`.\n7. Any other value is handled as `'unauthorized'` (fail closed).\n\n`onopen` resets both counters to 0. With only `'ok'` outcomes this keeps today's behaviour: the sixth consecutive error stops the stream without a sixth refresh.\n\n`useAuth()` adds `refreshSession(): Promise<RefreshOutcome>` with exported type `RefreshOutcome = 'ok' | 'unauthorized' | 'unavailable'`. `refresh()` returns `(await refreshSession()) === 'ok'`. `user` is set to null only on `'unauthorized'`. `ProjectEventStreamDeps.refreshAuth` and the thread stream's `refreshAuth`: `() => Promise<RefreshOutcome>` (was `Promise<boolean>`). `useThread`, `useWorkspaceThread`, `useUserEvents` and `useProjectEvents` pass `refreshSession`; `useUserEvents` and `useProjectEvents` keep their `latestRefresh` variable name, whose default becomes `async () => 'unauthorized'`. `backoffMs(attempt) = min(1000 * 2^attempt, 30_000)` and `MAX_TERMINAL_FAILURES = 5` in `apps/web/lib/project-event-stream.ts`; `apps/web/lib/thread-event-stream.ts` has the same `recover` shape. Preserve dedupe, parsers, native reconnect, resync and thread ready/live handling. Update boolean outcome mocks, all affected useAuth thread/workspace/page mocks and composable source pins. Change useAuth AC-8 to a 401 failure, since plain Error now preserves user. The four composables pass `refreshSession` to the streams (same story); the `useThread` AC triggers a stream error through the composable.\n\n**Scope** — In: exported tri-state refresh, compatible boolean wrapper, both recovery loops and four composable delegates. Out: revocation belongs to US-005, safe redirects/cookies to US-006, invite encoding to US-008. US-007 only: the live proxy keeps answering 502 on an upstream failure; a 503 with a retry hint is not added, because `EventSource` cannot read the status either way. US-007 only: no single-flight for concurrent refreshes (E/PERF-1). Do not change fetchUser. E/BUG-1 is not reopened; the P0 bundle (#381) added the SSR session refresh in `server/middleware/session-refresh.ts`.\n\n**Interface** — `RefreshOutcome = 'ok' | 'unauthorized' | 'unavailable'`; `refreshSession(): Promise<RefreshOutcome>`; `refresh(): Promise<boolean>`; `refreshAuth: () => Promise<RefreshOutcome>`. useAuth returns both methods; latestRefresh names/delegation remain.",
+      "acceptanceCriteria": [
+        "[unit] useAuth().refreshSession() returns 'ok' when POST /api/auth/refresh resolves.",
+        "[unit] refreshSession() returns 'unauthorized' and sets user to null when the refresh rejects with statusCode 401.",
+        "[unit] refreshSession() returns 'unauthorized' and sets user to null when the refresh rejects with status 403.",
+        "[unit] refreshSession() returns 'unavailable' and keeps user when the refresh rejects with statusCode 502.",
+        "[unit] refreshSession() returns 'unavailable' and keeps user when the refresh rejects with an error that has no status.",
+        "[unit] refresh() returns false and keeps user when the refresh rejects with statusCode 500.",
+        "[unit] A project event stream whose refreshAuth resolves 'unauthorized' after an error schedules no reopen.",
+        "[unit] A project event stream whose refreshAuth resolves 'unavailable' after each of eight consecutive errors schedules a reopen after each, with delays 1000, 2000, 4000, 8000, 16000, 30000, 30000 and 30000.",
+        "[unit] A project event stream whose refreshAuth resolves 'ok' after five consecutive errors stops at the sixth error without calling refreshAuth a sixth time.",
+        "[unit] A project event stream that reopens after 'unavailable' errors and receives onopen uses a delay of 1000 for its next recovery.",
+        "[unit] A project event stream whose refreshAuth resolves true (not a RefreshOutcome) after an error schedules no reopen.",
+        "[unit] A thread event stream whose refreshAuth resolves 'unauthorized' after an error schedules no reopen.",
+        "[unit] A thread event stream whose refreshAuth resolves 'unavailable' after each of seven consecutive errors schedules a reopen after each.",
+        "[unit] useThread's stream, on an EventSource error, calls the refreshSession of useAuth()."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "session",
+        "sse",
+        "reliability",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Session failure classification and SSE recovery span two state machines, four composables and many mocks. Strict auth/session isolation applies; use deterministic EventSource/timer tests and actual composable delegation."
+      },
+      "contextFiles": [
+        "apps/web/composables/useAuth.ts",
+        "apps/web/lib/project-event-stream.ts",
+        "apps/web/lib/thread-event-stream.ts",
+        "apps/web/composables/useThread.ts",
+        "apps/web/composables/useUserEvents.ts"
+      ],
+      "suggestedCriteria": [
+        "When refreshSession rejects with response.status 401 and no statusCode or status, it returns 'unauthorized' and clears user.",
+        "When a stream closes while refreshAuth is pending, settling refreshAuth schedules no reopen.",
+        "When a thread stream receives five 'ok' refresh outcomes without onopen, its sixth error stops without a sixth refresh.",
+        "When a thread stream receives an invalid refreshAuth outcome such as true, it schedules no reopen.",
+        "When refreshSession resolves 'ok', refresh() returns true."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/useAuth.spec.ts",
+          "reason": "the AC-8 test rejects the refresh with a plain `Error` and expects `user` cleared; a plain error is now `'unavailable'` and keeps the user, so that test rejects with a 401 status error, and the invariant is that only 401 or 403 clears the user."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream.spec.ts",
+          "reason": "`refreshAuth` mocks resolve booleans; they resolve `'ok'` for true and `'unauthorized'` for false, keeping each test's meaning."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-event-stream.spec.ts",
+          "reason": "`refreshAuth` mocks resolve booleans; they resolve `'ok'` for true and `'unauthorized'` for false, keeping each test's meaning."
+        },
+        {
+          "path": "apps/web/tests/composables/useThread.spec.ts",
+          "reason": "the `useAuth` mock provides only `refresh`; it gains `refreshSession` resolving `'ok'`, because the thread stream now calls `refreshSession`."
+        },
+        {
+          "path": "apps/web/tests/composables/useThread-lifecycle.spec.ts",
+          "reason": "the `useAuth` mocks provide only `refresh`; they gain `refreshSession` resolving `'ok'`."
+        },
+        {
+          "path": "apps/web/tests/composables/useWorkspaceThread.spec.ts",
+          "reason": "the `useAuth` mock provides only `refresh`; it gains `refreshSession` resolving `'ok'`."
+        },
+        {
+          "path": "apps/web/tests/composables/useProjectEvents.spec.ts",
+          "reason": "the source assertion expects the line destructuring `refresh` from `useAuth()`; it now expects the line destructuring `refreshSession`, and the `latestRefresh` assignment from `refreshSession`; the `refreshAuth` delegation line through `latestRefresh` is unchanged."
+        },
+        {
+          "path": "apps/web/tests/composables/useUserEvents.spec.ts",
+          "reason": "the source assertion expects the line destructuring `refresh` from `useAuth()`; it now expects the line destructuring `refreshSession`."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-thread-detail-page.spec.ts",
+          "reason": "its `useAuth` mock provides only `refresh`; it gains `refreshSession` resolving `'ok'`."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-hub.spec.ts",
+          "reason": "`refreshAuth` mocks resolve true; they resolve `'ok'`, because any other value is now handled as `'unauthorized'`."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream-fleet.spec.ts",
+          "reason": "`refreshAuth` mocks resolve true; they resolve `'ok'`, because any other value is now handled as `'unauthorized'`."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream-notification.spec.ts",
+          "reason": "`refreshAuth` mocks resolve true; they resolve `'ok'`, because any other value is now handled as `'unauthorized'`."
+        },
+        {
+          "path": "apps/web/tests/lib/project-event-stream-approval-request.spec.ts",
+          "reason": "`refreshAuth` mocks resolve true; they resolve `'ok'`, because any other value is now handled as `'unauthorized'`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Keep invite tokens within one API path segment",
+      "description": "**Goal** — Encode invite tokens at browser/Nitro boundaries and standardize approval paths under the expanded API-path guard.\n\n**Motivation** — `/invite/..%2Fprojects%2Fdemo%2Flabels%3F` decodes to a path that the browser normalizes to `POST /api/projects/demo/labels?/accept`, a same-origin POST with the victim's session to a path the attacker chose.\n\n**Approach** — `apiPath` in the invite page and `acceptInvite`, `encodeURIComponent` in the Nitro accept route, `apiPath` in `useApprovalRequests`, and the wider guard roots. Baseline finding only: the invite token is interpolated raw into API paths. It now goes through `apiPath` (or `encodeURIComponent` in the Nitro route), and the `apiPath` guard spec covers the `invites`, `approvals`, `me`, `memory`, `notifications`, `home` and `api/threads` roots.\n\n`apps/web/tests/lib/api-path-guard.spec.ts` — `API_ROOT` lists only `projects|agents|comments|admin|code-intel|fleet`; it adds `invites`, `approvals`, `me`, `memory`, `notifications` and `home`, plus `threads` only after the api prefix (the threads root without that prefix is also a page route), and the pattern self-test gains a case for each new root; `offenders` must stay empty.\n\nUse existing apiPath without pre-encoding interpolations: preview uses apiPath for `/invites/${token}`, acceptInvite uses apiPath for `/api/invites/${token}/accept`, Nitro encodes the router param in its forwarded path, and approval decisions replace their manual encodeURIComponent with apiPath. Preserve query options/body/comment and normal tok123 forwarding. Convert any newly exposed raw dynamic API paths rather than weakening the guard; preserve /threads page navigation. Update invite route AC13 and mounted preview/useAuth cases, and exercise the approval composable. The current Nitro route lacks a missing/empty parameter check: add the spec's 400/no-upstream guard before forwarding, without adding token-alphabet validation. Preserve upstream error rejection and no-cookie behavior, including an encoded-token request whose upstream answers 409.\n\n**Scope** — In: invite preview/accept paths across browser and Nitro, the required missing/empty Nitro parameter guard, approval decision path, wider guarded roots and existing error-path regression assertions; preserve sibling useAuth changes. Input boundary, not deferred work: US-008 only: the Nitro accept route answers 400 without calling the API when the router param is missing or empty; the invite page always has a non-empty route token, so `apiPath` never sees an empty value there. Out: revocation is US-005, redirect/cookie policy is US-006, refreshSession/stream behavior is US-007. US-008 only: the invite page does not validate the token's alphabet; encoding keeps any token one path segment.\n\n**Interface** — Keep existing `apiPath` tagged template unchanged. `acceptInvite(token: string, body: { name: string; password: string }): Promise<void>` keeps its signature. Nitro forwards `/invites/<encodeURIComponent(token)>/accept`; `useApprovalRequests().decide` posts to apiPath`/approvals/${id}/decisions`.",
+      "acceptanceCriteria": [
+        "[unit] The invite page mounted with route token '../projects/demo/labels?' calls $api.get with '/invites/..%2Fprojects%2Fdemo%2Flabels%3F'.",
+        "[unit] useAuth().acceptInvite('a/b', { name: 'N', password: 'p' }) calls $fetch with '/api/invites/a%2Fb/accept'.",
+        "[unit] The Nitro accept route for router param '../x' calls forwardToApi with '/invites/..%2Fx/accept'.",
+        "[unit] The Nitro accept route for router param 'tok123' calls forwardToApi with '/invites/tok123/accept'.",
+        "[unit] useApprovalRequests().decide('a/b', 'approve') posts to '/approvals/a%2Fb/decisions'.",
+        "[unit] the Nitro accept route with an empty router param answers 400 and makes no forwardToApi call."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "invites",
+        "api-path",
+        "review-p2-session-runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Clear call-site encoding with an existing primitive, but invite tokens and attacker-steered authenticated paths require strict security TDD. Capture calls from mounted preview, useAuth, Nitro and approval composable; extend guard self-tests without guarding unprefixed page routes."
+      },
+      "contextFiles": [
+        "apps/web/pages/invite/[token].vue",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/server/api/invites/[token]/accept.post.ts",
+        "apps/web/composables/useApprovalRequests.ts",
+        "apps/web/tests/lib/api-path-guard.spec.ts",
+        "apps/web/tests/composables/useApprovalRequests.spec.ts"
+      ],
+      "expectedFiles": [],
+      "suggestedCriteria": [
+        "When an invite token contains a percent sign and question mark, each API hop forwards it as one encoded segment without adding a query string.",
+        "When useApprovalRequests().decide receives an id containing a percent sign, the posted path encodes that percent sign exactly once."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/lib/api-path-guard.spec.ts",
+          "reason": "`API_ROOT` lists only `projects|agents|comments|admin|code-intel|fleet`; it adds `invites`, `approvals`, `me`, `memory`, `notifications` and `home`, plus `threads` only after the api prefix (the threads root without that prefix is also a page route), and the pattern self-test gains a case for each new root; `offenders` must stay empty."
+        },
+        {
+          "path": "apps/web/tests/server/invite-accept-route.spec.ts",
+          "reason": "AC13 expects the forwarded invite accept path for token tok123, which encoding leaves unchanged; a token containing a slash is now forwarded encoded."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Architecture and discovery: This is an existing-code hardening bundle. Codebase-memory MCP was unavailable, so discovery used Read, Glob and Grep against the supplied worktree. The detected Express/Next.js labels are inaccurate: apps/api/src/memory/prisma-canonical-state.repository.ts:1 uses NestJS/Nathapp PrismaService; apps/web/middleware/auth.global.ts:1 and apps/web/pages/login.vue:54 are Nuxt/Vue. Authoritative guidance is .nax/mono/apps/{api,runner,web}/context.md. API uses NestJS/Fastify, Prisma 7 and Vitest; runner uses Bun ESM, SQLite and bun:test; web uses Nuxt SSR/Nitro and Jest. Keep domain rules API-owned, runner networking inside src/sync and tokens in server httpOnly cookies. Read nathapp-nestjs-patterns before writing API code. All eight stories have the binding workdirs and no dependencies. No new runtime dependencies, schema migration, backfill, apps/cli changes or generated-client edits are needed; US-004 does change the runner's own CLI server-stop exit policy. Existing response shapes stay unchanged; OpenAPI regeneration is unnecessary unless implementation changes controller/DTO contracts. US-001: apps/api/src/memory/prisma-canonical-state.repository.ts:134 currently queries every active undeleted DECISION without order or take. Preserve its predicate/object mapping, null-object empty string and return signature. Import REVIEW_EVENT_SOURCE from apps/api/src/memory/review-decisions.ts:4. Mirror null-safe source exclusion and descending ordering from apps/api/src/memory/prisma-memory-item.repository.ts:344-360; Prisma not alone discards null sources. Do not change findReviewDecisionRows, which separately feeds review-minted rows to review jobs. Callers are canonical-state.service.ts:69-78 and context/context-builder.service.ts:103,144; downstream readers include agents/adapters/nax.adapter.ts:74-80, claude-code.adapter.ts:54-57, copilot.adapter.ts:44-46 and policy/policy-gate.service.ts:477. The exact findMany argument assertion at prisma-canonical-state.repository.spec.ts:273-293 needs OR, orderBy and take. Add actual PostgreSQL coverage under test/integration/memory/active-decisions.integration.spec.ts and extend test/e2e/context.e2e.spec.ts; its :42-77 setup uses canRunDbTests, AppFactory and CombinedAuthGuard. test/integration/context/context-controller.integration.spec.ts:11-16 is placeholder coverage, not a DB/request assertion. Use generated Prisma imports, createTestPrismaClient and existing role-binding fixtures; do not bypass auth or add Prisma enums. DB verification requires KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and an isolated test PostgreSQL database; reset-based suites must not run concurrently against one DB. Main risks are dropping legacy null-source decisions, filtering after rather than before the cap, and losing deterministic id tie-breaking. ttlAt remains ignored. US-002: apps/runner/src/sync/sync-loop.ts:119-143 tracks the request AbortController but currently returns classify without awaiting it; async classification must be awaited so finally does not clear inflight before a pending probe settles. :175-211 currently blames the first event at minimum scale. Preserve bounded capability rejection, halving and ack exclusion, then send exactly one jobs:[] probe with all other fields and the same signal. Failed probes must not recurse into badBatch or mutate the journal. A successful probe must use apply at :145-173, preserving token answers, command handling, reported-job-only acknowledgements, held-ack detail stripping and failure reset. Then replace one sequence-preserving event, log jobId/seq/type, restore FULL_SCALE and retry the original error; the successful apply intentionally resets the delay to attempt zero. Persistent failed probes instead accumulate the existing counter. backoff.ts:5-8 provides jitter and batch.ts:18-23 provides FULL_SCALE/halveScale. sync-loop.spec.ts:32-50 has injected scripted transport, real in-memory Journal, captured sleeps and fixed random. D24 tests at :185 and :243 need probe responses and retry instead of again after replacement; preserve D58 ack-isolation semantics. Cover syncOnce and run, since returning retry alone does not prove a sleep. Risks are event loss on global parser errors, recursive probes, premature inflight cleanup and failed-probe counter resets. Auth-stop and token-response paths warrant strict security TDD. US-003: executor/nax-process.ts:68-78 treats EPERM as alive; inject kill for tests rather than stubbing process.kill under Bun. Invalid pids remain false and all thrown errors become false. executor/job-executor.ts:71-72 gains processIdentity; update HostExecutor and test/helpers/fake-executor.ts:13, the implementations discovered. host-executor.ts:258-269 already uses injected ProcessInfo.command and matches profile markers, with special config-job rules; reuse its matching rule while distinguishing null lookup as unknown. ProcessInfo is defined in executor/pid-registry.ts:76-81, not a separate process-info.ts. supervisor/supervisor.ts:182-184 retains its initial matchesProcess readopt gate. supervisor/job-run.ts:424-456 ticks before liveness; only a watch start checks identity after isAlive true. other follows the existing exited path, ours/unknown continue. chainFixStep at :399-400 already refuses readopted FIX chaining; preserve this and all ownership-based signaling. fake-executor.ts:26-28 models alive/procMatches; :58-60 changes liveness before the tick's check. Add identityUnknown precedence and do not append identity calls to calls, preserving exact existing call sequences. Extend executor/nax-process.spec.ts, supervisor/job-run.spec.ts and test/unit/host-executor.spec.ts using injected kill/ProcessInfo/FakeExecutor rather than host ps. Unknown must not falsely terminate a live job, while foreign identity must release the watch/mutex. US-004: service/units.ts:54-80 already has systemd RestartPreventExitStatus=2; do not change it. :84-124 renders launchd XML with unconditional KeepAlive and HOME/PATH. commands/run.ts:36-42 logs server stop and returns 2; only its launchd-specific final server-stop return becomes zero. Config/enrollment errors remain one and clean stop remains zero. daemon/tuning.ts:1-56,59-94 contains interface/frozen defaults; add the two log tuning fields and update exact-object tuning.spec.ts expectations. daemon/daemon.ts:96-98 merges overrides; :258-262 holds unref'd timers and :269,292 clears them on stop/crash. Await guarded startup rotation and register a separately guarded periodic timer, not the 24-hour prune timer. New service/log-rotate.ts must copy to .1 then truncate the original inode because launchd holds its descriptor open; rotate strictly above the threshold, replace the single backup, return false for missing files and propagate other errors to daemon warning handling. Extend units.spec.ts, commands/run.spec.ts, tuning.spec.ts and test/unit/daemon.spec.ts; create service/log-rotate.spec.ts with real temporary files. daemon.spec.ts:35-37 injects fetch instead of sockets and :79-98 supplies homes/fake nax/FakeExecutor/tuning, so the specified filesystem integration cases stay there and do not need PostgreSQL. Assert captured outcomes outside swallowed callback try/catch blocks. Risks are unhandled interval rejection, leaked timers, startup failure on a directory/permissions error and accidental systemd/non-launchd exit changes. The live koda-wk plist is hand-edited and needs manual sudo/reinstall after merge; copy/truncate intentionally has a lost-line window. US-005: web/server/utils/api.ts:75-116 is shared transport using .raw with ignoreResponseError; logout must inspect returned status. Add bearer precedence without cookie reads when set, preserving URL, client-IP and content-type behavior. unwrapAuth at :27-37 throws 401 on nonzero ret; logout must catch that and return 502. server/api/auth/logout.post.ts:8-20 currently skips refresh-only revocation and ignores failures. Implement the flow table with one cleanup for all outcomes. auth/refresh.post.ts:10-29 demonstrates cookieName refresh and unwrapAuth, but do not invoke its cookie-setting route from logout; call forwardToApi directly and retain the minted access token only in server memory. useAuth.ts:63-71 already clears local state and navigates after failed logout; leave it unchanged. tests/server/forward-to-api.spec.ts:24-34,43-81 demonstrates Nitro global stubs and transport capture. Create tests/server/logout-route.spec.ts covering status, throw, envelope, refresh-only and no-cookie paths. Risks are false successful revocation, token leakage/new cookies, early-return cleanup loss and leaking unwrapAuth's 401 instead of 502. US-006: server/utils/api.ts:40-59 sets both cookies strict; only access becomes lax. middleware/auth.global.ts:8-10 preserves public invite access and :16-18 fetchUser hydration; :21-27 currently loses fullPath. New safe-redirect.ts validates the specified local path, control characters and guest-route exclusion, and is called by both guest-route completion and login.vue:78-89. Registration completion is unchanged. tests/middleware/auth.spec.ts:15-17 has fullPath/query fixtures and :65-110 has string-only navigateTo mocks that must accept object redirects and revised result assertions; home has no redirect query and protected routes retain fullPath. Assert no navigation at all for unauthenticated /login. Add safe-redirect.spec.ts and login-redirect.spec.ts using existing tests/helpers/mount-sfc.ts and the specified vee-validate/global seams. No new layout, palette entry, styling or translated text is required. docs/ux/redesign/MASTER-PLAN.md:34-43 governs navigation/layout changes; consult it and apply its Status/Decisions requirements if applicable without expanding into a UX redesign. .nax/rules/web.md is explicitly read-only and its old guest-route rule is manually updated after merge. Risks are open redirects, guest loops, lost query/hash and accidentally changing refresh cookie policy. US-007: useAuth.ts:104-115 clears user on every refresh exception. Add exported RefreshOutcome and refreshSession; retain boolean refresh for other callers. Only explicit 401/403 clear user using statusCode, status, response.status precedence; do not change fetchUser. project-event-stream.ts:101-106 defines shared deps, imported by thread-event-stream.ts:11-18; change both to tri-state outcomes. Project recover at :210-230 and thread recover at :85-102 need separate delay/authenticated-failure counters, closure checks after await, explicit fail-closed comparisons and reset of both onopen. Preserve native reconnect, dedupe, parsers, resync and thread ready/live handling. useThread.ts:17,31 and useWorkspaceThread.ts:32,46 directly delegate refresh; useProjectEvents.ts:9,27,32 and useUserEvents.ts:12,31,38 use latestRefresh. Update all four to refreshSession, retaining latestRefresh name/default unauthorized. Existing tests to update are tests/useAuth.spec.ts AC-8 (401 instead of plain Error), lib/project-event-stream.spec.ts, thread-event-stream.spec.ts, project-event-hub.spec.ts and project-event-stream-{fleet,notification,approval-request}.spec.ts (boolean mocks to outcomes); composables/useThread.spec.ts, useThread-lifecycle.spec.ts, useWorkspaceThread.spec.ts and pages/workspace-thread-detail-page.spec.ts (add refreshSession mocks); composables/useProjectEvents.spec.ts and useUserEvents.spec.ts (source pins). Exercise real useThread stream-error delegation, not just source assertions. Risks are truthy invalid outcomes, unavailable increments exhausting terminal budget, stale shared callbacks and mock contracts silently stopping streams. US-008: pages/invite/[token].vue:20-34, useAuth.ts:55-60 and server/api/invites/[token]/accept.post.ts:8-13 interpolate tokens raw. Use lib/api-path.ts:11-19 for browser paths and encodeURIComponent upstream in Nitro, encoding once and retaining ordinary tok123 forwarding. Add the specified missing/empty Nitro token guard returning 400 without upstream calls: the current accept.post.ts:8-10 reads the parameter but has no such guard. This is a bounded input check, not new token-alphabet validation. Preserve the existing upstream-error rejection/no-cookie branch at accept.post.ts:15-23, covered by tests/server/invite-accept-route.spec.ts:49-57. useApprovalRequests.ts:7-10 already hand-encodes; replace its path with apiPath rather than nesting the encoder, preserving body/comment behavior. tests/lib/api-path-guard.spec.ts:8-16 guards six roots and checks raw templates, concatenation and double encoding across components/composables/pages at :25-36. Widen roots exactly as specified; api/threads is guarded but /threads remains a page path. Convert newly exposed raw dynamic API paths within web instead of weakening the guard. Extend tests/pages/invite-accept.spec.ts, tests/useAuth.spec.ts and tests/server/invite-accept-route.spec.ts:43-44, and create tests/composables/useApprovalRequests.spec.ts for the decision seam. Risks are double encoding, unguarded hops and false positives for page navigation. Integration and rollout: US-005/US-006 share server/utils/api.ts and US-007/US-008 share useAuth.ts/tests. Keep dependencies empty but combine edits without overwriting sibling bearer, cookie, refresh or apiPath changes. Preserve CanonicalDecision shape, journal sequence continuity, initial readopt/signaling rules, systemd behavior, boolean refresh, normal token paths and registration completion. Use package-native unit suites plus host DB/process verification where required; sandbox skips are not proof. Generated acceptance tests are read-only and run separately with package-specific commands and colon-terminated AC filters. No tests were executed during PRD discovery, and no runtime source files are changed by this artifact. The only operational migration is the explicitly manual plist/rule update; no other review findings are absorbed. Refine audit: enumerated all 91 explicit spec ACs in order (US-001: 6, US-002: 13, US-003: 12, US-004: 15, US-005: 13, US-006: 13, US-007: 14, US-008: 5) and retained every assertion and qualifying clause, including same tokenRequests/bootId, dieAfterTicks(4)/onTick order, systemd unchanged behavior, mounted-login seams and normal tok123 forwarding. The revised 96 criteria add only the failure-table 426/403/envelope cases and required null-object/upstream-409 regression guards. Every story now has directly observable negative-path and compatibility criteria. All 14 failure-table rows and all 24 verbatim feature-level exclusions are represented; all spec-recommended context files are included within five per story. Eight binding ids/workdirs and empty dependencies are unchanged. US-002 and US-003 use medium complexity because they extend existing injected seams rather than introducing architectures; strict security strategies remain for auth/session/token stories. No runtime tests or JSON parser were available in this drafting toolset, so this is a source/spec audit rather than an execution claim.",
+  "outOfScope": [
+    "Deploying the new launchd plist on koda-wk is a manual step: the live runner uses a hand-edited plist with the `run-service.sh` wrapper, and `install-service` needs sudo. The user re-installs or hand-applies `KeepAlive` and `KODA_RUNNER_SUPERVISOR` after merge.",
+    "The other P2 rows of the 2026-11-01 review (C carried BUG-1..5, the deploy bundle, A/BUG-2 and A/ENH-1) and the D LOW items (`pruneJobs` throwing outside its try, cancel-path identity check, journal permissions) are not part of this bundle.",
+    "E/BUG-1 is not reopened; the P0 bundle (#381) added the SSR session refresh in `server/middleware/session-refresh.ts`.",
+    "US-001 only: `findActiveDecisions` keeps ignoring `ttlAt`; expiring decisions in `/context` is a separate change.",
+    "US-001 only: no per-call budget or separate cap for review-minted decisions in `/context`; they are left out entirely, because `findReviewDecisionRows` already hands them to the reviews that need them.",
+    "US-002 only: a dropped `state` event is not parked or retried later; it is replaced and logged at error level, as before, but only after the probe shows the event is the cause.",
+    "US-002 only: the sync loop does not count consecutive bad-batch cycles separately from `failures`; the existing backoff counter bounds the rate.",
+    "US-002 only: a successful probe is a success for `apply`: it resets `failures` and resends held acks without detail, even though the probe did not prove the acks were the cause.",
+    "`.nax/rules/web.md` says guest-only routes redirect authenticated users to `/`; after US-006 they go to a validated `redirect` or `/`. The rule file is read-only to the run; the user updates it after merge.",
+    "US-003 only: a pid this daemon spawned is not identity-checked; Bun reaps its own children, and the readopt path is the reported failure.",
+    "US-003 only: a readopted FIX still never chains its fix step (no surviving token cache); that is unchanged.",
+    "US-003 only: no status.json heartbeat staleness check is added to the watch loop.",
+    "US-004 only: rotation keeps one old file (`runner.log.1`) and uses copy-then-truncate, so lines written between the copy and the truncate can be lost.",
+    "US-004 only: a newsyslog.d entry is not installed; launchd holds the log file open, so rename-based rotation would keep writing to the renamed file.",
+    "US-004 only: exit 1 (bad config, not enrolled) still restarts under launchd every 10 s, as systemd's `Restart=always` does.",
+    "US-005 only: no API route that accepts the refresh token for logout is added; the web refreshes first and logs out with the new access token.",
+    "US-005 only: the client shows no message for a failed revocation; the 502 is visible to the logout call only.",
+    "US-006 only: the refresh cookie keeps `sameSite: 'strict'` and `path: '/'`; path-scoping it (E/SEC-10) is not part of this bundle.",
+    "US-006 only: CSRF behaviour of the `lax` access cookie is not re-tested; `lax` still withholds the cookie on cross-site POST and fetch requests.",
+    "US-006 only: `register.vue` keeps navigating to `/` after registration.",
+    "US-007 only: the live proxy keeps answering 502 on an upstream failure; a 503 with a retry hint is not added, because `EventSource` cannot read the status either way.",
+    "US-007 only: no single-flight for concurrent refreshes (E/PERF-1).",
+    "US-008 only: the invite page does not validate the token's alphabet; encoding keeps any token one path segment.",
+    "US-008 only: the Nitro accept route answers 400 without calling the API when the router param is missing or empty; the invite page always has a non-empty route token, so `apiPath` never sees an empty value there."
+  ],
+  "routingProfile": "native-codex-ds"
+}
