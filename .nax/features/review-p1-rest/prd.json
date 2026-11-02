@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T12:45:48.119Z",
+  "updatedAt": "2026-11-02T12:59:17.243Z",
   "userStories": [
     {
       "id": "US-001",
@@ -564,14 +564,17 @@
         "audit"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "External GraphQL identity verification, scoped token minting, role checks and durable approval provenance require security-isolated TDD."
+        "reasoning": "External GraphQL identity verification, scoped token minting, role checks and durable approval provenance require security-isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-event.minter.ts",
@@ -622,7 +625,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6e03d82ff43395cd5356e0efcba139141741dac3"
     },
     {
       "id": "US-008",
