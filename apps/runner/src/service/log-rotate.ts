@@ -8,8 +8,8 @@ export const RUNNER_LOG_MAX_BYTES = 10 * 1024 * 1024;
  * OPS-1: bound a log file a supervisor keeps open. The current bytes are copied to `<path>.1`, replacing the
  * previous rotation, and then the original inode is truncated — launchd holds the descriptor, so renaming the file
  * would leave it writing into the rotated one. Only a file strictly larger than `maxBytes` rotates, and a missing
- * file is not an error. Anything else propagates: a filesystem error (permissions, a full disk, a directory where
- * the log should be — this helper can never bound that path) and `startDaemon` turns it into a warning.
+ * file is not an error. Everything else propagates, and `startDaemon` turns it into a warning: another filesystem
+ * error (permissions, a full disk), and a path that is not a regular file — a log this helper can never bound.
  */
 export async function rotateLogFile(path: string, maxBytes: number): Promise<boolean> {
   let info: Stats;
