@@ -3,7 +3,7 @@
   "feature": "review-p2-session-runner",
   "branchName": "feat/review-p2-session-runner",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T16:19:16.360Z",
+  "updatedAt": "2026-11-02T16:28:58.797Z",
   "userStories": [
     {
       "id": "US-001",
@@ -24,14 +24,17 @@
         "review-p2-session-runner"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Localized Prisma behavior with unchanged interfaces. Write query-shape tests first and add real PostgreSQL filtering/cap plus existing context endpoint coverage; no authorization rules change."
+        "reasoning": "Localized Prisma behavior with unchanged interfaces. Write query-shape tests first and add real PostgreSQL filtering/cap plus existing context endpoint coverage; no authorization rules change.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-canonical-state.repository.ts",
@@ -54,7 +57,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fcf8f0ebeba31426718009ee09a1787d07e84a23"
     },
     {
       "id": "US-002",
@@ -111,7 +118,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -165,7 +175,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -232,7 +245,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -286,7 +302,10 @@
         "When logout with refreshed access answers a status >= 400, the route answers 502 with { revoked: false } and clears both cookies."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -348,7 +367,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -457,7 +479,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -512,7 +537,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Architecture and discovery: This is an existing-code hardening bundle. Codebase-memory MCP was unavailable, so discovery used Read, Glob and Grep against the supplied worktree. The detected Express/Next.js labels are inaccurate: apps/api/src/memory/prisma-canonical-state.repository.ts:1 uses NestJS/Nathapp PrismaService; apps/web/middleware/auth.global.ts:1 and apps/web/pages/login.vue:54 are Nuxt/Vue. Authoritative guidance is .nax/mono/apps/{api,runner,web}/context.md. API uses NestJS/Fastify, Prisma 7 and Vitest; runner uses Bun ESM, SQLite and bun:test; web uses Nuxt SSR/Nitro and Jest. Keep domain rules API-owned, runner networking inside src/sync and tokens in server httpOnly cookies. Read nathapp-nestjs-patterns before writing API code. All eight stories have the binding workdirs and no dependencies. No new runtime dependencies, schema migration, backfill, apps/cli changes or generated-client edits are needed; US-004 does change the runner's own CLI server-stop exit policy. Existing response shapes stay unchanged; OpenAPI regeneration is unnecessary unless implementation changes controller/DTO contracts. US-001: apps/api/src/memory/prisma-canonical-state.repository.ts:134 currently queries every active undeleted DECISION without order or take. Preserve its predicate/object mapping, null-object empty string and return signature. Import REVIEW_EVENT_SOURCE from apps/api/src/memory/review-decisions.ts:4. Mirror null-safe source exclusion and descending ordering from apps/api/src/memory/prisma-memory-item.repository.ts:344-360; Prisma not alone discards null sources. Do not change findReviewDecisionRows, which separately feeds review-minted rows to review jobs. Callers are canonical-state.service.ts:69-78 and context/context-builder.service.ts:103,144; downstream readers include agents/adapters/nax.adapter.ts:74-80, claude-code.adapter.ts:54-57, copilot.adapter.ts:44-46 and policy/policy-gate.service.ts:477. The exact findMany argument assertion at prisma-canonical-state.repository.spec.ts:273-293 needs OR, orderBy and take. Add actual PostgreSQL coverage under test/integration/memory/active-decisions.integration.spec.ts and extend test/e2e/context.e2e.spec.ts; its :42-77 setup uses canRunDbTests, AppFactory and CombinedAuthGuard. test/integration/context/context-controller.integration.spec.ts:11-16 is placeholder coverage, not a DB/request assertion. Use generated Prisma imports, createTestPrismaClient and existing role-binding fixtures; do not bypass auth or add Prisma enums. DB verification requires KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and an isolated test PostgreSQL database; reset-based suites must not run concurrently against one DB. Main risks are dropping legacy null-source decisions, filtering after rather than before the cap, and losing deterministic id tie-breaking. ttlAt remains ignored. US-002: apps/runner/src/sync/sync-loop.ts:119-143 tracks the request AbortController but currently returns classify without awaiting it; async classification must be awaited so finally does not clear inflight before a pending probe settles. :175-211 currently blames the first event at minimum scale. Preserve bounded capability rejection, halving and ack exclusion, then send exactly one jobs:[] probe with all other fields and the same signal. Failed probes must not recurse into badBatch or mutate the journal. A successful probe must use apply at :145-173, preserving token answers, command handling, reported-job-only acknowledgements, held-ack detail stripping and failure reset. Then replace one sequence-preserving event, log jobId/seq/type, restore FULL_SCALE and retry the original error; the successful apply intentionally resets the delay to attempt zero. Persistent failed probes instead accumulate the existing counter. backoff.ts:5-8 provides jitter and batch.ts:18-23 provides FULL_SCALE/halveScale. sync-loop.spec.ts:32-50 has injected scripted transport, real in-memory Journal, captured sleeps and fixed random. D24 tests at :185 and :243 need probe responses and retry instead of again after replacement; preserve D58 ack-isolation semantics. Cover syncOnce and run, since returning retry alone does not prove a sleep. Risks are event loss on global parser errors, recursive probes, premature inflight cleanup and failed-probe counter resets. Auth-stop and token-response paths warrant strict security TDD. US-003: executor/nax-process.ts:68-78 treats EPERM as alive; inject kill for tests rather than stubbing process.kill under Bun. Invalid pids remain false and all thrown errors become false. executor/job-executor.ts:71-72 gains processIdentity; update HostExecutor and test/helpers/fake-executor.ts:13, the implementations discovered. host-executor.ts:258-269 already uses injected ProcessInfo.command and matches profile markers, with special config-job rules; reuse its matching rule while distinguishing null lookup as unknown. ProcessInfo is defined in executor/pid-registry.ts:76-81, not a separate process-info.ts. supervisor/supervisor.ts:182-184 retains its initial matchesProcess readopt gate. supervisor/job-run.ts:424-456 ticks before liveness; only a watch start checks identity after isAlive true. other follows the existing exited path, ours/unknown continue. chainFixStep at :399-400 already refuses readopted FIX chaining; preserve this and all ownership-based signaling. fake-executor.ts:26-28 models alive/procMatches; :58-60 changes liveness before the tick's check. Add identityUnknown precedence and do not append identity calls to calls, preserving exact existing call sequences. Extend executor/nax-process.spec.ts, supervisor/job-run.spec.ts and test/unit/host-executor.spec.ts using injected kill/ProcessInfo/FakeExecutor rather than host ps. Unknown must not falsely terminate a live job, while foreign identity must release the watch/mutex. US-004: service/units.ts:54-80 already has systemd RestartPreventExitStatus=2; do not change it. :84-124 renders launchd XML with unconditional KeepAlive and HOME/PATH. commands/run.ts:36-42 logs server stop and returns 2; only its launchd-specific final server-stop return becomes zero. Config/enrollment errors remain one and clean stop remains zero. daemon/tuning.ts:1-56,59-94 contains interface/frozen defaults; add the two log tuning fields and update exact-object tuning.spec.ts expectations. daemon/daemon.ts:96-98 merges overrides; :258-262 holds unref'd timers and :269,292 clears them on stop/crash. Await guarded startup rotation and register a separately guarded periodic timer, not the 24-hour prune timer. New service/log-rotate.ts must copy to .1 then truncate the original inode because launchd holds its descriptor open; rotate strictly above the threshold, replace the single backup, return false for missing files and propagate other errors to daemon warning handling. Extend units.spec.ts, commands/run.spec.ts, tuning.spec.ts and test/unit/daemon.spec.ts; create service/log-rotate.spec.ts with real temporary files. daemon.spec.ts:35-37 injects fetch instead of sockets and :79-98 supplies homes/fake nax/FakeExecutor/tuning, so the specified filesystem integration cases stay there and do not need PostgreSQL. Assert captured outcomes outside swallowed callback try/catch blocks. Risks are unhandled interval rejection, leaked timers, startup failure on a directory/permissions error and accidental systemd/non-launchd exit changes. The live koda-wk plist is hand-edited and needs manual sudo/reinstall after merge; copy/truncate intentionally has a lost-line window. US-005: web/server/utils/api.ts:75-116 is shared transport using .raw with ignoreResponseError; logout must inspect returned status. Add bearer precedence without cookie reads when set, preserving URL, client-IP and content-type behavior. unwrapAuth at :27-37 throws 401 on nonzero ret; logout must catch that and return 502. server/api/auth/logout.post.ts:8-20 currently skips refresh-only revocation and ignores failures. Implement the flow table with one cleanup for all outcomes. auth/refresh.post.ts:10-29 demonstrates cookieName refresh and unwrapAuth, but do not invoke its cookie-setting route from logout; call forwardToApi directly and retain the minted access token only in server memory. useAuth.ts:63-71 already clears local state and navigates after failed logout; leave it unchanged. tests/server/forward-to-api.spec.ts:24-34,43-81 demonstrates Nitro global stubs and transport capture. Create tests/server/logout-route.spec.ts covering status, throw, envelope, refresh-only and no-cookie paths. Risks are false successful revocation, token leakage/new cookies, early-return cleanup loss and leaking unwrapAuth's 401 instead of 502. US-006: server/utils/api.ts:40-59 sets both cookies strict; only access becomes lax. middleware/auth.global.ts:8-10 preserves public invite access and :16-18 fetchUser hydration; :21-27 currently loses fullPath. New safe-redirect.ts validates the specified local path, control characters and guest-route exclusion, and is called by both guest-route completion and login.vue:78-89. Registration completion is unchanged. tests/middleware/auth.spec.ts:15-17 has fullPath/query fixtures and :65-110 has string-only navigateTo mocks that must accept object redirects and revised result assertions; home has no redirect query and protected routes retain fullPath. Assert no navigation at all for unauthenticated /login. Add safe-redirect.spec.ts and login-redirect.spec.ts using existing tests/helpers/mount-sfc.ts and the specified vee-validate/global seams. No new layout, palette entry, styling or translated text is required. docs/ux/redesign/MASTER-PLAN.md:34-43 governs navigation/layout changes; consult it and apply its Status/Decisions requirements if applicable without expanding into a UX redesign. .nax/rules/web.md is explicitly read-only and its old guest-route rule is manually updated after merge. Risks are open redirects, guest loops, lost query/hash and accidentally changing refresh cookie policy. US-007: useAuth.ts:104-115 clears user on every refresh exception. Add exported RefreshOutcome and refreshSession; retain boolean refresh for other callers. Only explicit 401/403 clear user using statusCode, status, response.status precedence; do not change fetchUser. project-event-stream.ts:101-106 defines shared deps, imported by thread-event-stream.ts:11-18; change both to tri-state outcomes. Project recover at :210-230 and thread recover at :85-102 need separate delay/authenticated-failure counters, closure checks after await, explicit fail-closed comparisons and reset of both onopen. Preserve native reconnect, dedupe, parsers, resync and thread ready/live handling. useThread.ts:17,31 and useWorkspaceThread.ts:32,46 directly delegate refresh; useProjectEvents.ts:9,27,32 and useUserEvents.ts:12,31,38 use latestRefresh. Update all four to refreshSession, retaining latestRefresh name/default unauthorized. Existing tests to update are tests/useAuth.spec.ts AC-8 (401 instead of plain Error), lib/project-event-stream.spec.ts, thread-event-stream.spec.ts, project-event-hub.spec.ts and project-event-stream-{fleet,notification,approval-request}.spec.ts (boolean mocks to outcomes); composables/useThread.spec.ts, useThread-lifecycle.spec.ts, useWorkspaceThread.spec.ts and pages/workspace-thread-detail-page.spec.ts (add refreshSession mocks); composables/useProjectEvents.spec.ts and useUserEvents.spec.ts (source pins). Exercise real useThread stream-error delegation, not just source assertions. Risks are truthy invalid outcomes, unavailable increments exhausting terminal budget, stale shared callbacks and mock contracts silently stopping streams. US-008: pages/invite/[token].vue:20-34, useAuth.ts:55-60 and server/api/invites/[token]/accept.post.ts:8-13 interpolate tokens raw. Use lib/api-path.ts:11-19 for browser paths and encodeURIComponent upstream in Nitro, encoding once and retaining ordinary tok123 forwarding. Add the specified missing/empty Nitro token guard returning 400 without upstream calls: the current accept.post.ts:8-10 reads the parameter but has no such guard. This is a bounded input check, not new token-alphabet validation. Preserve the existing upstream-error rejection/no-cookie branch at accept.post.ts:15-23, covered by tests/server/invite-accept-route.spec.ts:49-57. useApprovalRequests.ts:7-10 already hand-encodes; replace its path with apiPath rather than nesting the encoder, preserving body/comment behavior. tests/lib/api-path-guard.spec.ts:8-16 guards six roots and checks raw templates, concatenation and double encoding across components/composables/pages at :25-36. Widen roots exactly as specified; api/threads is guarded but /threads remains a page path. Convert newly exposed raw dynamic API paths within web instead of weakening the guard. Extend tests/pages/invite-accept.spec.ts, tests/useAuth.spec.ts and tests/server/invite-accept-route.spec.ts:43-44, and create tests/composables/useApprovalRequests.spec.ts for the decision seam. Risks are double encoding, unguarded hops and false positives for page navigation. Integration and rollout: US-005/US-006 share server/utils/api.ts and US-007/US-008 share useAuth.ts/tests. Keep dependencies empty but combine edits without overwriting sibling bearer, cookie, refresh or apiPath changes. Preserve CanonicalDecision shape, journal sequence continuity, initial readopt/signaling rules, systemd behavior, boolean refresh, normal token paths and registration completion. Use package-native unit suites plus host DB/process verification where required; sandbox skips are not proof. Generated acceptance tests are read-only and run separately with package-specific commands and colon-terminated AC filters. No tests were executed during PRD discovery, and no runtime source files are changed by this artifact. The only operational migration is the explicitly manual plist/rule update; no other review findings are absorbed. Refine audit: enumerated all 91 explicit spec ACs in order (US-001: 6, US-002: 13, US-003: 12, US-004: 15, US-005: 13, US-006: 13, US-007: 14, US-008: 5) and retained every assertion and qualifying clause, including same tokenRequests/bootId, dieAfterTicks(4)/onTick order, systemd unchanged behavior, mounted-login seams and normal tok123 forwarding. The revised 96 criteria add only the failure-table 426/403/envelope cases and required null-object/upstream-409 regression guards. Every story now has directly observable negative-path and compatibility criteria. All 14 failure-table rows and all 24 verbatim feature-level exclusions are represented; all spec-recommended context files are included within five per story. Eight binding ids/workdirs and empty dependencies are unchanged. US-002 and US-003 use medium complexity because they extend existing injected seams rather than introducing architectures; strict security strategies remain for auth/session/token stories. No runtime tests or JSON parser were available in this drafting toolset, so this is a source/spec audit rather than an execution claim.",
