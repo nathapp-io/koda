@@ -45,6 +45,7 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
       review: {
         prNumber: reviewPrNumber, botLogin: gitIdentity.name,
         ...(Array.isArray(job.reviewDecisions) && job.reviewDecisions.length > 0 ? { decisions: job.reviewDecisions } : {}),
+        ...(job.command === 'FIX' && repo.fixTrustDetectedChecks === true ? { trustDetectedChecks: true as const } : {}),
       },
     } : {}),
     ...(thread ? { thread } : {}),
