@@ -5,6 +5,7 @@ import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-pr
 import { PROFILE_NAME_RE } from '../common/capabilities';
 import { RESERVED_PROFILE_PREFIX } from '../jobs/dispatch-input';
 import { AutoReviewException } from './auto-review.exception';
+import { FixChecksException } from './fix-checks.exception';
 import type { AutoReviewPatch } from './domain/fleet-repo.domain';
 import { PermissionService } from '../../permissions/permission.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -22,6 +23,7 @@ import type { FleetRepoRecord } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
+import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
@@ -102,6 +104,31 @@ export class FleetReposService {
 
       const updated = await this.repo.updateAutoReview(id, patch);
       await this.audit.record({ key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId, summary: dto.enabled ? 'enabled' : 'disabled' });
+      return FleetRepoDto.from(updated);
+    });
+  }
+
+  /**
+   * Fleet FIX US-001: the repo-level `fixTrustDetectedChecks` switch (default off). Enabling is only
+   * allowed where koda can broker a GitHub App token, because that is the flow a FIX uses to read the
+   * repo and push; disabling is always allowed. The write and its audit share one transaction.
+   *
+   * The principal is part of the signature because the approval engine re-enters this method as the
+   * requesting actor; the setting records no attribution (unlike auto-review's enabler columns), so it
+   * only ever reads the switch.
+   */
+  async configureFixChecks(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateFixChecksDto): Promise<FleetRepoDto> {
+    return this.txManager.run(async () => {
+      const row = await this.repo.findById(id);
+      if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      if (dto.trustDetectedChecks && (row.provider !== 'github' || row.githubInstallationId === null)) {
+        throw new FixChecksException('github app required');
+      }
+      const updated = await this.repo.updateFixChecks(id, dto.trustDetectedChecks);
+      await this.audit.record({
+        key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
+        summary: dto.trustDetectedChecks ? 'fix detected checks enabled' : 'fix detected checks disabled',
+      });
       return FleetRepoDto.from(updated);
     });
   }

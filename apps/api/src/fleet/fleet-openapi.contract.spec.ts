@@ -66,6 +66,19 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(operation)).toContain('#/components/schemas/FleetRepoDto');
   });
 
+  it('exposes the fix-checks route, its body and the repo field (fleet FIX US-001)', () => {
+    // The repo-level, default-off switch `nax bot fix` reads: a patch route with its own body DTO,
+    // and the setting on the repo the listing and the route answer.
+    const operation = spec.paths['/api/fleet/repos/{id}/fix-checks']?.['patch'];
+    expect(operation).toBeDefined();
+    expect(Object.keys(spec.components.schemas['FleetRepoDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['fixTrustDetectedChecks']));
+    expect(Object.keys(spec.components.schemas['UpdateFixChecksDto']?.properties ?? {}))
+      .toEqual(['trustDetectedChecks']);
+    expect(JSON.stringify(operation)).toContain('#/components/schemas/UpdateFixChecksDto');
+    expect(JSON.stringify(operation)).toContain('#/components/schemas/FleetRepoDto');
+  });
+
   it('exposes the thread run route and its body (US-007)', () => {
     expect(spec.paths['/api/projects/{slug}/threads/{id}/run']?.['post']).toBeDefined();
     const schemas = spec.components.schemas as Record<string, unknown>;
@@ -228,6 +241,7 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/repos', 'post', 'fleet.repo.create'],
       ['/api/fleet/repos/{id}/check', 'post', 'fleet.repo.check'],
       ['/api/fleet/repos/{id}/auto-review', 'patch', 'fleet.repo.review.configure'],
+      ['/api/fleet/repos/{id}/fix-checks', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}', 'delete', 'fleet.repo.delete'],
       ['/api/fleet/enrollments', 'get', 'fleet.enrollment.read'],
       ['/api/fleet/enrollments', 'post', 'fleet.enrollment.create'],

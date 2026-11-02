@@ -780,6 +780,9 @@ model FleetRepo {
   autoReviewEnabledById String?
   autoReviewEnabledByType String?
   autoReviewEnabledAt DateTime?
+  /// Fleet FIX (fix detected checks): allow `nax bot fix` to run the checks it detects in a repo
+  /// whose base branch has no nax check commands. Off by default.
+  fixTrustDetectedChecks Boolean @default(false)
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
