@@ -16,6 +16,17 @@ export interface CanonicalRepo {
   defaultBranch: string;
 }
 
+/** US-007: what a review-thread lookup answers — the PR and repository the thread belongs to, and its comment authors. */
+export interface ReviewThreadInfo {
+  repoOwner: string;
+  repoName: string;
+  prNumber: number;
+  authors: readonly string[];
+}
+
+/** US-007: one bounded read of a review thread's PR, repository and first page of comment authors. */
+const REVIEW_THREAD_QUERY = 'query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { name owner { login } } } comments(first: 100) { nodes { author { login } } } } } }';
+
 export interface OpenPullRequest {
   number: number;
   headSha: string;
@@ -42,6 +53,15 @@ export class GitHubAppClient {
 
   private get api(): string {
     return this.vcsConfig.githubApiUrl.replace(/\/+$/, '');
+  }
+
+  /**
+   * US-007: the GraphQL endpoint on the same host as the REST base. GitHub.com answers on `/graphql`; a
+   * GitHub Enterprise base ends in `/api/v3`, whose GraphQL counterpart is `/api/graphql`.
+   */
+  private get graphqlUrl(): string {
+    const api = this.api;
+    return api.endsWith('/api/v3') ? `${api.slice(0, -'/api/v3'.length)}/api/graphql` : `${api}/graphql`;
   }
 
   private headers(bearer: string): Record<string, string> {
@@ -84,6 +104,43 @@ export class GitHubAppClient {
     return this.mintScopedToken(installationId, repoName, {
       contents: 'read', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read',
     });
+  }
+
+  /**
+   * US-007: the read-only counterpart the review-thread lookup uses — contents, pull_requests and metadata
+   * read, and nothing else, so a token minted for verification cannot write.
+   */
+  async mintThreadReadToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
+    return this.mintScopedToken(installationId, repoName, { contents: 'read', pull_requests: 'read', metadata: 'read' });
+  }
+
+  /**
+   * US-007: the PR, repository and comment authors of one review thread, read through GitHub's GraphQL API.
+   * Null when the id is not a review-thread node (or the node is gone), which the caller reads as "unverified".
+   */
+  async getReviewThread(token: string, threadId: string): Promise<ReviewThreadInfo | null> {
+    const res = await this.http.request('POST', this.graphqlUrl, this.headers(token), {
+      query: REVIEW_THREAD_QUERY, variables: { id: threadId },
+    });
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+
+    const thread = obj(obj(obj(res.body).data).node);
+    const pullRequest = obj(thread.pullRequest);
+    if (typeof pullRequest.number !== 'number') return null;
+    const repository = obj(pullRequest.repository);
+    const repoName = repository.name;
+    const repoOwner = obj(repository.owner).login;
+    if (typeof repoName !== 'string' || typeof repoOwner !== 'string') throw new RepoCheckException('provider_error');
+
+    const comments = obj(thread.comments).nodes;
+    const authors = Array.isArray(comments)
+      ? [...new Set(comments.flatMap((raw): string[] => {
+        const login = obj(obj(raw).author).login;
+        return typeof login === 'string' ? [login] : [];
+      }))]
+      : [];
+
+    return { repoOwner, repoName, prNumber: pullRequest.number, authors };
   }
 
   /** Best-effort default branch protection probe. Any inability to confirm both endpoints fails closed. */

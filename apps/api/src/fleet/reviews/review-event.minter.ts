@@ -5,10 +5,18 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { runAsSystemWriter, runWithApproval } from '../../action-context/action-context';
 import { ReviewDecisionWriter, type ReviewDecisionInput, type ReviewDecisionResult } from '../../memory/review-decision.writer';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
-import { GitHubAppClient } from '../git-broker/github-app-client';
+import { GitHubAppClient, type ReviewThreadInfo } from '../git-broker/github-app-client';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import type { FleetReviewEventRecord } from './domain/fleet-review-event.domain';
 import { FleetReviewEventsService } from './fleet-review-events.service';
+
+/** A repository role that may author a review: the same set `getRepoRole` reports as write-capable. */
+const WRITER_ROLES: ReadonlySet<string> = new Set(['admin', 'maintain', 'write']);
+
+/** Forge logins are case-insensitive; two spellings of one login are one author. */
+const normalizeLogin = (login: string): string => login.toLowerCase();
+
+type ReviewRepo = { owner: string; name: string };
 
 @Injectable()
 @SystemWriter('system.review.decision')
@@ -58,29 +66,29 @@ export class ReviewEventMinter {
 
     let token: string;
     try {
-      ({ token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name));
+      ({ token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name));
     } catch (error) {
       return this.retry(row.id, error);
     }
-    let approver: string | undefined;
+    let writers: string[];
     try {
-      for (const login of logins) {
-        const role = await this.github.getRepoRole(token, repo.owner, repo.name, login);
-        if (role === 'admin' || role === 'maintain' || role === 'write') {
-          approver = login;
-          break;
-        }
-      }
+      writers = await this.writers(logins, token, repo);
     } catch (error) {
       this.logFailure(row.id, error);
       return this.skip(row.id, 'permission-check-failed');
     }
-    if (approver === undefined) return this.skip(row.id, 'no-writer');
+    if (writers.length === 0) return this.skip(row.id, 'no-writer');
+
+    // US-007 (ruling 14): the writer is the approver either way; only a confirmed thread author is a
+    // *verified* forge-human approval. An unverified decision is still minted — downgraded, not dropped.
+    const verified = await this.verifiedWriter(row, repo, token, writers);
+    const approver = verified ?? writers[0];
 
     let result: ReviewDecisionResult;
     try {
       result = await runWithApproval({
-        requiredMode: 'human', satisfiedBy: 'human', approverType: 'FORGE_USER', approverId: `github:${approver}`,
+        requiredMode: 'human', satisfiedBy: verified === undefined ? 'none' : 'human',
+        approverType: 'FORGE_USER', approverId: `github:${approver}`,
       }, () => this.writer.mint(input));
     } catch (error) {
       return this.retry(row.id, error);
@@ -89,6 +97,32 @@ export class ReviewEventMinter {
     if (result.status === 'skipped') return this.skip(row.id, result.reason);
     await bookkeeping('fleet.review-event-bookkeeping', () =>
       this.events.markMinted(row.id, { memoryItemId: result.memoryItemId, approverLogin: approver }));
+  }
+
+  /** One role lookup per non-bot login, in `disagreedBy` order; every writer is kept, not just the first. */
+  private async writers(logins: readonly string[], token: string, repo: ReviewRepo): Promise<string[]> {
+    const roles = await Promise.all(logins.map((login) => this.github.getRepoRole(token, repo.owner, repo.name, login)));
+    return logins.filter((_login, index) => WRITER_ROLES.has(roles[index]));
+  }
+
+  /**
+   * The first writer who commented in the review thread `row.threadId` names, when that thread belongs to the
+   * same PR and repository. A failed lookup, a foreign thread or no match all answer undefined: unverified.
+   */
+  private async verifiedWriter(row: FleetReviewEventRecord, repo: ReviewRepo, token: string, writers: readonly string[]): Promise<string | undefined> {
+    let thread: ReviewThreadInfo | null;
+    try {
+      thread = await this.github.getReviewThread(token, row.threadId);
+    } catch (error) {
+      this.logFailure(row.id, error);
+      return undefined;
+    }
+    if (thread === null || thread.prNumber !== row.prNumber) return undefined;
+    if (normalizeLogin(thread.repoOwner) !== normalizeLogin(repo.owner)) return undefined;
+    if (normalizeLogin(thread.repoName) !== normalizeLogin(repo.name)) return undefined;
+
+    const authors = new Set(thread.authors.map(normalizeLogin));
+    return writers.find((login) => authors.has(normalizeLogin(login)));
   }
 
   private async retry(id: string, error: unknown): Promise<void> {
