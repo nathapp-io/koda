@@ -7,7 +7,7 @@ const webDir = join(__dirname, '../..')
 /** Directories whose API paths must go through apiPath. */
 const GUARDED_DIRS = ['components', 'composables', 'pages']
 
-const API_ROOT = String.raw`(?:api\/)?(?:projects|agents|comments|admin|code-intel|fleet)\/`
+const API_ROOT = String.raw`(?:(?:api\/)?(?:projects|agents|comments|admin|code-intel|fleet|invites|approvals|me|memory|notifications|home)|api\/threads)\/`
 /** An API path written as an untagged template literal with an interpolation. */
 const RAW_TEMPLATE = new RegExp(String.raw`(?<!apiPath)\`\/${API_ROOT}[^\`]*\$\{`)
 /** An API path built by string concatenation. */
@@ -45,6 +45,11 @@ describe('API paths go through apiPath', () => {
     expect(CONCAT.test("$api.delete('/agents/' + props.agent.slug)")).toBe(true)
     expect(RAW_TEMPLATE.test('$api.patch(`/fleet/runners/${id}`, body)')).toBe(true)
     expect(RAW_TEMPLATE.test('$api.post(apiPath`/fleet/repos/${id}/check`, {})')).toBe(false)
+    for (const root of ['invites', 'approvals', 'me', 'memory', 'notifications', 'home']) {
+      expect(RAW_TEMPLATE.test(`$api.get(\`/${root}/\${id}\`)`)).toBe(true)
+    }
+    expect(RAW_TEMPLATE.test('$api.get(`/api/threads/${id}`)')).toBe(true)
+    expect(RAW_TEMPLATE.test('router.push(`/threads/${id}`)')).toBe(false)
     expect(CONCAT.test("$api.delete('/fleet/' + path)")).toBe(true)
     expect(DOUBLE_ENCODED.test('apiPath`/projects/${encodeURIComponent(slug)}`')).toBe(true)
   })

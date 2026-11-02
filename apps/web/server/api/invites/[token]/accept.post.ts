@@ -6,8 +6,11 @@
  */
 export default defineEventHandler(async (event) => {
   const token = getRouterParam(event, 'token')
+  if (!token) {
+    throw createError({ statusCode: 400, statusMessage: 'Invite token is required' })
+  }
   const body = await readBody<{ name: string; password: string }>(event)
-  const { status, body: responseBody } = await forwardToApi(event, `/invites/${token}/accept`, {
+  const { status, body: responseBody } = await forwardToApi(event, `/invites/${encodeURIComponent(token)}/accept`, {
     method: 'POST',
     body,
   })

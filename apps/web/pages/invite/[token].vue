@@ -3,6 +3,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
 import { extractApiError, extractErrorStatus } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'auth' })
 
@@ -31,7 +32,7 @@ const accountExists = ref(false)
 
 onMounted(async () => {
   try {
-    preview.value = await $api.get<InvitePreview>(`/invites/${token}`)
+    preview.value = await $api.get<InvitePreview>(apiPath`/invites/${token}`)
   } catch (err: unknown) {
     if (extractErrorStatus(err) === 404) invalid.value = true
     else toast.error(extractApiError(err))

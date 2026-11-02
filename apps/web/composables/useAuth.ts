@@ -1,3 +1,5 @@
+import { apiPath } from '~/lib/api-path'
+
 interface LoginCredentials {
   email: string
   password: string
@@ -81,7 +83,7 @@ export function useAuth() {
    * the httpOnly cookies and returning the new user so client state matches.
    */
   async function acceptInvite(token: string, body: { name: string; password: string }): Promise<void> {
-    const response = await $fetch<{ user: AuthUser }>(`/api/invites/${token}/accept`, {
+    const response = await $fetch<{ user: AuthUser }>(apiPath`/api/invites/${token}/accept`, {
       method: 'POST',
       body,
     })

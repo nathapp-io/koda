@@ -121,6 +121,23 @@ describe('AC-2: register() proxies to /api/auth/register and stores user.value',
   })
 })
 
+// ── US-008 AC-2: invite tokens remain one encoded path segment ────────────────
+
+describe('US-008 AC-2: acceptInvite encodes its token as one path segment', () => {
+  test('acceptInvite posts to the encoded invite acceptance path', async () => {
+    const env = makeFakeEnv()
+    applyNuxtGlobals(env)
+    const mod = loadAuth()
+
+    await mod.useAuth().acceptInvite('a/b', { name: 'N', password: 'p' })
+
+    expect(env.fetchMock).toHaveBeenCalledWith(
+      '/api/invites/a%2Fb/accept',
+      expect.objectContaining({ method: 'POST', body: { name: 'N', password: 'p' } }),
+    )
+  })
+})
+
 // ── AC-3: logout POSTs to /api/auth/logout, clears state, and navigates ─────
 
 describe('AC-3: logout() proxies to /api/auth/logout, clears user.value, and navigates to /login', () => {
