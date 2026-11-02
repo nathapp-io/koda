@@ -67,6 +67,14 @@ describe('buildFixArgv', () => {
       ['nax', 'bot', 'fix', '4', '--no-rereview', '--profile', 'native-codex,koda-job-j1'],
     );
   });
+  test('US-003 AC-6 appends --trust for an explicitly trusted FIX', () => {
+    expect(buildFixArgv(['nax'], assign({ command: 'FIX', jobId: 'j1', profiles: ['native-codex'], review: { prNumber: 4, botLogin: 'koda-fleet[bot]', trustDetectedChecks: true } }))).toEqual(
+      ['nax', 'bot', 'fix', '4', '--no-rereview', '--profile', 'native-codex,koda-job-j1', '--trust'],
+    );
+  });
+  test('US-003 AC-7 omits --trust when trustDetectedChecks is absent', () => {
+    expect(buildFixArgv(['nax'], assign({ command: 'FIX', jobId: 'j1', profiles: ['native-codex'], review: { prNumber: 4, botLogin: 'koda-fleet[bot]' } }))).not.toContain('--trust');
+  });
   test('AC-12: rejects an invalid review login with PathError invalid review', () => {
     try {
       buildFixArgv(['nax'], assign({ command: 'FIX', review: { prNumber: 4, botLogin: 'koda-fleet' } }));

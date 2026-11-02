@@ -41,7 +41,7 @@ export function buildFixArgv(naxCommand: readonly string[], assign: AssignPayloa
   if (assign.command !== 'FIX') throw new PathError('invalid review');
   const prNumber = reviewPrNumber(assign);
   const chain = [...assign.profiles, jobProfileName(assign.jobId)].join(',');
-  return [...naxCommand, 'bot', 'fix', String(prNumber), '--no-rereview', '--profile', chain];
+  return [...naxCommand, 'bot', 'fix', String(prNumber), '--no-rereview', '--profile', chain, ...(assign.review?.trustDetectedChecks === true ? ['--trust'] : [])];
 }
 
 export interface SpawnNaxOptions {

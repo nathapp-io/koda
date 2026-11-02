@@ -721,6 +721,12 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     await expect(stat(w.tokenPath)).rejects.toThrow();
   });
 
+  test('US-003 AC-8: fix step passes --trust from the stored assign through injected spawn', async () => {
+    const w = await injectedWorld('FIX', { review: { prNumber: 42, botLogin: BOT, trustDetectedChecks: true } });
+    await w.ex.spawnFixStep(w.row);
+    expect(w.calls[0]?.argv).toContain('--trust');
+  });
+
   test('US-009 AC-1, AC-2, AC-3: fix step brokers fresh token/login, argv, and separate output files', async () => {
     const w = await injectedWorld('FIX');
     const handle = await w.ex.spawnFixStep(w.row);
