@@ -65,9 +65,14 @@ function readEntry(entry: Readable): Promise<string> {
  * tar-stream 3 entries are streamx streams: advance on `close`, after the entry was consumed (see
  * src/fleet/logs/bundle-log-extractor.ts for the same rule).
  */
-export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
+export function readBundleFiles(
+  bundle: Readable,
+  limits: Readonly<Record<'fileBytes' | 'totalBytes' | 'maxFilesPerSlot', number>> = INGEST_LIMITS,
+): Promise<BundleFiles> {
   return new Promise((resolve, reject) => {
     const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, featureReport: null as BundleFile | null, decisions: null as BundleFile | null, botReview: [] as BundleFile[], naxStdout: null as BundleFile | null, oversized: [] as string[] };
+    let keptBytes = 0;
+    const keptFilesPerSlot: Partial<Record<Slot, number>> = {};
     const x = extract();
     const fail = (error: Error) => {
       bundle.destroy();
@@ -82,11 +87,18 @@ export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
         body.resume();
         return;
       }
-      if ((header.size ?? 0) > INGEST_LIMITS.fileBytes) {
+      const size = header.size ?? 0;
+      const arraySlot = slot === 'cost' || slot === 'reviews' || slot === 'finishResults' || slot === 'finishLast' || slot === 'botReview';
+      const skip = size > limits.fileBytes
+        || (arraySlot && (keptFilesPerSlot[slot] ?? 0) >= limits.maxFilesPerSlot)
+        || keptBytes + size > limits.totalBytes;
+      if (skip) {
         if (slot !== 'botReview' && slot !== 'naxStdout') acc.oversized = [...acc.oversized, name];
         body.resume();
         return;
       }
+      keptBytes += size;
+      if (arraySlot) keptFilesPerSlot[slot] = (keptFilesPerSlot[slot] ?? 0) + 1;
       readEntry(body).then((text) => {
         const file = { name, text };
         if (slot === 'metrics') acc.metrics = file;

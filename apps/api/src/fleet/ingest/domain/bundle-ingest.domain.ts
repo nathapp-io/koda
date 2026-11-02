@@ -16,6 +16,8 @@ export const INGEST_DRAIN_LIMIT = 50;
 
 export const INGEST_LIMITS = {
   fileBytes: 33_554_432,
+  totalBytes: 67_108_864,
+  maxFilesPerSlot: 5_000,
   costEvents: 50_000,
   stories: 2_000,
   reviews: 5_000,
