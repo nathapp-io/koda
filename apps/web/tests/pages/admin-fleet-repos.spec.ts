@@ -14,7 +14,7 @@ import type { FleetPage, FleetRepo, FleetRepoCheck } from '../../lib/fleet-types
 
 const repo = (id: string, over: Partial<FleetRepo> = {}): FleetRepo => ({
   id, projectId: 'p1', provider: 'github', owner: 'acme', name: id, defaultBranch: 'main',
-  githubInstallationId: '7', autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000',
+  githubInstallationId: '7', autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000', fixTrustDetectedChecks: false,
   autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null,
   createdAt: '2026-10-01T00:00:00Z', ...over,
 })
@@ -73,8 +73,11 @@ function mountRepos(
   const app = mountSfc(reposPage, {
     components: uiStubs,
     // The reachability badge is mounted for real: its label is the page's main output.
-    fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview'],
-    alias: { '~/composables/useApi': apiModule },
+    fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks'],
+    alias: {
+      '~/composables/useApi': apiModule,
+      '~/composables/useFleetRepos': { useFleetRepos: () => ({ setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
+    },
     globals: {
       ref, computed, watch, nextTick,
       onMounted: Vue.onMounted,
@@ -120,10 +123,10 @@ describe('Fleet admin Repos page (behaviour)', () => {
     delete (globalThis as Record<string, unknown>).useApi
   })
 
-  test('mounts real auto-review switches only for GitHub repos with installations (AC-1, AC-2)', async () => {
+  test('mounts fix-checks switches only for GitHub repos with installations (AC-8)', async () => {
     const { app, settle, unmount } = mountRepos({ repos: [repo('github'), repo('gitlab', { provider: 'gitlab', githubInstallationId: null }), repo('no-install', { githubInstallationId: null })] })
     await settle()
-    expect(app.find('[data-stub="switch"]')).toHaveLength(1)
+    expect(app.find('[data-stub="switch"]')).toHaveLength(2)
     unmount()
   })
 
