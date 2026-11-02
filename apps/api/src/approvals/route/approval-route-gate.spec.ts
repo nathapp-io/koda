@@ -122,6 +122,28 @@ describe('ApprovalRouteGate', () => {
     expect(h.gate.gate).not.toHaveBeenCalled();
   });
 
+  it('AC-10: forwards alsoKeys to the gate', async () => {
+    const h = harness(['ticket.transition.start']);
+    const callWithExtras: RouteGateCall = {
+      key: 'ticket.transition.start', variant: 'rest:tickets.update-status', projectId: 'p1', input,
+      alsoKeys: ['ticket.update'],
+    };
+
+    await asActor(agent, () => h.routeGate.run(callWithExtras));
+
+    expect(h.gate.gate).toHaveBeenCalledWith('ticket.transition.start', input, {
+      projectId: 'p1', variant: 'rest:tickets.update-status', alsoKeys: ['ticket.update'],
+    });
+  });
+
+  it('AC-14: leaves alsoKeys out of the legacy gate options shape', async () => {
+    const h = harness(['ticket.update']);
+
+    await asActor(agent, () => h.routeGate.run({ key: 'ticket.update', variant: 'rest:tickets.update', projectId: 'p1', input }));
+
+    expect(h.gate.gate).toHaveBeenCalledWith('ticket.update', input, { projectId: 'p1', variant: 'rest:tickets.update' });
+  });
+
   it('AC-8: a key held only in its .own form passes the check and reaches the gate', async () => {
     const h = harness(['ticket.update.own']);
 

@@ -15,6 +15,7 @@ import {
   type ApprovalRequestRecord,
 } from './domain/approval.domain';
 import { UnregisteredApprovalCommandError } from './domain/approval.errors';
+import { APPROVAL_MODE_RANK } from './domain/approval-mode';
 import type { PendingApprovalMatch, PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 
 export type GateOutcome<TResult> =
@@ -61,7 +62,7 @@ export class ApprovalGate {
   async gate<TResult>(
     key: string,
     input: unknown,
-    opts: { projectId: string | null; variant?: string },
+    opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[] },
     now?: Date,
   ): Promise<GateOutcome<TResult>> {
     const command = this.registry.get(key, opts.variant);
@@ -91,7 +92,15 @@ export class ApprovalGate {
       throw new Error(`approval gate needs a project for key ${key}`);
     }
 
-    const resolved = await this.resolver.resolve({ key, projectId: opts.projectId, subject });
+    const keys = opts.alsoKeys !== undefined && opts.alsoKeys.length > 0 ? [key, ...opts.alsoKeys] : [key];
+    const resolutions = await Promise.all(keys.map((resolutionKey) =>
+      this.resolver.resolve({ key: resolutionKey, projectId: opts.projectId, subject }),
+    ));
+    // Reduce strictly on rank so ties retain the primary (first) resolution and all policy flags
+    // come from the same winning resolution as its mode.
+    const resolved = resolutions.reduce((winner, candidate) =>
+      APPROVAL_MODE_RANK[candidate.mode] > APPROVAL_MODE_RANK[winner.mode] ? candidate : winner,
+    );
     let approval: ActionApproval;
     if (resolved.mode === 'none') {
       approval = { requiredMode: 'none', satisfiedBy: 'none' };
