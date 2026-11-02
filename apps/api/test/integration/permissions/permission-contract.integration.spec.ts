@@ -62,9 +62,10 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  // 127 after decision retirement; the OpenAPI contract pins the same gated operations.
-  it('AC-12 (US-007): collects exactly 127 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(127);
+  // 128 after decision retirement plus the fleet fix-checks route; the OpenAPI contract pins the
+  // same gated operations.
+  it('AC-12 (US-007): collects exactly 128 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(128);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {
