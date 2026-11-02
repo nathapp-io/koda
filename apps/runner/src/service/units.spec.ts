@@ -44,17 +44,34 @@ describe('systemdUnit (design §3.3, D105)', () => {
     expect(systemdUnit({ ...SPEC, command: ['/home/u/.bun/bin/bun', '/repo/apps/runner/src/main.ts'] }))
       .toContain('ExecStart=/home/u/.bun/bin/bun /repo/apps/runner/src/main.ts --home /home/koda-runner/.koda-runner run');
   });
+  // OPS-1: only launchd needs the exit-0 server stop; systemd's RestartPreventExitStatus=2 already covers it.
+  test('AC-3: keeps RestartPreventExitStatus=2 and never names KODA_RUNNER_SUPERVISOR', () => {
+    const unit = systemdUnit(SPEC);
+    expect(unit).toContain('RestartPreventExitStatus=2');
+    expect(unit).not.toContain('KODA_RUNNER_SUPERVISOR');
+  });
 });
 
 describe('launchdPlist (design §3.3, D105)', () => {
   const plist = launchdPlist(SPEC);
+  // OPS-1: a plain `<true/>` restarts the runner every 10 s after a server refusal; a dict with SuccessfulExit
+  // false restarts it only on a failed exit.
+  test('AC-1: KeepAlive is a dict whose SuccessfulExit is false', () => {
+    expect(plist).toContain('<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>');
+  });
+  test('AC-2: EnvironmentVariables maps KODA_RUNNER_SUPERVISOR to launchd next to HOME and PATH', () => {
+    const envBlock = /<key>EnvironmentVariables<\/key>\n {2}<dict>\n([\s\S]*?)\n {2}<\/dict>/.exec(plist)?.[1] ?? '';
+    expect(envBlock).toContain('<key>HOME</key>');
+    expect(envBlock).toContain('<key>PATH</key>');
+    expect(envBlock).toContain('<key>KODA_RUNNER_SUPERVISOR</key>\n    <string>launchd</string>');
+  });
   test('UserName, AbandonProcessGroup, KeepAlive, the program arguments and the log file', () => {
     for (const fragment of [
       '<key>Label</key>\n  <string>dev.koda.runner</string>',
       '<key>UserName</key>\n  <string>koda-runner</string>',
       '<string>/usr/local/bin/koda-runner</string>\n    <string>--home</string>\n    <string>/home/koda-runner/.koda-runner</string>\n    <string>run</string>',
       '<key>AbandonProcessGroup</key>\n  <true/>',
-      '<key>KeepAlive</key>\n  <true/>',
+      '<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>',
       '<key>RunAtLoad</key>\n  <true/>',
       '<key>ThrottleInterval</key>\n  <integer>10</integer>',
       '<key>HOME</key>\n    <string>/home/koda-runner</string>',

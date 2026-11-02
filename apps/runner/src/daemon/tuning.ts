@@ -1,3 +1,5 @@
+import { RUNNER_LOG_MAX_BYTES } from '../service/log-rotate';
+
 export interface Tuning {
   readonly statusPollMs: number;
   readonly killGraceMs: number;
@@ -53,6 +55,12 @@ export interface Tuning {
    */
   readonly threadRunningAckPollMs: number;
   readonly threadRunningAckWaitMs: number;
+  /**
+   * OPS-1: the ceiling of the daemon's own runner.log (launchd appends to it forever) and how often the daemon
+   * checks it. `pruneIntervalMs` is a day, which a chatty runner.log would outgrow.
+   */
+  readonly runnerLogMaxBytes: number;
+  readonly runnerLogCheckMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -91,4 +99,6 @@ export const TUNING: Tuning = Object.freeze({
   threadCloseTimeoutMs: 10_000,
   threadRunningAckPollMs: 250,
   threadRunningAckWaitMs: 30_000,
+  runnerLogMaxBytes: RUNNER_LOG_MAX_BYTES,
+  runnerLogCheckMs: 300_000,
 });

@@ -23,6 +23,7 @@ import { createNaxCli, type NaxCli } from '../nax/nax-cli';
 import { assertWorkspaceTrusted } from '../nax/trust';
 import { assertInside } from '../paths/safe-segment';
 import { selfCommand } from '../self-command';
+import { rotateLogFile } from '../service/log-rotate';
 import { CommandHandler } from '../supervisor/command-handler';
 import { RepoMutex } from '../supervisor/repo-mutex';
 import { Supervisor } from '../supervisor/supervisor';
@@ -106,6 +107,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 0o700 so a local user on a multi-tenant host cannot list the directory.
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await chmod(home.dir, 0o700).catch(() => undefined);
+  // OPS-1: launchd appends every stdout/stderr line to runner.log and never rotates it, so the daemon bounds it
+  // here and every `runnerLogCheckMs`. A rotation failure (a directory in the way, permissions, a full disk) is a
+  // warning: runner.log is not worth stopping the daemon for.
+  const rotateLog = async (): Promise<void> => {
+    try {
+      await rotateLogFile(join(home.dir, 'runner.log'), tuning.runnerLogMaxBytes);
+    } catch (error) {
+      log.warn('could not rotate runner.log', { error: errorMessage(error) });
+    }
+  };
+  await rotateLog();
   const uid = process.getuid?.() ?? 0;
   const socketDir = config.socketDir ?? defaultSocketDir(uid);
   await ensureSocketDir(socketDir, uid);
@@ -258,6 +270,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
     setInterval(() => { void pruneJobs(journal, config, log); void pruneThreadAssets(); }, tuning.pruneIntervalMs),
     setInterval(() => { void reprobe(); }, tuning.capabilityProbeMs),
+    setInterval(() => { void rotateLog(); }, tuning.runnerLogCheckMs),
   ];
   for (const timer of timers) timer.unref();
 

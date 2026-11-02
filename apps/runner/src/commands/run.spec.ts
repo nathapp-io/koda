@@ -23,7 +23,7 @@ async function enrolledHome(serverUrl = 'https://koda.example.com') {
   await writeIdentity(home.identityPath, { runnerId: 'r1', apiKey: 'kr_x', serverUrl, name: 'box', enrolledAt: 't' });
   return home;
 }
-function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void) => void) {
+function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void) => void, env: NodeJS.ProcessEnv = {}) {
   const handlers: Array<() => void> = [];
   const signals = new Map<string, () => void>();
   let stopped = 0;
@@ -31,7 +31,7 @@ function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth';
   let stoppedOnce = false;
   const log = createMemoryLogger();
   const deps: RunDeps = {
-    env: {}, log,
+    env, log,
     start: async () => {
       let resolveStopped: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void = () => undefined;
       const stoppedPromise = new Promise<'stopped' | { kind: 'protocol' | 'auth'; message: string }>((r) => { resolveStopped = r; });
@@ -75,6 +75,30 @@ describe('runCommand', () => {
     const h = harness((resolve) => resolve({ kind: 'auth', message: 'runner key rejected' }));
     expect(await runCommand(home.dir, h.deps)).toBe(2);
     expect(h.log.lines.some((l) => l.level === 'error')).toBe(true);
+  });
+  // OPS-1: under launchd a plain KeepAlive would restart the runner every 10 s after a server refusal, so the
+  // supervisor-aware exit 0 tells launchd "do not restart". systemd's RestartPreventExitStatus=2 stays as is.
+  test('AC-4: under launchd a server stop (401) is exit 0 and is still logged at error level', async () => {
+    const home = await enrolledHome();
+    const h = harness((resolve) => resolve({ kind: 'auth', message: 'runner key rejected' }), { KODA_RUNNER_SUPERVISOR: 'launchd' });
+    expect(await runCommand(home.dir, h.deps)).toBe(0);
+    const line = h.log.lines.find((l) => l.level === 'error' && l.message.startsWith('stopped by the server (auth)'));
+    expect(line).toBeDefined();
+    expect(line?.message).toBe('stopped by the server (auth): runner key rejected');
+  });
+  test('AC-5: without KODA_RUNNER_SUPERVISOR a server stop (426) is still exit 2', async () => {
+    const home = await enrolledHome();
+    const h = harness((resolve) => resolve({ kind: 'protocol', message: 'Unsupported protocol version' }));
+    expect(await runCommand(home.dir, h.deps)).toBe(2);
+  });
+  test('AC-6: KODA_RUNNER_SUPERVISOR launchd does not soften a missing identity (exit 1)', async () => {
+    const dir = await tmp.make('run');
+    const home = resolveHome({}, join(dir, 'home'));
+    await mkdir(home.dir, { recursive: true });
+    await writeFile(home.configPath, JSON.stringify({ serverUrl: 'https://koda.example.com', workspaceRoot: join(dir, 'ws') }));
+    const h = harness(() => undefined, { KODA_RUNNER_SUPERVISOR: 'launchd' });
+    expect(await runCommand(home.dir, h.deps)).toBe(1);
+    expect(h.stopped).toBe(0);
   });
   test('D102: SIGHUP asks the daemon to probe again and does not stop it', async () => {
     const home = await enrolledHome();
