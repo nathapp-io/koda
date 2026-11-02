@@ -91,7 +91,44 @@ describe('KnowledgeChunkStore on LanceDB', () => {
     await table.add([chunk('ticket:t1', 0, 'ticket')]);
     await store.deleteFile(PROJECT, a);
     expect(await store.readFile(PROJECT, a)).toEqual([]);
-    expect((await store.readFile(PROJECT, 'ticket:t1')).map((r) => r.id)).toEqual(['ticket:t1#0']);
+    const ticketRows = await table.query().where("source_id = 'ticket:t1'").toArray();
+    expect(ticketRows.map((r: LanceRecord) => r.id)).toEqual(['ticket:t1#0']);
+  });
+
+  it('readFile returns only repo/outcome rows when a doc shares its source_id (US-004 AC-1/2)', async () => {
+    const repoId = 'repo:r1:docs/shared.md';
+    const outcomeId = 'outcome:r1:j1:report';
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await table.add([chunk(repoId, 0, 'doc'), chunk(outcomeId, 0, 'doc')]);
+    await store.replaceFile(PROJECT, repoId, [chunk(repoId, 1)]);
+    await store.replaceFile(PROJECT, outcomeId, [chunk(outcomeId, 1, 'outcome')]);
+
+    expect((await store.readFile(PROJECT, repoId)).map((record) => record.id)).toEqual([`${repoId}#1`]);
+    expect((await store.readFile(PROJECT, outcomeId)).map((record) => record.id)).toEqual([`${outcomeId}#1`]);
+  });
+
+  it('deleteFile leaves a doc row sharing the repo source_id (US-004 AC-3/4)', async () => {
+    const sourceId = 'repo:r1:docs/delete-shared.md';
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await table.add([chunk(sourceId, 0, 'doc')]);
+    await store.replaceFile(PROJECT, sourceId, [chunk(sourceId, 0)]);
+
+    await store.deleteFile(PROJECT, sourceId);
+
+    expect((await table.query().where(`source = 'doc' AND source_id = '${sourceId}'`).toArray()).map((r: LanceRecord) => r.source)).toEqual(['doc']);
+    expect(await store.readFile(PROJECT, sourceId)).toEqual([]);
+  });
+
+  it('replaceFile leaves a doc row sharing the repo source_id and only the new repo row (US-004 AC-5/6)', async () => {
+    const sourceId = 'repo:r1:docs/replace-shared.md';
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await table.add([chunk(sourceId, 0, 'doc')]);
+    await store.replaceFile(PROJECT, sourceId, [chunk(sourceId, 0)]);
+
+    await store.replaceFile(PROJECT, sourceId, [chunk(sourceId, 1)]);
+
+    expect((await table.query().where(`source = 'doc' AND source_id = '${sourceId}'`).toArray()).map((r: LanceRecord) => r.source)).toEqual(['doc']);
+    expect((await store.readFile(PROJECT, sourceId)).map((record) => record.id)).toEqual([`${sourceId}#1`]);
   });
 
   it('vector search honours the predicate', async () => {

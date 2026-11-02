@@ -2417,6 +2417,14 @@ describeIntegration('API Integration Tests', () => {
       documentSourceId = 'doc-manual-001';
     });
 
+    it('POST /api/projects/:slug/kb/documents — rejects a reserved repository source id', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/documents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ source: 'doc', sourceId: 'repo:x:y.md', content: 'reserved' })
+        .expect(400);
+    });
+
     it('POST /api/projects/:slug/kb/documents — returns 404 for nonexistent project', async () => {
       await request(httpServer)
         .post('/api/projects/nonexistent/kb/documents')

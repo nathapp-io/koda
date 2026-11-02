@@ -51,6 +51,16 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await db.approvalPolicy.deleteMany();
     await seedWaitPolicy(db, 'kb.document.add', world.projectId);
   });
+  it('US-004 AC-12/13: rejects a reserved repo id and writes no doc row', async () => {
+    const reservedId = 'repo:r1:docs/a.md';
+    const res = await request(app.getHttpServer()).post('/api/projects/web/kb/documents').set(auth(agent.apiKey)).send({
+      source: 'doc', sourceId: reservedId, content: 'x',
+    });
+
+    expect(res.status).toBe(400);
+    expect((await rag.listDocuments(world.projectId)).filter((row) => row.source === 'doc' && row.sourceId === reservedId)).toEqual([]);
+  });
+
   it('AC-1: waits with permission and project', async () => { await open(); });
   it('AC-2: pending has no indexed document', async () => {
     await open();
