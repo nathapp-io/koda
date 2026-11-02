@@ -78,6 +78,8 @@ function build(options: BuildOptions = {}) {
     findTicketWithComments: vi.fn().mockResolvedValue({ ...ticket, comments: [], deletedAt: null }),
     hasFleetOwnership: vi.fn().mockResolvedValue(false),
     hasPrLink: options.hasPrLink ?? vi.fn().mockResolvedValue(false),
+    // Whole-branch fix B2: the closing transition re-derives the newest VERIFY_FIX actor.
+    findLatestStatusChangeActor: vi.fn().mockResolvedValue(null),
   };
 
   const provider = {

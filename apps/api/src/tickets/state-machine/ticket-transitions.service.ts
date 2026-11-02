@@ -17,6 +17,8 @@ import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { actorKind, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { currentContext } from '../../action-context/action-context';
+import { APPROVAL_MODE_RANK } from '../../approvals/domain/approval-mode';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
 import { TicketEventService } from '../../events/ticket-event.service';
@@ -562,6 +564,9 @@ export class TicketTransitionsService {
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
 
+      // Whole-branch fix B2: the self-fix floor, decided again under this transaction's lock.
+      await this.assertSelfFixApproval(ticket.id, ticket.status, TicketStatus.CLOSED, principal);
+
       const authorFields = actorForeignKeys(principal, 'authoredBy');
       const comment = await repo.createComment({
         ticketId: ticket.id,
@@ -616,6 +621,42 @@ export class TicketTransitionsService {
       commentBody,
       principal,
     ) as Promise<TransitionResultWithComment>;
+  }
+
+  /**
+   * Whole-branch fix B2: the self-fix floor, re-derived where the closing transition runs.
+   *
+   * The route's floor (`TicketsService.selfFixApprovalFloor`) reads the ticket before the gate, and the
+   * transition then reads it again: a `/fix` that commits between the two makes the transition close a
+   * ticket the caller has just fixed itself, under whatever approval the gate resolved from the older
+   * read (`none`, or a weaker contextual mode). The requirement is therefore decided again here, from
+   * the activity row that owns the `VERIFY_FIX` status this transaction is leaving, and a caller that
+   * submitted the fix closes it only under an approval of at least `agent`.
+   *
+   * Called after the conditional status write, so the row is locked: the status this transition leaves
+   * cannot change again, and the `VERIFY_FIX` activity it read is the one that produced that status. A
+   * refusal throws before commit, so the comment, activity and status write all roll back — the same
+   * answer the route gives when the floor was seen in the first place. A caller outside any action
+   * context ran under no gate at all and is refused the same way.
+   */
+  private async assertSelfFixApproval(
+    ticketId: string,
+    fromStatus: string,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<void> {
+    if (fromStatus !== TicketStatus.VERIFY_FIX || toStatus !== TicketStatus.CLOSED) return;
+    if (principal.actorType === 'runner') return;
+
+    const fixActor = await this.ticketRepo.findLatestStatusChangeActor(ticketId, TicketStatus.VERIFY_FIX);
+    if (fixActor === null) return;
+    const callerType = principal.actorType === 'agent' ? 'AGENT' : 'USER';
+    if (fixActor.type !== callerType || fixActor.id !== principal.id) return;
+
+    const requiredMode = currentContext()?.approval.requiredMode ?? 'none';
+    if (APPROVAL_MODE_RANK[requiredMode] < APPROVAL_MODE_RANK.agent) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
   }
 
   /**
@@ -750,6 +791,9 @@ export class TicketTransitionsService {
         // so PrismaTransactionManager.run propagates it and rolls back.
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
+
+      // Whole-branch fix B2: the self-fix floor, decided again under this transaction's lock.
+      await this.assertSelfFixApproval(ticket.id, ticket.status, toStatus, principal);
 
       // Whole-branch fix B3: the PATCH's field writes belong to this transaction and come after the
       // conditional status write, so a lost status race has already thrown and nothing is left behind.

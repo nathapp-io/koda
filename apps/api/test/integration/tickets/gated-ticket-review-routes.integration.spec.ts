@@ -151,4 +151,56 @@ describeIntegration('gated ticket review routes', () => {
     await request(server()).post(`${path(ticket.ref)}/close`).set(agentAuth()).send({ body: '' }).expect(400);
     expect(await db.approvalRequest.count()).toBe(0);
   });
+
+  /** A policy in one fixed mode, so a call resolves at that mode without a contextual minimum. */
+  const seedModePolicy = async (key: string, mode: 'none' | 'self' | 'agent' | 'human') => db.approvalPolicy.create({
+    data: {
+      selector: `${project.id}|${key}|type:AGENT`, projectId: project.id, permissionPattern: key,
+      principalType: 'AGENT', mode, updatedByType: 'SYSTEM', updatedById: 'test',
+    },
+  });
+
+  it('B1: returning and re-fixing supersedes the weaker parked request instead of reusing it', async () => {
+    const ticket = await createTicket();
+    // The fix is the root user's: the agent's own approve resolves at the policy's `self` mode.
+    await reachVerifyFix(ticket.ref);
+    await seedModePolicy('ticket.transition.verify-fix.approve', 'self');
+
+    const weak = pending(await request(server()).post(`${path(ticket.ref)}/verify-fix?approve=true`).set(agentAuth()).send({ body: 'approve' }));
+    expect(weak).toMatchObject({ permissionKey: 'ticket.transition.verify-fix.approve', requiredMode: 'self' });
+
+    // The agent returns the ticket, submits its own fix, and repeats the identical body.
+    await request(server()).post(`${path(ticket.ref)}/verify-fix`).set(agentAuth()).send({ body: 'not good enough' }).expect(200);
+    await request(server()).post(`${path(ticket.ref)}/fix`).set(agentAuth()).send({ body: 'my own fix' }).expect(200);
+
+    const strong = pending(await request(server()).post(`${path(ticket.ref)}/verify-fix?approve=true`).set(agentAuth()).send({ body: 'approve' }));
+    expect(strong.id).not.toBe(weak.id);
+    expect(strong).toMatchObject({ permissionKey: 'ticket.transition.verify-fix.approve', requiredMode: 'agent' });
+
+    // The superseded ask is gone from the inbox and cannot be decided into a close.
+    const superseded = await db.approvalRequest.findUniqueOrThrow({ where: { id: weak.id } });
+    expect(superseded.status).toBe('cancelled');
+    await checkStatus(ticket.id, 'VERIFY_FIX');
+    await request(server()).post(`/api/approvals/${superseded.id}/decisions`).set(rootAuth()).send({ decision: 'approve' }).expect(409);
+    await checkStatus(ticket.id, 'VERIFY_FIX');
+  });
+
+  it('B2: a close approved while the ticket was IN_PROGRESS cannot close the fix that landed before execution', async () => {
+    const ticket = await createTicket();
+    await request(server()).post(`${path(ticket.ref)}/verify`).set(rootAuth()).send({ body: 'verified' }).expect(200);
+    await request(server()).post(`${path(ticket.ref)}/start`).set(rootAuth()).send({}).expect(200);
+    await seedModePolicy('ticket.transition.close', 'self');
+
+    // No floor applies yet: the ticket is IN_PROGRESS, so the agent parks a self-mode close.
+    const parked = pending(await request(server()).post(`${path(ticket.ref)}/close`).set(agentAuth()).send({ body: 'done' }));
+    expect(parked).toMatchObject({ permissionKey: 'ticket.transition.close', requiredMode: 'self' });
+
+    // The same agent's /fix lands between the floor read and the execution.
+    await request(server()).post(`${path(ticket.ref)}/fix`).set(agentAuth()).send({ body: 'my own fix' }).expect(200);
+    await checkStatus(ticket.id, 'VERIFY_FIX');
+
+    // The approved close is re-checked under the transition's lock and refused.
+    expect(await approve(parked.id)).toMatchObject({ status: 'failed' });
+    await checkStatus(ticket.id, 'VERIFY_FIX');
+  });
 });

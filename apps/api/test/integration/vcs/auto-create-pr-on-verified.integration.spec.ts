@@ -118,6 +118,8 @@ describe('Auto-create PR on VERIFIED Transition', () => {
         },
         ticketActivity: {
           create: vi.fn(),
+          // Whole-branch fix B2: the closing transition re-derives the newest VERIFY_FIX actor.
+          findFirst: vi.fn().mockResolvedValue(null),
         },
         ticketLink: {
           create: vi.fn(),

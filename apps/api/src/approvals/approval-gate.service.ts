@@ -25,8 +25,11 @@ export type GateOutcome<TResult> =
 /** No policy names a setting, so the request carries these (the catalog has no per-key defaults). */
 const NO_POLICY_ON_TIMEOUT: ApprovalRequestRecord['onTimeout'] = 'reject';
 
-/** The gate's request seam: the duplicate lookup and the insert of one pending request. */
-type RequestStore = Pick<PrismaApprovalRequestRepository, 'create' | 'findPendingDuplicate'>;
+/**
+ * The gate's request seam: the duplicate lookup, the insert of one pending request, and the
+ * cancellation of a duplicate that no longer satisfies the call (whole-branch fix B1).
+ */
+type RequestStore = Pick<PrismaApprovalRequestRepository, 'create' | 'findPendingDuplicate' | 'transition'>;
 
 /**
  * The input a request stores and hashes for `command`, before it is frozen (US-001 of `gate-secret`).
@@ -133,6 +136,11 @@ export class ApprovalGate {
    * that retries gets the one it already opened instead of flooding the inbox. Two identical calls
    * racing each other can still open two (check-then-insert, no unique index); each is then decided
    * on its own.
+   *
+   * Whole-branch fix B1: that identity is not enough — the duplicate must also be as strict as this
+   * call's resolution. A duplicate that is weaker (a lower `requiredMode`, or a policy where this call
+   * resolved without one) is superseded and replaced, so a contextual minimum can never be answered
+   * with an ask opened before it applied.
    */
   private async openRequest(
     opened: {
@@ -167,11 +175,22 @@ export class ApprovalGate {
     };
 
     const pending = await this.requests.findPendingDuplicate(duplicate, now);
-    if (pending !== null) return pending;
+    // A duplicate is only this ask while it is at least as strict as what this call resolved to. The
+    // contextual minimum (`minMode`) can raise a call above what an earlier identical call needed —
+    // a self-mode ask opened for someone else's fix, then the caller's own fix — and reusing that
+    // weaker pending request would hand back a mode this call must not accept.
+    const weakening = pending !== null && !satisfiesResolution(pending, resolved) ? pending : null;
+    if (pending !== null && weakening === null) return pending;
 
     // The ApprovalRequest row is itself the record of the ask, so opening it is bookkeeping: no
     // audit entry, and the write does not count against the entry point's audit coverage.
     return bookkeeping('approval.request-open', () => this.txManager.run(async () => {
+      // The weaker duplicate is superseded in the transaction that opens its replacement, so the
+      // inbox shows one live ask and the stale one can no longer be decided into an execution.
+      if (weakening !== null) {
+        const cancelled = await this.requests.transition(weakening.id, 'pending', { status: 'cancelled', settledAt: now });
+        if (cancelled !== null) await this.events.record(cancelled);
+      }
       const created = await this.requests.create(
         newRequest({ command, key, projectId, variant, resolved, context, actorType, input, inputHash }, now),
       );
@@ -179,6 +198,19 @@ export class ApprovalGate {
       return created;
     }));
   }
+}
+
+/**
+ * Whether a still-pending request from an earlier identical call represents this one.
+ *
+ * Two things must hold. The request must be at least as strict as the resolution this call reached:
+ * a weaker `requiredMode` is exactly the bypass a contextual minimum exists to stop. And a resolution
+ * raised by `minMode` carries no policy on purpose — its no-policy defaults (`onTimeout: 'reject'`)
+ * must not be replaced by a duplicate's policy, which could release it on timeout.
+ */
+function satisfiesResolution(pending: ApprovalRequestRecord, resolved: ResolvedApproval): boolean {
+  if (APPROVAL_MODE_RANK[pending.requiredMode] < APPROVAL_MODE_RANK[resolved.mode]) return false;
+  return resolved.policy !== null || pending.policyId === null;
 }
 
 /**

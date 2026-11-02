@@ -13,6 +13,8 @@ describe('transition audit transaction seam', () => {
       updateTicketStatusIf: vi.fn().mockResolvedValue({ id: 'ticket' }),
       createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity' }),
       createComment: vi.fn().mockResolvedValue({ id: 'comment' }),
+      // Whole-branch fix B2: the closing transition re-derives the newest VERIFY_FIX actor.
+      findLatestStatusChangeActor: vi.fn().mockResolvedValue(null),
     };
     const audit = { record: vi.fn(async () => { expect(inside).toBe(true); }) };
     const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => { inside = true; try { return await fn(); } finally { inside = false; } }) };

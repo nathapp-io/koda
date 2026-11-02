@@ -29,6 +29,7 @@ describe('ApprovalGate', () => {
   let requests: {
     create: ReturnType<typeof vi.fn<(record: ApprovalRequestRecord) => Promise<ApprovalRequestRecord>>>;
     findPendingDuplicate: ReturnType<typeof vi.fn<(match: PendingApprovalMatch, now: Date) => Promise<ApprovalRequestRecord | null>>>;
+    transition: ReturnType<typeof vi.fn<(id: string, from: string, patch: Partial<ApprovalRequestRecord>) => Promise<ApprovalRequestRecord | null>>>;
   };
   let transactions: { run: ReturnType<typeof vi.fn> };
   let gate: ApprovalGate;
@@ -44,6 +45,7 @@ describe('ApprovalGate', () => {
     requests = {
       create: vi.fn(async (record: ApprovalRequestRecord) => record),
       findPendingDuplicate: vi.fn().mockResolvedValue(null),
+      transition: vi.fn().mockResolvedValue(null),
     };
     transactions = { run: vi.fn(<T>(fn: () => Promise<T>) => fn()) };
     events = { record: vi.fn().mockResolvedValue(undefined) };
@@ -321,6 +323,90 @@ describe('ApprovalGate', () => {
       await expect(asActor({ type: 'RUNNER', id: 'r1' }, () => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now)))
         .rejects.toThrow('approval gate cannot gate actor RUNNER/r1');
       untouched();
+    });
+  });
+
+  describe('whole-branch fix B1 — a weaker pending duplicate is superseded', () => {
+    const selfPolicy: ApprovalPolicyRecord = {
+      id: 'p-self', selector: 'p1|label.delete|type:AGENT', projectId: 'p1', permissionPattern: 'label.delete',
+      principalType: 'AGENT', roleId: null, principalId: null, mode: 'self', timeoutSec: 600,
+      onTimeout: 'approve', requiredApprovals: 1, approverMustHoldAction: false, requireDistinctApprover: false,
+      updatedByType: 'USER', updatedById: 'u1', createdAt: now, updatedAt: now,
+    };
+
+    it('B1: supersedes the self-mode duplicate a contextual minimum has outgrown', async () => {
+      // The ask an agent opened while the floor did not apply, then re-sent after it fixed the ticket
+      // itself: the same body, the same policy, but now under `minMode: 'agent'`.
+      resolve.mockResolvedValue({ mode: 'self', floor: 'none', policy: selfPolicy, source: 'policy' });
+      const stale = storedRequest({ id: 'request-self', requiredMode: 'self', policyId: 'p-self', onTimeout: 'approve' });
+      requests.findPendingDuplicate.mockResolvedValue(stale);
+      requests.transition.mockResolvedValue({ ...stale, status: 'cancelled' });
+
+      const outcome = await agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+
+      expect(outcome).toMatchObject({
+        status: 'pending',
+        request: { requiredMode: 'agent', policyId: null, onTimeout: 'reject', status: 'pending' },
+      });
+      expect((outcome as { request: ApprovalRequestRecord }).request.id).not.toBe('request-self');
+      expect(requests.transition).toHaveBeenCalledExactlyOnceWith('request-self', 'pending', { status: 'cancelled', settledAt: now });
+      // The cancellation is recorded with the ask it replaces, in the same transaction.
+      expect(transactions.run).toHaveBeenCalledTimes(1);
+      expect(events.record).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'request-self', status: 'cancelled' }));
+      expect(events.record).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'pending', requiredMode: 'agent' }));
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        requiredMode: 'agent', policyId: null, onTimeout: 'reject',
+      }));
+      expect(testCommand.state.calls).toEqual([]);
+    });
+
+    it('B1: supersedes a policy duplicate when the minimum resolved without a policy', async () => {
+      // Equal modes, different timeout rules: the minimum's no-policy defaults must not be exchanged
+      // for a duplicate whose policy could release the ask on timeout.
+      resolve.mockResolvedValue({ mode: 'self', floor: 'none', policy: selfPolicy, source: 'policy' });
+      const stale = storedRequest({ id: 'request-policy', requiredMode: 'agent', policyId: 'p-self', onTimeout: 'approve' });
+      requests.findPendingDuplicate.mockResolvedValue(stale);
+      requests.transition.mockResolvedValue({ ...stale, status: 'cancelled' });
+
+      const outcome = await agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+
+      expect(requests.transition).toHaveBeenCalledExactlyOnceWith('request-policy', 'pending', { status: 'cancelled', settledAt: now });
+      expect(outcome).toMatchObject({ status: 'pending', request: { policyId: null, onTimeout: 'reject' } });
+    });
+
+    it('B1: reuses a duplicate that is stricter than the resolution this call reached', async () => {
+      resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
+      const stricter = storedRequest({ id: 'request-human', requiredMode: 'human', policyId: null });
+      requests.findPendingDuplicate.mockResolvedValue(stricter);
+
+      await expect(agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now)))
+        .resolves.toEqual({ status: 'pending', request: stricter });
+      expect(requests.transition).not.toHaveBeenCalled();
+      expect(requests.create).not.toHaveBeenCalled();
+    });
+
+    it('B1: reuses an equal duplicate under a policy without a minimum', async () => {
+      resolve.mockResolvedValue({ mode: 'self', floor: 'none', policy: selfPolicy, source: 'policy' });
+      const pending = storedRequest({ id: 'request-self', requiredMode: 'self', policyId: 'p-self', onTimeout: 'approve' });
+      requests.findPendingDuplicate.mockResolvedValue(pending);
+
+      await expect(agent(() => gate.gate('label.delete', input, opts, now)))
+        .resolves.toEqual({ status: 'pending', request: pending });
+      expect(requests.transition).not.toHaveBeenCalled();
+      expect(requests.create).not.toHaveBeenCalled();
+    });
+
+    it('B1: opens the replacement even when the supersede loses its race', async () => {
+      resolve.mockResolvedValue({ mode: 'self', floor: 'none', policy: selfPolicy, source: 'policy' });
+      const stale = storedRequest({ id: 'request-self', requiredMode: 'self', policyId: 'p-self' });
+      requests.findPendingDuplicate.mockResolvedValue(stale);
+      // Another call cancelled it between the lookup and this transaction.
+      requests.transition.mockResolvedValue(null);
+
+      const outcome = await agent(() => gate.gate('label.delete', input, { ...opts, minMode: 'agent' }, now));
+
+      expect(outcome).toMatchObject({ status: 'pending', request: { requiredMode: 'agent' } });
+      expect(events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 'pending' }));
     });
   });
 
