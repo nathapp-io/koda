@@ -1,4 +1,5 @@
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -6,17 +7,18 @@ const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve
 function build(ticketRow: Record<string, unknown> | null) {
   const repo = { findTicketWithComments: vi.fn().mockResolvedValue(ticketRow) };
   const ragService = { indexDocument: vi.fn().mockResolvedValue('doc-1') };
-  // Required permission and audit collaborators precede optional indexing.
+  // Required permission, audit and after-commit collaborators precede optional indexing.
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
   const service = new TicketTransitionsService(
     repo as never,
     { run: vi.fn() } as never,
     permissions as never,
     mockAuditRecorder as never,
+    new AfterCommitService(),
     ragService as never,
   );
   const autoIndex = (service as unknown as {
-    autoIndexTicket: (project: { id: string; key: string; autoIndexOnClose: boolean }, ticket: { id: string }) => void;
+    autoIndexTicket: (project: { id: string; key: string; autoIndexOnClose: boolean }, ticket: { id: string }) => Promise<void>;
   }).autoIndexTicket.bind(service);
   return { autoIndex, ragService };
 }

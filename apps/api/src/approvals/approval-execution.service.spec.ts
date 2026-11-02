@@ -409,6 +409,52 @@ describe('ApprovalExecutionService', () => {
       expect(flushed).toEqual([]);
       expect(s.tx.run).toHaveBeenCalledTimes(2);
     });
+
+    /**
+     * US-006 AC-14: the composition a ticket transition relies on. The command (the transition)
+     * defers its PR/index task through this scope, and the task runs once the request is settled
+     * executed — never before the commit, and only once.
+     */
+    it('US-006 AC-14: runs a task the command deferred, once, after the request settled executed', async () => {
+      const s = setup();
+      const ran: string[] = [];
+      // Reads the row state the task sees: the settle must already be durable when it runs.
+      s.repo.transition.mockImplementation(async (_id, _from, patch) => {
+        s.state.current = { ...s.state.current, ...patch };
+        return s.state.current;
+      });
+      const execute = s.test.command.execute;
+      s.test.command.execute = async (value) => {
+        expect(s.afterCommit.defer(async () => { ran.push(s.state.current.status); })).toBe(true);
+        expect(ran).toEqual([]);
+        return execute(value);
+      };
+
+      const settled = await s.service.execute('r1', now);
+
+      expect(settled).toMatchObject({ status: 'executed' });
+      expect(ran).toEqual(['executed']);
+    });
+
+    /**
+     * US-006 AC-15: when the settle transition finds the request no longer approved, it rolls the
+     * transaction back — and the task the transition deferred inside it is dropped with it.
+     */
+    it('US-006 AC-15: never runs the deferred task when the settle transition finds the request unapproved', async () => {
+      const s = setup();
+      const flushed: string[] = [];
+      // The row lost its `approved` status under the lock: the settle transition matches nothing.
+      s.repo.transition.mockResolvedValue(null);
+      const execute = s.test.command.execute;
+      s.test.command.execute = async (value) => {
+        expect(s.afterCommit.defer(async () => { flushed.push('flushed'); })).toBe(true);
+        return execute(value);
+      };
+
+      await expect(s.service.execute('r1', now)).rejects.toEqual(new ApprovalRequestNotPendingError('approved'));
+
+      expect(flushed).toEqual([]);
+    });
   });
 
   it('runs the command under the request context and settles it executed', async () => {

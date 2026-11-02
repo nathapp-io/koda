@@ -1,4 +1,5 @@
 import { TicketTransitionsService } from './ticket-transitions.service';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import { TicketStatus, CommentType } from '../../common/enums';
 import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
 
@@ -15,7 +16,7 @@ describe('transition audit transaction seam', () => {
     };
     const audit = { record: vi.fn(async () => { expect(inside).toBe(true); }) };
     const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => { inside = true; try { return await fn(); } finally { inside = false; } }) };
-    const service = new TicketTransitionsService(repo as never, tx as never, { can: vi.fn().mockResolvedValue({ allowed: true }) } as never, audit as never);
+    const service = new TicketTransitionsService(repo as never, tx as never, { can: vi.fn().mockResolvedValue({ allowed: true }) } as never, audit as never, new AfterCommitService());
     return { service, repo, audit, tx };
   };
   it.each([

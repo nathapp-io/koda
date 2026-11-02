@@ -15,6 +15,7 @@ import { TicketsService } from '../../../src/tickets/tickets.service';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
@@ -88,6 +89,9 @@ describeIntegration('producers record outbox rows atomically', () => {
             effectiveKeys: vi.fn().mockResolvedValue(new Set(['project.read'])),
           },
         },
+        // Permissions P1 (US-006): the transition's post-commit seam. No scope is open here, so its
+        // external effects run immediately.
+        AfterCommitService,
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketEventService,

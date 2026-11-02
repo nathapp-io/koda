@@ -409,4 +409,13 @@ export class PrismaTicketsRepository implements ITicketRepository {
     ]);
     return fleetPr > 0 || activeJob > 0;
   }
+
+  /**
+   * US-006: one count over every `pr` link of the ticket, whatever its source. The classic auto-PR
+   * asks this before calling a provider, so no retry can open a second PR for the same ticket.
+   */
+  async hasPrLink(ticketId: string): Promise<boolean> {
+    const count = await this.db.ticketLink.count({ where: { ticketId, linkType: 'pr' } });
+    return count > 0;
+  }
 }

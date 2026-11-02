@@ -11,6 +11,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { PermissionService } from '../../permissions/permission.service';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
 vi.mock('../../vcs/factory', () => ({ createVcsProvider: vi.fn() }));
@@ -170,6 +171,9 @@ describe('TicketTransitionsService', () => {
           provide: PermissionService,
           useValue: mockPermissions,
         },
+        // US-006: the real deferral queue. Outside a scope it runs the task immediately, which is
+        // the immediate path these transition tests exercise.
+        AfterCommitService,
         {
           provide: TicketEventService,
           useValue: mockTicketEventService,
@@ -1075,6 +1079,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       webhookDispatcher as never,
       undefined,
@@ -1246,6 +1251,8 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-123' }),
       createTicketLink: vi.fn().mockResolvedValue({ id: 'link-123' }),
       hasFleetOwnership: vi.fn().mockResolvedValue(false),
+      // US-006: the duplicate guard runs after the fleet check; this ticket has no PR link yet.
+      hasPrLink: vi.fn().mockResolvedValue(false),
       createTicketActivity2: undefined,
     };
     const txManager = { run: (fn: () => unknown) => fn() };
@@ -1258,6 +1265,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       undefined,
       vcsConnectionService as never,
@@ -1314,6 +1322,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       undefined,
       vcsConnectionService as never,
