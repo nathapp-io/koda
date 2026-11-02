@@ -146,6 +146,9 @@ const HIGH_RISK_PREFIXES: readonly string[] = [
   'fleet.job.shell.',
 ];
 
+/** Credential writes that can return a raw secret or credential. */
+export const CREDENTIAL_KEYS: ReadonlySet<string> = new Set(['agent.create', 'agent.key.rotate', 'user.create']);
+
 /**
  * `proposed_key` → `catalog_scope` from
  * `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`, in file order, with the
@@ -409,6 +412,7 @@ export const ROLE_GRANT_KEYS: ReadonlySet<string> = new Set(['member.add', 'invi
 function classifyRisk(key: string): PermissionRisk {
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   if (isReadKey(key)) return 'low';
+  if (CREDENTIAL_KEYS.has(key)) return 'high';
   const last = key.slice(key.lastIndexOf('.') + 1);
   if (last === 'delete' || last === 'remove') return 'high';
   if (HIGH_RISK_PREFIXES.some((prefix) => key.startsWith(prefix))) return 'high';

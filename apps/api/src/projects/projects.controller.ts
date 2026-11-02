@@ -142,7 +142,7 @@ export class ProjectsController {
       variant: secret ? PROJECT_ROUTE_VARIANTS.updateCiToken : PROJECT_ROUTE_VARIANTS.update,
       projectId: project.project.id,
       input: { slug: parsedSlug, patch },
-      ...(secret ? { redeem } : {}),
+      ...(secret ? { redeem, minMode: 'agent' as const } : {}),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

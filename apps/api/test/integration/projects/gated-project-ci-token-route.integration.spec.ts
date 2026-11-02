@@ -115,10 +115,17 @@ describeIntegration('gated project CI token route (US-006)', () => {
     expect(data<{ ciWebhookToken: string | null }>(await readToken().expect(200)).ciWebhookToken).toBeNull();
   });
 
-  it('FM-1: agent token patch executes immediately under the project.update default-none policy', async () => {
-    const token = 't'.repeat(32);
-    await patchAgent({ ciWebhookToken: token }).expect(200);
-    expect((await currentProject()).ciWebhookToken).toBe(token);
+  it('US-004 AC-9: agent ordinary project patch executes with no approval policy', async () => {
+    await patchAgent({ name: 'No-policy update' }).expect(200);
+    expect((await currentProject()).name).toBe('No-policy update');
     expect(await db.approvalRequest.count()).toBe(0);
+  });
+
+  it('FM-1: agent token patch parks under the credential minimum without changing the token', async () => {
+    const token = 't'.repeat(32);
+    const response = pending(await patchAgent({ ciWebhookToken: token }).expect(202));
+    expect(response.permissionKey).toBe('project.update');
+    expect((await currentProject()).ciWebhookToken).toBeNull();
+    expect(await db.approvalRequest.count()).toBe(1);
   });
 });

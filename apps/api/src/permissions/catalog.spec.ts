@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  CREDENTIAL_KEYS,
   findCatalogEntry,
   IMPLICIT_KEYS,
   OWNABLE_KEYS,
@@ -169,6 +170,7 @@ function expectedRisk(key: string): CatalogRisk {
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   const last = key.slice(key.lastIndexOf('.') + 1);
   if (last === 'read' || READ_ACTION_KEYS.has(key)) return 'low';
+  if (CREDENTIAL_KEYS.has(key)) return 'high';
   if (last === 'delete' || last === 'remove') return 'high';
   if (HIGH_RISK_PREFIXES.some((prefix) => key.startsWith(prefix))) return 'high';
   return 'medium';
@@ -410,6 +412,13 @@ describe('PERMISSION_CATALOG', () => {
  * the mode an `AGENT` subject gets when no policy matches (design §4).
  */
 describe('catalog approval metadata', () => {
+  it('US-004 AC-1/2/3: credentials are high risk with agent defaults, while agent.update remains medium', () => {
+    expect(CREDENTIAL_KEYS).toEqual(new Set(['agent.create', 'agent.key.rotate', 'user.create']));
+    for (const key of CREDENTIAL_KEYS) {
+      expect(findCatalogEntry(key)).toMatchObject({ risk: 'high', approval: { default: 'agent' } });
+    }
+    expect(findCatalogEntry('agent.update')).toMatchObject({ risk: 'medium' });
+  });
   it.each(['testhook.schedule.fire', 'testhook.nax-files.seed'])(
     'US-001 AC-1: makes test-hook key %s non-approvable with no floor or default',
     (key) => {
