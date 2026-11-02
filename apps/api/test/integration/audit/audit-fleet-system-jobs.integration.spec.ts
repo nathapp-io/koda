@@ -84,8 +84,10 @@ describeDb('system fleet job audit writes (PG)', () => {
   it('AC-4: rolls back a silent-runner transition when audit recording rejects', async () => {
     const running = await job({ state: 'RUNNING', runnerId, leaseEpoch: 1 });
     const record = vi.spyOn(app.get(AuditRecorder), 'record').mockRejectedValueOnce(new Error('audit unavailable'));
-    await expect(app.get(FleetSweeper).sweep(now)).rejects.toThrow('audit unavailable');
+    // The sweep isolates a failing silent id: it is logged and skipped, never rethrown, and not counted.
+    expect(await app.get(FleetSweeper).sweep(now)).toBe(0);
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: running.id } })).state).toBe('RUNNING');
+    expect(await auditRows(running.id, 'system.job.crash-silent-runner')).toHaveLength(0);
     record.mockRestore();
   });
 

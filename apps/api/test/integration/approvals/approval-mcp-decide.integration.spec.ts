@@ -60,6 +60,22 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await app.get(PermissionCache, { strict: false }).invalidate();
   });
 
+  it('AC-11/12/13: an approval.decide human policy parks MCP decision', async () => {
+    const opened = await withTestActor({ type: 'AGENT', id: openerId }, () => app.get(ApprovalGate, { strict: false })
+      .gate('label.delete', { labelId: randomUUID() }, { projectId }, new Date()));
+    if (opened.status !== 'pending') throw new Error(`expected pending request, got ${opened.status}`);
+    await request(app.getHttpServer()).post('/api/approval-policies').set('Authorization', `Bearer ${token}`).send({
+      permissionPattern: 'approval.decide', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human',
+    }).expect(201);
+
+    const answer = await rpc({ name: 'koda_decide_approval', arguments: { id: opened.request.id, decision: 'approve' } });
+
+    expect(answer.result.isError).toBe(false);
+    expect(answer.result.content[0].text).toMatch(/^pending: /);
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: opened.request.id } })).toMatchObject({ status: 'pending' });
+    expect(await db.approvalRequest.findFirst({ where: { permissionKey: 'approval.decide' } })).not.toBeNull();
+  }, 30_000);
+
   it('AC-14: a REST agent decides another agent’s pending P request and the request is executed', async () => {
     const opened = await withTestActor({ type: 'AGENT', id: openerId }, () => app.get(ApprovalGate, { strict: false })
       .gate('label.delete', { labelId: randomUUID() }, { projectId }, new Date()));

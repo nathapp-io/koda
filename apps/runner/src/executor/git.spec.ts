@@ -1,8 +1,62 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NO_CREDENTIALS_REASON, GitError, assertMinGitVersion, createGit, isAuthFailure, parseGitVersion, reasonFromError, type Git } from './git';
 
 describe('createGit', () => {
   const git = createGit();
+  const tempDirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+  const initRepo = async (): Promise<string> => {
+    const cwd = await mkdtemp(join(tmpdir(), 'koda-git-hardening-'));
+    tempDirs.push(cwd);
+    const init = Bun.spawn(['git', 'init', '-q', cwd], { stdout: 'ignore', stderr: 'pipe' });
+    if (await init.exited !== 0) throw new Error(await new Response(init.stderr).text());
+    for (const [key, value] of [['user.name', 'Test User'], ['user.email', 'test@example.com'], ['commit.gpgsign', 'false']] as const) {
+      const config = Bun.spawn(['git', '-C', cwd, 'config', key, value], { stdout: 'ignore', stderr: 'pipe' });
+      if (await config.exited !== 0) throw new Error(await new Response(config.stderr).text());
+    }
+    return cwd;
+  };
+  test('ignores local pre-commit hooks when committing', async () => {
+    const cwd = await initRepo();
+    const hooks = join(cwd, 'hooks');
+    const marker = join(cwd, 'hook-ran');
+    await mkdir(hooks);
+    const hook = join(hooks, 'pre-commit');
+    await writeFile(hook, `#!/bin/sh\nprintf ran > '${marker}'\n`);
+    await chmod(hook, 0o755);
+    const config = Bun.spawn(['git', '-C', cwd, 'config', 'core.hooksPath', hooks], { stdout: 'ignore', stderr: 'pipe' });
+    if (await config.exited !== 0) throw new Error(await new Response(config.stderr).text());
+    await expect(git.ok(['commit', '--allow-empty', '-m', 'x'], { cwd })).resolves.toContain('x');
+    expect(await Bun.file(marker).exists()).toBe(false);
+  });
+  test('overrides local hooksPath', async () => {
+    const cwd = await initRepo();
+    const config = Bun.spawn(['git', '-C', cwd, 'config', 'core.hooksPath', '/tmp/elsewhere'], { stdout: 'ignore', stderr: 'pipe' });
+    if (await config.exited !== 0) throw new Error(await new Response(config.stderr).text());
+    expect((await git.ok(['config', '--get', 'core.hooksPath'], { cwd })).trim()).toBe('/dev/null');
+  });
+  test('overrides local fsmonitor', async () => {
+    const cwd = await initRepo();
+    const config = Bun.spawn(['git', '-C', cwd, 'config', 'core.fsmonitor', 'true'], { stdout: 'ignore', stderr: 'pipe' });
+    if (await config.exited !== 0) throw new Error(await new Response(config.stderr).text());
+    expect((await git.ok(['config', '--get', 'core.fsmonitor'], { cwd })).trim()).toBe('false');
+  });
+  test('overrides local submodule recursion', async () => {
+    const cwd = await initRepo();
+    const config = Bun.spawn(['git', '-C', cwd, 'config', 'submodule.recurse', 'true'], { stdout: 'ignore', stderr: 'pipe' });
+    if (await config.exited !== 0) throw new Error(await new Response(config.stderr).text());
+    expect((await git.ok(['config', '--get', 'submodule.recurse'], { cwd })).trim()).toBe('false');
+  });
+  test('keeps credential helper overrides after the hardening prefix', async () => {
+    const cwd = await initRepo();
+    const output = await git.ok(['config', '--get-all', 'credential.helper'], { cwd, credentialHelper: '!f() { echo x; }; f', env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    expect(output.split('\n')).toEqual(['', '!f() { echo x; }; f', '']);
+  });
   test('runs git and returns code, stdout and stderr without throwing', async () => {
     const version = await git.run(['--version'], { cwd: process.cwd() });
     expect(version.code).toBe(0);

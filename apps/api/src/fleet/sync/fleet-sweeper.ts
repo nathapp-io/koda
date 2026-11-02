@@ -57,20 +57,24 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     const cutoff = new Date(now.getTime() - this.fleetConfig.jobCrashSec * 1000);
     let crashed = 0;
     for (const id of await this.repo.findSilentHeldIds(cutoff)) {
-      const result = await this.txManager.run(async () => {
-        const job = await this.repo.lockById(id, { skipLocked: true });
-        if (!job || !(RUNNER_HELD_STATES as readonly string[]).includes(job.state) || !job.runnerId) return null;
-        const [runner] = await this.repo.findPlacementRunners([job.runnerId]);
-        if (runner && runner.lastSeenAt.getTime() >= cutoff.getTime()) return null;
-        const result = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' });
-        await this.audit.record({ key: 'system.job.crash-silent-runner', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `${job.state} -> CRASHED` });
-        return result;
-      });
-      if (result) {
-        this.live.publish([result.live]);
-        void this.attribution.attribute(id); // fire-and-forget; never throws
-        void this.ticketEffects.onTerminal([id]); // C9 §3.2; never throws
-        crashed += 1;
+      try {
+        const result = await this.txManager.run(async () => {
+          const job = await this.repo.lockById(id, { skipLocked: true });
+          if (!job || !(RUNNER_HELD_STATES as readonly string[]).includes(job.state) || !job.runnerId) return null;
+          const [runner] = await this.repo.findPlacementRunners([job.runnerId]);
+          if (runner && runner.lastSeenAt.getTime() >= cutoff.getTime()) return null;
+          const result = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' });
+          await this.audit.record({ key: 'system.job.crash-silent-runner', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `${job.state} -> CRASHED` });
+          return result;
+        });
+        if (result) {
+          this.live.publish([result.live]);
+          void this.attribution.attribute(id); // fire-and-forget; never throws
+          void this.ticketEffects.onTerminal([id]); // C9 §3.2; never throws
+          crashed += 1;
+        }
+      } catch (error) {
+        this.logger.warn(`Silent-runner crash of job ${id} failed: ${error instanceof Error ? error.name : 'unknown'}`);
       }
     }
     if (crashed > 0) this.logger.warn(`Crashed ${crashed} job(s) of silent runners`);

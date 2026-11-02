@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { transitionKeyFor } from './state-machine/transition-keys';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
@@ -241,9 +242,23 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
+    const patch = parseBody(UpdateTicketDto, updateTicketDto ?? {});
+    let key = 'ticket.update';
+    let variant: string = TICKET_ROUTE_VARIANTS.update;
+    let alsoKeys: readonly string[] | undefined;
+    if (patch.status !== undefined) {
+      const ticket = await this.ticketsService.findByRef(slug, ref);
+      const edgeKey = transitionKeyFor(ticket.status, patch.status);
+      if (edgeKey !== undefined) {
+        key = edgeKey;
+        variant = TICKET_ROUTE_VARIANTS.updateStatus;
+        alsoKeys = ['ticket.update'];
+      }
+    }
     const outcome = await this.routeGate.run<TicketResponseDto>({
-      key: 'ticket.update', variant: TICKET_ROUTE_VARIANTS.update,
-      projectId: project.project.id, input: { slug, ref, patch: parseBody(UpdateTicketDto, updateTicketDto ?? {}) },
+      key, variant,
+      projectId: project.project.id, input: { slug, ref, patch },
+      ...(alsoKeys === undefined ? {} : { alsoKeys }),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

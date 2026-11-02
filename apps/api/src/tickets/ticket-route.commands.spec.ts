@@ -1,9 +1,14 @@
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
+import type { PermissionService } from '../permissions/permission.service';
 import type { TicketsService } from './tickets.service';
 import type { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketRouteCommands, TICKET_ROUTE_VARIANTS } from './ticket-route.commands';
+import { TICKET_EDGE_KEYS } from './state-machine/transition-keys';
+
+/** The command's permission dependency: every key held unless a case says otherwise. */
+const allowsAll = () => ({ can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) });
 
 describe('TicketRouteCommands', () => {
   it('AC-8/9/10: registers and executes gated transition commands', async () => {
@@ -17,7 +22,7 @@ describe('TicketRouteCommands', () => {
       fix: vi.fn().mockResolvedValue({ ticket: resultTicket }),
     };
     const service = {};
-    new TicketRouteCommands(registry, service as unknown as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
     for (const [key, variant] of [
       ['ticket.transition.verify', 'rest:tickets.verify'],
       ['ticket.transition.start', 'rest:tickets.start'],
@@ -43,7 +48,7 @@ describe('TicketRouteCommands', () => {
       softDelete: vi.fn(),
       assign: vi.fn().mockResolvedValue({ ref: 'AL-1' }),
     };
-    const commands = new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader);
+    const commands = new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService);
     commands.onModuleInit();
 
     expect(TICKET_ROUTE_VARIANTS.assign).toBe('rest:tickets.assign');
@@ -67,7 +72,7 @@ describe('TicketRouteCommands', () => {
       close: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'CLOSED' } }),
       reject: vi.fn().mockResolvedValue({ ticket: { ref: 'AL-1', status: 'REJECTED' } }),
     };
-    new TicketRouteCommands(registry, {} as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, {} as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
     const approve = registry.get('ticket.transition.verify-fix.approve', 'rest:tickets.verify-fix');
     const returning = registry.get('ticket.transition.verify-fix.return', 'rest:tickets.verify-fix');
     expect(approve).toBeDefined();
@@ -82,11 +87,100 @@ describe('TicketRouteCommands', () => {
     expect(transitions.verifyFix).toHaveBeenNthCalledWith(2, 'alpha', 'AL-1', 'good', false, principal);
   });
 
+  it('AC-1/2/3: registers the status update variant for every transition edge and executes start as ticket.update', async () => {
+    expect([...TICKET_EDGE_KEYS].sort()).toEqual([
+      'ticket.transition.fix',
+      'ticket.transition.reject',
+      'ticket.transition.start',
+      'ticket.transition.verify',
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+    ]);
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'loaded-agent' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = {
+      findByRef: vi.fn().mockResolvedValue({ id: 't1', projectId: 'p1', ref: 'AL-1', status: 'CREATED' }),
+      update: vi.fn().mockResolvedValue({ ref: 'AL-1', status: 'IN_PROGRESS' }),
+    };
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
+
+    for (const key of TICKET_EDGE_KEYS) {
+      expect(registry.get(key, TICKET_ROUTE_VARIANTS.updateStatus)).toBeDefined();
+    }
+    expect(TICKET_ROUTE_VARIANTS.updateStatus).toBe('rest:tickets.update-status');
+    const command = registry.get('ticket.transition.start', TICKET_ROUTE_VARIANTS.updateStatus);
+    if (!command) throw new Error('Missing status update command');
+    const parsed = command.parse({ slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } });
+    await command.execute(parsed);
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { status: 'IN_PROGRESS' }, principal);
+  });
+
+  it('B1 AC-1/2: a status update revoked of ticket.update after parking writes nothing', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'loaded-agent' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = {
+      findByRef: vi.fn().mockResolvedValue({ id: 't1', projectId: 'p1', ref: 'AL-1', status: 'CREATED' }),
+      update: vi.fn().mockResolvedValue({ ref: 'AL-1', status: 'IN_PROGRESS' }),
+    };
+    // The edge key is still held (so the engine's execution re-check passes); ticket.update was revoked.
+    const permissions = { can: vi.fn().mockResolvedValue({ allowed: false, reason: 'not-granted' }) };
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService,
+      loader as unknown as ActorPrincipalLoader, permissions as unknown as PermissionService).onModuleInit();
+
+    const command = registry.get('ticket.transition.start', TICKET_ROUTE_VARIANTS.updateStatus);
+    if (!command) throw new Error('Missing status update command');
+    const parsed = command.parse({ slug: 'alpha', ref: 'AL-1', patch: { title: 'renamed', status: 'IN_PROGRESS' } });
+
+    await expect(command.execute(parsed)).rejects.toBeInstanceOf(ForbiddenAppException);
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'ticket.update', { projectId: 'p1' });
+    expect(service.update).not.toHaveBeenCalled();
+  });
+
+  it('B1 AC-3: the status update command checks ticket.update in the ticket\'s project', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'loaded-agent' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = {
+      findByRef: vi.fn().mockResolvedValue({ id: 't1', projectId: 'p7', ref: 'AL-1', status: 'CREATED' }),
+      update: vi.fn().mockResolvedValue({ ref: 'AL-1', status: 'IN_PROGRESS' }),
+    };
+    const permissions = allowsAll();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService,
+      loader as unknown as ActorPrincipalLoader, permissions as unknown as PermissionService).onModuleInit();
+
+    const command = registry.get('ticket.transition.start', TICKET_ROUTE_VARIANTS.updateStatus);
+    if (!command) throw new Error('Missing status update command');
+    await command.execute(command.parse({ slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } }));
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'ticket.update', { projectId: 'p7' });
+  });
+
+  it('B1 AC-4: a plain ticket.update PATCH does not need a second key', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'loaded-agent' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = {
+      findByRef: vi.fn(),
+      update: vi.fn().mockResolvedValue({ ref: 'AL-1' }),
+    };
+    const permissions = allowsAll();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService,
+      loader as unknown as ActorPrincipalLoader, permissions as unknown as PermissionService).onModuleInit();
+
+    const command = registry.get('ticket.update', TICKET_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing update command');
+    await command.execute(command.parse({ slug: 'alpha', ref: 'AL-1', patch: { title: 'renamed' } }));
+    expect(permissions.can).not.toHaveBeenCalled();
+    expect(service.findByRef).not.toHaveBeenCalled();
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { title: 'renamed' }, principal);
+  });
+
   it('AC-8: registers create and update route commands', () => {
     const registry = new ApprovalCommandRegistry();
     const loader = { forContext: vi.fn() };
     const service = { create: vi.fn(), update: vi.fn(), assign: vi.fn(), softDelete: vi.fn() };
-    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
 
     expect(registry.get('ticket.create', 'rest:tickets.create')).toBeDefined();
     expect(registry.get('ticket.update', 'rest:tickets.update')).toBeDefined();
@@ -97,7 +191,7 @@ describe('TicketRouteCommands', () => {
     const principal = { id: 'a1' };
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
     const service = { softDelete: vi.fn().mockResolvedValue({ ref: 'AL-1' }) };
-    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader, allowsAll() as unknown as PermissionService).onModuleInit();
     expect(TICKET_ROUTE_VARIANTS.delete).toBe('rest:tickets.delete');
     const command = registry.get('ticket.delete', 'rest:tickets.delete');
     if (!command) throw new Error('Missing command');

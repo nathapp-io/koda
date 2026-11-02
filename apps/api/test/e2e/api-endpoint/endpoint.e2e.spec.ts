@@ -1265,6 +1265,24 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('13b. Ticket PATCH — Status Transition', () => {
+    it('US-007 AC-11/12: root status PATCH returns 200 and persists IN_PROGRESS', async () => {
+      const createRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'US-007 root status patch' })
+        .expect(201);
+      const created = body<{ id: string; ref: string }>(createRes);
+      const ticketRef = created.ref;
+
+      const response = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'IN_PROGRESS' })
+        .expect(200);
+      expect(body<{ status: string }>(response).status).toBe('IN_PROGRESS');
+      expect((await prismaClient().ticket.findUniqueOrThrow({ where: { id: created.id } })).status).toBe('IN_PROGRESS');
+    });
+
     it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → IN_PROGRESS', async () => {
       const createRes = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
@@ -2415,6 +2433,14 @@ describeIntegration('API Integration Tests', () => {
       const data = body<{ indexed: boolean; sourceId: string }>(res);
       expect(data).toMatchObject({ indexed: true, sourceId: 'doc-manual-001' });
       documentSourceId = 'doc-manual-001';
+    });
+
+    it('POST /api/projects/:slug/kb/documents — rejects a reserved repository source id', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/documents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ source: 'doc', sourceId: 'repo:x:y.md', content: 'reserved' })
+        .expect(400);
     });
 
     it('POST /api/projects/:slug/kb/documents — returns 404 for nonexistent project', async () => {

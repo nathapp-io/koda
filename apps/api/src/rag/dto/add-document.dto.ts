@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsObject, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 /**
  * The two sources a REST caller may write (permissions P1 US-007).
@@ -22,6 +22,7 @@ export class AddDocumentDto {
   @ApiProperty({ description: 'Source record ID of the document being indexed' })
   @IsString()
   @MinLength(1)
+  @Matches(/^(?!repo:|outcome:)/, { message: 'sourceId must not start with a reserved prefix (repo:, outcome:)' })
   sourceId!: string;
 
   @ApiProperty({ description: 'Full text content to embed and index' })

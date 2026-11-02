@@ -246,6 +246,82 @@ describe('ApprovalGate', () => {
     expect(requests.create).not.toHaveBeenCalled();
   });
 
+  describe('US-006 — strictest resolution across extra keys', () => {
+    const primaryKey = 'ticket.transition.start';
+    const extraKey = 'ticket.update';
+    const alsoOpts = { projectId: 'p1', variant: 'rest:tickets.update-status', alsoKeys: [extraKey] };
+    const registerPrimary = () => {
+      const primary = configurableTestCommand(primaryKey, { variant: alsoOpts.variant });
+      registry.register(primary.command);
+      return primary;
+    };
+
+    it('AC-1..3: uses the strictest extra-key mode but keeps the primary command and request key', async () => {
+      registerPrimary();
+      resolve.mockImplementation(async ({ key }: { key: string }) => ({
+        mode: key === primaryKey ? 'none' : 'agent', floor: 'none', policy: null, source: 'default',
+      }));
+
+      const outcome = await agent(() => gate.gate(primaryKey, input, alsoOpts, now));
+
+      expect(outcome).toMatchObject({ status: 'pending', request: { permissionKey: primaryKey, requiredMode: 'agent' } });
+      expect(resolve.mock.calls.map(([resolution]) => resolution)).toEqual([
+        { key: primaryKey, projectId: 'p1', subject: { type: 'AGENT', id: 'a1' } },
+        { key: extraKey, projectId: 'p1', subject: { type: 'AGENT', id: 'a1' } },
+      ]);
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ permissionKey: primaryKey, requiredMode: 'agent' }));
+    });
+
+    it('AC-4: keeps the primary resolution when it is stricter', async () => {
+      registerPrimary();
+      resolve.mockImplementation(async ({ key }: { key: string }) => ({
+        mode: key === primaryKey ? 'human' : 'agent', floor: 'none', policy: null, source: 'default',
+      }));
+
+      await agent(() => gate.gate(primaryKey, input, alsoOpts, now));
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requiredMode: 'human' }));
+    });
+
+    it('AC-5..6: runs immediately when all keys resolve to none', async () => {
+      registerPrimary();
+      resolve.mockResolvedValue({ mode: 'none', floor: 'none', policy: null, source: 'default' });
+
+      await expect(agent(() => gate.gate(primaryKey, input, alsoOpts, now))).resolves.toMatchObject({ status: 'executed' });
+      expect(requests.create).not.toHaveBeenCalled();
+    });
+
+    it('AC-7: keeps the primary policy on a mode tie', async () => {
+      registerPrimary();
+      const primaryPolicy = { id: 'pol-start' } as ApprovalPolicyRecord;
+      const extraPolicy = { id: 'pol-update' } as ApprovalPolicyRecord;
+      resolve.mockImplementation(async ({ key }: { key: string }) => ({
+        mode: 'agent', floor: 'none', policy: key === primaryKey ? primaryPolicy : extraPolicy, source: 'policy',
+      }));
+
+      await agent(() => gate.gate(primaryKey, input, alsoOpts, now));
+      expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ policyId: 'pol-start' }));
+    });
+
+    it.each([['AC-8', undefined], ['AC-9', []] as const])('%s: resolves only the primary when alsoKeys is absent or empty', async (_ac, alsoKeys) => {
+      await agent(() => gate.gate('label.delete', input, { projectId: 'p1', ...(alsoKeys === undefined ? {} : { alsoKeys }) }));
+      expect(resolve).toHaveBeenCalledExactlyOnceWith({ key: 'label.delete', projectId: 'p1', subject: { type: 'AGENT', id: 'a1' } });
+    });
+
+    it('AC-11..13: propagates extra-key resolver failure before execution or request creation', async () => {
+      const primary = registerPrimary();
+      const failure = Object.assign(new Error('policy failure'), { name: 'PolicyResolutionError' });
+      resolve.mockImplementation(async ({ key }: { key: string }) => {
+        if (key === extraKey) throw failure;
+        return { mode: 'none', floor: 'none', policy: null, source: 'default' };
+      });
+
+      await expect(agent(() => gate.gate(primaryKey, input, alsoOpts, now))).rejects.toBe(failure);
+      expect(primary.state.calls).toEqual([]);
+      expect(requests.create).not.toHaveBeenCalled();
+      expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
+    });
+  });
+
   it('opens a variant request with the variant on the record and the duplicate match', async () => {
     const variant = configurableTestCommand('label.delete', { variant: 'rest:labels.delete' });
     registry.register(variant.command);

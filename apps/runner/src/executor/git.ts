@@ -62,6 +62,7 @@ const NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_
 const NO_HELPER_ARGS = ['-c', 'credential.helper='] as const;
 const helperArgs = (helper: string | null | undefined): readonly string[] =>
   helper ? ['-c', 'credential.helper=', '-c', `credential.helper=${helper}`] : NO_HELPER_ARGS;
+const HARDENING_ARGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false'] as const;
 
 export const MIN_GIT_VERSION: readonly [number, number] = [2, 30];
 
@@ -81,7 +82,7 @@ export async function assertMinGitVersion(git: Git): Promise<void> {
 
 export function createGit(): Git {
   const run: Git['run'] = async (args, options) => {
-    const proc = Bun.spawn(['git', ...helperArgs(options.credentialHelper), ...args], {
+    const proc = Bun.spawn(['git', ...HARDENING_ARGS, ...helperArgs(options.credentialHelper), ...args], {
       cwd: options.cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, killSignal: 'SIGKILL',
       env: { ...process.env, ...options.env, ...NO_PROMPT_ENV },

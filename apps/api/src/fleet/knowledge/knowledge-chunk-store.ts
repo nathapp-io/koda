@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager, OUTCOME_SOURCE, REPO_SOURCE, whereIfSupported,
+  isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager, OUTCOME_SOURCE, REPO_SOURCE, sourceRowFilter, whereIfSupported,
 } from '../../rag/lance-table-manager';
 
 const MAX_FILE_ROWS = 2_000;
@@ -24,8 +24,8 @@ export class KnowledgeStoreUnavailableError extends Error {
 }
 
 export class KnowledgeInvalidPathError extends Error {
-  constructor(sourceId: string) {
-    super(`knowledge source id is not a safe filter value: ${JSON.stringify(sourceId)}`);
+  constructor(sourceId: string, reason = 'is not a safe filter value') {
+    super(`knowledge source id ${reason}: ${JSON.stringify(sourceId)}`);
     this.name = 'KnowledgeInvalidPathError';
   }
 }
@@ -73,28 +73,29 @@ export class KnowledgeChunkStore {
 
   /** Deletes the file's rows, then adds all of `rows` in one call, under the table's write mutex. */
   async replaceFile(projectId: string, sourceId: string, rows: LanceRecord[]): Promise<void> {
-    this.assertReady(sourceId);
+    const source = this.sourceFor(sourceId);
     for (const row of rows) {
-      if (row.source_id !== sourceId) throw new KnowledgeInvalidPathError(row.source_id);
+      if (row.source_id !== sourceId || row.source !== source) throw new KnowledgeInvalidPathError(row.source_id);
     }
+    const predicate = sourceRowFilter(source, sourceId);
     const table = await this.table(projectId);
     await this.manager.exclusive(tableName(projectId), async () => {
-      await table.delete(`source_id = '${sourceId}'`);
+      await table.delete(predicate);
       if (rows.length > 0) await table.add(rows);
     });
   }
 
   async deleteFile(projectId: string, sourceId: string): Promise<void> {
-    this.assertReady(sourceId);
+    const predicate = sourceRowFilter(this.sourceFor(sourceId), sourceId);
     const table = await this.table(projectId);
-    await this.manager.exclusive(tableName(projectId), () => table.delete(`source_id = '${sourceId}'`));
+    await this.manager.exclusive(tableName(projectId), () => table.delete(predicate));
   }
 
   /** The file's rows (at most 2000) in `chunkIndex` order. */
   async readFile(projectId: string, sourceId: string): Promise<KnowledgeChunkRow[]> {
-    this.assertReady(sourceId);
+    const predicate = sourceRowFilter(this.sourceFor(sourceId), sourceId);
     const table = await this.table(projectId);
-    const records: LanceRecord[] = await table.query().where(`source_id = '${sourceId}'`).limit(MAX_FILE_ROWS).toArray();
+    const records: LanceRecord[] = await table.query().where(predicate).limit(MAX_FILE_ROWS).toArray();
     return records.map(parseRow).sort((a, b) => a.chunkIndex - b.chunkIndex);
   }
 
@@ -160,9 +161,12 @@ export class KnowledgeChunkStore {
     await this.manager.exclusive(tableName(projectId), () => table.createIndex('content', { config: Index.fts(), replace: true }));
   }
 
-  private assertReady(sourceId: string): void {
+  private sourceFor(sourceId: string): typeof REPO_SOURCE | typeof OUTCOME_SOURCE {
     this.assertAvailable();
     if (!isSafeFilterValue(sourceId)) throw new KnowledgeInvalidPathError(sourceId);
+    if (sourceId.startsWith('repo:')) return REPO_SOURCE;
+    if (sourceId.startsWith('outcome:')) return OUTCOME_SOURCE;
+    throw new KnowledgeInvalidPathError(sourceId, 'has no reserved prefix');
   }
 
   /**

@@ -83,6 +83,27 @@ describe('KnowledgeChunkStore', () => {
     expect(manager.exclusive).not.toHaveBeenCalled();
   });
 
+  it.each(['readFile', 'deleteFile', 'replaceFile'] as const)('%s rejects an id without a reserved prefix without calling the table', async (method) => {
+    const manager = fakeManager(true);
+    const store = new KnowledgeChunkStore(manager as unknown as LanceTableManager);
+    const call = {
+      readFile: () => store.readFile('p1', 'docs/a.md'),
+      deleteFile: () => store.deleteFile('p1', 'docs/a.md'),
+      replaceFile: () => store.replaceFile('p1', 'docs/a.md', []),
+    }[method];
+
+    await expect(call()).rejects.toBeInstanceOf(KnowledgeInvalidPathError);
+    expect(manager.getOrCreateTable).not.toHaveBeenCalled();
+    expect(manager.exclusive).not.toHaveBeenCalled();
+  });
+
+  it('replaceFile rejects a row whose source differs from the id prefix', async () => {
+    const manager = fakeManager(true);
+    const store = new KnowledgeChunkStore(manager as unknown as LanceTableManager);
+    await expect(store.replaceFile('p1', 'repo:r1:a.md', [{ ...row('repo:r1:a.md', 0), source: 'doc' }])).rejects.toBeInstanceOf(KnowledgeInvalidPathError);
+    expect(manager.getOrCreateTable).not.toHaveBeenCalled();
+  });
+
   it('replaceFile rejects a row whose source_id differs from the file', async () => {
     const manager = fakeManager(true);
     const store = new KnowledgeChunkStore(manager as unknown as LanceTableManager);

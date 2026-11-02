@@ -1,0 +1,658 @@
+{
+  "project": "koda",
+  "feature": "review-p1-bundle",
+  "branchName": "feat/review-p1-bundle",
+  "createdAt": "2026-11-02T00:00:00.000Z",
+  "updatedAt": "2026-11-02T08:24:36.399Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Sync refuses the PROJECT anchor token",
+      "description": "**Goal** — Refuse repo-less token requests for PROJECT thread jobs without changing existing scoped grants.\n\n**Motivation** — A PROJECT thread job stores the anchor repo id, so a repo-less request from it falls to `findRepo(job.repoId)` and gets a write token.\n\n**Approach** — **PROJECT repo-less refusal (B/SEC-2).** In `SyncService.grantTokens`, the repo-less branch for a THREAD job refuses with `{ jobId, reason: 'repo_not_assigned' }` when the thread token scope's `kind` is `'WORKSPACE'` **or** `'PROJECT'`, for every turn action. REPO threads and every non-THREAD command keep minting from `findRepo(job.repoId)` exactly as today.\n\n**Scope** — In: the missing-repo THREAD scope branch in sync.service.ts, PROJECT SESSION/PUBLISH unit refusals and the real PROJECT held-thread HTTP integration case. Out: sweep/placement isolation (US-002), branch protection (US-008), runner git hardening (US-009), and explicit-repo grant redesign. The endpoint e2e file gains no MCP or runner-sync cases: those routes keep their request and response shapes, and their behaviour changes are covered by the integration ACs. Preserve every existing sync-token-fence and fleet-project-code-token-fence case; build the new integration request without requestFor, which always attaches repoId.\n\n**Interface** — Existing read-only seam: `FleetJobRepository.findThreadTokenScope(jobId): Promise<{ kind: ChatThreadKind; action: string } | null>`; `ChatThreadKind` (`'REPO' | 'PROJECT' | 'WORKSPACE'`). Refusal: `{ jobId, reason: 'repo_not_assigned' }`, no mint, no `findRepo` (fail closed). No request/response shape change.",
+      "acceptanceCriteria": [
+        "[unit] SyncService.sync for a held THREAD job whose findThreadTokenScope answers { kind: 'PROJECT', action: 'SESSION' }, with token request { jobId, leaseEpoch } and no repoId, returns gitTokenErrors [{ jobId, reason: 'repo_not_assigned' }].",
+        "[unit] In the same PROJECT SESSION case, SyncService.sync returns gitTokens [].",
+        "[unit] In the same PROJECT SESSION case, the broker's mint is never called.",
+        "[unit] In the same PROJECT SESSION case, the repository's findRepo is never called.",
+        "[unit] SyncService.sync for a held THREAD job whose scope is { kind: 'PROJECT', action: 'PUBLISH' }, with a repo-less token request, returns gitTokenErrors [{ jobId, reason: 'repo_not_assigned' }].",
+        "[unit] SyncService.sync for a THREAD job whose scope is { kind: 'REPO', action: 'SESSION' }, with a repo-less token request, calls the broker's mint once with the repo returned by findRepo(job.repoId).",
+        "[unit] SyncService.sync for a RUN job with a repo-less token request calls the broker's mint once with the repo returned by findRepo(job.repoId).",
+        "[integration] When a runner whose held THREAD job belongs to a PROJECT thread sends POST /api/fleet/runner/sync with a token request for that job and no repoId, the response's gitTokenErrors contains { jobId, reason: 'repo_not_assigned' }.",
+        "[integration] In that same sync, the response's gitTokens contains no entry for that job."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "fleet",
+        "tokens"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small existing branch change plus unit/HTTP regressions, but credential scope is security-critical and requires strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+        "apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "`grantTokens` refuses a repo-less THREAD request with `repo_not_assigned` when the scope kind is `'WORKSPACE'` or `'PROJECT'`, for every turn action."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+          "reason": "add the PROJECT repo-less refusal cases beside \"workspace AC-7 refuses the anchor token without repoId\"; every existing case stays."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts",
+          "reason": "add one case whose token request for the held PROJECT thread job carries no `repoId` (the file's `requestFor` helper always sends one, so the case builds its request without it); existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "de1429c5a36dc6826b1eacae14a3cd158fba7f00"
+    },
+    {
+      "id": "US-002",
+      "title": "Isolate sweep items and sync placement failures",
+      "description": "**Goal** — Keep later sweep items and sync command/token delivery alive after an individual crash or placement failure.\n\n**Motivation** — The project rule is \"one failing job or ack in a sync is logged and skipped\".\n\n**Approach** — **Sweep isolation (B/BUG-1).** In `FleetSweeper.crashSilent`, each silent id's transaction and its post-commit effects run inside their own try/catch. A throw is logged with `this.logger.warn` as `Silent-runner crash of job <id> failed: <error name>` (the error's `name`, never its message) and the loop moves on to the next id. A failed id is not counted in the returned total.\n\n**Sync placement isolation (B/BUG-1).** In `SyncService.sync`, the `placement.fillRunner` call and the `placement.fillRunnerThreads` call each run inside their own try/catch. A throw is logged with `this.logger.error` as `Sync: placement for runner <runnerId> failed: <error name>`, and the sync continues to `afterTerminal`, `grantTokens` and `deliver`. A `fillRunner` throw does not skip `fillRunnerThreads`. `afterTerminal` is unchanged (its effects are already fire-and-forget).\n\n**Scope** — In: fleet-sweeper.ts and sync.service.ts isolation, fleet-sweeper.spec.ts additions and sync-token-fence.spec.ts placement rejection tests. Out: token-scope change (US-001), ingest caps (US-003), and changes to the transaction/state-transition or terminal-effect rules. Preserve all existing cases. Expose the placement mock from harness(); placement failure cases use freeSlots > 0 and protocolVersion 4. Observe Nest Logger.prototype.warn/error and assert no thrown message leakage.\n\n**Interface** — Preserve `SyncService.sync(runnerId: string, raw: unknown): Promise<SyncResponse>` and `FleetSweeper.sweep(now = new Date()): Promise<number>`. No protocol or constructor changes; failed silent ids contribute zero to the returned count.",
+      "acceptanceCriteria": [
+        "[unit] FleetSweeper.sweep with findSilentHeldIds returning ['j1', 'j2'], where transition apply for j1 rejects with an Error named TransitionError whose message is secret-detail, still applies the CRASHED transition to j2.",
+        "[unit] That sweep resolves 1.",
+        "[unit] During that sweep logger.warn is called with 'Silent-runner crash of job j1 failed: TransitionError'.",
+        "[unit] During that sweep no logged text contains the thrown error's message secret-detail.",
+        "[unit] FleetSweeper.sweep with findSilentHeldIds returning ['j1', 'j2'], where lockById rejects for j1, still applies the CRASHED transition to j2.",
+        "[unit] SyncService.sync with freeSlots > 0 where placement.fillRunner rejects resolves without throwing.",
+        "[unit] In that fillRunner rejection case, the response's commands equals findPendingCommands' rows projected as { commandId: row.id, type: row.type, jobId: row.jobId, leaseEpoch: row.leaseEpoch, payload: row.payload }, preserving the existing delivery shape.",
+        "[unit] In that fillRunner rejection case, with a repo-less token request for a held RUN job, the response's gitTokens contains the minted token.",
+        "[unit] SyncService.sync with freeSlots > 0 and protocolVersion 4 where placement.fillRunner rejects still calls placement.fillRunnerThreads once.",
+        "[unit] SyncService.sync with freeSlots > 0 and protocolVersion 4 where placement.fillRunnerThreads rejects with an Error named PlacementError resolves without throwing.",
+        "[unit] In that fillRunnerThreads rejection case logger.error is called with 'Sync: placement for runner <runnerId> failed: PlacementError'.",
+        "[unit] With freeSlots > 0 and protocolVersion 4, when fillRunnerThreads rejects, the sync response still contains the pending commands projected to their existing commandId/type/jobId/leaseEpoch/payload wire shape.",
+        "[unit] In that fillRunnerThreads rejection case, a repo-less token request for a held RUN job still receives the broker's minted token in gitTokens.",
+        "[unit] When fillRunner rejects with an Error named PlacementError, logger.error is called with 'Sync: placement for runner <runnerId> failed: PlacementError'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "reliability"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized error-isolation changes in existing loops and tests; no change to token authorization or credential semantics.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/fleet-sweeper.ts",
+        "apps/api/src/fleet/sync/fleet-sweeper.spec.ts",
+        "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+        "apps/api/src/approvals/approval-request-expiry.sweeper.ts"
+      ],
+      "suggestedCriteria": [
+        "When a silent job's post-commit live publication throws, FleetSweeper.sweep still processes the next id and excludes the failed item from its count.",
+        "When placement.fillRunner rejects with an Error whose message contains a secret, logger.error includes only the runner id and error name, not that message."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.ts",
+          "reason": "`crashSilent` wraps each id's transaction and post-commit effects in a try/catch that logs `Silent-runner crash of job <id> failed: <error name>` with the class logger's `warn` and continues."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "`sync` wraps `placement.fillRunner` and `placement.fillRunnerThreads` each in its own try/catch that logs `Sync: placement for runner <runnerId> failed: <error name>` with the class logger's `error`."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.spec.ts",
+          "reason": "add the per-item isolation cases (the logger is observed by spying on the Nest `Logger` prototype's `warn`); existing cases stay."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+          "reason": "the `harness()` helper exposes its `placement` mock so a case can make `fillRunner` or `fillRunnerThreads` reject; add the placement-failure cases, each sending `freeSlots > 0` and protocol version 4 (the logger is observed by spying on the Nest `Logger` prototype's `error`); existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a34287baec1f390700c3c67e25ab883cbbf46cd3"
+    },
+    {
+      "id": "US-003",
+      "title": "Bound bundle-reader retained bytes and per-slot files",
+      "description": "**Goal** — Bound allowlisted decompressed payload retention and array-slot file counts before buffering entries.\n\n**Motivation** — Thousands of 32 MiB allowlisted entries that compress well fit under the compressed upload cap, and the reader buffers all of them before `parseBundle` runs; the single API instance runs out of memory, then retries the claim after restart until `INGEST_MAX_ATTEMPTS`.\n\n**Approach** — **Ingest caps (B/MEM-1).** `INGEST_LIMITS` gains `totalBytes: 67_108_864` (64 MiB) and `maxFilesPerSlot: 5_000`. `readBundleFiles(bundle, limits = INGEST_LIMITS)` takes an optional second parameter typed `Readonly<Record<'fileBytes' | 'totalBytes' | 'maxFilesPerSlot', number>>` (not a `Pick` of the `as const` object, whose literal types would refuse test values) so tests can use small caps; the ingest service keeps calling it with one argument. For each allowlisted regular-file entry, in tar order, the checks compose as an ordered pipeline, first match wins:\n1. `header.size > limits.fileBytes` -> skipped (the existing rule);\n2. for an array slot (`cost`, `reviews`, `finishResults`, `finishLast`, `botReview`), the slot already holds `limits.maxFilesPerSlot` files -> skipped;\n3. `keptBytes + header.size > limits.totalBytes`, where `keptBytes` is the sum of `header.size` of entries kept so far -> skipped;\n4. otherwise the entry is read and kept, and `keptBytes` grows by `header.size`.\n\nA skipped entry is drained with `resume()` and never buffered. Its name is appended to `oversized`, except for the `botReview` and `naxStdout` slots, which are skipped silently (the existing rule for those two slots). An entry skipped by rule 2 or 3 does not count toward `keptBytes`, so a later smaller entry that fits is still kept. `tar-stream` emits exactly `header.size` bytes per entry, so counting by header size is exact. A non-empty `oversized` already makes `parseBundle` answer a partial outcome (`parse-bundle.ts:59`), so no parser change. A small single-file slot (`status.json`, `workflow/result.json`) that arrives after the total cap is used up is skipped and reported the same way; that is intended, a bundle that large is already partial.\n\n**Scope** — In: the limits object, reader optional test seam and ordered cap checks, plus small-cap tests in bundle-reader.spec.ts preserving every existing case. Out: sweep isolation (US-002), knowledge-source isolation (US-004), ingest retry policy and array append refactors. US-003 only: marking a failed ingest claim terminal before `INGEST_MAX_ATTEMPTS` is not changed; the new caps remove the out-of-memory path that made retries repeat. US-003 only: replacing the copy-on-append of slot arrays with in-place pushes is not required; the per-slot cap bounds the copy cost.\n\n**Interface** — `readBundleFiles(bundle: Readable, limits?: Readonly<Record<'fileBytes' | 'totalBytes' | 'maxFilesPerSlot', number>>): Promise<BundleFiles>`, `limits` defaulting to `INGEST_LIMITS`. The same `INGEST_LIMITS` keys plus `totalBytes: 67_108_864` and `maxFilesPerSlot: 5_000`; every other key keeps its value.",
+      "acceptanceCriteria": [
+        "[unit] INGEST_LIMITS.totalBytes equals 67108864.",
+        "[unit] INGEST_LIMITS.maxFilesPerSlot equals 5000.",
+        "[unit] readBundleFiles with { fileBytes: 100, totalBytes: 150, maxFilesPerSlot: 10 } over 60-byte cost/a.jsonl, cost/b.jsonl and cost/c.jsonl entries under nax-out in that order returns cost holding a and b only.",
+        "[unit] In that three-60-byte-cost-file case, readBundleFiles returns oversized ['nax-out/cost/c.jsonl'].",
+        "[unit] With the same limits, cost/a.jsonl (60 bytes), cost/b.jsonl (100 bytes), cost/c.jsonl (40 bytes) under nax-out return cost holding a and c.",
+        "[unit] In that 60/100/40-byte cost case, readBundleFiles returns oversized ['nax-out/cost/b.jsonl'].",
+        "[unit] With the same limits, nax-out/cost/a.jsonl (60 bytes), nax-out/metrics.json (60 bytes), then nax.stdout (60 bytes) return naxStdout null.",
+        "[unit] In that stdout total-cap case, the returned oversized list does not name nax.stdout.",
+        "[unit] With { fileBytes: 100, totalBytes: 10000, maxFilesPerSlot: 2 }, three small nax-out/review-audit/f/s<N>.json entries return reviews holding the first two only.",
+        "[unit] In that review-slot-cap case, oversized names the third review entry.",
+        "[unit] With { fileBytes: 100, totalBytes: 10000, maxFilesPerSlot: 2 }, small nax-out/bot/pr-1/a/bot-review.json, nax-out/bot/pr-1/b/bot-review.json and nax-out/bot/pr-1/c/bot-review.json entries return botReview holding two files.",
+        "[unit] In that botReview slot-cap case, oversized is empty, preserving silent skips for that slot.",
+        "[unit] With { fileBytes: 50, totalBytes: 100, maxFilesPerSlot: 10 }, a 60-byte nax-out/metrics.json followed by two 50-byte cost files return cost holding both cost files, because a file over fileBytes adds nothing to the kept total.",
+        "[unit] In that per-file-overflow case, oversized equals ['nax-out/metrics.json'], because a file over fileBytes adds nothing to the kept total.",
+        "[unit] When an allowlisted regular-file entry exceeds any cap, readBundleFiles drains its entry stream with resume() without buffering its body."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "ingest",
+        "resource-limits"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Bounded stream accounting and existing-slot limits use standard patterns across reader/domain/tests; no auth, token or credential changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/bundle-reader.ts",
+        "apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts",
+        "apps/api/src/fleet/ingest/bundle-reader.spec.ts",
+        "apps/api/src/fleet/ingest/parse-bundle.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When a kept entry makes the aggregate header-size sum exactly totalBytes, readBundleFiles retains that entry.",
+        "When finishResults or finishLast reaches maxFilesPerSlot, the next entry in that slot is omitted and its name is reported in oversized.",
+        "When status or workflowResult arrives after the total cap is exhausted, the slot remains null and oversized names the skipped file."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts",
+          "reason": "`INGEST_LIMITS` gains `totalBytes: 67_108_864` and `maxFilesPerSlot: 5_000`; every other key keeps its value."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-reader.ts",
+          "reason": "`readBundleFiles` takes the optional `limits` parameter and applies the ordered skip pipeline of call 4."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-reader.spec.ts",
+          "reason": "add the total-bytes and files-per-slot cases using small injected `limits`; existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "65d84868449d04d19d5f2fac5522080ca6fdab4c"
+    },
+    {
+      "id": "US-004",
+      "title": "Isolate knowledge rows by source and reserve KB id prefixes",
+      "description": "**Goal** — Prevent KB writers from impersonating reserved knowledge content or losing colliding user rows during indexing.\n\n**Motivation** — The next index pass over the file deletes the user's row without `kb.document.delete` and without an audit entry.\n\n**Approach** — **Knowledge store source filters (C/SEC-1).** `KnowledgeChunkStore.readFile`, `replaceFile` and `deleteFile` keep their signatures. Each derives the row source from the id prefix: `repo:` -> `REPO_SOURCE` (`'repo'`), `outcome:` -> `OUTCOME_SOURCE` (`'outcome'`); any other id throws `KnowledgeInvalidPathError` (its constructor may take an optional reason so the message can say the id has no reserved prefix), after the existing `isSafeFilterValue` check. Each then filters with the existing `sourceRowFilter(source, sourceId)` from `rag/lance-table-manager`, so a `doc`, `manual` or `ticket` row that shares the id is never read, replaced or deleted. `replaceFile` also requires every row's `source` to equal the derived source, else `KnowledgeInvalidPathError`.\n\n**Reserved KB id prefixes (C/SEC-1).** `AddDocumentDto.sourceId` refuses a value that starts with `repo:` or `outcome:`: validation fails on `sourceId` with the message `sourceId must not start with a reserved prefix (repo:, outcome:)`. The KB add route (`POST /api/projects/:slug/kb/documents`) parses its body with this DTO, so it answers 400 and writes no row. Only the start of the id is checked: `notes:repo:x` is accepted.\n\n**Scope** — In: knowledge-chunk-store.ts and its predicate-fake unit tests, AddDocumentDto and a new DTO unit spec, real LanceDB shared-id cases in knowledge-store.integration.spec.ts, reserved-prefix/no-row checks in gated-kb-add-route.integration.spec.ts and one repo:x:y.md 400 endpoint e2e case beside KB adds. Replace the old ticket-row read in knowledge-store integration AC-9 with a direct manager.getOrCreateTable query filtered on source_id = 'ticket:t1'; preserve the assertion that the ticket row survives and all other existing cases. Out: bundle caps (US-003), approvals (US-005 through US-007), index/search redesign. US-004 only: KB documents already stored with a `repo:` or `outcome:` id are not migrated or deleted; after this change they are no longer served by `koda_get_doc` and no longer deleted by the indexer. US-004 only: search ranking and the search legs' filters are unchanged; both already filter on `source`.\n\n**Interface** — Preserve `readFile(projectId: string, sourceId: string): Promise<KnowledgeChunkRow[]>`, `replaceFile(projectId: string, sourceId: string, rows: LanceRecord[]): Promise<void>` and `deleteFile(projectId: string, sourceId: string): Promise<void>`. Reuse `sourceRowFilter(source: string, sourceId: string): string`, `REPO_SOURCE = 'repo'`, `OUTCOME_SOURCE = 'outcome'`, `isSafeFilterValue` (`apps/api/src/rag/lance-table-manager.ts`). Invalid-prefix ids throw `KnowledgeInvalidPathError`, no table call.",
+      "acceptanceCriteria": [
+        "[integration] Given a real LanceDB table holding repo and doc rows with source_id repo:r1:docs/a.md, KnowledgeChunkStore.readFile(project, 'repo:r1:docs/a.md') returns only the repo row.",
+        "[integration] Given a real table holding outcome and doc rows with source_id outcome:r1:j1:report, readFile(project, 'outcome:r1:j1:report') returns only the outcome row.",
+        "[integration] Given repo and doc rows sharing source_id repo:r1:docs/a.md, deleteFile(project, 'repo:r1:docs/a.md') leaves the doc row in the real table.",
+        "[integration] In that deleteFile shared-id case the repo row is gone.",
+        "[integration] Given the same two rows, replaceFile(project, 'repo:r1:docs/a.md', [a new repo row]) leaves the doc row in the real table.",
+        "[integration] In that replaceFile shared-id case the only repo row is the new one.",
+        "[unit] Table-driven over readFile, deleteFile and replaceFile, each call with source id docs/a.md rejects with KnowledgeInvalidPathError because it has no reserved prefix.",
+        "[unit] In each of those invalid-prefix calls, the knowledge store makes no table call.",
+        "[unit] replaceFile('p1', 'repo:r1:a.md', [a row with source 'doc' and source_id 'repo:r1:a.md']) rejects with KnowledgeInvalidPathError.",
+        "[unit] Table-driven over repo:r1:docs/a.md and outcome:r1:j1:report, validating AddDocumentDto with { source: 'doc', sourceId: the id, content: 'x' } yields a validation error on sourceId with message 'sourceId must not start with a reserved prefix (repo:, outcome:)'.",
+        "[unit] Validating AddDocumentDto with { source: 'doc', sourceId: 'notes:repo:x', content: 'x' } yields no validation errors.",
+        "[integration] When a project member holding kb.document.add sends POST /api/projects/:slug/kb/documents with { source: 'doc', sourceId: 'repo:r1:docs/a.md', content: 'x' }, the response is HTTP 400.",
+        "[integration] After that refused request no KB row with source_id repo:r1:docs/a.md and source doc exists."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "knowledge",
+        "rag"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing sourceRowFilter and DTO validation patterns cover the localized store/route changes without a new storage abstraction; source isolation is access-control critical, so strict security TDD remains mandatory.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+        "apps/api/src/rag/lance-table-manager.ts",
+        "apps/api/src/rag/dto/add-document.dto.ts",
+        "apps/api/test/integration/fleet/knowledge-store.integration.spec.ts",
+        "apps/api/test/integration/rag/gated-kb-add-route.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/rag/dto/add-document.dto.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+          "reason": "`readFile`, `replaceFile` and `deleteFile` derive the source from the id prefix, throw `KnowledgeInvalidPathError` for an id with neither prefix, and filter with `sourceRowFilter(source, sourceId)`; `replaceFile` also refuses a row whose `source` differs from the derived source."
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-chunk-store.spec.ts",
+          "reason": "add the prefix-derivation and refusal cases; any fake table that captures the delete or where predicate expects the `source = '<source>' AND source_id = '<id>'` form; existing refusal cases stay."
+        },
+        {
+          "path": "apps/api/src/rag/dto/add-document.dto.ts",
+          "reason": "`sourceId` gains a validator refusing a value that starts with `repo:` or `outcome:`, with the message of call 6."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/knowledge-store.integration.spec.ts",
+          "reason": "the test \"deleteFile removes the file rows and keeps a ticket row of the same table (AC-9)\" reads the ticket row back with a direct query on `manager.getOrCreateTable(...)` filtered on `source_id = 'ticket:t1'` instead of `store.readFile(PROJECT, 'ticket:t1')`, which now refuses an unprefixed id; its assertion that the ticket row survives stays. Add the shared-id cases; every other case stays."
+        },
+        {
+          "path": "apps/api/test/integration/rag/gated-kb-add-route.integration.spec.ts",
+          "reason": "add the reserved-prefix 400 case; existing cases stay."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add one case beside the KB document add tests: a KB document add POST whose sourceId is repo:x:y.md answers 400 (rule: endpoint changes are reflected here). Existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5b40683c91b2dc164c4568f989637f7c0670d9e7"
+    },
+    {
+      "id": "US-005",
+      "title": "Gate MCP approval decisions like REST decisions",
+      "description": "**Goal** — Eliminate the MCP approval-policy bypass while preserving immediate execution and error semantics.\n\n**Motivation** — With a policy \"agent decisions need a human\", an agent's REST decision parks, while the same agent's MCP decision executes at once.\n\n**Approach** — **MCP decide through the gate (A/SEC-4).** The `koda_decide_approval` handler keeps its input checks, then mirrors the REST decide route: `queries.get(ref, id)` for visibility, `decisions.assertMayDecide(id)`, then `routeGate.run({ key: 'approval.decide', variant: APPROVAL_ROUTE_VARIANTS.decide, projectId: visible.request.projectId, input: { requestId: id, decision, comment, params? }, keyCheck: false })`, where `params` is present in `input` only when the caller sent it. Outcomes:\n- `status: 'pending'` -> tool result `pending: <outcome.request.id>`, `isError: false`;\n- `status: 'executed'` and `decision: 'approve'` -> `execution.execute(id)`, then `<record.id> <record.status>`;\n- `status: 'executed'` and `decision: 'reject'` -> `<outcome.result.id> <outcome.result.status>`.\n\nError mapping keeps today's four (`not_found`, `not_pending: <status>`, `expired`, `forbidden: <reason>`) and adds `ForbiddenAppException` -> `forbidden: permissions`. `ApprovalMcpTools` gains constructor dependencies `ApprovalRouteGate` and `ApprovalExecutionService`; both are already providers of `ApprovalEngineModule`, the module that provides `ApprovalMcpTools`.\n\n**Scope** — In: approval-mcp-tools.ts handler/constructor, both list and decide tools() unit helpers and HTTP MCP parked-decision integration. Supply routeGate.run, decisions.assertMayDecide and execution.execute stubs to both helpers; get returns { request: { projectId: 'p1' } }. Replace decide-call expectations with exact routeGate.run calls, and reject the existing AC-10/11/12/13 error table from routeGate.run instead of decide. Keep list/input-validation cases with both decide and routeGate.run not called; existing integration AC-14 still answers <id> executed. Out: extra-key gate resolution (US-006) and ticket PATCH routing (US-007). A/SEC-3 (verify-fix self-approval rule) and A/SEC-6 (re-tier credential write keys) are not in this bundle; they are separate P1 work. A/BUG-1 (move PR creation and email out of the approval execution transaction) is not in this bundle. The endpoint e2e file gains no MCP or runner-sync cases: those routes keep their request and response shapes, and their behaviour changes are covered by the integration ACs.\n\n**Interface** — Constructor target: `(queries: ApprovalRequestQueries, decisions: ApprovalDecisionService, routeGate: ApprovalRouteGate, execution: ApprovalExecutionService)`. Reuse `ApprovalDecisionService.assertMayDecide(requestId: string): Promise<void>`, `ApprovalExecutionService.execute(requestId: string, now?: Date): Promise<ApprovalRequestRecord>` and `APPROVAL_ROUTE_VARIANTS.decide = 'rest:approvals.decide'`.",
+      "acceptanceCriteria": [
+        "[unit] The koda_decide_approval handler for { id: 'r1', decision: 'approve' }, with queries.get returning { request: { projectId: 'p1' } }, calls routeGate.run once with { key: 'approval.decide', variant: 'rest:approvals.decide', projectId: 'p1', input: { requestId: 'r1', decision: 'approve', comment: null }, keyCheck: false }.",
+        "[unit] In that call decisions.assertMayDecide is called with 'r1' before routeGate.run.",
+        "[unit] In that call decisions.decide is never called.",
+        "[unit] When routeGate.run returns { status: 'pending', request: { id: 'ar9' } }, the handler returns content 'pending: ar9' with isError false.",
+        "[unit] When routeGate.run returns status executed for decision approve and execution.execute('r1') returns { id: 'r1', status: 'executed' }, the handler calls execution.execute with 'r1'.",
+        "[unit] In that executed approve case the handler returns content 'r1 executed'.",
+        "[unit] When routeGate.run returns { status: 'executed', result: { id: 'r1', status: 'rejected' } } for decision reject, the handler returns content 'r1 rejected'.",
+        "[unit] For { id: 'r1', decision: 'approve', params: { remember: true } }, the input passed to routeGate.run equals { requestId: 'r1', decision: 'approve', comment: null, params: { remember: true } }.",
+        "[unit] When assertMayDecide rejects with ApprovalDecideForbiddenError('distinct-approver-required'), the handler returns content 'forbidden: distinct-approver-required' with isError true.",
+        "[unit] When routeGate.run rejects with ForbiddenAppException, the handler returns content 'forbidden: permissions' with isError true.",
+        "[integration] Given a global approval.decide policy with mode human for principal type AGENT, when an agent that may decide another agent's pending request calls koda_decide_approval through POST /api/mcp with decision approve, the result text starts with 'pending: '.",
+        "[integration] After that parked MCP call the original request's status remains pending.",
+        "[integration] After that parked MCP call an ApprovalRequest row with permissionKey approval.decide exists.",
+        "[unit] When an MCP decision parks, execution.execute is not called."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "mcp"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing REST gate pattern reused through MCP, but approval authority and decision execution are access-control critical.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts",
+        "apps/api/src/memory/mcp/memory-mcp-tools.ts",
+        "apps/api/test/integration/approvals/approval-mcp-decide.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+          "reason": "the constructor gains `ApprovalRouteGate` and `ApprovalExecutionService`; the `koda_decide_approval` handler follows call 7."
+        },
+        {
+          "path": "apps/api/src/approvals/mcp/approval-mcp-tools.spec.ts",
+          "reason": "both `tools()` helpers (the list describe's near line 12 and the decide describe's near line 65) construct `ApprovalMcpTools` with stub `routeGate` (with `run`), `assertMayDecide` on the decisions stub, and stub `execution` (with `execute`); the `get` stub answers `{ request: { projectId: 'p1' } }` instead of `{}`; the decide cases that expect `decisions.decide` to be called with `('r1', 'approve', null)` or with `params` instead expect `routeGate.run` to be called with `key: 'approval.decide'`, `variant: 'rest:approvals.decide'`, `keyCheck: false` and the matching `input`; the \"AC-10/11/12/13 maps error\" table rejects each error from the stubbed `routeGate.run` instead of `decide`, with the same expected texts; the list cases and the input-validation cases stay, with their `decide` not-called assertions also holding for `routeGate.run`."
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-mcp-decide.integration.spec.ts",
+          "reason": "add the parked-decision case under an `approval.decide` policy; the existing case \"AC-14: a REST agent decides another agent's pending P request and the request is executed\" keeps its `<id> executed` answer."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "82310957672f83ff3b6cea148e02123439c95d1e"
+    },
+    {
+      "id": "US-006",
+      "title": "Apply the strictest approval resolution across extra keys",
+      "description": "**Goal** — Let one primary approval command honor the strictest policy mode of additional keys without opening separate requests.\n\n**Motivation** — The user ruled on 2026-11-02 for one gate call that applies the stricter of the two keys' modes.\n\n**Approach** — **Strictest-of-keys gate (A/SEC-5).** `ApprovalGate.gate`'s `opts` gains `alsoKeys?: readonly string[]`. When it is present and non-empty, the gate resolves the primary key and each extra key for the same subject and project, and uses the resolution with the highest-ranked mode (`APPROVAL_MODE_RANK`); on a tie the primary key's resolution wins. The command, the request's `permissionKey` and the variant stay the primary key's. When `alsoKeys` is absent or empty, the gate resolves only the primary key, as today. `RouteGateCall` gains the same optional `alsoKeys`, and `ApprovalRouteGate.run` passes it into the gate's `opts` only when present (so the existing `{ projectId, variant }` shape is unchanged for every other route).\n\n**Scope** — In: approval-gate.service.ts selection of the complete winning resolution, RouteGateCall and route-gate forwarding, plus both existing unit specs with regression expectations retained. Out: ticket edge exports/command registration/controller wiring/integration (US-007), MCP decision routing (US-005), authorization redesign, and deferred policy rulings. Keep the primary command, key, variant, request dedupe, human satisfaction and request lifecycle unchanged; copy policy flags from the complete winning resolution using the existing request-construction rules. Extra-key resolver failures propagate without executing a command or creating a request. Preserve the legacy route-gate call with exactly { projectId: 'p1', variant: 'rest:tickets.update' } when alsoKeys is absent.\n\n**Interface** — `gate<TResult>(key, input, opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[] }, now?)`. `RouteGateCall` gains `alsoKeys?: readonly string[]`. Read-only resolver contract: `ApprovalPolicyResolver.resolve({ key, projectId, subject }): Promise<ResolvedApproval>` with `ResolvedApproval = { mode, floor, policy, source }`. Reuse `APPROVAL_MODE_RANK`, `modeAtLeast(mode, required)` (`apps/api/src/approvals/domain/approval-mode.ts`). This seam is consumed by US-007.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalGate.gate('ticket.transition.start', input, { projectId: 'p1', variant: 'rest:tickets.update-status', alsoKeys: ['ticket.update'] }) for an AGENT subject, with resolver modes none for ticket.transition.start and agent for ticket.update, returns status pending.",
+        "[unit] In that call the opened request's permissionKey is ticket.transition.start.",
+        "[unit] In that call the opened request's requiredMode is agent.",
+        "[unit] The same call with resolver modes human for ticket.transition.start and agent for ticket.update opens a request whose requiredMode is human.",
+        "[unit] The same call with resolver mode none for both keys runs the command at once.",
+        "[unit] In that both-none case the gate returns status executed.",
+        "[unit] The same alsoKeys call with mode agent for both keys from policies pol-start (primary) and pol-update opens a request whose policyId is pol-start.",
+        "[unit] ApprovalGate.gate without alsoKeys calls the resolver exactly once, with the primary key.",
+        "[unit] ApprovalGate.gate with alsoKeys [] calls the resolver exactly once, with the primary key.",
+        "[unit] ApprovalRouteGate.run({ key: 'ticket.transition.start', variant: 'rest:tickets.update-status', projectId: 'p1', input, alsoKeys: ['ticket.update'] }) calls the gate with ('ticket.transition.start', input, { projectId: 'p1', variant: 'rest:tickets.update-status', alsoKeys: ['ticket.update'] }).",
+        "[unit] When the resolver rejects with an Error named PolicyResolutionError for ticket.update in an alsoKeys call whose primary key is ticket.transition.start, ApprovalGate.gate rejects with that error.",
+        "[unit] In that extra-key resolution failure case, the primary command's execute is not called.",
+        "[unit] In that extra-key resolution failure case, the request store's create is not called.",
+        "[unit] ApprovalRouteGate.run({ key: 'ticket.update', variant: 'rest:tickets.update', projectId: 'p1', input }) calls the gate with ('ticket.update', input, { projectId: 'p1', variant: 'rest:tickets.update' }), preserving the existing options shape with no alsoKeys property."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "policy"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing gate and route seam gain optional multi-key policy resolution; central approval-policy enforcement is security-critical.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/route/approval-route-gate.ts",
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/approvals/domain/approval-mode.ts",
+        "apps/api/src/approvals/approval-gate.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an extra key's winning resolution has a different timeoutSec or requireDistinctApprover setting, the opened request copies those settings from the winning policy."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.ts",
+          "reason": "`gate`'s `opts` gains `alsoKeys`; with a non-empty `alsoKeys` the gate resolves every key and uses the highest-ranked mode's resolution, the primary key's on a tie."
+        },
+        {
+          "path": "apps/api/src/approvals/route/approval-route-gate.ts",
+          "reason": "`RouteGateCall` gains `alsoKeys`; `run` passes it in the gate `opts` only when present."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.spec.ts",
+          "reason": "add the `alsoKeys` cases; existing cases stay."
+        },
+        {
+          "path": "apps/api/src/approvals/route/approval-route-gate.spec.ts",
+          "reason": "add the `alsoKeys` forwarding case; the existing assertion that the gate is called with `{ projectId: 'p1', variant: 'rest:tickets.update' }` stays unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5bec4869dd121463cf5544e4200921515539d0eb"
+    },
+    {
+      "id": "US-007",
+      "title": "Gate ticket status PATCH under edge and update policies",
+      "description": "**Goal** — Gate status-bearing ticket PATCH requests under their transition edge while retaining stricter ticket.update policy requirements.\n\n**Motivation** — A project policy `ticket.transition.start` -> `agent` is skipped: the agent's PATCH starts the ticket at once.\n\n**Approach** — **PATCH status gating (A/SEC-5).** `TicketsController.update`: when the parsed patch has a `status`, it reads the ticket with `ticketsService.findByRef(slug, ref)` and computes `edgeKey = transitionKeyFor(ticket.status, patch.status)`. When `edgeKey` is defined it calls `routeGate.run({ key: edgeKey, variant: TICKET_ROUTE_VARIANTS.updateStatus, projectId, input: { slug, ref, patch }, alsoKeys: ['ticket.update'] })`, where `TICKET_ROUTE_VARIANTS.updateStatus` is `'rest:tickets.update-status'`. Otherwise (no status, or no edge between the two statuses) it keeps today's `ticket.update` call; the service then refuses an impossible transition as today. `transition-keys.ts` exports `TICKET_EDGE_KEYS`, the distinct values of its edge table (`ticket.transition.verify`, `ticket.transition.start`, `ticket.transition.reject`, `ticket.transition.fix`, `ticket.transition.verify-fix.approve`, `ticket.transition.verify-fix.return`). `TicketRouteCommands` registers the `'rest:tickets.update-status'` variant under each of them, with the same parse and run as the `ticket.update` command (`this.service.update(slug, ref, patch, principal)`).\n\n**Scope** — In: transition-keys.ts export, ticket-route.commands.ts variant/registrations and its unit spec, tickets.controller.ts routing and its unit spec, new ticket-patch-status-gate.integration.spec.ts using the real gate, adjusted gated-ticket-write-routes integration AC-4, and one root-user CREATED to IN_PROGRESS 200 endpoint e2e case. Add findByRef to the controller harness; preserve the exact existing no-status title PATCH gate expectation. The pre-existing agent-missing-edge AC-4 must expect immediate HTTP 403 and no ApprovalRequest for that ticket, not an approval that later fails. Preserve all other cases and service-owned transactional state-machine validation. Out: alsoKeys engine/forwarding implementation (US-006), MCP decisions (US-005), KB endpoint cases (US-004), and comment/self-approval policy changes. A/SEC-3 (verify-fix self-approval rule) and A/SEC-6 (re-tier credential write keys) are not in this bundle; they are separate P1 work. US-007 only: an edge key reachable through `PATCH /tickets/:ref` other than `ticket.transition.start` still fails in the transition service as today (those edges need a comment); this bundle only gates them correctly before that refusal.\n\n**Interface** — `TICKET_ROUTE_VARIANTS` gains `updateStatus: 'rest:tickets.update-status'`. `transition-keys.ts` also exports `TICKET_EDGE_KEYS: readonly string[]`, the six distinct edge keys listed above. Read-only seams: `transitionKeyFor(from: TicketStatus, to: TicketStatus): string | undefined`, `TicketsService.findByRef(projectSlug, ref)`. Consume US-006's `alsoKeys?: readonly string[]` on RouteGateCall and ApprovalGate.gate; integration ACs enter PATCH /api/projects/:slug/tickets/:ref with the real gate, asserting HTTP and persisted ticket status.",
+      "acceptanceCriteria": [
+        "[unit] TICKET_EDGE_KEYS imported from tickets/state-machine/transition-keys equals, in any order, ticket.transition.verify, ticket.transition.start, ticket.transition.reject, ticket.transition.fix, ticket.transition.verify-fix.approve and ticket.transition.verify-fix.return.",
+        "[unit] After TicketRouteCommands.onModuleInit, registry.get(key, 'rest:tickets.update-status') is defined for every key in TICKET_EDGE_KEYS.",
+        "[unit] Executing the registered ticket.transition.start / rest:tickets.update-status command with { slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } } calls ticketsService.update('alpha', 'AL-1', { status: 'IN_PROGRESS' }, the loaded principal) once.",
+        "[unit] TicketsController.update('alpha', 'AL-1', { status: 'IN_PROGRESS' }, principal, project) with findByRef returning status CREATED calls routeGate.run once with { key: 'ticket.transition.start', variant: 'rest:tickets.update-status', projectId: 'project-1', input: { slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } }, alsoKeys: ['ticket.update'] }.",
+        "[unit] TicketsController.update with { status: 'CREATED' } on a CLOSED ticket, where no edge exists, calls routeGate.run once with key ticket.update and variant rest:tickets.update.",
+        "[integration] Given a project policy ticket.transition.start -> mode agent for principal type AGENT, an agent holding ticket.update and ticket.transition.start PATCHes { status: 'IN_PROGRESS' } on a CREATED ticket through /api/projects/:slug/tickets/:ref and gets HTTP 202.",
+        "[integration] In that edge-policy parked response permissionKey is ticket.transition.start.",
+        "[integration] After that edge-policy parked PATCH the ticket's status remains CREATED.",
+        "[integration] Given a project policy ticket.update -> mode agent for principal type AGENT and no edge-key policy, the same agent's status PATCH gets HTTP 202.",
+        "[integration] After that update-policy parked PATCH the ticket's status remains CREATED.",
+        "[integration] With no approval policies, the root user's PATCH /api/projects/:slug/tickets/:ref with { status: 'IN_PROGRESS' } on a CREATED ticket gets HTTP 200.",
+        "[integration] After that unparked root-user PATCH the ticket's status is IN_PROGRESS.",
+        "[integration] An agent holding ticket.update but not ticket.transition.start under a project ticket.update -> mode agent policy sends the same status PATCH and gets HTTP 403.",
+        "[unit] TicketsController.update('alpha', 'AL-1', { title: 'New title' }, principal, project) calls routeGate.run once with { key: 'ticket.update', variant: 'rest:tickets.update', projectId: 'project-1', input: { slug: 'alpha', ref: 'AL-1', patch: { title: 'New title' } } }, preserving the existing no-status CurrentProject-scoped call with no alsoKeys property.",
+        "[integration] After the status PATCH is refused because the agent lacks ticket.transition.start, no ApprovalRequest row exists for that ticket, preserving the gate's immediate key-check refusal rather than parking an unauthorized request."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "approvals",
+        "tickets"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing ticket source files reuse the established command-registration pattern and US-006's optional gate seam; transition authorization and approval-policy enforcement still require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/tickets/ticket-route.commands.ts",
+        "apps/api/src/tickets/state-machine/transition-keys.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/test/integration/tickets/gated-ticket-write-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/tickets/ticket-patch-status-gate.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/state-machine/transition-keys.ts",
+          "reason": "exports `TICKET_EDGE_KEYS`, the six distinct values of the edge table."
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.ts",
+          "reason": "`TICKET_ROUTE_VARIANTS` gains `updateStatus: 'rest:tickets.update-status'`; `onModuleInit` registers that variant under each key of `TICKET_EDGE_KEYS` with the `ticket.update` command's parse and run."
+        },
+        {
+          "path": "apps/api/src/tickets/ticket-route.commands.spec.ts",
+          "reason": "add the registration cases for the new variant; existing cases stay."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.ts",
+          "reason": "`update` follows call 9."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "the controller harness `build()` gives its `ticketsService` stub a `findByRef` member; the existing case \"update gates the DTO under ticket.update in CurrentProject scope\" (patch `{ title }`, no status) keeps its exact `run` expectation; add the status cases."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/gated-ticket-write-routes.integration.spec.ts",
+          "reason": "the test \"AC-4: approved status patch fails when the agent lacks the edge key\" (agent holds `ticket.update` but not `ticket.transition.start`, wait policy on `ticket.update`, PATCH `{ status: 'IN_PROGRESS' }`) now expects HTTP 403 at once and no `ApprovalRequest` row for that ticket, because the edge key is the gate's primary key and the route gate's key check refuses a caller who does not hold it; every other test in the file stays."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add one case beside the ticket PATCH tests: a root user's ticket PATCH with status IN_PROGRESS on a CREATED ticket answers 200 (rule: endpoint changes are reflected here). Existing cases stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6a629f38a3237f5ce4bf20824e48668b76428eb7"
+    },
+    {
+      "id": "US-008",
+      "title": "Fall through unavailable GitHub rulesets to classic protection",
+      "description": "**Goal** — Report default_branch_unprotected rather than provider_error when a private free-plan repository lacks protection.\n\n**Motivation** — The refusal is correct; only its reason is wrong.\n\n**Approach** — **Rulesets fall-through (#382).** In `GitHubAppClient.isBranchProtected`, a rules response with status 404, or with status 403 whose body `message` matches `/upgrade to github pro|make this repository public/i`, is treated as \"no rulesets\" and the probe goes on to the classic `GET /branches/{branch}`. Every other non-200 rules status, a non-array 200 body, a network error and every existing classic-endpoint failure still throw `RepoCheckException('provider_error')`. `GitTokenBroker.mint` already turns `false` into the resolved value `{ ok: false, error: { jobId, reason: 'default_branch_unprotected' } }` (it never rejects), so a FIX on such a repo now fails with `git token: default_branch_unprotected`. The broker is unchanged.\n\n**Scope** — In: github-app-client.ts branch-protection probe and fall-through unit cases in github-app-client.branch-protection.spec.ts; retain the existing AC-8/9/12 fails-closed endpoint-failure table and all existing tests. The broker is unchanged; do not modify git-token.broker.ts. Out: PROJECT token scope (US-001), runner hardening (US-009), broker mint/cache/token refresh changes, and unrelated GitHub methods. US-008 only: no web, CLI or assistant copy is added for `default_branch_unprotected`; the job page shows the reason text as it does today. US-008 only: GitLab repos are unchanged; the branch-protection probe is GitHub-only.\n\n**Interface** — Preserve `isBranchProtected(token: string, owner: string, name: string, branch: string): Promise<boolean>`. `GitTokenBroker.mint` (resolves `{ ok: false, error: { jobId, reason: 'default_branch_unprotected' } }` when `isBranchProtected` answers `false`; it never rejects). Existing branch URL encoding and FleetHttpClient timeout/no-redirect behavior stay unchanged.",
+      "acceptanceCriteria": [
+        "[unit] isBranchProtected('t', 'acme', 'app', 'main') with rules response 403 { message: 'Upgrade to GitHub Pro or make this repository public to enable this feature.' } then classic response 200 { protected: false } resolves false.",
+        "[unit] The same rules 403 followed by classic response 200 { protected: true } resolves true.",
+        "[unit] Rules response 404 followed by classic response 200 { protected: false } resolves false.",
+        "[unit] After a plan-upgrade 403 rules response, the second request is GET https://github.test/repos/acme/app/branches/main.",
+        "[unit] Rules response 403 { message: 'Resource not accessible by integration' } rejects with RepoCheckException whose reason is provider_error.",
+        "[unit] After that non-plan 403 rules response no classic branch request is made.",
+        "[unit] A plan-upgrade 403 rules response followed by classic response 404 rejects with RepoCheckException whose reason is provider_error.",
+        "[unit] A rules response 500 or a rules-request network error rejects with RepoCheckException whose reason is provider_error, preserving existing fail-closed behavior."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "fleet",
+        "github",
+        "issue-382"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two-file provider fallback change, but fail-closed branch protection governs FIX credential eligibility and therefore requires security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.branch-protection.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a rules 403 message contains only 'make this repository public' with different casing, isBranchProtected uses the classic endpoint's protected boolean.",
+        "When a rules 200 body is not an array, isBranchProtected rejects with reason provider_error without a classic request.",
+        "When a rules 403 body lacks a string message, isBranchProtected rejects with reason provider_error."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.ts",
+          "reason": "`isBranchProtected` treats a rules 404, or a rules 403 whose body `message` matches the plan-upgrade text, as \"no rulesets\" and continues to the classic branch probe."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.branch-protection.spec.ts",
+          "reason": "add the fall-through cases; the \"AC-8/9/12: fails closed for endpoint failure\" table stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6c4a0367e27679f8ca269449c39b926ae12d0fd4"
+    },
+    {
+      "id": "US-009",
+      "title": "Harden every runner-owned git call against local config",
+      "description": "**Goal** — Prevent repository-local hooks, fsmonitor and submodule recursion from executing through the runner's privileged git wrapper.\n\n**Motivation** — A raw agent that writes `core.hooksPath` or `core.fsmonitor` gets code run by the next job's `ensureClone`/`checkout` inside the daemon, which holds every job's credential sockets.\n\n**Approach** — **Runner git hardening (D/SEC-2).** `createGit().run` spawns `git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c submodule.recurse=false <helper args> <args>`. A `-c` setting outranks repo-local config wherever it sits on the command line; the three settings apply to every call the daemon makes through `createGit` (clone, fetch, checkout, clean, commit, push).\n\n**Scope** — In: the fixed -c prefix in apps/runner/src/executor/git.ts and real-git hardening cases in git.spec.ts, retaining all existing cases. Each fixture is a temporary git-init directory whose local config sets user.name, user.email and commit.gpgsign=false, removed after the test. Compare createGit().ok outputs trimmed except the helper AC, which compares raw output. Out: API token scope (US-001), branch-protection probing (US-008), nax subprocess behavior and OS sandbox enforcement. D/BUG-2 (a fresh forge token for FIX and REVIEW) waits on review ruling 4 and is not in this bundle. US-009 only: `-c protocol.file.allow=never` is not added to runner git calls, because `assertCloneUrl` accepts `file://` remotes by design and the runner's tests clone from local `file://` fixtures. US-009 only: git invocations made by nax itself (inside `nax bot` or a nax run) are not changed; only calls made through the runner's `createGit` are. Forcing nax's OS sandbox for raw job kinds (review ruling 5 on D/SEC-2) is not decided and not built; only the runner's own git calls are hardened.\n\n**Interface** — Preserve `createGit(): Git`, `run(args: readonly string[], options: GitOptions): Promise<GitResult>` and `ok(args: readonly string[], options: GitOptions): Promise<string>`. Keep helper args after the hardening prefix, no-prompt environment, timeout/error behavior and raw stdout unchanged.",
+      "acceptanceCriteria": [
+        "[unit] In a temporary git-init repo with local user.name, user.email, commit.gpgsign=false and core.hooksPath pointing to a directory holding an executable pre-commit hook that writes a marker, createGit().ok(['commit', '--allow-empty', '-m', 'x'], { cwd }) succeeds.",
+        "[unit] After that commit the hook's marker file does not exist.",
+        "[unit] In such a repo whose local config sets core.hooksPath to /tmp/elsewhere, createGit().ok(['config', '--get', 'core.hooksPath'], { cwd }) trimmed returns the string '/dev/null'.",
+        "[unit] In such a repo whose local config sets core.fsmonitor to true, createGit().ok(['config', '--get', 'core.fsmonitor'], { cwd }) trimmed returns the string 'false'.",
+        "[unit] In such a repo whose local config sets submodule.recurse to true, createGit().ok(['config', '--get', 'submodule.recurse'], { cwd }) trimmed returns the string 'false'.",
+        "[unit] In such a repo, createGit().ok(['config', '--get-all', 'credential.helper'], { cwd, credentialHelper: '!f() { echo x; }; f' }) returns raw output that, split on newlines, equals ['', '!f() { echo x; }; f', ''] (this AC compares the untrimmed output), so the helper args keep working after the new prefix."
+      ],
+      "tags": [
+        "runner",
+        "security",
+        "git",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small central spawn change with real filesystem/git fixtures, but it protects daemon credential sockets from repository-controlled code execution.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/git.ts",
+        "apps/runner/src/executor/git.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/executor/git.ts",
+          "reason": "`createGit().run` puts the three settings core.hooksPath=/dev/null, core.fsmonitor=false and submodule.recurse=false, each as a `-c` pair, before the helper args."
+        },
+        {
+          "path": "apps/runner/src/executor/git.spec.ts",
+          "reason": "add the hardening cases; existing cases stay."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3f0c9a1cda537ff44adca80eba9a8727591b7a70"
+    }
+  ],
+  "analysis": "Existing-system security/reliability bundle closing #382 and eight holes from the 2026-11-01 review; exactly nine stories, eight in apps/api and one in apps/runner. Graph-first navigation was requested but codebase-memory MCP is unavailable in this session; findings below come from direct source reads, Glob and Grep. No application code is changed by this planning task. The auto-detected Express/Next.js labels are inaccurate: authoritative .nax/mono/apps/api/context.md:17 describes NestJS 12 + Fastify, Prisma 7 and Vitest; .nax/mono/apps/runner/context.md:15 describes Bun-only ESM, bun:sqlite and bun:test. Web is Nuxt per root guidance and is untouched. Follow Nathapp NestJS patterns before implementation, strict repository auth/transaction conventions, and app contexts; do not edit generated AGENTS.md or generated clients.\n\nUS-001 baseline and impact: apps/api/src/fleet/sync/sync.service.ts:109 grants tokens under short fenced transactions, with minting outside the transaction at :146. The explicit-repo branch at :127 recomputes PROJECT SESSION fetchable repos and grants readOnly, while :135 only refuses WORKSPACE for missing repoId; PROJECT therefore reaches findRepo(job.repoId) at :138. Extend only the missing-repo THREAD refusal to PROJECT for all turn actions, preserving fencing, held-state checks, explicit-repo scope, REPO and RUN behavior. apps/api/src/fleet/sync/sync-token-fence.spec.ts:23 has a reusable PROJECT THREAD harness, :79 already anchors WORKSPACE denial and :162 anchors legacy RUN mint shape. apps/api/test/integration/fleet/fleet-project-code-token-fence.integration.spec.ts:45 seeds real PROJECT/REPO held thread jobs, :76 always attaches repoId in requestFor; add an intentionally repo-less request without that helper. Existing HTTP + fake forge tests prove the real repository projection and runner guard. No protocol field changes or migration.\n\nUS-002 baseline and impact: SyncService.sync processes reports independently (:72), catches boot reconciliation (:87), then calls fillRunner and fillRunnerThreads unguarded at apps/api/src/fleet/sync/sync.service.ts:93-94 before afterTerminal, grantTokens and deliver. Preserve the freeSlots predicate for ordinary placement and protocol >=4 predicate for threads, with independent catches so one call cannot suppress the other. Use error.name only (unknown for non-Error), never messages, in the exact specified class logger error. apps/api/src/fleet/sync/fleet-sweeper.ts:56 loops silent ids; each transaction locks skipLocked, rechecks held state and runner heartbeat, applies CRASHED and records audit (:58-66). Publication and fire-and-forget attribution/ticket effects follow at :69-73. Put each transaction AND its post-commit effects inside the per-item catch; count only successful items. Do not move effects into the transaction, remove audit, change system actor context, or change interval behavior. apps/api/src/fleet/sync/fleet-sweeper.spec.ts:23 tests system context and :49 tests committed transition/publication. Extend this and sync-token-fence.spec.ts, exposing placement from its harness and spying on Nest Logger.prototype.warn/error, restoring spies. Both US-001 and US-002 modify sync.service.ts and its unit spec despite having no declared dependency; coordinate edits to avoid overwriting one another.\n\nUS-003 baseline and impact: apps/api/src/fleet/ingest/bundle-reader.ts:31 lists allowlisted slots, :47 rejects unsafe entry names, :54 buffers an accepted entry, and :68 reads a tar.gz sequentially. Existing per-file skip is at :85, body.resume drains a skip, close advances tar-stream at :78, and :91 appends arrays/sets singletons. Cap BEFORE readEntry, count header.size only for kept entries, and include all singleton and array slots in aggregate accounting. The five array slots are cost, reviews, finishResults, finishLast, botReview; only botReview/naxStdout suppress oversized reporting. Keep archive order, regular-file filtering, unsafe-name behavior, error handling and close-based stream progression. Header-sized accounting bounds kept payload bytes, not all process overhead or parser allocations; do not claim a hard RSS bound. apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts:17 defines existing as-const limits, including fileBytes=33554432; retain all values and add aggregate 67108864/per-slot 5000. Parameter type must use numeric Record, not literal-type Pick. apps/api/src/fleet/ingest/bundle-ingest.service.ts:91 consumes the reader with one argument; no production caller change. apps/api/src/fleet/ingest/parse-bundle.ts:59 already marks nonempty oversized as partial; no parser rewrite. Extend bundle-reader.spec.ts with small tar fixtures so tests do not allocate production-sized bombs; skipped entries must allow later smaller entries. No change to retry attempt logic, parser version, database schema or array copy strategy is required.\n\nUS-004 baseline and impact: apps/api/src/fleet/knowledge/knowledge-chunk-store.ts:75, :87 and :94 implement replace/delete/read. They currently select by source_id alone; replace validates row.source_id but not row.source. Preserve signatures, MAX_FILE_ROWS=2000, chunkIndex ordering, write mutex, availability checks before/after lazy table initialization (:150-175), and filter-value rejection. Derive reserved source only after safe-filter validation, before any table call, and validate every replacement row source before deletion. apps/api/src/rag/lance-table-manager.ts:38 rejects quotes/control chars, :54 supplies sourceRowFilter returning source = '<source>' AND source_id = '<id>'; :113 and :121 define repo/outcome sources. The in-memory fallback supports AND predicates, and VectorStore already uses the same pair filter (vector-store.service.ts:261, :580, :604); reuse the helper rather than inventing SQL quoting. Consumers include knowledge-search.service.ts:239 and knowledge-repo-indexer.ts:57; their signatures and search leg predicates remain intact. apps/api/src/rag/dto/add-document.dto.ts:12 already restricts REST sources to doc/manual but :22 permits arbitrary nonempty sourceId; add reserved-start validation with the exact message, preserving notes:repo:x. Existing planted doc rows are retained but invisible to reserved-source reads and cannot be deleted by the indexer. Update knowledge-chunk-store.spec.ts predicate fakes and knowledge-store.integration.spec.ts:86-94: its surviving ticket row must be queried directly from the manager, not through readFile('ticket:t1'), which now refuses it. Native LanceDB tests in that file run with a real temp directory independently of its PG-gated sections (:49). Add shared-id repo/doc and outcome/doc round trips, DTO unit spec (new), gated-kb-add-route integration refusal/no-write checks, and one reserved-id endpoint e2e beside existing KB adds. Do not migrate/delete old KB rows.\n\nUS-005 baseline and impact: apps/api/src/approvals/mcp/approval-mcp-tools.ts:18 has two constructor collaborators; :56 validates decide inputs and :66-72 directly decides after visibility. Preserve all input rules, own-property distinction for params, actor context origin=mcp, list tool behavior and four existing error mappings (:74-77). Mirror apps/api/src/approvals/approval-requests.controller.ts:113-126: visible project -> assertMayDecide -> routeGate with keyCheck:false -> execute original request after approve, or return reject result. Unlike REST's DTO object, MCP must omit params entirely unless supplied. Pending must return non-error text without executing the original. ForbiddenAppException becomes forbidden: permissions. apps/api/src/approvals/approval-engine.module.ts:31-40 already provides and exports route gate and execution, so constructor additions need no new module abstraction or dependency import cycle. MCP controller injects tools at apps/api/src/fleet/assistant/mcp/mcp.controller.ts:57. Direct constructor sites in both tools helpers at approval-mcp-tools.spec.ts:12 and :65 must receive all four stubs, get must return projectId, and routeGate.run replaces direct-decide expectations/rejections. Keep no-call input-validation/list regressions and existing HTTP integration AC-14 (<id> executed) at test/integration/approvals/approval-mcp-decide.integration.spec.ts:61. Its RPC helper at :24 supports JSON and SSE. Add a real global AGENT/human approval.decide policy park, original request unchanged and new approval.decide request persisted. No MCP endpoint schema changes.\n\nUS-006 baseline and impact: apps/api/src/approvals/approval-gate.service.ts:62 takes projectId/variant, :92 parses the registered primary command, :98 resolves one policy, :106 opens a request or executes for a human. Extend options with readonly alsoKeys and select the entire strictest ResolvedApproval, not just its mode, so policyId, timeout, distinctness and other flags copied by newRequest (:185-219) come from the winner. apps/api/src/approvals/domain/approval-mode.ts:3 ranks none < self < agent < human; its strictestMode reduces ties toward the later mode, so selection of resolutions must explicitly preserve primary on equal rank rather than accidentally overwriting its policy. Keep primary key/variant/command, parse/freeze/hash, dedupe, subject rules, direct-human satisfaction, request transaction/events and no-extra-key behavior unchanged. apps/api/src/approvals/route/approval-route-gate.ts:11 defines RouteGateCall; :55 proves principal/key authority before redemption or gate call at :87. Forward alsoKeys only when present, maintaining existing opts object for unrelated routes. alsoKeys affects approval policy resolution, not extra authorization bypasses or alternate command execution. Modify approval-gate.service.spec.ts and approval-route-gate.spec.ts, retaining exact legacy option-shape assertions. US-007 depends on this seam; US-005 uses the same route gate without extra keys.\n\nUS-007 baseline and impact: apps/api/src/tickets/state-machine/transition-keys.ts:13 owns the six edge values and :36 exports transitionKeyFor, but no distinct-list export. apps/api/src/tickets/ticket-route.commands.ts:20 defines variants, :54-63 registers ordinary update parsing UpdateTicketDto then invoking service.update with a freshly loaded principal. Add updateStatus variant registered under each distinct edge, reusing that parse/run behavior rather than transition-route commands that require comments. apps/api/src/tickets/tickets.controller.ts:232-251 gates all PATCH under ticket.update after DTO parsing; retain membership/Requires('ticket.update') guards, CurrentProject scope and response envelope, but resolve live ticket status for status-bearing patches and gate a valid edge under its primary key plus alsoKeys ticket.update. No-edge/no-status falls back to existing update gate and invalid transition remains service-owned. apps/api/src/tickets/tickets.service.ts:268-303 already routes status changes through assertTransitionAllowed and executeTransitionPublic, with additional fields in the same transition transaction and live edge rechecks. Do not replace or weaken these invariants; initial controller read is not authoritative at deferred execution time. Preserve title-only controller expectation and add findByRef to its harness. Extend ticket-route.commands.spec.ts, tickets.controller.spec.ts, add ticket-patch-status-gate.integration.spec.ts, and adjust the existing gated-ticket-write-routes.integration.spec.ts AC-4 from parked-then-refused to immediate 403/no request when edge permission is absent. Include one root-user CREATED->IN_PROGRESS endpoint e2e. Other PATCH edges remain comment-refused by existing service. US-004 and US-007 share endpoint.e2e.spec.ts and must preserve each other's additions despite no dependency.\n\nUS-008 baseline and impact: apps/api/src/fleet/git-broker/github-app-client.ts:89-108 probes rulesets then classic branch, validates array/boolean, encodes branch and maps all failures to provider_error. Add exactly the 404 and message-matching plan-upgrade 403 exceptions; malformed 200, unrelated 403, 5xx and transport/classic failures still fail closed. Do not interpret missing protection as permission to mint FIX tokens. Existing GitTokenBroker remains unchanged: false is a resolved default_branch_unprotected failure, not a rejection. github-app-client.branch-protection.spec.ts:44-66 anchors supported rules, classic fallback and encoded branches; :69-79 fail-closed table must remain. Add sequential mocked HTTP responses and request-order assertions, no live GitHub dependency or GitLab changes. This is a security-sensitive credential eligibility probe even though the edit is small.\n\nUS-009 baseline and impact: apps/runner/src/executor/git.ts:60-64 defines immutable no-prompt env and credential helper clearing, :82-99 wraps Bun.spawn and returns raw stdout from ok. Prefix every spawn with the three fixed -c settings before helper args, preserving args, env, timeout, error/secret sanitization, helper empty reset and raw trailing newline. Public Git and GitOptions interfaces are unchanged. daemon.ts:102 creates the shared Git implementation used across workspace/checkout/plan-commit/progress-push/config jobs and thread worktree/mirror paths, so this one spawn seam hardens them without editing each consumer. Existing git.spec.ts:5-40 runs real git/no-prompt/version tests and :44-66 anchors auth failures. Add isolated real git-init repos with configured user.name/user.email/commit.gpgsign=false and cleanup; test executable pre-commit marker suppression, config override observations and untrimmed helper output. Do not disable file:// protocol, change nax's git subprocesses, add an OS sandbox requirement or redesign token refresh.\n\nImplementation/testing/migration: US-006 must precede US-007; other dependency arrays remain empty as specified. All listed existing context paths were checked; only add-document.dto.spec.ts and ticket-patch-status-gate.integration.spec.ts are new outputs. Shared files require merge discipline, not invented dependencies. Use Vitest vi mocks, not Jest, with unit tests co-located in src; no DB-backed DI tests. Run API unit tests with bun run test or scoped specs; DB/HTTP integration and endpoint e2e require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and scoped-test/globalSetup provisioning. A skipped DB test is not verification. Never run concurrent DB-reset suites on the same test database; a second checkout uses KODA_TEST_DB_CONTAINER=1/private container. Native LanceDB collision tests must use real local tables, not the fallback. Runner tests use Bun and real isolated git, no installed-nax dependency. Strict three-session-tdd is mandatory for token scope, knowledge isolation, both approval bypass fixes, gate semantics, ticket edge authorization, branch protection and daemon git hardening; reliability-only US-002 and bounded-reader US-003 use tdd-simple. No schema/migration or data backfill, no UI/CLI business-rule changes, no client protocol changes. DTO/controller contract changes should follow root OpenAPI export/client-generation policy if their exported contract changes; never manually edit generated files or add a cross-package story. Done means the nine behavioral fixes and their preserved regressions, integration and endpoint cases are verified, without expanding into deferred review rulings.\n\nRefinement audit: enumerated all 79 explicit spec AC bullets (US-001:9, US-002:10, US-003:7, US-004:10, US-005:11, US-006:9, US-007:11, US-008:7, US-009:5). Every assertion remains in its original story, with compound observations split and qualifying regression clauses preserved; the per-file skipped-byte qualifier and untrimmed helper-output qualifier are explicit. All 15 feature-level Out of Scope items remain verbatim. Binding ids, workdirs and dependencies remain unchanged. Corrected US-002's command-delivery assertion to match apps/api/src/fleet/sync/sync.service.ts:166-170: repository records expose id, but the wire response exposes commandId and omits delivery metadata. Added failure-table delivery checks for thread placement errors and an explicit primary-placement error log assertion. US-006 now includes resolver-error propagation/no-side-effect negative cases and an exact legacy opts forwarding assertion. Register a local primary command with the rest:tickets.update-status variant in US-006 unit fixtures using the existing registry pattern (approval-gate.service.spec.ts:39-49); this requires no US-007 production registration or reverse dependency. The phrase unchanged policy flags means use the winning resolution's existing flags, not retain a losing primary policy's flags. Source resolver behavior is confirmed at apps/api/src/approvals/approval-policy.resolver.ts:30-60. US-007 now explicitly anchors title-only routing and the missing-edge 403/no-request behavior. US-008 exercises the unchanged broker's FIX refusal as a consumer check in the same branch-protection spec: apps/api/src/fleet/git-broker/git-token.broker.ts:68-79 first mints read-only, probes protection, and throws internally on false; mint catches that at :48-58 and resolves the error, never allowing a write mint. US-009 fixtures point hooksPath to a directory, not the hook file; configuration reads assert strings, whereas provider protection results are booleans. Spec-recommended memory MCP context (memory-mcp-tools.ts:34-58, an existing project-aware gated MCP example) and approval-policy.resolver.ts now replace less-critical test context entries, keeping each list within five. US-004 and US-007 are medium complexity because both reuse existing source-filter/DTO and command-registration/controller seams with no new architecture; their strict security TDD overrides stay unchanged. Every story has an observable negative path and a compatibility/removal-of-bypass anchor. No schema, protocol, UI or deferred-ruling scope was added.",
+  "outOfScope": [
+    "A/SEC-3 (verify-fix self-approval rule) and A/SEC-6 (re-tier credential write keys) are not in this bundle; they are separate P1 work.",
+    "A/BUG-1 (move PR creation and email out of the approval execution transaction) is not in this bundle.",
+    "C/SEC-2 (verify that a forge approver replied in the thread) waits on review ruling 14 and is not in this bundle.",
+    "D/BUG-2 (a fresh forge token for FIX and REVIEW) waits on review ruling 4 and is not in this bundle.",
+    "Forcing nax's OS sandbox for raw job kinds (review ruling 5 on D/SEC-2) is not decided and not built; only the runner's own git calls are hardened.",
+    "The endpoint e2e file gains no MCP or runner-sync cases: those routes keep their request and response shapes, and their behaviour changes are covered by the integration ACs.",
+    "US-009 only: `-c protocol.file.allow=never` is not added to runner git calls, because `assertCloneUrl` accepts `file://` remotes by design and the runner's tests clone from local `file://` fixtures.",
+    "US-009 only: git invocations made by nax itself (inside `nax bot` or a nax run) are not changed; only calls made through the runner's `createGit` are.",
+    "US-003 only: marking a failed ingest claim terminal before `INGEST_MAX_ATTEMPTS` is not changed; the new caps remove the out-of-memory path that made retries repeat.",
+    "US-003 only: replacing the copy-on-append of slot arrays with in-place pushes is not required; the per-slot cap bounds the copy cost.",
+    "US-004 only: KB documents already stored with a `repo:` or `outcome:` id are not migrated or deleted; after this change they are no longer served by `koda_get_doc` and no longer deleted by the indexer.",
+    "US-004 only: search ranking and the search legs' filters are unchanged; both already filter on `source`.",
+    "US-007 only: an edge key reachable through `PATCH /tickets/:ref` other than `ticket.transition.start` still fails in the transition service as today (those edges need a comment); this bundle only gates them correctly before that refusal.",
+    "US-008 only: no web, CLI or assistant copy is added for `default_branch_unprotected`; the job page shows the reason text as it does today.",
+    "US-008 only: GitLab repos are unchanged; the branch-protection probe is GitHub-only."
+  ],
+  "routingProfile": "native-codex-ds"
+}

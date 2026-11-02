@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { createMock } from '@golevelup/ts-vitest';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
@@ -7,6 +8,7 @@ import { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { FleetJobRecord, FleetRepoRef, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { PrismaFleetJobRepository } from '../jobs/prisma-fleet-job.repository';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
+import { PlacementService } from '../jobs/placement.service';
 import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
@@ -42,11 +44,12 @@ function harness() {
     inTransaction = true;
     try { return await fn(); } finally { inTransaction = false; }
   } });
+  const placement = createMock<PlacementService>();
   const service = new SyncService(repo, createMock(), createMock<CommandAckProcessor>({ process: async () => ({ live: [] }) }),
-    createMock(), createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
+    placement, createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
     createMock(), createMock(), tx, createMock(), createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }));
-  const sync = (requests: unknown[] = [request]) => service.sync('runner1', { ...base, tokenRequests: requests });
-  return { repo, job, r1, broker, token, fence, sync };
+  const sync = (requests: unknown[] = [request], overrides: Record<string, unknown> = {}) => service.sync('runner1', { ...base, ...overrides, tokenRequests: requests });
+  return { repo, job, r1, broker, token, fence, placement, sync };
 }
 
 async function expectDenied(h: ReturnType<typeof harness>, repoId = 'r1', reason = 'repo_not_assigned') {
@@ -76,6 +79,34 @@ describe('sync repository token fence', () => {
     await h.sync([]);
     expect(h.repo.markDelivered).toHaveBeenCalledTimes(1);
   });
+  it('US-001 AC-1 to AC-4 refuses the PROJECT SESSION anchor token without repoId', async () => {
+    const h = harness();
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'repo_not_assigned' }]);
+    expect(response.gitTokens).toEqual([]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+    expect(h.repo.findRepo).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-5 refuses a PROJECT PUBLISH anchor token without repoId', async () => {
+    const h = harness();
+    h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'PROJECT', action: 'PUBLISH' });
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'repo_not_assigned' }]);
+    expect(response.gitTokens).toEqual([]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+    expect(h.repo.findRepo).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-6 keeps repo-less REPO thread grants on their anchor repo', async () => {
+    const h = harness();
+    h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'REPO', action: 'SESSION' });
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([]);
+    expect(h.repo.findRepo).toHaveBeenCalledExactlyOnceWith('anchor');
+    expect(h.broker.mint).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', leaseEpoch: 1, repo: repository('anchor') }, expect.any(Date));
+  });
+
   it('workspace AC-7 refuses the anchor token without repoId', async () => {
     const h = harness();
     h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });
@@ -184,6 +215,56 @@ describe('sync repository token fence', () => {
     expect(response.unknownJobIds).toEqual(['j1']);
     expect(response.gitTokenErrors).toEqual([]);
     expect(h.broker.mint).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-6..8,14 continues command and token delivery after fillRunner rejects', async () => {
+    const h = harness();
+    h.job.command = FleetJobKind.RUN;
+    h.placement.fillRunner.mockRejectedValue(Object.assign(new Error('private detail'), { name: 'PlacementError' }));
+    const rows = [{ id: 'c1', type: 'CANCEL', jobId: 'j1', leaseEpoch: 1, payload: { reason: 'done' }, deliveredAt: null }];
+    h.repo.findPendingCommands.mockResolvedValue(rows as never);
+    const error = vi.spyOn(Logger.prototype, 'error').mockClear();
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }], { freeSlots: 2 });
+
+    expect(response.commands).toEqual([{ commandId: 'c1', type: 'CANCEL', jobId: 'j1', leaseEpoch: 1, payload: { reason: 'done' } }]);
+    expect(response.gitTokens).toEqual([h.token]);
+    expect(error).toHaveBeenCalledWith('Sync: placement for runner runner1 failed: PlacementError');
+    expect(error.mock.calls.flat().join(' ')).not.toContain('private detail');
+    // The global test setup owns the no-op Logger spies for the whole file (US-002 M1): restoring this
+    // one would put the real Nest logger back for every later test here, so clear it instead.
+    error.mockClear();
+  });
+
+  it('US-002 AC-9 calls thread placement even when fillRunner rejects', async () => {
+    const h = harness();
+    h.placement.fillRunner.mockRejectedValue(new Error('placement failed'));
+    await h.sync([], { freeSlots: 1, protocolVersion: 4 });
+    expect(h.placement.fillRunnerThreads).toHaveBeenCalledOnce();
+  });
+
+  it('US-002 AC-10..13 continues command and token delivery after fillRunnerThreads rejects', async () => {
+    const h = harness();
+    h.job.command = FleetJobKind.RUN;
+    h.placement.fillRunnerThreads.mockRejectedValue(Object.assign(new Error('private detail'), { name: 'PlacementError' }));
+    const rows = [{ id: 'c2', type: 'ABANDON', jobId: 'j1', leaseEpoch: 1, payload: {}, deliveredAt: null }];
+    h.repo.findPendingCommands.mockResolvedValue(rows as never);
+    const error = vi.spyOn(Logger.prototype, 'error').mockClear();
+
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }], { freeSlots: 1, protocolVersion: 4 });
+
+    expect(response.commands).toEqual([{ commandId: 'c2', type: 'ABANDON', jobId: 'j1', leaseEpoch: 1, payload: {} }]);
+    expect(response.gitTokens).toEqual([h.token]);
+    expect(error).toHaveBeenCalledWith('Sync: placement for runner runner1 failed: PlacementError');
+    expect(error.mock.calls.flat().join(' ')).not.toContain('private detail');
+    // The global test setup owns the no-op Logger spies for the whole file (US-002 M1): restoring this
+    // one would put the real Nest logger back for every later test here, so clear it instead.
+    error.mockClear();
+  });
+
+  it('US-002 M1: the shared no-op logger spies still guard the cases after the placement ones', () => {
+    expect(vi.isMockFunction(Logger.prototype.error)).toBe(true);
+    expect(vi.isMockFunction(Logger.prototype.warn)).toBe(true);
   });
 });
 

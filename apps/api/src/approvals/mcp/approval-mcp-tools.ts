@@ -1,11 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
 import { runWithActionContext } from '../../action-context/action-context';
 import type { McpToolRegistration } from '../../fleet/assistant/mcp/mcp-server.factory';
 import { toMcpToolResult } from '../../fleet/assistant/mcp/mcp-tool-catalog';
 import { ApprovalRequestQueries } from '../approval-request.queries';
 import { ApprovalDecisionService } from '../approval-decision.service';
-import type { ApprovalRequestStatus } from '../domain/approval.domain';
+import { ApprovalExecutionService } from '../approval-execution.service';
+import { APPROVAL_ROUTE_VARIANTS } from '../approval-route.commands';
+import { ApprovalRouteGate } from '../route/approval-route-gate';
+import type { ApprovalRequestStatus, ApprovalRequestRecord } from '../domain/approval.domain';
 import { ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from '../domain/approval.errors';
 
 const STATUSES: ApprovalRequestStatus[] = ['pending', 'approved', 'rejected', 'expired', 'cancelled', 'executed', 'failed'];
@@ -15,7 +19,12 @@ const STATUSES: ApprovalRequestStatus[] = ['pending', 'approved', 'rejected', 'e
 export class ApprovalMcpTools {
   private readonly logger = new Logger(ApprovalMcpTools.name);
 
-  constructor(private readonly queries: ApprovalRequestQueries, private readonly decisions: ApprovalDecisionService) {}
+  constructor(
+    private readonly queries: ApprovalRequestQueries,
+    private readonly decisions: ApprovalDecisionService,
+    private readonly routeGate: ApprovalRouteGate,
+    private readonly execution: ApprovalExecutionService,
+  ) {}
 
   registrations(principal: AgentPrincipal): McpToolRegistration[] {
     const ref = { type: 'AGENT' as const, id: principal.id };
@@ -65,17 +74,28 @@ export class ApprovalMcpTools {
         if (Object.hasOwn(args, 'params') && (args.params === null || typeof args.params !== 'object' || Array.isArray(args.params)
           || (Object.getPrototypeOf(args.params) !== Object.prototype && Object.getPrototypeOf(args.params) !== null))) return invalid('params');
         try {
-          await this.queries.get(ref, args.id);
-          const comment = (args.comment as string | undefined) ?? null;
-          const request = Object.hasOwn(args, 'params')
-            ? await this.decisions.decide(args.id, args.decision, comment, undefined, args.params)
-            : await this.decisions.decide(args.id, args.decision, comment);
+          const visible = await this.queries.get(ref, args.id);
+          await this.decisions.assertMayDecide(args.id);
+          const decision = args.decision as 'approve' | 'reject';
+          const input = {
+            requestId: args.id,
+            decision,
+            comment: (args.comment as string | undefined) ?? null,
+            ...(Object.hasOwn(args, 'params') ? { params: args.params } : {}),
+          };
+          const outcome = await this.routeGate.run<ApprovalRequestRecord>({
+            key: 'approval.decide', variant: APPROVAL_ROUTE_VARIANTS.decide, projectId: visible.request.projectId,
+            input, keyCheck: false,
+          });
+          if (outcome.status === 'pending') return toMcpToolResult({ content: `pending: ${outcome.request.id}`, isError: false });
+          const request = decision === 'approve' ? await this.execution.execute(args.id) : outcome.result;
           return toMcpToolResult({ content: `${request.id} ${request.status}`, isError: false });
         } catch (error) {
           if (error instanceof ApprovalRequestNotFoundError) return toMcpToolResult({ content: 'not_found', isError: true });
           if (error instanceof ApprovalRequestNotPendingError) return toMcpToolResult({ content: `not_pending: ${error.status}`, isError: true });
           if (error instanceof ApprovalRequestExpiredError) return toMcpToolResult({ content: 'expired', isError: true });
           if (error instanceof ApprovalDecideForbiddenError) return toMcpToolResult({ content: `forbidden: ${error.reason}`, isError: true });
+          if (error instanceof ForbiddenAppException) return toMcpToolResult({ content: 'forbidden: permissions', isError: true });
           this.logger.error('MCP tool koda_decide_approval failed', error instanceof Error ? error.stack : String(error));
           return toMcpToolResult({ content: 'error: koda_decide_approval failed', isError: true });
         }

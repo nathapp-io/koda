@@ -29,6 +29,11 @@ const EDGE_KEYS: Readonly<Partial<Record<TicketStatus, Readonly<Partial<Record<T
   },
 };
 
+/** Distinct permission keys assigned to the ticket state-machine edges. */
+export const TICKET_EDGE_KEYS: readonly string[] = [...new Set(
+  Object.values(EDGE_KEYS).flatMap((edges) => Object.values(edges ?? {})),
+)];
+
 /**
  * The permission key of a state-machine edge; undefined for a pair with no key (not an edge of the
  * state machine).

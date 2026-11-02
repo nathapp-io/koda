@@ -87,8 +87,20 @@ export class SyncService {
       this.logger.error(`Sync: boot reconcile for runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
     }
     this.live.publish(live);
-    if (req.freeSlots > 0) await this.placement.fillRunner(runnerId, req.freeSlots, now);
-    if (req.protocolVersion >= 4) await this.placement.fillRunnerThreads(runnerId, now);
+    if (req.freeSlots > 0) {
+      try {
+        await this.placement.fillRunner(runnerId, req.freeSlots, now);
+      } catch (error) {
+        this.logger.error(`Sync: placement for runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
+      }
+    }
+    if (req.protocolVersion >= 4) {
+      try {
+        await this.placement.fillRunnerThreads(runnerId, now);
+      } catch (error) {
+        this.logger.error(`Sync: placement for runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
+      }
+    }
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
     const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);
@@ -130,7 +142,7 @@ export class SyncService {
           const repo = repos.find((r) => r.id === req.repoId);
           if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo, readOnly: true });
           else gitTokenErrors.push({ jobId: job.id, repoId: req.repoId, reason: 'repo_not_assigned' });
-        } else if (job.command === 'THREAD' && (await this.repo.findThreadTokenScope(job.id))?.kind === 'WORKSPACE') {
+        } else if (job.command === 'THREAD' && ['WORKSPACE', 'PROJECT'].includes((await this.repo.findThreadTokenScope(job.id))?.kind ?? '')) {
           gitTokenErrors.push({ jobId: job.id, reason: 'repo_not_assigned' });
         } else {
           const repo = await this.repo.findRepo(job.repoId);

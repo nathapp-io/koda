@@ -26,6 +26,8 @@ export interface RouteGateCall {
    * true; a route that already proved the key in its guard (or service) may skip the second read.
    */
   keyCheck?: boolean;
+  /** Additional keys whose resolved approval modes also constrain this call. */
+  alsoKeys?: readonly string[];
 }
 
 /**
@@ -52,7 +54,7 @@ export class ApprovalRouteGate {
   ) {}
 
   async run<TResult>(call: RouteGateCall): Promise<GateOutcome<TResult>> {
-    const { key, variant, projectId, input, keyCheck = true, redeem } = call;
+    const { key, variant, projectId, input, keyCheck = true, redeem, alsoKeys } = call;
     const actor = currentContext()?.actor;
     if (actor === undefined) throw new Error('approval route gate needs a principal actor');
     if (actor.type === 'RUNNER') throw new ForbiddenAppException({}, 'permissions');
@@ -81,7 +83,11 @@ export class ApprovalRouteGate {
     }
 
     try {
-      return await this.gate.gate<TResult>(key, input, { projectId, variant });
+      return await this.gate.gate<TResult>(key, input, {
+        projectId,
+        variant,
+        ...(alsoKeys === undefined ? {} : { alsoKeys }),
+      });
     } catch (error) {
       throw unavailableActorAsAuth(error);
     }

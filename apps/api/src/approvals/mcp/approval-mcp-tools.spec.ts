@@ -1,4 +1,8 @@
 import { Logger } from '@nestjs/common';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ApprovalRouteGate } from '../route/approval-route-gate';
+import { ApprovalExecutionService } from '../approval-execution.service';
+import { APPROVAL_ROUTE_VARIANTS } from '../approval-route.commands';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
 import { currentContext } from '../../action-context/action-context';
 import { ApprovalRequestQueries } from '../approval-request.queries';
@@ -9,7 +13,8 @@ import { ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequ
 const agent = { actorType: 'agent', id: 'agent-1', slug: 'agent' } as AgentPrincipal;
 describe('ApprovalMcpTools list', () => {
   const list = vi.fn();
-  const tools = () => new ApprovalMcpTools({ list } as unknown as ApprovalRequestQueries, {} as ApprovalDecisionService);
+  const tools = () => new ApprovalMcpTools({ list } as unknown as ApprovalRequestQueries, {} as ApprovalDecisionService,
+    { run: vi.fn() } as unknown as ApprovalRouteGate, { execute: vi.fn() } as unknown as ApprovalExecutionService);
   const registration = () => {
     const tool = tools().registrations(agent)[0];
     if (!tool) throw new Error('missing inbox registration');
@@ -62,7 +67,12 @@ describe('ApprovalMcpTools decide (US-013)', () => {
   const list = vi.fn();
   const get = vi.fn();
   const decide = vi.fn();
-  const tools = () => new ApprovalMcpTools({ list, get } as unknown as ApprovalRequestQueries, { decide } as unknown as ApprovalDecisionService);
+  const assertMayDecide = vi.fn();
+  const run = vi.fn();
+  const execute = vi.fn();
+  const tools = () => new ApprovalMcpTools({ list, get } as unknown as ApprovalRequestQueries,
+    { decide, assertMayDecide } as unknown as ApprovalDecisionService,
+    { run } as unknown as ApprovalRouteGate, { execute } as unknown as ApprovalExecutionService);
   const registrations = () => tools().registrations(agent);
   const decisionTool = () => {
     const tool = registrations()[1];
@@ -71,8 +81,10 @@ describe('ApprovalMcpTools decide (US-013)', () => {
   };
   const call = (input: unknown) => decisionTool().handler(input);
   beforeEach(() => {
-    list.mockReset(); get.mockReset(); decide.mockReset();
-    get.mockResolvedValue({}); decide.mockResolvedValue({ id: 'r1', status: 'executed' });
+    list.mockReset(); get.mockReset(); decide.mockReset(); assertMayDecide.mockReset(); run.mockReset(); execute.mockReset();
+    get.mockResolvedValue({ request: { projectId: 'p1' } });
+    run.mockResolvedValue({ status: 'executed', result: { id: 'r1', status: 'rejected' } });
+    execute.mockResolvedValue({ id: 'r1', status: 'executed' });
   });
   it('AC-1: registers list then decide', () => expect(registrations().map(({ name }) => name)).toEqual(['koda_list_approvals', 'koda_decide_approval']));
   it('AC-6: advertises optional object params without changing required arguments', () => {
@@ -80,44 +92,63 @@ describe('ApprovalMcpTools decide (US-013)', () => {
       properties: { params: { type: 'object' } }, required: ['id', 'decision'],
     });
   });
-  it('AC-2/3/4: checks visibility then decides in MCP action context and answers status', async () => {
-    decide.mockImplementation(async () => {
+  it('AC-1/2/3/5/6: checks visibility, then authorization, gates decision and executes approval', async () => {
+    run.mockImplementation(async () => {
       const ctx = currentContext();
       expect({ actorType: ctx?.actor.type, actorId: ctx?.actor.id, origin: ctx?.origin }).toEqual({ actorType: 'AGENT', actorId: agent.id, origin: 'mcp' });
-      return { id: 'r1', status: 'executed' };
+      return { status: 'executed', result: { id: 'r1', status: 'approved' } };
     });
     expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'r1 executed' }], isError: false });
     expect(get).toHaveBeenCalledWith({ type: 'AGENT', id: agent.id }, 'r1');
-    expect(decide).toHaveBeenCalledWith('r1', 'approve', null);
+    expect(assertMayDecide).toHaveBeenCalledWith('r1');
+    expect(assertMayDecide.mock.invocationCallOrder[0]).toBeLessThan(run.mock.invocationCallOrder[0] ?? Infinity);
+    expect(run).toHaveBeenCalledWith({ key: 'approval.decide', variant: APPROVAL_ROUTE_VARIANTS.decide, projectId: 'p1', input: { requestId: 'r1', decision: 'approve', comment: null }, keyCheck: false });
+    expect(decide).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledWith('r1');
   });
-  it('AC-8: forwards supplied decision params in the service params position', async () => {
+  it('AC-9: maps assertMayDecide refusal to its distinct reason', async () => {
+    assertMayDecide.mockRejectedValue(new ApprovalDecideForbiddenError('distinct-approver-required'));
+    expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'forbidden: distinct-approver-required' }], isError: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+  it('AC-4/14: parked decisions answer pending and do not execute', async () => {
+    run.mockResolvedValue({ status: 'pending', request: { id: 'ar9' } });
+    expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'pending: ar9' }], isError: false });
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('AC-7: returns the rejected result for executed rejects', async () => {
+    expect(await call({ id: 'r1', decision: 'reject' })).toEqual({ content: [{ type: 'text', text: 'r1 rejected' }], isError: false });
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('AC-8: forwards supplied decision params to the gate only when present', async () => {
     await call({ id: 'r1', decision: 'approve', params: { remember: true } });
-    expect(decide).toHaveBeenCalledWith('r1', 'approve', null, undefined, { remember: true });
+    expect(run).toHaveBeenCalledWith({ key: 'approval.decide', variant: APPROVAL_ROUTE_VARIANTS.decide, projectId: 'p1', input: { requestId: 'r1', decision: 'approve', comment: null, params: { remember: true } }, keyCheck: false });
   });
   it.each([[], null, 'x', new Date(), undefined])('AC-9/10: rejects non-plain params %j before deciding', async (params) => {
     expect(await call({ id: 'r1', decision: 'approve', params })).toEqual({ content: [{ type: 'text', text: 'invalid_input: params' }], isError: true });
-    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled();
   });
   it.each([[{ id: 'r1', decision: 'maybe' }, 'decision'], [{ id: '', decision: 'approve' }, 'id'], [{ id: 'r1', decision: 'approve', comment: 'x'.repeat(2001) }, 'comment']])('AC-5/6/7/9 invalid input %j', async (input, field) => {
     expect(await call(input)).toEqual({ content: [{ type: 'text', text: `invalid_input: ${field}` }], isError: true });
-    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled();
   });
   it('rejects unknown arguments before querying or deciding', async () => {
     expect(await call({ id: 'r1', decision: 'approve', extra: true })).toEqual({ content: [{ type: 'text', text: 'invalid_input: extra' }], isError: true });
-    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled();
   });
   it('AC-8/9 missing request does not decide', async () => {
     get.mockRejectedValue(new ApprovalRequestNotFoundError('r1'));
     expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'not_found' }], isError: true });
-    expect(decide).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled();
   });
   it.each([
     [new ApprovalDecideForbiddenError('tier-too-low'), 'forbidden: tier-too-low'],
     [new ApprovalRequestNotPendingError('rejected'), 'not_pending: rejected'],
     [new ApprovalRequestExpiredError('r1'), 'expired'],
+    [new ForbiddenAppException({}, 'permissions'), 'forbidden: permissions'],
     [new Error('boom'), 'error: koda_decide_approval failed'],
-  ])('AC-10/11/12/13 maps error', async (error, text) => {
-    decide.mockRejectedValue(error);
+  ])('AC-9/10 maps error', async (error, text) => {
+    run.mockRejectedValue(error);
     const answer = await call({ id: 'r1', decision: 'reject' });
     expect(answer.content[0]?.text).toBe(text); expect(answer.isError).toBe(true);
   });
