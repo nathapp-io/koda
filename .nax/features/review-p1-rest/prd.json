@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T11:51:00.176Z",
+  "updatedAt": "2026-11-02T11:56:22.256Z",
   "userStories": [
     {
       "id": "US-001",
@@ -189,14 +189,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three controller branches consume the existing gate and the upstream floor helper with conditional options; implementation is localized and standard, while access control still requires security-isolated TDD."
+        "reasoning": "Three controller branches consume the existing gate and the upstream floor helper with conditional options; implementation is localized and standard, while access control still requires security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/tickets/tickets.controller.ts",
@@ -227,7 +230,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b5b756e3caa0c1e4b3703a266597225c5e8ba99"
     },
     {
       "id": "US-004",
