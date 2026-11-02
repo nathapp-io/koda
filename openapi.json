@@ -8082,6 +8082,79 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/fix-checks": {
+      "patch": {
+        "operationId": "FleetReposController_configureFixChecks",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFixChecksDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.review.configure is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          },
+          "422": {
+            "description": "Detected checks cannot be trusted for this repo: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Allow FIX on detected checks for a registered repo (fleet.repo.review.configure, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -18804,6 +18877,10 @@
           "autoReviewEnabledAt": {
             "type": "string",
             "nullable": true
+          },
+          "fixTrustDetectedChecks": {
+            "type": "boolean",
+            "description": "Allow FIX to run the check commands it detects for a base branch without nax check commands"
           }
         },
         "required": [
@@ -18816,7 +18893,8 @@
           "createdAt",
           "autoReview",
           "autoReviewProfiles",
-          "autoReviewMaxCostUsd"
+          "autoReviewMaxCostUsd",
+          "fixTrustDetectedChecks"
         ]
       },
       "RepoCheckResultDto": {
@@ -18881,6 +18959,18 @@
         },
         "required": [
           "enabled"
+        ]
+      },
+      "UpdateFixChecksDto": {
+        "type": "object",
+        "properties": {
+          "trustDetectedChecks": {
+            "type": "boolean",
+            "description": "Allow FIX to run the check commands it detects for a base branch without nax check commands"
+          }
+        },
+        "required": [
+          "trustDetectedChecks"
         ]
       },
       "NaxFileEntryDto": {

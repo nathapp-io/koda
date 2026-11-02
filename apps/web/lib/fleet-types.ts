@@ -131,6 +131,7 @@ export interface FleetRepo {
   autoReviewEnabledById: string | null
   autoReviewEnabledByType: 'USER' | 'AGENT' | null
   autoReviewEnabledAt: string | null
+  fixTrustDetectedChecks: boolean
   createdAt: string
 }
 

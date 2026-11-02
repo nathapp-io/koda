@@ -70,6 +70,28 @@ describe('buildAssignPayload', () => {
   });
 });
 
+describe('FIX assign detected-check trust (US-002)', () => {
+  it('AC-1: opts FIX into detected-check trust when repo setting is true', () => {
+    const payload = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-7' }, { ...repo, fixTrustDetectedChecks: true }, 'https://x/y.git', identity);
+    expect(payload.review).toEqual({ prNumber: 7, botLogin: 'koda-fleet[bot]', trustDetectedChecks: true });
+  });
+
+  it('AC-2: omits detected-check trust when repo setting is false', () => {
+    const payload = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-7' }, { ...repo, fixTrustDetectedChecks: false }, 'https://x/y.git', identity);
+    expect(payload.review).not.toHaveProperty('trustDetectedChecks');
+  });
+
+  it('AC-3: omits detected-check trust when repo setting is missing', () => {
+    const payload = buildAssignPayload({ ...job, command: 'FIX', feature: 'review-pr-7' }, repo, 'https://x/y.git', identity);
+    expect(payload.review).not.toHaveProperty('trustDetectedChecks');
+  });
+
+  it('AC-4: never sends detected-check trust for REVIEW jobs', () => {
+    const payload = buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-7' }, { ...repo, fixTrustDetectedChecks: true }, 'https://x/y.git', identity);
+    expect(payload.review).not.toHaveProperty('trustDetectedChecks');
+  });
+});
+
 describe('FIX assign review payload (US-003)', () => {
   const decision = { id: 'm1', statement: 'auth: tokens live in Redis', source: 'koda:memory/m1' };
   it('AC-9: includes PR, bot identity and stored decisions for FIX', () => {

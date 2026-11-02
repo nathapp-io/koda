@@ -8,6 +8,8 @@ describe('FleetRepoRouteCommands', () => {
   const body = { projectSlug: 'web', provider: 'github', owner: 'acme', name: 'app' };
   /** The auto-review route's `{ id, patch }` frozen input (US-003). */
   const patch = { enabled: true };
+  /** The fix-checks route's `{ id, patch }` frozen input (US-001). */
+  const fixPatch = { trustDetectedChecks: true };
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { id: 'r1', repoId: 'r1', reachable: true };
@@ -16,6 +18,7 @@ describe('FleetRepoRouteCommands', () => {
       remove: vi.fn(),
       check: vi.fn().mockResolvedValue(result),
       configureAutoReview: vi.fn().mockResolvedValue(result),
+      configureFixChecks: vi.fn().mockResolvedValue(result),
     };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new FleetRepoRouteCommands(registry, repos as unknown as FleetReposService, loader as unknown as ActorPrincipalLoader).onModuleInit();
@@ -34,16 +37,21 @@ describe('FleetRepoRouteCommands', () => {
       action: 'autoReview', key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.auto-review',
       raw: { id: 'r1', patch: { ...patch, extra: 1 } }, parsed: { id: 'r1', patch },
     },
+    {
+      action: 'fixChecks', key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.fix-checks',
+      raw: { id: 'r1', patch: { ...fixPatch, extra: 1 } }, parsed: { id: 'r1', patch: fixPatch },
+    },
   ] as const;
   /** Inputs every variant must refuse: no object, no id, an empty id, a non-string id. */
   const invalidFor = (action: string) => [
     null, [], {}, { id: '' }, { id: 7 },
     ...(action === 'autoReview' ? [{ id: 'r1' }, { id: 'r1', patch: { enabled: 'yes' } }] : []),
+    ...(action === 'fixChecks' ? [{ id: 'r1' }, { id: 'r1', patch: { trustDetectedChecks: 'yes' } }] : []),
   ];
 
-  it('AC-12: registers the four matching variants', () => {
+  it('AC-12: registers the five matching variants', () => {
     const { registry } = build();
-    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(4);
+    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(5);
     for (const { action, key, variant } of cases) {
       expect(registry.get(key, FLEET_REPO_ROUTE_VARIANTS[action])).toMatchObject({ key, variant });
     }
@@ -61,6 +69,7 @@ describe('FleetRepoRouteCommands', () => {
       if (action === 'create') expect(repos.create).toHaveBeenCalledExactlyOnceWith('a1', body);
       if (action === 'check') expect(repos.check).toHaveBeenCalledExactlyOnceWith('r1');
       if (action === 'autoReview') expect(repos.configureAutoReview).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', patch);
+      if (action === 'fixChecks') expect(repos.configureFixChecks).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', fixPatch);
       if (action === 'delete') {
         expect(repos.remove).toHaveBeenCalledExactlyOnceWith('a1', 'r1');
         expect(out).toBeNull();

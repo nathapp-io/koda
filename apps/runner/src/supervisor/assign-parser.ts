@@ -198,6 +198,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   let reviewDecisions: ReviewDecision[] | undefined;
   if (isReview) {
     if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || rawReview['botLogin'].length < 1 || rawReview['botLogin'].length > 100 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(rawReview['botLogin'])) return bad('review');
+    const hasTrustDetectedChecks = Object.hasOwn(rawReview, 'trustDetectedChecks');
+    if (kind === 'FIX' ? hasTrustDetectedChecks && rawReview['trustDetectedChecks'] !== true : hasTrustDetectedChecks) return bad('review');
     if (rawReview['decisions'] !== undefined) {
       const cleaned = cleanReviewDecisions(rawReview['decisions']);
       if (cleaned === null) return bad('review');
@@ -236,6 +238,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     const review = isReview ? { review: {
       prNumber: reviewValue['prNumber'] as number,
       botLogin: reviewValue['botLogin'] as string,
+      ...(kind === 'FIX' && reviewValue['trustDetectedChecks'] === true ? { trustDetectedChecks: true as const } : {}),
       ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
     } } : {};
     return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review } };

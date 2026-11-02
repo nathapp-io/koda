@@ -16,3 +16,20 @@ describe('FleetRepoDto auto-review fields', () => {
     });
   });
 });
+
+describe('FleetRepoDto fix-checks field (US-001)', () => {
+  const record = (over: Partial<FleetRepoRecord> = {}): FleetRepoRecord => ({
+    id: 'r', projectId: 'p', provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main',
+    githubInstallationId: null, createdById: 'u', createdAt: new Date(0), autoReview: false,
+    autoReviewProfiles: [], autoReviewMaxCostUsd: '1', autoReviewEnabledById: null,
+    autoReviewEnabledByType: null, autoReviewEnabledAt: null, ...over,
+  });
+
+  it('AC-13: a record without the field serializes as false', () => {
+    expect(FleetRepoDto.from(record()).fixTrustDetectedChecks).toBe(false);
+  });
+
+  it('AC-13: a record with the field true serializes as true', () => {
+    expect(FleetRepoDto.from(record({ fixTrustDetectedChecks: true })).fixTrustDetectedChecks).toBe(true);
+  });
+});

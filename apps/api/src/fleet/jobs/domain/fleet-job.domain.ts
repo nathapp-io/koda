@@ -221,6 +221,7 @@ export interface FleetRepoRef {
   name: string;
   defaultBranch: string;
   githubInstallationId: bigint | null;
+  fixTrustDetectedChecks?: boolean;
 }
 
 export interface ActiveJobRef {

@@ -111,6 +111,26 @@ describe('useFleetRepos', () => {
     expect(fleet.repos.value[0]).toEqual(saved)
   })
 
+  test('setFixChecks returns a pending request without changing repos, then saves and replaces the repo', async () => {
+    const original = { ...repo('a'), fixTrustDetectedChecks: false }
+    const approval = { id: 'ap2', permissionKey: 'fleet.repo.review.configure' }
+    const saved = { ...original, fixTrustDetectedChecks: true }
+    const patch = jest.fn().mockResolvedValueOnce(approval).mockResolvedValueOnce(saved)
+    withApi({ get: jest.fn(async () => pageOf([original])), patch })
+    const { useFleetRepos } = await import(composablePath)
+    const fleet = useFleetRepos()
+    await fleet.load()
+
+    const pending = await fleet.setFixChecks('a', { trustDetectedChecks: true })
+    expect(pending).toEqual({ kind: 'pending', request: approval })
+    expect(fleet.repos.value[0]).toEqual(original)
+    const result = await fleet.setFixChecks('a', { trustDetectedChecks: true })
+    expect(result).toEqual({ kind: 'saved', repo: saved })
+    expect(patch).toHaveBeenNthCalledWith(1, '/fleet/repos/a/fix-checks', { trustDetectedChecks: true })
+    expect(patch).toHaveBeenNthCalledWith(2, '/fleet/repos/a/fix-checks', { trustDetectedChecks: true })
+    expect(fleet.repos.value[0]).toEqual(saved)
+  })
+
   test('create posts the body and appends; remove deletes, drops the row and its check', async () => {
     const post = jest.fn()
       .mockImplementationOnce(async () => repo('b'))

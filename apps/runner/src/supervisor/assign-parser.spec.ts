@@ -80,6 +80,21 @@ describe('FIX assignment (US-006)', () => {
   test('AC-6 accepts FIX with review and raw bash mode', () => {
     expect(parseAssign(cmd(fix()))).toMatchObject({ ok: true, assign: { command: 'FIX', review: { prNumber: 3, botLogin: 'koda-fleet[bot]' }, bashMode: 'raw' } });
   });
+  test('US-003 AC-1 accepts and copies trustDetectedChecks true for FIX', () => {
+    const parsed = parseAssign(cmd(fix({ review: { prNumber: 4, botLogin: 'koda-fleet[bot]', trustDetectedChecks: true } })));
+    expect(parsed).toMatchObject({ ok: true, assign: { review: { prNumber: 4, botLogin: 'koda-fleet[bot]', trustDetectedChecks: true } } });
+  });
+  test('US-003 AC-2 leaves trustDetectedChecks absent for FIX when not sent', () => {
+    const parsed = parseAssign(cmd(fix()));
+    expect(parsed.ok && parsed.assign.command === 'FIX' && parsed.assign.review).toEqual({ prNumber: 3, botLogin: 'koda-fleet[bot]' });
+  });
+  test.each([false, 'true'])("US-003 rejects invalid FIX trustDetectedChecks %p", (trustDetectedChecks) => {
+    expect(parseAssign(cmd(fix({ review: { prNumber: 4, botLogin: 'koda-fleet[bot]', trustDetectedChecks } })))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('US-003 AC-5 rejects trustDetectedChecks on REVIEW', () => {
+    const payload = { ...assignFor('RUN'), command: 'REVIEW', bashMode: 'raw', review: { prNumber: 42, botLogin: 'koda-fleet[bot]', trustDetectedChecks: true } };
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid review' });
+  });
   test('AC-7 rejects FIX without review', () => {
     const { review: _review, ...payload } = fix();
     expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid review' });

@@ -17,6 +17,8 @@ export class FleetRepoDto {
   @ApiPropertyOptional({ nullable: true }) declare autoReviewEnabledById: string | null;
   @ApiPropertyOptional({ enum: ['USER', 'AGENT'], nullable: true }) declare autoReviewEnabledByType: 'USER' | 'AGENT' | null;
   @ApiPropertyOptional({ nullable: true }) declare autoReviewEnabledAt: string | null;
+  @ApiProperty({ description: 'Allow FIX to run the check commands it detects for a base branch without nax check commands' })
+  declare fixTrustDetectedChecks: boolean;
 
   static from(r: FleetRepoRecord): FleetRepoDto {
     return Object.assign(new FleetRepoDto(), {
@@ -26,6 +28,7 @@ export class FleetRepoDto {
       autoReviewMaxCostUsd: Number(r.autoReviewMaxCostUsd).toFixed(4), autoReviewEnabledById: r.autoReviewEnabledById,
       autoReviewEnabledByType: r.autoReviewEnabledByType,
       autoReviewEnabledAt: r.autoReviewEnabledAt?.toISOString() ?? null,
+      fixTrustDetectedChecks: r.fixTrustDetectedChecks === true,
     });
   }
 }

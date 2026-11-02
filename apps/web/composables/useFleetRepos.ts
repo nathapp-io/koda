@@ -84,6 +84,13 @@ export function useFleetRepos() {
     return { kind: 'saved', repo: data }
   }
 
+  async function setFixChecks(id: string, body: { trustDetectedChecks: boolean }): Promise<AutoReviewResult> {
+    const data = await $api.patch<FleetRepo | ApprovalRequestSummary>(apiPath`/fleet/repos/${id}/fix-checks`, body)
+    if ('permissionKey' in data) return { kind: 'pending', request: data }
+    repos.value = repos.value.map((repo) => repo.id === id ? data : repo)
+    return { kind: 'saved', repo: data }
+  }
+
   async function remove(id: string): Promise<void> {
     await $api.delete(apiPath`/fleet/repos/${id}`)
     removed = new Set([...removed, id])
@@ -91,5 +98,5 @@ export function useFleetRepos() {
     checks.value = Object.fromEntries(Object.entries(checks.value).filter(([key]) => key !== id))
   }
 
-  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, remove }
+  return { repos, hasMore, pending, checks, projects, load, loadProjects, check, checkAll, create, setAutoReview, setFixChecks, remove }
 }

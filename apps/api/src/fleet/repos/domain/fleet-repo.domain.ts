@@ -19,6 +19,12 @@ export interface FleetRepoRecord {
   autoReviewEnabledById: string | null;
   autoReviewEnabledByType: 'USER' | 'AGENT' | null;
   autoReviewEnabledAt: Date | null;
+  /**
+   * Fleet FIX (fix detected checks): allow `nax bot fix` to run the checks it detects for a base
+   * branch with no nax check commands. Optional so a fixture written before the column stays valid;
+   * absent means `false` (the migration default).
+   */
+  fixTrustDetectedChecks?: boolean;
 }
 
 export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
@@ -28,9 +34,11 @@ export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
-  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt'>): Promise<FleetRepoRecord>;
+  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
   updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>;
+  /** The fix-checks setting (fleet FIX US-001): one boolean column, answered as the updated record. */
+  updateFixChecks(id: string, value: boolean): Promise<FleetRepoRecord>;
   /**
    * The project's anchor repo (fleet S5b-R13): the smallest `createdAt`, ties broken by the smallest `id`; null when
    * the project has no fleet repo. A PROJECT thread uses it as bookkeeping only — no checkout, no git token.

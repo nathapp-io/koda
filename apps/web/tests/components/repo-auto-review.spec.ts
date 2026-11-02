@@ -11,7 +11,7 @@ import type { FleetRepo } from '../../lib/fleet-types'
 const repo = (over: Partial<FleetRepo> = {}): FleetRepo => ({
   id: 'r1', projectId: 'p', provider: 'github', owner: 'org', name: 'repo', defaultBranch: 'main',
   githubInstallationId: '7', autoReview: false, autoReviewProfiles: [], autoReviewMaxCostUsd: '1.0000',
-  autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null, createdAt: '', ...over,
+  autoReviewEnabledById: null, autoReviewEnabledByType: null, autoReviewEnabledAt: null, fixTrustDetectedChecks: false, createdAt: '', ...over,
 })
 const fieldStub = {
   props: ['name'],

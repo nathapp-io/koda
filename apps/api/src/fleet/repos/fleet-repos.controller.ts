@@ -14,6 +14,7 @@ import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { ListFleetReposQuery } from './dto/list-fleet-repos.query';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
+import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
 
 /**
  * Fleet S1: the repo admin routes, migrated onto permission keys by permissions P1d (US-008). Each key
@@ -95,6 +96,27 @@ export class FleetReposController {
     const outcome = await this.routeGate.run<FleetRepoDto>({
       key: 'fleet.repo.review.configure',
       variant: FLEET_REPO_ROUTE_VARIANTS.autoReview,
+      projectId: null,
+      input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Patch(':id/fix-checks')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.review.configure')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Allow FIX on detected checks for a registered repo (fleet.repo.review.configure, global)' })
+  @ApiResponse({ status: 200, type: FleetRepoDto })
+  @ApiResponse({ status: 403, description: 'fleet.repo.review.configure is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  @ApiResponse({ status: 422, description: 'Detected checks cannot be trusted for this repo: { reason }' })
+  async configureFixChecks(@Param('id') id: string, @Body() dto: UpdateFixChecksDto) {
+    const outcome = await this.routeGate.run<FleetRepoDto>({
+      key: 'fleet.repo.review.configure',
+      variant: FLEET_REPO_ROUTE_VARIANTS.fixChecks,
       projectId: null,
       input: { id, patch: dto },
     });

@@ -262,7 +262,13 @@ export interface AssignPayload {
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
   /** Fleet PR review and fix: present only for REVIEW and FIX jobs. */
-  review?: { prNumber: number; botLogin: string; decisions?: ReviewDecision[] };
+  review?: {
+    prNumber: number;
+    botLogin: string;
+    decisions?: ReviewDecision[];
+    /** FIX-only: allow nax to trust detected checks for this assignment. */
+    trustDetectedChecks?: true;
+  };
   /** PLAN only: the branch the PRD must name (a thread PLAN). */
   expectBranch?: string;
 }
