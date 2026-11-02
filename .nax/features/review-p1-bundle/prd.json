@@ -3,7 +3,7 @@
   "feature": "review-p1-bundle",
   "branchName": "feat/review-p1-bundle",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T08:16:08.591Z",
+  "updatedAt": "2026-11-02T08:20:23.953Z",
   "userStories": [
     {
       "id": "US-001",
@@ -545,14 +545,17 @@
         "issue-382"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two-file provider fallback change, but fail-closed branch protection governs FIX credential eligibility and therefore requires security TDD."
+        "reasoning": "Two-file provider fallback change, but fail-closed branch protection governs FIX credential eligibility and therefore requires security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/github-app-client.ts",
@@ -577,7 +580,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6c4a0367e27679f8ca269449c39b926ae12d0fd4"
     },
     {
       "id": "US-009",
