@@ -3,7 +3,7 @@
   "feature": "review-p2-session-runner",
   "branchName": "feat/review-p2-session-runner",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T17:18:52.168Z",
+  "updatedAt": "2026-11-02T17:25:35.465Z",
   "userStories": [
     {
       "id": "US-001",
@@ -291,14 +291,17 @@
         "review-p2-session-runner"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small transport/route change but security-critical revocation and cookie lifecycle require strict isolated TDD. Capture actual transport arguments, status/body outcomes and cleanup across failures."
+        "reasoning": "Small transport/route change but security-critical revocation and cookie lifecycle require strict isolated TDD. Capture actual transport arguments, status/body outcomes and cleanup across failures.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/server/api/auth/logout.post.ts",
@@ -317,7 +320,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "76d55cc55021a53e183ab3efb1726d99a991b38f"
     },
     {
       "id": "US-006",
