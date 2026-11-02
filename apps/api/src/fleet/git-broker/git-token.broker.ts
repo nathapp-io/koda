@@ -32,9 +32,16 @@ export class GitTokenBroker {
    * It is cached under its own key (per job, epoch and repository), and its result carries the `repoId` so the
    * runner can tell which repository a token belongs to. Write mints are unchanged.
    */
-  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean }, now = new Date()): Promise<MintResult> {
-    const readOnly = req.readOnly === true;
-    const key = readOnly ? `${req.jobId}:${req.leaseEpoch}:ro:${req.repo.id}` : `${req.jobId}:${req.leaseEpoch}`;
+  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }, now = new Date()): Promise<MintResult> {
+    // FIX always requires a write-capable result; readOnly remains meaningful for purpose-less PROJECT mints.
+    const readOnly = req.readOnly === true && req.purpose !== 'fix';
+    // Purpose credentials are GitHub-only; reject before cache lookup so a legacy/write entry cannot bypass this.
+    if (req.purpose && req.repo.provider !== 'github') {
+      return { ok: false, error: { jobId: req.jobId, reason: 'provider_error' } };
+    }
+    const key = req.purpose === 'review'
+      ? `${req.jobId}:${req.leaseEpoch}:review`
+      : readOnly ? `${req.jobId}:${req.leaseEpoch}:ro:${req.repo.id}` : `${req.jobId}:${req.leaseEpoch}`;
     const cached = this.cache.get(key);
     const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
     if (cached && Date.parse(cached.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached };
@@ -56,17 +63,28 @@ export class GitTokenBroker {
     this.cache = new Map([...this.cache].filter(([key]) => !key.startsWith(`${jobId}:`)));
   }
 
-  private async fresh(req: { jobId: string; repo: FleetRepoRef; readOnly?: boolean }, now: Date): Promise<GitToken> {
-    const { repo, readOnly } = req;
+  private async fresh(req: { jobId: string; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }, now: Date): Promise<GitToken> {
+    const { repo, purpose } = req;
+    const readOnly = req.readOnly === true && purpose !== 'fix';
     if (repo.provider === 'github') {
       if (repo.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
+      if (purpose === 'review') {
+        const { token, expiresAt } = await this.github.mintReviewToken(repo.githubInstallationId, repo.name);
+        return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString() };
+      }
+      if (purpose === 'fix') {
+        const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
+        if (!await this.github.isBranchProtected(token, repo.owner, repo.name, repo.defaultBranch)) {
+          throw new RepoCheckException('default_branch_unprotected');
+        }
+      }
       const { token, expiresAt } = readOnly
         ? await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name)
         : await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
       return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString(), ...(readOnly ? { repoId: repo.id } : {}) };
     }
-    // Fleet S5b defers read-only GitLab access (spec §1c-b-R2): never fall back to the write-capable stored token.
-    if (readOnly) throw new RepoCheckException('provider_error');
+    // Purpose and read-only requests must never fall back to the write-capable stored GitLab token.
+    if (purpose || readOnly) throw new RepoCheckException('provider_error');
     const token = await this.gitlab.resolve(repo.projectId, repo.owner, repo.name);
     return { jobId: req.jobId, token, username: 'oauth2', expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString() };
   }

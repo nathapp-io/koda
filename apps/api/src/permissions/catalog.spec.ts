@@ -7,6 +7,7 @@ import {
   PERMISSION_CATALOG,
   PUBLIC_KEYS,
   READ_ACTION_KEYS,
+  ROLE_GRANT_KEYS,
   TEST_HOOK_KEYS,
   type PermissionCatalogEntry,
 } from './catalog';
@@ -165,7 +166,7 @@ function expectedScope(key: string, access: CatalogAccess, ownable: boolean): Ca
 }
 
 function expectedRisk(key: string): CatalogRisk {
-  if (key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
+  if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   const last = key.slice(key.lastIndexOf('.') + 1);
   if (last === 'read' || READ_ACTION_KEYS.has(key)) return 'low';
   if (last === 'delete' || last === 'remove') return 'high';
@@ -174,6 +175,16 @@ function expectedRisk(key: string): CatalogRisk {
 }
 
 describe('PERMISSION_CATALOG', () => {
+  it('US-002 AC-1/2/3: role-grant keys are critical and require human approval', () => {
+    expect(ROLE_GRANT_KEYS).toEqual(new Set(['member.add', 'invite.create', 'invite.resend']));
+    for (const key of ROLE_GRANT_KEYS) {
+      expect(findCatalogEntry(key)).toMatchObject({
+        risk: 'critical',
+        approval: { floor: 'human' },
+      });
+    }
+  });
+
   it('US-001 AC-1/2: code-intel read and index keys are project role keys', () => {
     expect(findCatalogEntry('codeintel.read')).toMatchObject({ scope: 'project', access: 'role' });
     expect(findCatalogEntry('codeintel.index.write')).toMatchObject({ scope: 'project', access: 'role' });
@@ -535,7 +546,7 @@ describe('catalog approval metadata', () => {
       .filter((entry) => !entry.key.startsWith('role.') && !entry.key.startsWith('approval.policy.'))
       .map((entry) => entry.key);
 
-    expect(elsewhere).toEqual([]);
+    expect(new Set(elsewhere)).toEqual(ROLE_GRANT_KEYS);
   });
 
   it('AC-10: approval.decide is scoped any, so a global role can hold it', () => {

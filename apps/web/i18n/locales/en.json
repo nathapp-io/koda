@@ -1101,7 +1101,8 @@
       "capacity": "Runner is at capacity",
       "config_jobs": "Runner is too old for config jobs (upgrade the runner)",
       "bot_review": "nax on this runner cannot run PR reviews",
-      "bot_fix": "nax on this runner cannot run PR fixes"
+      "bot_fix": "nax on this runner cannot run PR fixes",
+      "trust_domain": "Runner holds another project's job (isolation)"
     },
     "repoReason": {
       "github_app_not_configured": "The GitHub App is not configured on the koda server",

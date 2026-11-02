@@ -1986,6 +1986,27 @@ describeIntegration('API Integration Tests', () => {
         .expect(200);
     });
 
+    it('PATCH /api/projects/:slug/agents/:agentSlug — agent cannot reactivate itself', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(200);
+
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ status: 'ACTIVE' })
+        .expect(403);
+
+      expect((await prismaClient().agent.findUniqueOrThrow({ where: { id: agentId } })).status).toBe('PAUSED');
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+    });
+
     it('PATCH /api/projects/:slug/agents/nonexistent — 404 for unknown agent slug', async () => {
       await request(httpServer)
         .patch(`/api/projects/${projectSlug}/agents/no-such-agent`)
@@ -3401,6 +3422,21 @@ describeIntegration('API Integration Tests', () => {
 
     it('GET /api/projects/:slug/members?principals=agents answers 400 validation', async () => {
       await membersOf(userAccessToken, '?principals=agents').expect(400);
+    });
+
+    it('US-002: project-admin agent invite requests wait for human approval', async () => {
+      const prisma = prismaClient();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantRole(prisma, { type: 'AGENT', id: agentId }, 'project-admin', project.id);
+      await app.get(MembershipService).invalidatePermissions();
+
+      const response = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/invites`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ email: `agent-pending-${Date.now()}@koda.test`, roleKey: 'project-admin' })
+        .expect(202);
+
+      expect(body<{ permissionKey: string }>(response).permissionKey).toBe('invite.create');
     });
   });
 

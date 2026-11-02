@@ -49,6 +49,27 @@ describe('job_unplaceable (S2b (c) §2.3)', () => {
     expect(only({ loads }).item).toMatchObject({ verdict: 'waiting_capacity', severity: 'warning', reasons: [{ runnerName: 'wk-mac', reason: 'capacity' }] });
   });
 
+  it('US-004 AC-1: reports waiting_capacity when every runner misfits only on trust_domain', () => {
+    const loads = new Map([['r1', {
+      active: 1, repoIds: new Set(['other-repo']), projectIds: new Set(['p2']), rawProjectIds: new Set(['p2']), threads: 0,
+    }]]);
+    expect(only({ loads }).item).toMatchObject({
+      verdict: 'waiting_capacity', severity: 'warning', reasons: [{ runnerName: 'wk-mac', reason: 'trust_domain' }], reasonsTotal: 1,
+    });
+  });
+
+  it('US-004 AC-8: keeps waiting_capacity when the only misfits are capacity and busy_repo', () => {
+    const loads = new Map([
+      ['r1', { active: 1, repoIds: new Set(['other-repo']), projectIds: new Set(['p1']), rawProjectIds: new Set(['p1']), threads: 0 }],
+      ['r2', { active: 1, repoIds: new Set(['repo1']), projectIds: new Set(['p1']), rawProjectIds: new Set(['p1']), threads: 0 }],
+    ]);
+    const runners = [dashRunner({ id: 'r1', name: 'aa-box' }), dashRunner({ id: 'r2', name: 'zz-box' })];
+    expect(only({ loads, runners }).item).toMatchObject({
+      verdict: 'waiting_capacity', severity: 'warning', reasonsTotal: 2,
+      reasons: [{ runnerName: 'aa-box', reason: 'capacity' }, { runnerName: 'zz-box', reason: 'busy_repo' }],
+    });
+  });
+
   it('reports runners_paused when every runner is budget-paused', () => {
     expect(only({ pauses: { runnerPaused: () => true, match: () => null } }).item).toMatchObject({ verdict: 'runners_paused', severity: 'warning' });
   });

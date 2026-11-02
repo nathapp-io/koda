@@ -1,4 +1,5 @@
 import type { DashboardJobRow, DashboardRecentRow, DashboardRunnerRow, DashboardScope, PendingSummary } from '../dashboard.types';
+import type { ActiveJobRef } from '../../jobs/domain/fleet-job.domain';
 
 export const DASHBOARD_REPOSITORY = Symbol('DASHBOARD_REPOSITORY');
 
@@ -11,8 +12,8 @@ export interface RawRunnerRow extends Omit<DashboardRunnerRow, 'capabilities'> {
 export interface IDashboardRepository {
   /** Every runner, ordered by name then id. */
   findRunners(): Promise<RawRunnerRow[]>;
-  /** Every runner-held job (ASSIGNED, RUNNING, UPLOADING) across all projects. */
-  findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string; command: string }>>;
+  /** Every runner-held job (ASSIGNED, RUNNING, UPLOADING) across all projects, with the project and bash mode the trust-domain rule reads (US-004). */
+  findHeldRefs(): Promise<ActiveJobRef[]>;
   /** Active jobs in scope, oldest queuedAt first then id; at most `limit`. */
   findActiveJobs(scope: DashboardScope, limit: number): Promise<DashboardJobRow[]>;
   /** The globally oldest QUEUED jobs (any project, soft-deleted included): the window fillRunner scans (D407). */

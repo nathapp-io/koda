@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuthException } from '@nathapp/nestjs-common';
+import { FleetJobKind } from '../../common/enums';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { LiveFleetJobEvent } from '../../live/live-event';
@@ -111,7 +112,7 @@ export class SyncService {
     const gitTokenErrors: GitTokenError[] = [];
     const unknownJobIds: string[] = [];
     const toMint = await this.txManager.run(async () => {
-      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean }> = [];
+      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }> = [];
       for (const req of requests) {
         // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
         const job = await this.repo.lockById(req.jobId);
@@ -133,7 +134,12 @@ export class SyncService {
           gitTokenErrors.push({ jobId: job.id, reason: 'repo_not_assigned' });
         } else {
           const repo = await this.repo.findRepo(job.repoId);
-          if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo });
+          if (repo) granted.push({
+            jobId: job.id,
+            leaseEpoch: job.leaseEpoch,
+            repo,
+            ...(job.command === FleetJobKind.REVIEW ? { purpose: 'review' as const } : job.command === FleetJobKind.FIX ? { purpose: 'fix' as const } : {}),
+          });
         }
       }
       return granted;

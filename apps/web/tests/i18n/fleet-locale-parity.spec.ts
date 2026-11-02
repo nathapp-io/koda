@@ -20,7 +20,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 // dynamic key (fleet.state.<STATE> ...), which used-keys-exist.spec cannot see.
 const ENUMS: Record<string, string[]> = {
   'fleet.state': ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'],
-  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'bot_review', 'bot_fix'],
+  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'bot_review', 'bot_fix', 'trust_domain'],
   'fleet.repoReason': [
     'github_app_not_configured', 'github_app_key_unreadable', 'app_not_installed', 'app_permissions_insufficient',
     'repo_not_found', 'provider_unreachable', 'provider_error', 'vcs_connection_missing', 'vcs_connection_mismatch',
@@ -91,6 +91,11 @@ describe('Fleet locale parity (en and zh)', () => {
 
   test.each(Object.entries(ENUMS))('%s covers exactly the API values', (path, values) => {
     expect(Object.keys(at(en, path) as Tree).sort()).toEqual([...values].sort())
+  })
+
+  test('trust-domain misfit labels are non-empty in both locales (AC-9)', () => {
+    expect(String(at(en, 'fleet.misfit.trust_domain') ?? '').trim()).not.toBe('')
+    expect(String(at(zh, 'fleet.misfit.trust_domain') ?? '').trim()).not.toBe('')
   })
 
   // Parity, not copy: rewording an English label must not fail a green test.

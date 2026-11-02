@@ -268,3 +268,9 @@ it('workspace AC-5 exposes workspace_threads in placement, attention and credent
   expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('workspace_threads');
   expect(JSON.stringify(spec.components.schemas['ProfileCellDto'])).toContain('workspace_threads');
 });
+
+it('US-004 exposes trust_domain in placement, attention and credential board', () => {
+  expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('trust_domain');
+  expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('trust_domain');
+  expect(JSON.stringify(spec.components.schemas['ProfileCellDto'])).toContain('trust_domain');
+});

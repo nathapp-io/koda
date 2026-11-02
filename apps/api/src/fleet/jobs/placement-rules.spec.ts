@@ -21,7 +21,7 @@ const runner = (over: Partial<PlacementRunner> = {}): PlacementRunner => ({
   labels: ['linux', 'gpu'], capacity: 1, capabilities: caps(), ...over,
 });
 const job = (over: Partial<PlacementJob> = {}): PlacementJob => ({
-  command: 'RUN', repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
+  command: 'RUN', repoId: 'repo-1', projectId: 'p1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });
 const misfit = (j: PlacementJob, r: PlacementRunner, load = EMPTY_LOAD) => firstMisfit(j, r, load, NOW, 90);
 const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
@@ -59,6 +59,11 @@ describe('placement rules (spec §4)', () => {
 
   it('US-003 AC-8: dashboard misfit reasons include bot_fix', () => {
     expect(MISFIT_REASONS).toContain('bot_fix');
+  });
+
+  it('US-004: trust_domain is recoverable and named by the dashboard reason list', () => {
+    expect(PERMANENT_MISFITS.has('trust_domain')).toBe(false);
+    expect(MISFIT_REASONS).toContain('trust_domain');
   });
 
   it('fits a matching runner', () => {
@@ -103,7 +108,7 @@ describe('placement rules (spec §4)', () => {
   });
 
   it('reports busy_repo before capacity, and capacity when full', () => {
-    expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['repo-1']) })).toBe('busy_repo');
+    expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['repo-1']), projectIds: new Set(), rawProjectIds: new Set() })).toBe('busy_repo');
     expect(misfit(job(), runner({ capacity: 2 }), { active: 2, repoIds: new Set(['other']) })).toBe('capacity');
     expect(misfit(job(), runner({ capacity: 2 }), { active: 1, repoIds: new Set(['other']) })).toBeNull();
   });
@@ -193,7 +198,7 @@ describe('placement rules (spec §4)', () => {
 
     it('carries the command through toPlacementJob', () => {
       const record = { command: 'CONFIG_DRIFT', repoId: 'repo-1', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw' as const };
-      expect(toPlacementJob(record as never, { provider: 'github' }).command).toBe('CONFIG_DRIFT');
+      expect(toPlacementJob(record as never, { provider: 'github', projectId: 'p1' }).command).toBe('CONFIG_DRIFT');
     });
 
     it('never holds a config job on a job-scope budget pause', () => {
@@ -211,11 +216,11 @@ describe('THREAD placement (US-006)', () => {
   const threadJob = (over: Partial<PlacementJob> = {}) => job({ command: 'THREAD', profiles: [], thread: { backend: { kind: 'native' }, enabled: true }, ...over });
   const threadRunner = (over: Partial<PlacementRunner> = {}) => runner({ protocolVersion: 4, threadCapacity: 2, capabilities: caps({ threadBackends: { native: ['m1'], acp: [] } }), ...over });
 
-  it('counts THREAD refs in their own load class', () => {
-    expect(toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1')).toEqual({ active: 0, repoIds: new Set(), threads: 1 });
+  it('counts THREAD refs in their own load class and preserves their project trust domain', () => {
+    expect(toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]).get('r1')).toEqual({ active: 0, repoIds: new Set(), projectIds: new Set(['p1']), rawProjectIds: new Set(['p1']), threads: 1 });
   });
   it('does not block a RUN job on a repo held by THREAD', () => {
-    const threadLoad = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1');
+    const threadLoad = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]).get('r1');
     expect(misfit(job({ repoId: 'rA' }), runner(), threadLoad ?? EMPTY_LOAD)).toBeNull();
   });
   it('fits THREAD despite finite capacity, same-repo load, and broken interaction/sandbox', () => {
@@ -293,15 +298,19 @@ describe('evaluateRunners (S2b (c) §2.3)', () => {
 
 describe('placement helpers moved from PlacementService (D413)', () => {
   it('toLoads counts held jobs and their repos per runner', () => {
-    const loads = toLoads([{ runnerId: 'r1', repoId: 'a' }, { runnerId: 'r1', repoId: 'b' }, { runnerId: 'r2', repoId: 'a' }]);
-    expect(loads.get('r1')).toEqual({ active: 2, repoIds: new Set(['a', 'b']) });
-    expect(loads.get('r2')).toEqual({ active: 1, repoIds: new Set(['a']) });
+    const loads = toLoads([
+      { runnerId: 'r1', repoId: 'a', projectId: 'p1', bashMode: 'gated' },
+      { runnerId: 'r1', repoId: 'b', projectId: 'p2', bashMode: 'raw' },
+      { runnerId: 'r2', repoId: 'a', projectId: 'p1', bashMode: 'gated' },
+    ]);
+    expect(loads.get('r1')).toEqual({ active: 2, repoIds: new Set(['a', 'b']), projectIds: new Set(['p1', 'p2']), rawProjectIds: new Set(['p2']), threads: 0 });
+    expect(loads.get('r2')).toEqual({ active: 1, repoIds: new Set(['a']), projectIds: new Set(['p1']), rawProjectIds: new Set(), threads: 0 });
     expect(loads.get('r3')).toBeUndefined();
   });
 
-  it('toPlacementJob copies the placement fields and the repo provider', () => {
-    expect(toPlacementJob({ command: 'RUN', repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab' }))
-      .toEqual({ command: 'RUN', repoId: 'x', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
+  it('toPlacementJob copies the placement fields, the repo provider and the project', () => {
+    expect(toPlacementJob({ command: 'RUN', repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab', projectId: 'p7' }))
+      .toEqual({ command: 'RUN', repoId: 'x', projectId: 'p7', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
   });
 
   it('keeps the placement scan window at 50', () => {

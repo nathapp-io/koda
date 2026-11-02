@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { FleetJobKind, FleetJobState } from '../../common/enums';
 import type { BashMode } from '../common/protocol';
-import type { FleetJobStory } from '../jobs/domain/fleet-job.domain';
+import type { ActiveJobRef, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import { ACTIVE_STATES, RUNNER_HELD_STATES, TERMINAL_STATES } from '../jobs/job-state';
 import type { DashboardJobRow, DashboardRecentRow, DashboardScope, PendingSummary } from './dashboard.types';
 import type { IDashboardRepository, RawRunnerRow } from './domain/dashboard.domain';
@@ -64,13 +64,13 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     });
   }
 
-  async findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string; command: string }>> {
+  async findHeldRefs(): Promise<ActiveJobRef[]> {
     const rows = await this.db.fleetJob.findMany({
       where: { state: { in: [...RUNNER_HELD_STATES] }, runnerId: { not: null } },
       orderBy: { id: 'asc' },
-      select: { runnerId: true, repoId: true, command: true },
+      select: { runnerId: true, repoId: true, command: true, projectId: true, bashMode: true },
     });
-    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
+    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command, projectId: r.projectId, bashMode: r.bashMode }));
   }
 
   async findActiveJobs(scope: DashboardScope, limit: number): Promise<DashboardJobRow[]> {

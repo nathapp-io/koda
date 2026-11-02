@@ -153,7 +153,7 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix'
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'trust_domain'
 
 /** Fleet job kinds, including config jobs and PR reviews. */
 export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'

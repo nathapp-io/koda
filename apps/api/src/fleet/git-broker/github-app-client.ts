@@ -79,6 +79,35 @@ export class GitHubAppClient {
     return this.mintScopedToken(installationId, repoName, { contents: 'read', metadata: 'read' });
   }
 
+  /** A REVIEW token can read repository contents and checks while posting PR comments. */
+  async mintReviewToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
+    return this.mintScopedToken(installationId, repoName, {
+      contents: 'read', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read',
+    });
+  }
+
+  /** Best-effort default branch protection probe. Any inability to confirm both endpoints fails closed. */
+  async isBranchProtected(token: string, owner: string, name: string, branch: string): Promise<boolean> {
+    const path = this.repoPath(owner, name);
+    const encodedBranch = encodeURIComponent(branch);
+    try {
+      const rules = await this.http.request('GET', `${this.api}${path}/rules/branches/${encodedBranch}?per_page=100`, this.headers(token));
+      if (rules.status !== 200 || !Array.isArray(rules.body)) throw new RepoCheckException('provider_error');
+      if (rules.body.some((raw) => {
+        const type = obj(raw).type;
+        return type === 'pull_request' || type === 'update';
+      })) return true;
+
+      const protection = await this.http.request('GET', `${this.api}${path}/branches/${encodedBranch}`, this.headers(token));
+      if (protection.status !== 200) throw new RepoCheckException('provider_error');
+      const body = obj(protection.body);
+      if (typeof body.protected !== 'boolean') throw new RepoCheckException('provider_error');
+      return body.protected;
+    } catch {
+      throw new RepoCheckException('provider_error');
+    }
+  }
+
   private async mintScopedToken(
     installationId: bigint,
     repoName: string,

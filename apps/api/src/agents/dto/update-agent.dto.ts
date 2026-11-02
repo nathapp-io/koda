@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsIn, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateAgentDto {
@@ -14,6 +14,7 @@ export class UpdateAgentDto {
 
   @ApiProperty({ description: 'Max concurrent tickets agent can handle', required: false })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
   maxConcurrentTickets?: number;
 }

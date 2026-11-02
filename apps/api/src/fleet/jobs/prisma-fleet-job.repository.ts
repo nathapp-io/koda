@@ -223,9 +223,9 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     if (runnerIds.length === 0) return [];
     const rows = await this.db.fleetJob.findMany({
       where: { runnerId: { in: [...runnerIds] }, state: { in: [...RUNNER_HELD_STATES] } },
-      select: { runnerId: true, repoId: true, command: true },
+      select: { runnerId: true, repoId: true, command: true, projectId: true, bashMode: true },
     });
-    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
+    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command, projectId: r.projectId, bashMode: r.bashMode }));
   }
 
   async findThreadTokenScope(jobId: string): Promise<{ kind: ChatThreadKind; action: string } | null> {

@@ -402,9 +402,12 @@ function deriveScope(key: string, access: PermissionAccess, ownable: boolean): K
   return 'any';
 }
 
+/** Keys that grant project membership or invite roles; all require a human approval floor. */
+export const ROLE_GRANT_KEYS: ReadonlySet<string> = new Set(['member.add', 'invite.create', 'invite.resend']);
+
 /** Risk, first match wins: role and policy keys, then reads, then deletes/removes and high-risk writes. */
 function classifyRisk(key: string): PermissionRisk {
-  if (key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
+  if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   if (isReadKey(key)) return 'low';
   const last = key.slice(key.lastIndexOf('.') + 1);
   if (last === 'delete' || last === 'remove') return 'high';

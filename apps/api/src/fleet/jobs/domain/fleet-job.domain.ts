@@ -227,6 +227,8 @@ export interface ActiveJobRef {
   runnerId: string;
   repoId: string;
   command?: string;
+  projectId: string;
+  bashMode: string;
 }
 
 export type PlacementRunnerRow = PlacementRunner & { bootId: string };
