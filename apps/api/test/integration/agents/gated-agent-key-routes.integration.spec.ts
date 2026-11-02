@@ -273,6 +273,22 @@ describeIntegration('gated agent credential routes (US-006)', () => {
     expect(await agentBySlug(body.slug)).toBeNull();
   });
 
+  it('US-004 AC-10/11: agent create without a policy parks and creates no agent', async () => {
+    const body = createBody();
+    const response = await create(body).expect(202);
+    const summary = data<PendingSummary>(response);
+    expect(summary.permissionKey).toBe('agent.create');
+    expect(summary.status).toBe('pending');
+    expect(await agentBySlug(body.slug)).toBeNull();
+  });
+
+  it('US-004 AC-12: root agent create without a policy returns an apiKey', async () => {
+    const body = createBody();
+    const response = data<AgentCredentials>(await create(body, { token: world.tokens.root }).expect(201));
+    expect(response.agent.slug).toBe(body.slug);
+    expect(response.apiKey).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it('AC-13: a human create under a wait policy executes at once and opens no request', async () => {
     await seedPolicyForAnyPrincipal('agent.create');
     const body = createBody();

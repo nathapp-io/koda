@@ -30,6 +30,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
@@ -71,6 +72,9 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
         // Permissions P1 (US-003): the required third dependency; this spec races two writers on the
         // same ticket, so the edge check allows them.
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        // Permissions P1 (US-006): the transition's post-commit seam. No scope is open here, so its
+        // external effects run immediately.
+        AfterCommitService,
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
       ],

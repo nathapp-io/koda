@@ -101,6 +101,11 @@ export class MembershipService {
     await this.permissionCache.invalidate();
   }
 
+  /** Serialize a caller's decision against any transaction that grants or removes an Owner binding. */
+  async lockOwnerBindings(): Promise<void> {
+    await this.bindings.lockOwnerRole();
+  }
+
   /** A global `owner`/`admin` binding determines the compatibility role claim. */
   async isGlobalAdmin(userId: string): Promise<boolean> {
     return (await this.bindings.countGlobalAdminBindings(userId)) > 0;

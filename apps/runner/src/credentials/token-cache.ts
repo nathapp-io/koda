@@ -26,6 +26,7 @@ interface Entry {
   readonly token: CachedToken | null;
   readonly error: string | null;
   readonly coolUntilMs: number;
+  readonly minRemainingMs: number;
 }
 
 /** The server accepts at most 64 token requests per sync (apps/api/src/fleet/sync/sync-request.parser.ts). */
@@ -54,12 +55,27 @@ export class TokenCache {
   want(jobId: string, leaseEpoch: number, repoId?: string): void {
     const key = keyOf(jobId, leaseEpoch, repoId);
     if (this.entries.has(key)) return;
-    this.entries = new Map([...this.entries, [key, { jobId, leaseEpoch, ...(repoId === undefined ? {} : { repoId }), token: null, error: null, coolUntilMs: 0 }]]);
+    this.entries = new Map([...this.entries, [key, { jobId, leaseEpoch, ...(repoId === undefined ? {} : { repoId }), token: null, error: null, coolUntilMs: 0, minRemainingMs: 0 }]]);
     for (const listener of this.listeners) listener();
   }
 
   wanted(jobId: string, leaseEpoch: number, repoId?: string): boolean {
     return this.entries.has(keyOf(jobId, leaseEpoch, repoId));
+  }
+
+  /** Request a job-scoped token with at least the given remaining lifetime. */
+  requireFresh(jobId: string, leaseEpoch: number, minRemainingMs: number): void {
+    const key = keyOf(jobId, leaseEpoch);
+    const current = this.entries.get(key) ?? {
+      jobId, leaseEpoch, token: null, error: null, coolUntilMs: 0, minRemainingMs: 0,
+    };
+    this.entries = new Map([...this.entries, [key, { ...current, error: null, minRemainingMs }]]);
+    for (const listener of this.listeners) listener();
+  }
+
+  /** Return the stored server error even if a live token still takes precedence in state(). */
+  error(jobId: string, leaseEpoch: number, repoId?: string): string | null {
+    return this.entries.get(keyOf(jobId, leaseEpoch, repoId))?.error ?? null;
   }
 
   drop(jobId: string, leaseEpoch: number, repoId?: string): void {
@@ -83,10 +99,15 @@ export class TokenCache {
       if (!seen || entry.leaseEpoch > seen.leaseEpoch) highest.set(scopeOf(entry.jobId, entry.repoId), entry);
     }
     return [...highest.values()]
-      .filter((entry) => entry.coolUntilMs <= nowMs && (entry.token === null || !this.fresh(entry.token.expiresAt, nowMs)))
+      .filter((entry) => entry.coolUntilMs <= nowMs && (this.remaining(entry.token?.expiresAt, nowMs) <= this.timing.refreshMarginMs || this.remaining(entry.token?.expiresAt, nowMs) < entry.minRemainingMs))
       .sort((a, b) => Number(a.repoId !== undefined) - Number(b.repoId !== undefined))
       .slice(0, MAX_TOKEN_REQUESTS)
-      .map((entry) => ({ jobId: entry.jobId, leaseEpoch: entry.leaseEpoch, ...(entry.repoId === undefined ? {} : { repoId: entry.repoId }) }));
+      .map((entry) => ({
+        jobId: entry.jobId,
+        leaseEpoch: entry.leaseEpoch,
+        ...(entry.repoId === undefined ? {} : { repoId: entry.repoId }),
+        ...(entry.repoId === undefined && entry.minRemainingMs > 0 && this.remaining(entry.token?.expiresAt, nowMs) < entry.minRemainingMs ? { fresh: true as const } : {}),
+      }));
   }
 
   /** A GitToken names its job and optional repository: it belongs to the epoch this sync asked for (D81). */
@@ -99,9 +120,17 @@ export class TokenCache {
       const entry = epoch === undefined ? undefined : next.get(keyOf(token.jobId, epoch, token.repoId));
       if (!entry) continue;
       const cached: CachedToken = { token: token.token, username: token.username, expiresAt: token.expiresAt };
-      // A token already inside the margin (a refresh that returned the same token, or clock skew) would be asked for
-      // again at once: cool down instead (D81).
-      next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.repoId), { ...entry, token: cached, error: null, coolUntilMs: this.fresh(token.expiresAt, nowMs) ? 0 : cool });
+      const remaining = this.remaining(token.expiresAt, nowMs);
+      const minimumMet = remaining >= entry.minRemainingMs;
+      // A token still below the requested minimum, or already inside the normal refresh margin,
+      // would otherwise be requested again at once: cool down instead (D81).
+      next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.repoId), {
+        ...entry,
+        token: cached,
+        error: null,
+        minRemainingMs: minimumMet ? 0 : entry.minRemainingMs,
+        coolUntilMs: minimumMet && this.fresh(token.expiresAt, nowMs) ? 0 : cool,
+      });
     }
     for (const error of errors) {
       const epoch = epochOf.get(scopeOf(error.jobId, error.repoId));
@@ -111,8 +140,13 @@ export class TokenCache {
     this.entries = next;
   }
 
-  private fresh(expiresAt: string, nowMs: number): boolean {
+  private remaining(expiresAt: string | undefined, nowMs: number): number {
+    if (expiresAt === undefined) return Number.NEGATIVE_INFINITY;
     const at = Date.parse(expiresAt);
-    return !Number.isNaN(at) && at - nowMs > this.timing.refreshMarginMs;
+    return Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at - nowMs;
+  }
+
+  private fresh(expiresAt: string, nowMs: number): boolean {
+    return this.remaining(expiresAt, nowMs) > this.timing.refreshMarginMs;
   }
 }

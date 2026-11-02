@@ -7,6 +7,7 @@ import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
 import { agentHasProjectAccess } from '../permissions/membership.queries';
 import { TicketLinkSource } from '../common/enums';
+import type { TicketStatus } from '../common/enums';
 import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {
   ITicketRepository,
@@ -137,6 +138,21 @@ export class PrismaTicketsRepository implements ITicketRepository {
           ? { kind: 'agent', id: row.assignedToAgent.id, name: row.assignedToAgent.name }
           : null,
     };
+  }
+
+  async findLatestStatusChangeActor(
+    ticketId: string,
+    toStatus: TicketStatus,
+  ): Promise<{ type: 'USER' | 'AGENT'; id: string } | null> {
+    const activity = await this.db.ticketActivity.findFirst({
+      where: { ticketId, action: 'STATUS_CHANGE', toStatus },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { actorAgentId: true, actorUserId: true },
+    });
+    if (!activity) return null;
+    if (activity.actorAgentId) return { type: 'AGENT', id: activity.actorAgentId };
+    if (activity.actorUserId) return { type: 'USER', id: activity.actorUserId };
+    return null;
   }
 
   async findProjectBySlug(slug: string): Promise<TicketProject | null> {
@@ -392,5 +408,14 @@ export class PrismaTicketsRepository implements ITicketRepository {
       }),
     ]);
     return fleetPr > 0 || activeJob > 0;
+  }
+
+  /**
+   * US-006: one count over every `pr` link of the ticket, whatever its source. The classic auto-PR
+   * asks this before calling a provider, so no retry can open a second PR for the same ticket.
+   */
+  async hasPrLink(ticketId: string): Promise<boolean> {
+    const count = await this.db.ticketLink.count({ where: { ticketId, linkType: 'pr' } });
+    return count > 0;
   }
 }

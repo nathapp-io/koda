@@ -32,6 +32,7 @@ export interface CredentialProvider {
    * expired, a token error). A REVIEW job needs it to write nax's forge token file.
    */
   currentToken?(job: JobRow): string | null;
+  freshToken?(job: JobRow, minRemainingMs: number, isCancelled?: () => boolean): Promise<{ ok: true; token: string } | { ok: false; reason: string }>;
 }
 
 /** Read-only project repository credentials; no job-local command shims. */
@@ -133,6 +134,28 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
   currentToken(job: JobRow): string | null {
     const state = this.deps.tokens.state(job.jobId, job.leaseEpoch, this.deps.nowMs());
     return state.kind === 'token' ? state.token.token : null;
+  }
+
+  /** Await a token with the requested remaining lifetime; always remove the minimum when the wait ends. */
+  async freshToken(job: JobRow, minRemainingMs: number, isCancelled?: () => boolean): Promise<{ ok: true; token: string } | { ok: false; reason: string }> {
+    const { tokens, nowMs, sleep, timing } = this.deps;
+    tokens.requireFresh(job.jobId, job.leaseEpoch, minRemainingMs);
+    const deadline = nowMs() + timing.waitMs;
+    try {
+      for (;;) {
+        const error = tokens.error(job.jobId, job.leaseEpoch);
+        if (error !== null) return { ok: false, reason: `git token: ${error}` };
+        const state = tokens.state(job.jobId, job.leaseEpoch, nowMs());
+        if (state.kind === 'token' && Date.parse(state.token.expiresAt) - nowMs() >= minRemainingMs) {
+          return { ok: true, token: state.token.token };
+        }
+        if (this.closing || isCancelled?.()) return { ok: false, reason: 'cancelled' };
+        if (nowMs() >= deadline) return { ok: false, reason: 'git token: timeout' };
+        await sleep(timing.pollMs);
+      }
+    } finally {
+      tokens.requireFresh(job.jobId, job.leaseEpoch, 0);
+    }
   }
 
   async releaseRepo(job: JobRow, repoId: string): Promise<void> {

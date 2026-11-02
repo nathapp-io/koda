@@ -111,6 +111,10 @@ export interface AssignTicketData {
 
 export interface ITicketRepository {
   findProjectBySlug(slug: string): Promise<TicketProject | null>;
+  findLatestStatusChangeActor(
+    ticketId: string,
+    toStatus: TicketStatus,
+  ): Promise<{ type: 'USER' | 'AGENT'; id: string } | null>;
   findLastTicketInProject(projectId: string): Promise<{ number: number } | null>;
   createTicket(data: CreateTicketData): Promise<TicketDomain>;
   findTicketPage(filters: TicketListFilters, page: IPageOption): Promise<IPageResult<TicketDomain>>;
@@ -176,4 +180,10 @@ export interface ITicketRepository {
    * ends up with two open PRs.
    */
   hasFleetOwnership(ticketId: string): Promise<boolean>;
+  /**
+   * Permissions P1 US-006: true when the ticket already carries a pull-request link from any
+   * source — `vcs`, `fleet` or one a human added. The classic VERIFIED auto-PR asks before
+   * creating, so a retried or stale-approved transition cannot open a second PR for the same work.
+   */
+  hasPrLink(ticketId: string): Promise<boolean>;
 }

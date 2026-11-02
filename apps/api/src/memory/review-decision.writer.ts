@@ -56,10 +56,14 @@ export class ReviewDecisionWriter {
           if (skipped) throw new ReviewDecisionSkipped(skipped);
         },
         onWritten: async ({ item: written }) => {
+          const approval = currentContext()?.approval;
+          // US-007 (ruling 14): the approver is always the writer; only a confirmed review-thread author
+          // earned `satisfiedBy: 'human'`. The summary is where the difference stays visible.
+          const provenance = approval?.satisfiedBy === 'human' ? 'verified thread author' : 'unverified';
           await this.audit.record({
             key: 'system.review.decision', resourceType: 'memory-item', resourceId: written.id,
             projectId: input.projectId,
-            summary: `review decision from job ${input.jobId}, PR #${input.prNumber}, approver ${currentContext()?.approval.approverId} (one of the thread's commenters)`,
+            summary: `review decision from job ${input.jobId}, PR #${input.prNumber}, approver ${approval?.approverId} (${provenance})`,
           });
         },
       });

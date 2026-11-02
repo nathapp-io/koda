@@ -3,6 +3,7 @@ import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { currentContext } from '../../action-context/action-context';
 import { ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import { PermissionService, type PermissionScope } from '../../permissions/permission.service';
+import type { ApprovalMode } from '../../permissions/catalog';
 import { ApprovalGate, type GateOutcome } from '../approval-gate.service';
 import { approvalOf, ApprovalExecutionService } from '../approval-execution.service';
 import { rethrowApprovalError } from '../approval-http-errors';
@@ -28,6 +29,8 @@ export interface RouteGateCall {
   keyCheck?: boolean;
   /** Additional keys whose resolved approval modes also constrain this call. */
   alsoKeys?: readonly string[];
+  /** Contextual minimum approval mode for this route call. */
+  minMode?: ApprovalMode;
 }
 
 /**
@@ -54,7 +57,7 @@ export class ApprovalRouteGate {
   ) {}
 
   async run<TResult>(call: RouteGateCall): Promise<GateOutcome<TResult>> {
-    const { key, variant, projectId, input, keyCheck = true, redeem, alsoKeys } = call;
+    const { key, variant, projectId, input, keyCheck = true, redeem, alsoKeys, minMode } = call;
     const actor = currentContext()?.actor;
     if (actor === undefined) throw new Error('approval route gate needs a principal actor');
     if (actor.type === 'RUNNER') throw new ForbiddenAppException({}, 'permissions');
@@ -87,6 +90,7 @@ export class ApprovalRouteGate {
         projectId,
         variant,
         ...(alsoKeys === undefined ? {} : { alsoKeys }),
+        ...(minMode === undefined ? {} : { minMode }),
       });
     } catch (error) {
       throw unavailableActorAsAuth(error);

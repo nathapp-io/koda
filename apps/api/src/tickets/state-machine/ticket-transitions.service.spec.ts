@@ -11,6 +11,8 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { PermissionService } from '../../permissions/permission.service';
+import { AfterCommitService } from '../../permissions/after-commit.service';
+import { runWithActionContext } from '../../action-context/action-context';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
 vi.mock('../../vcs/factory', () => ({ createVcsProvider: vi.fn() }));
@@ -148,6 +150,9 @@ describe('TicketTransitionsService', () => {
       createTicketActivity: vi.fn(),
       createTicketLink: vi.fn(),
       updateTicketLink: vi.fn(),
+      // Whole-branch fix B2: the self-fix floor re-derives the newest VERIFY_FIX actor under the
+      // closing transaction. No activity row by default, so the existing transitions keep closing.
+      findLatestStatusChangeActor: vi.fn().mockResolvedValue(null),
     };
 
     mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'ev-1', createdAt: new Date() }) };
@@ -170,6 +175,9 @@ describe('TicketTransitionsService', () => {
           provide: PermissionService,
           useValue: mockPermissions,
         },
+        // US-006: the real deferral queue. Outside a scope it runs the task immediately, which is
+        // the immediate path these transition tests exercise.
+        AfterCommitService,
         {
           provide: TicketEventService,
           useValue: mockTicketEventService,
@@ -528,6 +536,100 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status });
       await expect(service.close('koda', 'KODA-1', 'reason', mockUserPrincipal)).rejects.toBeInstanceOf(AppException);
       expect(mockTicketRepo.createComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('whole-branch fix B2 — the self-fix floor is re-derived under the transition lock', () => {
+    const verifyFixTicket = { ...mockTicket, status: TicketStatus.VERIFY_FIX };
+    const closed = { ...verifyFixTicket, status: TicketStatus.CLOSED };
+    const reviewComment = { ...mockComment, type: CommentType.REVIEW };
+    const closedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.CLOSED };
+    /** Runs fn under an approval context, as the gate (or a settled request) does for the command. */
+    const asApproval = <T>(requiredMode: 'none' | 'self' | 'agent' | 'human', actor: KodaPrincipal, fn: () => T): T =>
+      runWithActionContext({
+        actor: { type: actor.actorType === 'agent' ? 'AGENT' : 'USER', id: actor.id },
+        origin: 'rest',
+        approval: { requiredMode, satisfiedBy: requiredMode === 'none' ? 'none' : 'human' },
+      }, fn);
+
+    beforeEach(() => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(closed);
+      mockTicketRepo.createComment.mockResolvedValue(reviewComment);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
+    });
+
+    it('refuses a close by the fix-submitting agent whose approval never reached agent mode', async () => {
+      // The probe's exact shape: the gate saw IN_PROGRESS (no floor) and executed under `none`, while
+      // the transition — reading after the same agent's /fix committed — finds its own VERIFY_FIX.
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      await expect(asApproval('none', mockAgentPrincipal, () => service.verifyFix('koda', 'KODA-1', 'ok', true, mockAgentPrincipal)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTicketRepo.findLatestStatusChangeActor).toHaveBeenCalledExactlyOnceWith(verifyFixTicket.id, TicketStatus.VERIFY_FIX);
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses the same close under a self-mode approval (the weaker duplicate B1 supersedes)', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      await expect(asApproval('self', mockAgentPrincipal, () => service.verifyFix('koda', 'KODA-1', 'ok', true, mockAgentPrincipal)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('closes when the fix-submitting agent closes under an agent-mode approval', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      const result = await asApproval('agent', mockAgentPrincipal, () => service.verifyFix('koda', 'KODA-1', 'ok', true, mockAgentPrincipal));
+
+      expect(result.ticket.status).toBe(TicketStatus.CLOSED);
+      expect(mockAuditRecorder.record).toHaveBeenCalled();
+    });
+
+    it('closes when the newest VERIFY_FIX actor is another principal', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: 'agent-other' });
+
+      const result = await service.verifyFix('koda', 'KODA-1', 'ok', true, mockAgentPrincipal);
+
+      expect(result.ticket.status).toBe(TicketStatus.CLOSED);
+    });
+
+    it('does not consult the fix actor or refuse a return to IN_PROGRESS', async () => {
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue({ ...verifyFixTicket, status: TicketStatus.IN_PROGRESS });
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      const result = await asApproval('none', mockAgentPrincipal, () => service.verifyFix('koda', 'KODA-1', 'redo', false, mockAgentPrincipal));
+
+      expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(mockTicketRepo.findLatestStatusChangeActor).not.toHaveBeenCalled();
+    });
+
+    it('refuses /verify closing the caller\'s own fix without an agent-mode approval', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      await expect(asApproval('none', mockAgentPrincipal, () => service.verify('koda', 'KODA-1', 'ok', mockAgentPrincipal)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses /close closing the caller\'s own fix without an agent-mode approval', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: mockAgentPrincipal.id });
+
+      await expect(asApproval('none', mockAgentPrincipal, () => service.close('koda', 'KODA-1', 'done', mockAgentPrincipal)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('matches a user principal against its own fix and lets it close under an agent-mode approval', async () => {
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'USER', id: mockUserPrincipal.id });
+
+      // The user also holds the approval (a USER subject satisfies every mode directly).
+      const result = await asApproval('agent', mockUserPrincipal, () => service.close('koda', 'KODA-1', 'done', mockUserPrincipal));
+
+      expect(result.ticket.status).toBe(TicketStatus.CLOSED);
     });
   });
 
@@ -1075,6 +1177,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       webhookDispatcher as never,
       undefined,
@@ -1246,6 +1349,8 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-123' }),
       createTicketLink: vi.fn().mockResolvedValue({ id: 'link-123' }),
       hasFleetOwnership: vi.fn().mockResolvedValue(false),
+      // US-006: the duplicate guard runs after the fleet check; this ticket has no PR link yet.
+      hasPrLink: vi.fn().mockResolvedValue(false),
       createTicketActivity2: undefined,
     };
     const txManager = { run: (fn: () => unknown) => fn() };
@@ -1258,6 +1363,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       undefined,
       vcsConnectionService as never,
@@ -1314,6 +1420,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      new AfterCommitService(),
       undefined,
       undefined,
       vcsConnectionService as never,

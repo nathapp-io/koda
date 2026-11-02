@@ -36,6 +36,21 @@ describe('parseSyncRequest (spec §3.2)', () => {
     expect(() => parseSyncRequest(raw)).toThrow(ValidationAppException);
   });
 
+  it('AC-1: retains fresh true on token requests', () => {
+    const parsed = parseSyncRequest({ ...base, tokenRequests: [{ jobId: 'j1', leaseEpoch: 1, fresh: true }] });
+    expect(parsed.tokenRequests).toEqual([{ jobId: 'j1', leaseEpoch: 1, fresh: true }]);
+  });
+
+  it('AC-2: drops fresh false from token requests', () => {
+    const parsed = parseSyncRequest({ ...base, tokenRequests: [{ jobId: 'j1', leaseEpoch: 1, fresh: false }] });
+    expect(parsed.tokenRequests).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
+  });
+
+  it('AC-3: rejects unsupported fresh token request values', () => {
+    expect(() => parseSyncRequest({ ...base, tokenRequests: [{ jobId: 'j1', leaseEpoch: 1, fresh: 'yes' }] }))
+      .toThrow(ValidationAppException);
+  });
+
   it('replaces NUL in event payload strings and keys instead of failing the request (review M2)', () => {
     const parsed = parseSyncRequest({ ...base, jobs: [{ jobId: 'j', leaseEpoch: 1, events: [ev(1, 'snapshot', { resultBranch: 'a\u0000b', ['k\u0000']: ['x\u0000'] })] }] });
     expect(parsed.jobs[0].events[0].payload).toEqual({ resultBranch: 'a\uFFFDb', ['k\uFFFD']: ['x\uFFFD'] });

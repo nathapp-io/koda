@@ -6,7 +6,7 @@ import type { AssignPayload } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../../src/approvals/approval-relay';
 import type { CredentialProvider } from '../../src/credentials/broker';
-import { HostExecutor } from '../../src/executor/host-executor';
+import { FORGE_TOKEN_MIN_REMAINING_MS, HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
 import { configBranchName } from '../../src/executor/config-job/commit-push';
 import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
@@ -644,6 +644,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
   type SpawnCall = { readonly argv: readonly string[]; readonly options: SpawnNaxOptions };
   interface Injection {
     currentToken?: string | null;
+    freshToken?: { ok: true; token: string } | { ok: false; reason: string };
     omitCurrentToken?: boolean;
     spawnError?: Error | null;
     breakTokenFile?: boolean;
@@ -663,6 +664,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
       ...(['REVIEW', 'FIX'].includes(command) ? { feature: 'review-pr-42', review: over.review ?? { prNumber: 42, botLogin: BOT, ...(command === 'FIX' ? { decisions: [{ id: 'm1', statement: 's' }] } : {}) } } : {}),
     });
     const calls: SpawnCall[] = [];
+    const freshCalls: { job: JobRow; minRemainingMs: number }[] = [];
     const tokenPath = join(w.row.jobDir, REVIEW_TOKEN_FILE);
     const credentials: CredentialProvider = {
       acquire: async () => over.acquireFailureReason === undefined
@@ -670,6 +672,10 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
         : { ok: false, reason: over.acquireFailureReason },
       release: async () => undefined,
       ...(over.omitCurrentToken === true ? {} : { currentToken: () => (over.currentToken === undefined ? TOKEN : over.currentToken) }),
+      ...(over.omitCurrentToken === true ? {} : { freshToken: async (job: JobRow, minRemainingMs: number) => {
+        freshCalls.push({ job, minRemainingMs });
+        return over.freshToken ?? (over.currentToken === null ? { ok: false as const, reason: 'git token: none' } : { ok: true as const, token: TOKEN });
+      } }),
     };
     const spawnNax = (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => {
       calls.push({ argv, options });
@@ -686,8 +692,57 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
       nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS, spawnNax,
     });
     await mkdir(w.row.jobDir, { recursive: true });
-    return { ...w, calls, ex, tokenPath };
+    return { ...w, calls, freshCalls, ex, tokenPath };
   }
+
+  test('AC-7: the forge token minimum is 50 minutes', () => {
+    expect(FORGE_TOKEN_MIN_REMAINING_MS).toBe(3_000_000);
+  });
+
+  test('AC-8/9: REVIEW uses freshToken and writes its returned value', async () => {
+    const w = await injectedWorld('REVIEW', { freshToken: { ok: true, token: 'fresh-review' } });
+    await w.ex.spawn(w.row);
+    expect(w.freshCalls).toEqual([{ job: w.row, minRemainingMs: 3_000_000 }]);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe('fresh-review');
+  });
+
+  test('AC-10/11: FIX review step uses freshToken and writes its returned value', async () => {
+    const w = await injectedWorld('FIX', { freshToken: { ok: true, token: 'fresh-review-step' } });
+    await w.ex.spawn(w.row);
+    expect(w.freshCalls).toEqual([{ job: w.row, minRemainingMs: 3_000_000 }]);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe('fresh-review-step');
+  });
+
+  test('AC-12/13: FIX step uses freshToken and writes its returned value', async () => {
+    const w = await injectedWorld('FIX', { freshToken: { ok: true, token: 'fresh-fix-step' } });
+    await w.ex.spawnFixStep(w.row);
+    expect(w.freshCalls).toEqual([{ job: w.row, minRemainingMs: 3_000_000 }]);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe('fresh-fix-step');
+  });
+
+  test('AC-14/15: FIX refusal does not write forge-token or start nax', async () => {
+    const w = await injectedWorld('FIX', { freshToken: { ok: false, reason: 'git token: timeout' } });
+    await expect(w.ex.spawnFixStep(w.row)).rejects.toThrow('git token: timeout');
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+    expect(w.calls).toEqual([]);
+  });
+
+  test('AC-16: REVIEW without freshToken refuses before writing', async () => {
+    const w = await injectedWorld('REVIEW', { omitCurrentToken: true });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('git token: none');
+    await expect(stat(w.tokenPath)).rejects.toThrow();
+  });
+
+  test('AC-17/18: default-branch refusal prevents token writes for REVIEW and FIX steps', async () => {
+    for (const start of ['REVIEW', 'FIX_REVIEW', 'FIX_STEP'] as const) {
+      const command = start === 'REVIEW' ? 'REVIEW' : 'FIX';
+      const w = await injectedWorld(command, { freshToken: { ok: false, reason: 'git token: default_branch_unprotected' } });
+      const run = start === 'FIX_STEP' ? w.ex.spawnFixStep(w.row) : w.ex.spawn(w.row);
+      await expect(run).rejects.toThrow('git token: default_branch_unprotected');
+      await expect(stat(w.tokenPath)).rejects.toThrow();
+      expect(w.calls).toEqual([]);
+    }
+  });
 
   test('US-008: FIX review spawn writes decisions, hands off token/login, and uses review argv', async () => {
     const w = await injectedWorld('FIX');
@@ -751,7 +806,7 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     let profileAtStart: Record<string, unknown> | undefined;
     const observing = new HostExecutor({
       config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
-      nowMs: () => Date.now(), credentials: { acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }), release: async () => undefined, currentToken: () => TOKEN },
+      nowMs: () => Date.now(), credentials: { acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }), release: async () => undefined, currentToken: () => TOKEN, freshToken: async () => ({ ok: true, token: TOKEN }) },
       approvals: NO_APPROVALS,
       spawnNax: (argv, options) => { profileAtStart = JSON.parse(readFileSync(jobProfilePath(w.naxHome, 'rjob1'), 'utf8')) as Record<string, unknown>; w.calls.push({ argv, options }); return HANDLE; },
     });

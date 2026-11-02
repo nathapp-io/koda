@@ -22,6 +22,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { RagService } from '../../../src/rag/rag.service';
 import { VectorStore } from '../../../src/rag/vector-store.service';
 import { TicketStatus } from '../../../src/common/enums';
@@ -93,6 +94,9 @@ describe('RAG close-to-search integration', () => {
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency. This spec is
         // about the close -> index -> search path, so the edge check allows the close.
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        // Permissions P1 (US-006): the post-commit seam for the close -> index effect. No scope is
+        // open here, so the index starts right after the transition, as this spec expects.
+        AfterCommitService,
         // Provide RagService with a factory so we can inject FakeEmbeddingService directly
         {
           provide: RagService,

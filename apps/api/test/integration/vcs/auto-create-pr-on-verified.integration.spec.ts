@@ -16,6 +16,7 @@ import type { Mock } from 'vitest';
  */
 
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -117,10 +118,17 @@ describe('Auto-create PR on VERIFIED Transition', () => {
         },
         ticketActivity: {
           create: vi.fn(),
+          // Whole-branch fix B2: the closing transition re-derives the newest VERIFY_FIX actor.
+          findFirst: vi.fn().mockResolvedValue(null),
         },
         ticketLink: {
           create: vi.fn(),
           findFirst: vi.fn(),
+          // US-006: the duplicate-PR guard counts `pr` links; hasFleetOwnership counts fleet ones.
+          count: vi.fn().mockResolvedValue(0),
+        },
+        fleetJobTicket: {
+          count: vi.fn().mockResolvedValue(0),
         },
         vcsConnection: {
           findUnique: vi.fn(),
@@ -154,6 +162,8 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       // effects of a VERIFIED transition, so the edge check allows it.
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as any,
       mockAuditRecorder as never,
+      // US-006: the real post-commit seam; no scope is open here, so the PR runs immediately.
+      new AfterCommitService(),
       undefined,
     );
   });
@@ -352,6 +362,11 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
             create: vi.fn(),
             findFirst: vi.fn(),
             update: vi.fn(),
+            // US-006: the duplicate-PR guard counts `pr` links; hasFleetOwnership counts fleet ones.
+            count: vi.fn().mockResolvedValue(0),
+          },
+          fleetJobTicket: {
+            count: vi.fn().mockResolvedValue(0),
           },
           vcsConnection: {
             findUnique: vi.fn(),
@@ -391,6 +406,8 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         // (ragService and webhookDispatcher stay undefined).
         { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as any,
         mockAuditRecorder as never,
+        // US-006: the real post-commit seam; no scope is open here, so the PR runs immediately.
+        new AfterCommitService(),
         undefined,
         undefined,
         mockVcsConnectionService as any,
@@ -487,6 +504,44 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       // neither a pending placeholder nor a final link (AC4)
       expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
       expect(mockPrismaService.client.ticketLink.update).not.toHaveBeenCalled();
+    });
+
+    /**
+     * US-006: the ticket already carries a `pr` link (from a human, the VCS sync, or a previous
+     * attempt of this same transition). Re-running the transition must not open a second PR.
+     *
+     * `ticketLink.count` answers both repository queries: the fleet-ownership one filters on
+     * `source`, the PR-link one does not.
+     */
+    describe('US-006: verifying a ticket that already has a PR link', () => {
+      beforeEach(() => {
+        mockPrismaService.client.ticketLink.count.mockImplementation(
+          async ({ where }: { where: { source?: string } }) => (where.source === undefined ? 1 : 0),
+        );
+      });
+
+      it('AC-18: creates no new TicketLink', async () => {
+        await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
+
+        expect(mockPrismaService.client.ticketLink.count).toHaveBeenCalledWith({
+          where: { ticketId: 'ticket-1', linkType: 'pr' },
+        });
+        expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
+      });
+
+      it('AC-19: never calls createPullRequest', async () => {
+        mockCreateVcsProvider.mockClear();
+        mockVcsProvider.createPullRequest.mockResolvedValue({
+          number: 999,
+          url: 'https://github.com/test-owner/test-repo/pull/999',
+        });
+
+        await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
+
+        expect(mockVcsProvider.createPullRequest).not.toHaveBeenCalled();
+        // Not even a provider is built: the guard answers before any VCS work starts.
+        expect(mockCreateVcsProvider).not.toHaveBeenCalled();
+      });
     });
   });
 

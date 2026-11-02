@@ -121,6 +121,62 @@ describe('GitHubAppClient', () => {
     });
   });
 
+  describe('mintThreadReadToken / getReviewThread (US-007)', () => {
+    const MINT = 'POST /app/installations/42/access_tokens';
+
+    it('US-007 AC-1: mints a contents/pull_requests/metadata read token for the repository', async () => {
+      forge.routes.set(MINT, (req) => {
+        expect(req.body).toEqual({ repositories: ['app'], permissions: { contents: 'read', pull_requests: 'read', metadata: 'read' } });
+        return { status: 201, body: { token: 'ghs_thread', expires_at: '2026-10-01T01:00:00Z' } };
+      });
+      await expect(client.mintThreadReadToken(BigInt(42), 'app')).resolves.toEqual({ token: 'ghs_thread', expiresAt: new Date('2026-10-01T01:00:00Z') });
+    });
+
+    const threadBody = (authors: unknown[], overrides: Record<string, unknown> = {}) => ({
+      data: { node: {
+        pullRequest: { number: 7, repository: { name: 'app', owner: { login: 'acme' } }, ...overrides },
+        comments: { nodes: authors.map((author) => ({ author })) },
+      } },
+    });
+
+    it("US-007 AC-2: posts one GraphQL query carrying the variables and the bearer token", async () => {
+      forge.routes.set('POST /graphql', () => ({ status: 200, body: threadBody([{ login: 'alice' }]) }));
+      await client.getReviewThread('tok', 'PRRT_1');
+      const posts = forge.requests.filter((r) => r.method === 'POST');
+      expect(posts).toHaveLength(1);
+      expect(posts[0]).toMatchObject({ path: '/graphql', headers: { authorization: 'Bearer tok' } });
+      expect(posts[0]?.body).toMatchObject({ variables: { id: 'PRRT_1' } });
+      expect(JSON.stringify(posts[0]?.body)).toContain('PullRequestReviewThread');
+    });
+
+    it('US-007 AC-3: maps a GHE /api/v3 base onto the same host\'s /api/graphql', async () => {
+      const request = vi.fn().mockResolvedValue({ status: 200, body: { data: { node: null } } });
+      const ghe = new GitHubAppClient(fleetCfg as never, { githubApiUrl: 'https://ghe.example/api/v3' } as never, { request } as unknown as FleetHttpClient, { mint: vi.fn() } as unknown as GitTokenBroker);
+      await expect(ghe.getReviewThread('tok', 'PRRT_1')).resolves.toBeNull();
+      expect(request).toHaveBeenCalledExactlyOnceWith('POST', 'https://ghe.example/api/graphql', expect.anything(), expect.anything());
+    });
+
+    it('US-007 AC-4: maps the PR, repository and deduplicated non-null comment authors', async () => {
+      forge.routes.set('POST /graphql', () => ({ status: 200, body: threadBody([{ login: 'alice' }, null, { login: 'alice' }]) }));
+      await expect(client.getReviewThread('tok', 'PRRT_1')).resolves.toEqual({ repoOwner: 'acme', repoName: 'app', prNumber: 7, authors: ['alice'] });
+    });
+
+    it('US-007 AC-5: answers null for a null node', async () => {
+      forge.routes.set('POST /graphql', () => ({ status: 200, body: { data: { node: null } } }));
+      await expect(client.getReviewThread('tok', 'PRRT_1')).resolves.toBeNull();
+    });
+
+    it('US-007 AC-6: answers null for an errors payload with no data', async () => {
+      forge.routes.set('POST /graphql', () => ({ status: 200, body: { errors: [{ message: 'Could not resolve to a node' }] } }));
+      await expect(client.getReviewThread('tok', 'PRRT_1')).resolves.toBeNull();
+    });
+
+    it('US-007 AC-7: rejects a non-200 answer with provider_error', async () => {
+      forge.routes.set('POST /graphql', () => ({ status: 502, body: { message: 'secret upstream detail' } }));
+      await expect(client.getReviewThread('tok', 'PRRT_1')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
+
   it('reports github_app_not_configured when the key file is unset', async () => {
     const bare = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: undefined } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: vi.fn() } as unknown as GitTokenBroker);
     await expect(bare.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_not_configured' });

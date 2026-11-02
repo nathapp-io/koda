@@ -73,6 +73,39 @@ describe('GitTokenBroker job purposes', () => {
     expect(github.mintInstallationToken).not.toHaveBeenCalled();
   });
 
+  it('AC-4 through AC-8: fresh FIX bypasses and replaces the cache while normal FIX reuses it', async () => {
+    const cachedExpiry = new Date(NOW.getTime() + 50 * 60_000);
+    github.mintInstallationToken.mockResolvedValueOnce({ token: 'cached-fix', expiresAt: cachedExpiry })
+      .mockResolvedValueOnce({ token: 'fresh-fix', expiresAt: minted.expiresAt });
+    const request = { jobId: 'j1', leaseEpoch: 1, repo, purpose: 'fix' as const };
+    const cached = await broker.mint(request, NOW);
+    const reused = await broker.mint(request, NOW);
+    expect(reused).toEqual(cached);
+    expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
+    const installationCallsBeforeReuse = github.mintInstallationToken.mock.calls.length;
+    const readOnlyCallsBeforeReuse = github.mintReadOnlyToken.mock.calls.length;
+    expect(await broker.mint(request, NOW)).toEqual(cached);
+    expect(github.mintInstallationToken).toHaveBeenCalledTimes(installationCallsBeforeReuse);
+    expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(readOnlyCallsBeforeReuse);
+
+    const fresh = await broker.mint({ ...request, fresh: true }, NOW);
+    expect(github.mintInstallationToken).toHaveBeenCalledTimes(2);
+    expect(fresh).toMatchObject({ ok: true, token: { token: 'fresh-fix' } });
+    const afterFresh = await broker.mint(request, NOW);
+    expect(afterFresh).toEqual(fresh);
+    expect(github.mintInstallationToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('AC-9: fresh REVIEW bypasses its cached review token', async () => {
+    github.mintReviewToken.mockResolvedValueOnce({ token: 'cached-review', expiresAt: minted.expiresAt })
+      .mockResolvedValueOnce({ token: 'fresh-review', expiresAt: minted.expiresAt });
+    const request = { jobId: 'j1', leaseEpoch: 1, repo, purpose: 'review' as const };
+    await broker.mint(request, NOW);
+    const fresh = await broker.mint({ ...request, fresh: true }, NOW);
+    expect(github.mintReviewToken).toHaveBeenCalledTimes(2);
+    expect(fresh).toMatchObject({ ok: true, token: { token: 'fresh-review' } });
+  });
+
   it('AC-13: preserves read-only token repository attribution without a purpose', async () => {
     await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo, readOnly: true }, NOW)).resolves.toEqual({
       ok: true, token: { jobId: 'j1', repoId: repo.id, token: 'readonly', username: 'x-access-token', expiresAt: minted.expiresAt.toISOString() },

@@ -293,7 +293,13 @@ assert "koda ticket show --json" '"id"\|"title"'  "$(koda ticket show KODA-1 --j
 assert "koda ticket verify"    "verif\|success\|VERIFIED"   "$(koda ticket verify KODA-1 --comment 'Looks verified')"
 assert "koda ticket start"     "start\|success\|IN_PROGRESS" "$(koda ticket start KODA-1)"
 assert "koda ticket fix"       "fix\|success\|VERIFY_FIX"   "$(koda ticket fix KODA-1 --comment 'Fixed it')"
-assert "koda ticket verify-fix" "pass\|CLOSED\|success"     "$(koda ticket verify-fix KODA-1 --comment 'Good fix' --pass)"
+# review-p1-rest US-003: the agent submitted KODA-1's own fix on the line above,
+# so approving it is a self-fix. The gate holds that transition at `agent` mode:
+# the call parks an approval request (exit 5), the ticket stays in VERIFY_FIX, and
+# only a human decision closes it.
+assert_approved_write "koda ticket verify-fix" "ticket.transition.verify-fix.approve" \
+  ticket verify-fix KODA-1 --comment 'Good fix' --pass
+assert "koda ticket verify-fix closes KODA-1 after approval" "Status: CLOSED" "$(koda ticket show KODA-1)"
 
 # =============================================================================
 # STEP 9: Ticket reject flow

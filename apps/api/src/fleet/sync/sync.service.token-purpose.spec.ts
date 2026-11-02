@@ -34,8 +34,8 @@ function harness(command: FleetJobKind) {
     { syncWaitMs: 0 }, broker, fence, createMock(), createMock(), txManager, createMock(),
     createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }),
   );
-  const sync = () => service.sync('runner-1', { ...base, tokenRequests: [{ jobId: job.id, leaseEpoch: job.leaseEpoch }] });
-  return { sync, github, job, repo };
+  const sync = (fresh = false) => service.sync('runner-1', { ...base, tokenRequests: [{ jobId: job.id, leaseEpoch: job.leaseEpoch, ...(fresh ? { fresh: true } : {}) }] });
+  return { sync, github, job, repo, broker };
 }
 
 describe('SyncService repo-less token purpose', () => {
@@ -60,6 +60,20 @@ describe('SyncService repo-less token purpose', () => {
   it('AC-4: returns no token when a FIX repo default branch is unprotected', async () => {
     const h = harness(FleetJobKind.FIX);
     expect((await h.sync()).gitTokens).toEqual([]);
+  });
+
+  it.each([
+    [FleetJobKind.FIX, true, true, 'AC-10'],
+    [FleetJobKind.REVIEW, true, true, 'AC-11'],
+    [FleetJobKind.RUN, true, false, 'AC-12'],
+    [FleetJobKind.FIX, false, false, 'AC-13'],
+  ])('%s fresh=%s forwards only the authorized fresh flag (%s)', async (command, requestFresh, expectedFresh) => {
+    const h = harness(command);
+    const mint = vi.spyOn(h.broker, 'mint').mockResolvedValue({ ok: false, error: { jobId: 'job-1', reason: 'provider_error' } });
+    await h.sync(requestFresh);
+    const request = mint.mock.calls[0]?.[0];
+    expect(request).toEqual({ jobId: 'job-1', leaseEpoch: 7, repo: h.repo, ...(expectedFresh ? { fresh: true } : {}), ...(command === FleetJobKind.REVIEW ? { purpose: 'review' } : command === FleetJobKind.FIX ? { purpose: 'fix' } : {}) });
+    expect(Object.prototype.hasOwnProperty.call(request, 'fresh')).toBe(expectedFresh);
   });
 
   it('AC-5: preserves the exact RUN broker request without a purpose key', async () => {

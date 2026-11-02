@@ -58,7 +58,13 @@ function parseAck(v: unknown): CommandAck {
 function parseTokenRequest(v: unknown): TokenRequest {
   if (!isObj(v) || !isStr(v.jobId, 64) || !isInt(v.leaseEpoch, 0)) fail('tokenRequest');
   if ('repoId' in v && !isStr(v.repoId, 64)) fail('tokenRequest');
-  return { jobId: v.jobId as string, leaseEpoch: v.leaseEpoch as number, ...('repoId' in v ? { repoId: v.repoId as string } : {}) };
+  if ('fresh' in v && v.fresh !== true && v.fresh !== false) fail('tokenRequest');
+  return {
+    jobId: v.jobId as string,
+    leaseEpoch: v.leaseEpoch as number,
+    ...('repoId' in v ? { repoId: v.repoId as string } : {}),
+    ...(v.fresh === true ? { fresh: true as const } : {}),
+  };
 }
 
 /** Envelope validation of an untrusted runner sync (spec §3.2). Payload semantics: interpretEvent. */

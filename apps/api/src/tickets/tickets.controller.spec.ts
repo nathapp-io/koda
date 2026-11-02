@@ -112,6 +112,7 @@ describe('TicketsController', () => {
     update: vi.fn(),
     softDelete: vi.fn(),
     assign: vi.fn(),
+    selfFixApprovalFloor: vi.fn().mockResolvedValue(undefined),
   };
 
   // ProjectContext a request receives from ProjectMembershipGuard (permissions P1 US-004: no role).
@@ -132,6 +133,7 @@ describe('TicketsController', () => {
   let module: TestingModule;
   beforeEach(async () => {
     mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
+    mockTicketsService.selfFixApprovalFloor.mockReset().mockResolvedValue(undefined);
     mockRouteGate.run.mockReset().mockResolvedValue({ status: 'executed', result: mockTicket });
     module = await Test.createTestingModule({
       controllers: [TicketsController],
@@ -679,6 +681,58 @@ describe('TicketsController', () => {
       expect(mockRouteGate.run).toHaveBeenCalledWith({
         key, variant: 'rest:tickets.verify-fix', projectId: 'proj-1',
         input: { slug: 'alpha', ref: 'AL-1', body: 'good' },
+      });
+    });
+  });
+
+  describe('US-003 self-fix approval floor', () => {
+    it('AC-1: verify-fix approval raises minimum mode for the fix actor', async () => {
+      mockTicketsService.selfFixApprovalFloor.mockResolvedValue('agent');
+      await controller.verifyFix('alpha', 'AL-1', { body: 'good' }, 'true', mockAgent, adminProject);
+      expect(service.selfFixApprovalFloor).toHaveBeenCalledOnce();
+      expect(service.selfFixApprovalFloor).toHaveBeenCalledWith('alpha', 'AL-1', mockAgent);
+      expect(mockRouteGate.run).toHaveBeenCalledOnce();
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify-fix.approve', variant: 'rest:tickets.verify-fix',
+        projectId: 'proj-1', input: { slug: 'alpha', ref: 'AL-1', body: 'good' }, minMode: 'agent',
+      });
+    });
+
+    it('AC-2: verify-fix approval omits minimum mode when there is no self-fix floor', async () => {
+      await controller.verifyFix('alpha', 'AL-1', { body: 'good' }, 'true', mockAgent, adminProject);
+      expect(service.selfFixApprovalFloor).toHaveBeenCalledWith('alpha', 'AL-1', mockAgent);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify-fix.approve', variant: 'rest:tickets.verify-fix',
+        projectId: 'proj-1', input: { slug: 'alpha', ref: 'AL-1', body: 'good' },
+      });
+      expect(mockRouteGate.run.mock.calls[0][0]).not.toHaveProperty('minMode');
+    });
+
+    it('AC-3/4: returning a fix skips the floor and omits minimum mode', async () => {
+      await controller.verifyFix('alpha', 'AL-1', { body: 'redo' }, 'false', mockAgent, adminProject);
+      expect(service.selfFixApprovalFloor).not.toHaveBeenCalled();
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify-fix.return', variant: 'rest:tickets.verify-fix',
+        projectId: 'proj-1', input: { slug: 'alpha', ref: 'AL-1', body: 'redo' },
+      });
+      expect(mockRouteGate.run.mock.calls[0][0]).not.toHaveProperty('minMode');
+    });
+
+    it('AC-5: verify raises minimum mode for the fix actor', async () => {
+      mockTicketsService.selfFixApprovalFloor.mockResolvedValue('agent');
+      await controller.verify('alpha', 'AL-1', { body: 'verified' }, mockAgent, adminProject);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.verify', variant: 'rest:tickets.verify', projectId: 'proj-1',
+        input: { slug: 'alpha', ref: 'AL-1', body: 'verified' }, minMode: 'agent',
+      });
+    });
+
+    it('AC-6: close raises minimum mode for the fix actor', async () => {
+      mockTicketsService.selfFixApprovalFloor.mockResolvedValue('agent');
+      await controller.close('alpha', 'AL-1', { body: 'done' }, mockAgent, adminProject);
+      expect(mockRouteGate.run).toHaveBeenCalledWith({
+        key: 'ticket.transition.close', variant: 'rest:tickets.close', projectId: 'proj-1',
+        input: { slug: 'alpha', ref: 'AL-1', body: 'done' }, minMode: 'agent',
       });
     });
   });

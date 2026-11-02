@@ -35,7 +35,7 @@ describeDb('ReviewDecisionWriter (PG)', () => {
     expect(await db.memoryItem.findUniqueOrThrow({ where: { id: result.memoryItemId } })).toMatchObject({ projectId: input.projectId, kind: 'DECISION', subject: 'repo:R1', predicate: 'review-finding:f-ab12', sourceType: 'review_event', sourceId: 'j1:t1', status: 'active', confidence: 1, ownerId: null, ownerType: null });
     const entries = await db.auditEntry.findMany({ where: { resourceId: result.memoryItemId } });
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ key: 'system.review.decision', resourceType: 'memory-item', actorType: 'SYSTEM', actorId: 'review', approverType: 'FORGE_USER', approverId: 'github:alice', summary: "review decision from job j1, PR #42, approver github:alice (one of the thread's commenters)" });
+    expect(entries[0]).toMatchObject({ key: 'system.review.decision', resourceType: 'memory-item', actorType: 'SYSTEM', actorId: 'review', approverType: 'FORGE_USER', approverId: 'github:alice', summary: 'review decision from job j1, PR #42, approver github:alice (verified thread author)' });
   });
   it('AC-7: duplicate in any status wins over retirement', async () => {
     const result = await mint();

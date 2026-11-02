@@ -126,6 +126,76 @@ describe('TokenCache want, drop and listeners', () => {
   });
 });
 
+describe('fresh token demand (US-009)', () => {
+  const freshTiming = { refreshMarginMs: 300_000, cooldownMs: 30_000 };
+  const expiresIn = (minutes: number) => iso(T0 + minutes * 60_000);
+
+  test('AC-1: requests a fresh token when a live token is below the requested minimum', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.want('j1', 1);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', expiresIn(40))], [], T0);
+    cache.requireFresh('j1', 1, 3_000_000);
+    expect(cache.requests(T0)).toEqual([{ jobId: 'j1', leaseEpoch: 1, fresh: true }]);
+  });
+  test('AC-2: no request is needed at the requested minimum', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.want('j1', 1);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', expiresIn(55))], [], T0);
+    cache.requireFresh('j1', 1, 3_000_000);
+    expect(cache.requests(T0)).toEqual([]);
+  });
+  test('AC-3 and AC-4: normal refresh boundary is unchanged and carries no fresh flag', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.want('j1', 1);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', expiresIn(40))], [], T0);
+    expect(cache.requests(T0)).toEqual([]);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', iso(T0 + 3 * 60_000))], [], T0 - 30_000);
+    expect(cache.requests(T0)).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
+  });
+  test('AC-5 through AC-8: fresh apply serves the token; a short fresh result cools down then retries fresh', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.want('j1', 1);
+    cache.requireFresh('j1', 1, 3_000_000);
+    const request = cache.requests(T0);
+    cache.apply(request, [tok('j1', expiresIn(59))], [], T0);
+    expect(cache.state('j1', 1, T0)).toMatchObject({ kind: 'token', token: { token: 'ghs_1' } });
+    expect(cache.requests(T0)).toEqual([]);
+
+    const short = new TokenCache(freshTiming);
+    short.want('j1', 1);
+    short.requireFresh('j1', 1, 3_000_000);
+    short.apply(short.requests(T0), [tok('j1', expiresIn(40))], [], T0);
+    expect(short.requests(T0 + 1)).toEqual([]);
+    expect(short.requests(T0 + freshTiming.cooldownMs + 1)).toEqual([{ jobId: 'j1', leaseEpoch: 1, fresh: true }]);
+  });
+  test('AC-9 and AC-10: fresh demand creates a wanted entry and asks for a fresh token', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.requireFresh('j1', 1, 3_000_000);
+    expect(cache.wanted('j1', 1)).toBe(true);
+    expect(cache.requests(T0)).toEqual([{ jobId: 'j1', leaseEpoch: 1, fresh: true }]);
+  });
+  test('AC-11 and AC-12: demand notifies listeners and zero clears the minimum', () => {
+    const cache = new TokenCache(freshTiming);
+    let calls = 0;
+    cache.onNeed(() => { calls += 1; });
+    cache.requireFresh('j1', 1, 3_000_000);
+    expect(calls).toBe(1);
+    cache.apply(cache.requests(T0), [tok('j1', expiresIn(40))], [], T0);
+    cache.requireFresh('j1', 1, 0);
+    expect(cache.requests(T0)).toEqual([]);
+  });
+  test('AC-13 through AC-15: error remains inspectable with a live token and is cleared by fresh demand', () => {
+    const cache = new TokenCache(freshTiming);
+    cache.want('j1', 1);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', expiresIn(40))], [], T0);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [], [{ jobId: 'j1', reason: 'default_branch_unprotected' }], T0);
+    expect(cache.error('j1', 1)).toBe('default_branch_unprotected');
+    expect(cache.state('j1', 1, T0)).toMatchObject({ kind: 'token' });
+    cache.requireFresh('j1', 1, 3_000_000);
+    expect(cache.error('j1', 1)).toBeNull();
+  });
+});
+
 describe('project code tokens', () => {
   test('project code AC-5: job and repository requests coexist without an undefined key', () => {
     const c = new TokenCache(timing);

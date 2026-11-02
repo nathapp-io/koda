@@ -17,11 +17,14 @@ import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { actorKind, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { currentContext } from '../../action-context/action-context';
+import { APPROVAL_MODE_RANK } from '../../approvals/domain/approval-mode';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
 import { TicketEventService } from '../../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
+import { AfterCommitService } from '../../permissions/after-commit.service';
 
 export interface TransitionTicketShape {
   id: string;
@@ -94,6 +97,12 @@ export class TicketTransitionsService {
     // authorized without it, and an optional dependency here would silently skip the check.
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    // Permissions P1 (US-006): the transition's external effects — the VERIFIED auto-PR and the
+    // CLOSED auto-index — are deferred to the commit of the transaction that produced them, so a
+    // rollback of that transaction cannot leave a PR behind. Required: the default provider is the
+    // global PermissionsModule's, and an optional dependency here would silently run them inside
+    // the transaction instead.
+    private readonly afterCommit: AfterCommitService,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
@@ -186,19 +195,54 @@ export class TicketTransitionsService {
   }
 
   /**
+   * US-006: the VERIFIED auto-PR, run after the transition's transaction committed.
+   *
+   * `AfterCommitService.defer` answers whether a scope is open. When one is — the deferred (approved)
+   * path, whose transaction `ApprovalExecutionService.executeOnce` owns — the task is queued and
+   * dropped with a rollback. When none is, the immediate path has no transaction left to wait for and
+   * the PR is created right after the transition's own transaction, awaited as before, so the
+   * response still reports what happened to it.
+   */
+  private async createPrAfterCommit(
+    project: { id: string; key: string },
+    ticket: TicketDomain,
+  ): Promise<void> {
+    const task = (): Promise<void> => this.createPrForTicket(project, ticket);
+    if (!this.afterCommit.defer(task)) await task();
+  }
+
+  /**
+   * US-006: the CLOSED auto-index, started after the transition's transaction committed.
+   *
+   * Deferred through the same queue as the PR task, so a rollback of the owning transaction drops it
+   * too. Outside any scope the task is started without being awaited (`void task()`): the immediate
+   * path's response has never waited on the embedding call, and the chain logs its own failure.
+   */
+  private autoIndexAfterCommit(
+    project: { id: string; key: string; autoIndexOnClose: boolean },
+    ticket: TicketDomain,
+  ): void {
+    const task = (): Promise<void> => this.autoIndexTicket(project, ticket);
+    if (!this.afterCommit.defer(task)) void task();
+  }
+
+  /**
    * Fire-and-forget: index a closed ticket in the RAG knowledge base.
    * Only runs when project.autoIndexOnClose is true and RagService is available.
+   *
+   * US-006: answers the index promise chain (it always catches and logs its own failure) so the
+   * caller decides whether to await it — the post-commit seam starts it unawaited.
    */
   private autoIndexTicket(
     project: { id: string; key: string; autoIndexOnClose: boolean },
     ticket: TicketDomain,
-  ): void {
-    if (!this.ragService || !project.autoIndexOnClose) return;
+  ): Promise<void> {
+    if (!this.ragService || !project.autoIndexOnClose) return Promise.resolve();
 
     const ragService = this.ragService;
     const projectId = project.id;
 
-    (this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository)
+    return (this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository)
       .findTicketWithComments(ticket.id)
       .then((ticketFull) => {
         // M15: a ticket deleted while this fire-and-forget index was pending must
@@ -221,6 +265,7 @@ export class TicketTransitionsService {
           },
         });
       })
+      .then(() => undefined)
       .catch((err) => {
         this.logger.warn(
           `[rag] Failed to auto-index ticket ${ticket.id} on close: ${err instanceof Error ? err.message : String(err)}`,
@@ -263,6 +308,25 @@ export class TicketTransitionsService {
       this.logger.warn(
         `[vcs] Fleet-ownership lookup failed for ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    // Permissions P1 (US-006): a ticket that already carries a `pr` link — from any source — must not
+    // get a second one. This is the duplicate guard the fleet check does not cover: a stale-approved
+    // retry, or a ticket whose PR a human opened, re-runs the same transition. Fail closed: a lookup
+    // that throws is treated as "already linked", because a skipped PR is recoverable and a second
+    // open PR is not.
+    try {
+      if (await this.ticketRepo.hasPrLink(ticketId)) {
+        this.logger.debug(
+          `[vcs] Skipping classic PR for ${projectKey}-${ticket.number}: the ticket already has a PR link`,
+        );
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[vcs] PR-link lookup failed for ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
     }
 
     let createdPrNumber: number | undefined;
@@ -500,6 +564,9 @@ export class TicketTransitionsService {
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
 
+      // Whole-branch fix B2: the self-fix floor, decided again under this transaction's lock.
+      await this.assertSelfFixApproval(ticket.id, ticket.status, TicketStatus.CLOSED, principal);
+
       const authorFields = actorForeignKeys(principal, 'authoredBy');
       const comment = await repo.createComment({
         ticketId: ticket.id,
@@ -532,7 +599,7 @@ export class TicketTransitionsService {
       };
     });
 
-    this.autoIndexTicket(project, transaction.ticket as unknown as TicketDomain);
+    this.autoIndexAfterCommit(project, transaction.ticket as unknown as TicketDomain);
 
     return transaction;
   }
@@ -554,6 +621,42 @@ export class TicketTransitionsService {
       commentBody,
       principal,
     ) as Promise<TransitionResultWithComment>;
+  }
+
+  /**
+   * Whole-branch fix B2: the self-fix floor, re-derived where the closing transition runs.
+   *
+   * The route's floor (`TicketsService.selfFixApprovalFloor`) reads the ticket before the gate, and the
+   * transition then reads it again: a `/fix` that commits between the two makes the transition close a
+   * ticket the caller has just fixed itself, under whatever approval the gate resolved from the older
+   * read (`none`, or a weaker contextual mode). The requirement is therefore decided again here, from
+   * the activity row that owns the `VERIFY_FIX` status this transaction is leaving, and a caller that
+   * submitted the fix closes it only under an approval of at least `agent`.
+   *
+   * Called after the conditional status write, so the row is locked: the status this transition leaves
+   * cannot change again, and the `VERIFY_FIX` activity it read is the one that produced that status. A
+   * refusal throws before commit, so the comment, activity and status write all roll back — the same
+   * answer the route gives when the floor was seen in the first place. A caller outside any action
+   * context ran under no gate at all and is refused the same way.
+   */
+  private async assertSelfFixApproval(
+    ticketId: string,
+    fromStatus: string,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<void> {
+    if (fromStatus !== TicketStatus.VERIFY_FIX || toStatus !== TicketStatus.CLOSED) return;
+    if (principal.actorType === 'runner') return;
+
+    const fixActor = await this.ticketRepo.findLatestStatusChangeActor(ticketId, TicketStatus.VERIFY_FIX);
+    if (fixActor === null) return;
+    const callerType = principal.actorType === 'agent' ? 'AGENT' : 'USER';
+    if (fixActor.type !== callerType || fixActor.id !== principal.id) return;
+
+    const requiredMode = currentContext()?.approval.requiredMode ?? 'none';
+    if (APPROVAL_MODE_RANK[requiredMode] < APPROVAL_MODE_RANK.agent) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
   }
 
   /**
@@ -689,6 +792,9 @@ export class TicketTransitionsService {
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
 
+      // Whole-branch fix B2: the self-fix floor, decided again under this transaction's lock.
+      await this.assertSelfFixApproval(ticket.id, ticket.status, toStatus, principal);
+
       // Whole-branch fix B3: the PATCH's field writes belong to this transaction and come after the
       // conditional status write, so a lost status race has already thrown and nothing is left behind.
       const patched = fields
@@ -732,10 +838,10 @@ export class TicketTransitionsService {
     });
 
     if (toStatus === TicketStatus.CLOSED) {
-      this.autoIndexTicket(project, result.ticket as unknown as TicketDomain);
+      this.autoIndexAfterCommit(project, result.ticket as unknown as TicketDomain);
     }
     if (toStatus === TicketStatus.VERIFIED) {
-      await this.createPrForTicket(project, result.ticket as unknown as TicketDomain);
+      await this.createPrAfterCommit(project, result.ticket as unknown as TicketDomain);
     }
     return result;
   }

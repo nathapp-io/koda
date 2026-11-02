@@ -263,9 +263,17 @@ describe('ProjectsController', () => {
       await controller.update('alpha', patch as any, { project: { id: 'proj-1', slug: 'alpha' } }, 'r1');
       expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
         key: 'project.update', variant: 'rest:projects.update-ci-token', projectId: 'proj-1',
-        input: { slug: 'alpha', patch }, redeem: 'r1',
+        input: { slug: 'alpha', patch }, redeem: 'r1', minMode: 'agent',
       });
       expect(projectsService.update).not.toHaveBeenCalled();
+    });
+    it('US-004 AC-5: raises the minimum for a null token patch', async () => {
+      const patch = { ciWebhookToken: null };
+      await controller.update('alpha', patch as any, { project: { id: 'proj-1', slug: 'alpha' } });
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({
+        key: 'project.update', variant: 'rest:projects.update-ci-token', projectId: 'proj-1',
+        input: { slug: 'alpha', patch }, minMode: 'agent',
+      });
     });
     it('AC-10: ignores a redemption header for the ordinary patch variant', async () => {
       await controller.update('alpha', { name: 'Name' } as any, { project: { id: 'proj-1', slug: 'alpha' } }, 'r1');

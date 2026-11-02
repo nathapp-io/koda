@@ -44,6 +44,7 @@ import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscr
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
 import { MemoryKind, TicketStatus } from '../../../src/common/enums';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -146,6 +147,8 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       // about what a successful transition records.
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       mockAuditRecorder as never,
+      // US-006: the transition's external effects defer through it; outside a scope it runs them.
+      new AfterCommitService(),
       undefined,
       undefined,
       undefined,

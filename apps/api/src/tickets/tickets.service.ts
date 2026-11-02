@@ -194,6 +194,20 @@ export class TicketsService {
     );
   }
 
+  async selfFixApprovalFloor(
+    projectSlug: string,
+    ref: string,
+    principal: KodaPrincipal,
+  ): Promise<'agent' | undefined> {
+    const { ticket } = await this.loadTicket(projectSlug, ref);
+    if (ticket.status !== TicketStatus.VERIFY_FIX) return undefined;
+    if (principal.actorType === 'runner') return undefined;
+
+    const actor = await this.ticketRepo.findLatestStatusChangeActor(ticket.id, TicketStatus.VERIFY_FIX);
+    const actorType = principal.actorType === 'agent' ? 'AGENT' : 'USER';
+    return actor?.type === actorType && actor.id === principal.id ? 'agent' : undefined;
+  }
+
   /**
    * The project and the ticket one ref names, with the two 404s.
    *

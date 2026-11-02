@@ -12,6 +12,9 @@ import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
 import { MembershipService } from '../permissions/membership.service';
 import { AfterCommitService } from '../permissions/after-commit.service';
+import { PermissionService } from '../permissions/permission.service';
+import { OWNER_BINDING_KEY } from '../permissions/catalog';
+import type { PrincipalRef } from '../permissions/permissions.types';
 import { PrismaUsersRepository } from './prisma-users.repository';
 import { UserListFilters } from './domain/user-admin.domain';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -32,6 +35,7 @@ export class UsersAdminService {
     private readonly membership: MembershipService,
     private readonly audit: AuditRecorder,
     private readonly afterCommit: AfterCommitService,
+    private readonly permissions: PermissionService,
   ) {}
 
   async list(filters: UserListFilters, page: IPageOption): Promise<IPageResult<UserAdminDto>> {
@@ -92,11 +96,11 @@ export class UsersAdminService {
     };
   }
 
-  async update(actorId: string, userId: string, patch: UpdateUserDto): Promise<UserAdminDto> {
+  async update(actor: PrincipalRef, userId: string, patch: UpdateUserDto): Promise<UserAdminDto> {
     const disables = patch.disabled === true;
     // Permissions P1l (US-005): `disabled` is the only patchable field, so a self-disable is the only
     // self-patch the rule refuses; asking to change your own "role" changes nothing at all.
-    if (actorId === userId && disables) {
+    if (actor.id === userId && disables) {
       throw new ForbiddenAppException({}, 'users.self');
     }
 
@@ -108,14 +112,25 @@ export class UsersAdminService {
         const target = await this.usersRepo.findById(userId);
         if (!target) throw new NotFoundAppException({}, 'users');
 
+        const newlyDisabled = disables && !target.disabled;
+        if (newlyDisabled) {
+          // Owner-binding writes take this same Role-row lock. Refresh only after acquiring it: the
+          // binding writer's after-commit cache invalidation may run just after releasing that lock.
+          await this.membership.lockOwnerBindings();
+          await this.membership.invalidatePermissions();
+          const targetKeys = await this.permissions.effectiveKeys({ type: 'USER', id: userId }, 'global');
+          if (targetKeys.has(OWNER_BINDING_KEY)) {
+            const actorKeys = await this.permissions.effectiveKeys(actor, 'global');
+            if (!actorKeys.has(OWNER_BINDING_KEY)) throw new ForbiddenAppException({}, 'users.owner');
+          }
+        }
+
         // The last-admin guard still applies to a disable: disabling the last active global admin would
         // leave the installation unadministrable.
         const removesActiveAdmin = !target.disabled && disables && (await this.membership.isGlobalAdmin(target.id));
         if (removesActiveAdmin && (await this.usersRepo.countActiveAdmins()) <= 1) {
           throw new ConflictAppException({}, 'users.lastAdmin');
         }
-
-        const newlyDisabled = disables && !target.disabled;
 
         // Permissions P1l (US-005): `update` never grants or removes a binding. Granting the global
         // admin is `POST /role-bindings` (roleKey `admin`, no project); demoting is its `DELETE`.

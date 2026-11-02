@@ -5,6 +5,8 @@ import { UsersAdminService } from './users-admin.service';
 import { AfterCommitService } from '../permissions/after-commit.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { UserAdminRecord } from './domain/user-admin.domain';
+import type { PrincipalRef } from '../permissions/permissions.types';
+import { OWNER_BINDING_KEY } from '../permissions/catalog';
 import * as bcrypt from 'bcrypt';
 
 // The service imports bcrypt as a namespace (`import * as bcrypt`), which `vi.spyOn` on the module
@@ -30,9 +32,10 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 describe('UsersAdminService', () => {
   let repo: Record<string, Mock>;
   let cache: { invalidate: Mock };
-  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock };
+  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock; lockOwnerBindings: Mock; invalidatePermissions: Mock };
   let service: UsersAdminService;
   let afterCommit: AfterCommitService;
+  let permissionService: { effectiveKeys: Mock };
   let mockAuditRecorder: { record: Mock };
   /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
   let stored: UserAdminRecord;
@@ -53,6 +56,8 @@ describe('UsersAdminService', () => {
       bindBaseline: vi.fn(),
       setGlobalAdmin: vi.fn(),
       isGlobalAdmin: vi.fn().mockResolvedValue(false),
+      lockOwnerBindings: vi.fn(),
+      invalidatePermissions: vi.fn(),
       // B3/B4: the writes run inside `update`'s transaction and `create`'s own one; the stub runs the
       // callback and flushes nothing, exactly as the real service does when it defers nothing.
       afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -60,7 +65,8 @@ describe('UsersAdminService', () => {
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     mockAuditRecorder = { record: vi.fn() };
     afterCommit = new AfterCommitService();
-    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never, mockAuditRecorder as never, afterCommit);
+    permissionService = { effectiveKeys: vi.fn().mockResolvedValue(new Set<string>()) };
+    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never, mockAuditRecorder as never, afterCommit, permissionService as never);
   });
 
   it('AC-16/18: create records only created, never account secrets', async () => {
@@ -69,7 +75,7 @@ describe('UsersAdminService', () => {
     expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith({ key: 'user.create', resourceType: 'user', resourceId: 'u2', projectId: null, summary: 'created' });
   });
   it('AC-17: update records patch field names only', async () => {
-    await service.update('u1', 'u2', { disabled: true });
+    await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
     expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith({ key: 'user.update', resourceType: 'user', resourceId: 'u2', projectId: null, summary: 'fields: disabled' });
   });
   describe('create', () => {
@@ -193,9 +199,57 @@ describe('UsersAdminService', () => {
   });
 
   describe('update', () => {
+    it('AC-1/2: a non-Owner cannot disable an Owner and no update is written', async () => {
+      stored = user({ id: 'owner-1' });
+      permissionService.effectiveKeys.mockImplementation(async (principal: PrincipalRef) =>
+        principal.id === 'owner-1' ? new Set([OWNER_BINDING_KEY]) : new Set(),
+      );
+      const actor: PrincipalRef = { type: 'USER', id: 'admin-1' };
+      const error = await service.update(actor, 'owner-1', { disabled: true }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('users.owner');
+      expect(membership.lockOwnerBindings.mock.invocationCallOrder[0]).toBeLessThan(permissionService.effectiveKeys.mock.invocationCallOrder[0]);
+      expect(membership.invalidatePermissions.mock.invocationCallOrder[0]).toBeLessThan(permissionService.effectiveKeys.mock.invocationCallOrder[0]);
+      expect(repo.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('AC-3: an agent without Owner permission cannot disable an Owner', async () => {
+      stored = user({ id: 'owner-1' });
+      permissionService.effectiveKeys.mockImplementation(async (principal: PrincipalRef) =>
+        principal.id === 'owner-1' ? new Set([OWNER_BINDING_KEY]) : new Set(),
+      );
+      await expect(service.update({ type: 'AGENT', id: 'agent-1' }, 'owner-1', { disabled: true }))
+        .rejects.toMatchObject({ prefix: 'users.owner' });
+      expect(repo.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('AC-4: an Owner can disable another Owner', async () => {
+      stored = user({ id: 'owner-1' });
+      permissionService.effectiveKeys.mockResolvedValue(new Set([OWNER_BINDING_KEY]));
+      await service.update({ type: 'USER', id: 'owner-2' }, 'owner-1', { disabled: true });
+      expect(repo.updateUser).toHaveBeenCalledWith('owner-1', { disabled: true, bumpTokenVersion: true });
+    });
+
+    it('AC-5/6: admins can disable non-Owners and re-enable an Owner', async () => {
+      stored = user({ id: 'member-1' });
+      await service.update({ type: 'USER', id: 'admin-1' }, 'member-1', { disabled: true });
+      expect(repo.updateUser).toHaveBeenCalledWith('member-1', { disabled: true, bumpTokenVersion: true });
+      repo.updateUser.mockClear();
+      stored = user({ id: 'owner-1' });
+      await service.update({ type: 'USER', id: 'admin-1' }, 'owner-1', { disabled: false });
+      expect(repo.updateUser).toHaveBeenCalledWith('owner-1', { disabled: false, bumpTokenVersion: false });
+    });
+
+    it('AC-7: self-disable remains refused before the target lookup', async () => {
+      const failure = await service.update({ type: 'USER', id: 'owner-1' }, 'owner-1', { disabled: true })
+        .catch((caught: unknown) => caught);
+      expect(failure).toBeInstanceOf(ForbiddenAppException);
+      expect((failure as ForbiddenAppException).prefix).toBe('users.self');
+      expect(repo.findById).not.toHaveBeenCalled();
+    });
     it('AC-11: defers both auth cache evictions until the outer scope returns', async () => {
       await afterCommit.scope(async () => {
-        await service.update('u1', 'u2', { disabled: true });
+        await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
         expect(repo.updateUser).toHaveBeenCalled();
         expect(cache.invalidate).not.toHaveBeenCalled();
       });
@@ -205,7 +259,7 @@ describe('UsersAdminService', () => {
     });
     it('drops auth cache evictions when the outer transaction rolls back', async () => {
       await expect(afterCommit.scope(async () => {
-        await service.update('u1', 'u2', { disabled: true });
+        await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
         throw new Error('rollback');
       })).rejects.toThrow('rollback');
       expect(cache.invalidate).not.toHaveBeenCalled();
@@ -215,16 +269,16 @@ describe('UsersAdminService', () => {
      * rule refuses. A patch that asks for a role changes nothing, so it is not a refusal.
      */
     it('refuses a self-disable and accepts every other self-patch', async () => {
-      await expect(service.update('u1', 'u1', { disabled: true })).rejects.toBeInstanceOf(ForbiddenAppException);
+      await expect(service.update({ type: 'USER', id: 'u1' }, 'u1', { disabled: true })).rejects.toBeInstanceOf(ForbiddenAppException);
       expect(repo.updateUser).not.toHaveBeenCalled();
 
-      await expect(service.update('u1', 'u1', { disabled: false })).resolves.toBeDefined();
+      await expect(service.update({ type: 'USER', id: 'u1' }, 'u1', { disabled: false })).resolves.toBeDefined();
       expect(repo.updateUser).toHaveBeenCalledWith('u1', { disabled: false, bumpTokenVersion: false });
     });
 
     it('404s an unknown user', async () => {
       repo.findById.mockResolvedValue(null);
-      await expect(service.update('u1', 'nope', { disabled: true })).rejects.toBeInstanceOf(NotFoundAppException);
+      await expect(service.update({ type: 'USER', id: 'u1' }, 'nope', { disabled: true })).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
     it('refuses to disable the last active admin, under the lock', async () => {
@@ -232,7 +286,7 @@ describe('UsersAdminService', () => {
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(1);
 
-      await expect(service.update('u1', 'u2', { disabled: true })).rejects.toBeInstanceOf(ConflictAppException);
+      await expect(service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true })).rejects.toBeInstanceOf(ConflictAppException);
       expect(repo.lockUserAdministration).toHaveBeenCalled();
       expect(repo.lockUserAdministration.mock.invocationCallOrder[0]).toBeLessThan(repo.countActiveAdmins.mock.invocationCallOrder[0]);
       expect(repo.updateUser).not.toHaveBeenCalled();
@@ -245,7 +299,7 @@ describe('UsersAdminService', () => {
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
-      await service.update('u1', 'u2', { disabled: true });
+      await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
 
       expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: true, bumpTokenVersion: true });
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
@@ -257,7 +311,7 @@ describe('UsersAdminService', () => {
     it('re-enables a disabled user without bumping tokenVersion again', async () => {
       stored = user({ disabled: true });
 
-      await service.update('u1', 'u2', { disabled: false });
+      await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: false });
 
       expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: false, bumpTokenVersion: false });
       expect(membership.isGlobalAdmin).not.toHaveBeenCalled();
@@ -273,7 +327,7 @@ describe('UsersAdminService', () => {
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
-      const updated = await service.update('u1', 'u2', { disabled: false });
+      const updated = await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: false });
 
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
       expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: false, bumpTokenVersion: false });
@@ -283,7 +337,7 @@ describe('UsersAdminService', () => {
     it('does not count admins when isGlobalAdmin is false', async () => {
       stored = user();
       membership.isGlobalAdmin.mockResolvedValue(false);
-      await service.update('u1', 'u2', { disabled: true });
+      await service.update({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
       expect(repo.countActiveAdmins).not.toHaveBeenCalled();
     });
   });
