@@ -76,6 +76,34 @@ describe('sync repository token fence', () => {
     await h.sync([]);
     expect(h.repo.markDelivered).toHaveBeenCalledTimes(1);
   });
+  it('US-001 AC-1 to AC-4 refuses the PROJECT SESSION anchor token without repoId', async () => {
+    const h = harness();
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'repo_not_assigned' }]);
+    expect(response.gitTokens).toEqual([]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+    expect(h.repo.findRepo).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-5 refuses a PROJECT PUBLISH anchor token without repoId', async () => {
+    const h = harness();
+    h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'PROJECT', action: 'PUBLISH' });
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'repo_not_assigned' }]);
+    expect(response.gitTokens).toEqual([]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+    expect(h.repo.findRepo).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-6 keeps repo-less REPO thread grants on their anchor repo', async () => {
+    const h = harness();
+    h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'REPO', action: 'SESSION' });
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([]);
+    expect(h.repo.findRepo).toHaveBeenCalledExactlyOnceWith('anchor');
+    expect(h.broker.mint).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', leaseEpoch: 1, repo: repository('anchor') }, expect.any(Date));
+  });
+
   it('workspace AC-7 refuses the anchor token without repoId', async () => {
     const h = harness();
     h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });

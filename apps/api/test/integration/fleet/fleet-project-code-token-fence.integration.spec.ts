@@ -108,6 +108,15 @@ describeIntegration('fleet project-code token fence (PG + HTTP, S5b 1c-b)', () =
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
+  it('US-001 AC-8/AC-9: refuses a repo-less PROJECT thread token request', async () => {
+    const job = await seedThreadJob('PROJECT');
+
+    const res = await sync({ tokenRequests: [{ jobId: job.id, leaseEpoch: 1 }] });
+
+    expect(res.gitTokenErrors).toContainEqual({ jobId: job.id, reason: 'repo_not_assigned' });
+    expect(res.gitTokens.some((token) => token.jobId === job.id)).toBe(false);
+  });
+
   it('US-002 AC-3/AC-4: mints a read-only token for a listed project repository, carrying its repoId', async () => {
     const job = await seedThreadJob('PROJECT');
 

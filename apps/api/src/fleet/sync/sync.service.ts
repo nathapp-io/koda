@@ -130,7 +130,7 @@ export class SyncService {
           const repo = repos.find((r) => r.id === req.repoId);
           if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo, readOnly: true });
           else gitTokenErrors.push({ jobId: job.id, repoId: req.repoId, reason: 'repo_not_assigned' });
-        } else if (job.command === 'THREAD' && (await this.repo.findThreadTokenScope(job.id))?.kind === 'WORKSPACE') {
+        } else if (job.command === 'THREAD' && ['WORKSPACE', 'PROJECT'].includes((await this.repo.findThreadTokenScope(job.id))?.kind ?? '')) {
           gitTokenErrors.push({ jobId: job.id, reason: 'repo_not_assigned' });
         } else {
           const repo = await this.repo.findRepo(job.repoId);
