@@ -37,6 +37,8 @@ import { removeReviewToken, writeReviewToken } from './review-token';
 import { REVIEW_DECISIONS_FILE, writeReviewDecisions } from './review-decisions-file';
 import { cleanWorkspace, ensureClone } from './workspace';
 
+export const FORGE_TOKEN_MIN_REMAINING_MS = 3_000_000;
+
 export interface HostExecutorDeps {
   readonly config: Pick<RunnerConfig, 'workspaceRoot' | 'naxCommand' | 'naxHome'>;
   readonly git: Git;
@@ -196,8 +198,7 @@ export class HostExecutor implements JobExecutor {
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
     if (!acquired.ok) throw new Error(acquired.reason);
     const binDir = acquired.credentials.binDir;
-    const token = this.deps.credentials.currentToken?.(job) ?? null;
-    if (token === null) throw new Error('git token: none');
+    const token = await this.forgeToken(job);
     const login = assign.review?.botLogin;
     if (login === undefined) throw new Error('invalid review');
 
@@ -236,12 +237,19 @@ export class HostExecutor implements JobExecutor {
 
   /**
    * US-006: the narrow file exception to D88. nax K0 rejects a login without a token file, and a GitHub App token
-   * cannot answer "who am I": the job's current token goes into `<jobDir>/forge-token` (0600), which nax reads and
+   * cannot answer "who am I": the job's fresh token goes into `<jobDir>/forge-token` (0600), which nax reads and
    * deletes at startup. It is never an environment value or an argv element.
    */
+  private async forgeToken(job: JobRow): Promise<string> {
+    const getFreshToken = this.deps.credentials.freshToken;
+    if (!getFreshToken) throw new Error('git token: none');
+    const result = await getFreshToken.call(this.deps.credentials, job, FORGE_TOKEN_MIN_REMAINING_MS);
+    if (!result.ok) throw new Error(result.reason);
+    return result.token;
+  }
+
   private async reviewEnv(job: JobRow, jobDir: string): Promise<Record<string, string>> {
-    const token = this.deps.credentials.currentToken?.(job) ?? null;
-    if (token === null) throw new Error('git token: none');   // before any write and before any start
+    const token = await this.forgeToken(job);   // before any file write and before any start
     const login = job.assign.review?.botLogin;
     if (login === undefined) throw new Error('invalid review');   // buildNaxArgv already refused such an assign
     return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, token), NAX_FORGE_LOGIN: login };

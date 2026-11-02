@@ -271,6 +271,51 @@ test.skipIf(isNaxSandboxed())('project code AC-13: releaseRepo closes only its s
   } finally { await w.broker.closeAll(); }
 });
 
+describe('CredentialBroker.freshToken (US-010)', () => {
+  const apply = (tokens: TokenCache, row: JobRow, token: string, remainingMs: number): void => tokens.apply(
+    [{ jobId: row.jobId, leaseEpoch: row.leaseEpoch }],
+    [{ jobId: row.jobId, token, username: 'x-access-token', expiresAt: new Date(Date.now() + remainingMs).toISOString() }], [], Date.now(),
+  );
+
+  test('AC-1: waits until a token meets the requested lifetime', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    apply(w.tokens, row, 'old', 40 * 60_000);
+    const pending = w.broker.freshToken(row, 3_000_000);
+    setTimeout(() => apply(w.tokens, row, 'new', 59 * 60_000), 20);
+    await expect(pending).resolves.toEqual({ ok: true, token: 'new' });
+  });
+
+  test('AC-2: returns an error as soon as the cache records one', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    apply(w.tokens, row, 'old', 40 * 60_000);
+    const pending = w.broker.freshToken(row, 3_000_000);
+    setTimeout(() => w.tokens.apply([{ jobId: row.jobId, leaseEpoch: row.leaseEpoch }], [], [{ jobId: row.jobId, reason: 'default_branch_unprotected' }], Date.now()), 20);
+    await expect(pending).resolves.toEqual({ ok: false, reason: 'git token: default_branch_unprotected' });
+  });
+
+  test('AC-3/4: times out and clears the fresh request minimum', async () => {
+    const w = await world({ ...FAST, waitMs: 30 });
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    apply(w.tokens, row, 'old', 40 * 60_000);
+    await expect(w.broker.freshToken(row, 3_000_000)).resolves.toEqual({ ok: false, reason: 'git token: timeout' });
+    expect(w.tokens.requests(Date.now()).filter((request) => request.jobId === row.jobId)).toEqual([]);
+  });
+
+  test('AC-5/6: immediately returns a qualifying token and clears the fresh request', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want(row.jobId, row.leaseEpoch);
+    apply(w.tokens, row, 'existing', 55 * 60_000);
+    await expect(w.broker.freshToken(row, 3_000_000)).resolves.toEqual({ ok: true, token: 'existing' });
+    expect(w.tokens.requests(Date.now()).filter((request) => request.jobId === row.jobId)).toEqual([]);
+  });
+});
+
 describe('CredentialBroker.currentToken (US-006: the REVIEW token file)', () => {
   test('AC-4: returns the token the cache holds for the job id and lease epoch', async () => {
     const w = await world();
