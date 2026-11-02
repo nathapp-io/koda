@@ -19,7 +19,7 @@ class FakeEventSource implements EventSourceLike {
 
 const deps = (sources: FakeEventSource[]) => ({
   createEventSource: () => { const es = new FakeEventSource(); sources.push(es); return es },
-  refreshAuth: async () => true,
+  refreshAuth: async () => 'ok',
   setTimer: () => null,
   clearTimer: () => undefined,
 })

@@ -8,6 +8,7 @@ import {
   type LiveTicketEvent,
   type ProjectEventStreamDeps,
 } from '~/lib/project-event-stream'
+import type { RefreshOutcome } from '~/composables/useAuth'
 
 class FakeEventSource implements EventSourceLike {
   readyState = 0
@@ -55,7 +56,7 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve()
 }
 
-function setup(refreshResults: boolean[] = []) {
+function setup(refreshResults: RefreshOutcome[] = []) {
   const sources: FakeEventSource[] = []
   let timers: Array<{ fn: () => void; ms: number }> = []
   const refreshQueue = [...refreshResults]
@@ -65,7 +66,7 @@ function setup(refreshResults: boolean[] = []) {
       sources.push(es)
       return es
     },
-    refreshAuth: jest.fn(async () => refreshQueue.shift() ?? true),
+    refreshAuth: jest.fn(async () => refreshQueue.shift() ?? 'ok'),
     setTimer: (fn, ms) => {
       const timer = { fn, ms }
       timers = [...timers, timer]
@@ -191,8 +192,8 @@ describe('createProjectEventStream', () => {
     expect(s.runTimers()).toEqual([1000])
   })
 
-  test('stops at once when the auth refresh fails', async () => {
-    const failing = setup([false])
+  test('stops at once when the auth refresh is refused', async () => {
+    const failing = setup(['unauthorized'])
     failing.latest().terminalError()
     await flush()
     expect(failing.runTimers()).toEqual([])
@@ -208,11 +209,11 @@ describe('createProjectEventStream', () => {
   })
 
   test('close() during an in-flight auth refresh prevents the reopen', async () => {
-    let resolveRefresh: (ok: boolean) => void = () => undefined
-    ;(s.deps.refreshAuth as jest.Mock).mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveRefresh = resolve }))
+    let resolveRefresh: (outcome: RefreshOutcome) => void = () => undefined
+    ;(s.deps.refreshAuth as jest.Mock).mockImplementationOnce(() => new Promise<RefreshOutcome>((resolve) => { resolveRefresh = resolve }))
     s.latest().terminalError()
     s.stream.close()
-    resolveRefresh(true)
+    resolveRefresh('ok')
     await flush()
     expect(s.runTimers()).toEqual([])
     expect(s.sources).toHaveLength(1)

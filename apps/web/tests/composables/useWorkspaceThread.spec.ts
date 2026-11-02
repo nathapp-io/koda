@@ -80,7 +80,7 @@ describe('useWorkspaceThread (US-004)', () => {
     })
     g.EventSource = StubEventSource
     g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
-    g.useAuth = () => ({ refresh: jest.fn(async () => true) })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
 
     const app = mountSfc(webFile('tests', 'fixtures', 'workspace-thread-client-probe.vue'), {
       globals: { useApi: g.useApi, useAuth: g.useAuth },

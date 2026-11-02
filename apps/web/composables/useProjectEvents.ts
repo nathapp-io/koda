@@ -3,10 +3,15 @@ import { apiPath } from '~/lib/api-path'
 import { createProjectEventHub } from '~/lib/project-event-hub'
 import type { ProjectEventHub } from '~/lib/project-event-hub'
 import type { EventSourceLike, ProjectEventHandlers } from '~/lib/project-event-stream'
+import type { RefreshOutcome } from '~/composables/useAuth'
 
 let hub: ProjectEventHub | null = null
-/** The newest component's useAuth().refresh; the shared stream reads it when it needs to recover. */
-let latestRefresh: () => Promise<boolean> = async () => false
+/**
+ * The newest component's useAuth().refreshSession; the shared stream reads it when it needs to recover.
+ * US-007: tri-state, so an outage keeps the stream retrying and a dead session stops it. Before any
+ * component has mounted there is no session to judge, so the default fails closed.
+ */
+let latestRefresh: () => Promise<RefreshOutcome> = async () => 'unauthorized'
 
 /** Created on first client mount only, so it never exists during SSR. */
 function sharedHub(): ProjectEventHub {
@@ -24,12 +29,12 @@ function sharedHub(): ProjectEventHub {
  * Every subscriber in the tab shares one EventSource per project (S1.5 1b D246).
  */
 export function useProjectEvents(slug: string, handlers: ProjectEventHandlers): void {
-  const { refresh } = useAuth()
+  const { refreshSession } = useAuth()
   let unsubscribe: (() => void) | null = null
 
   onMounted(() => {
     if (typeof EventSource === 'undefined') return
-    latestRefresh = refresh
+    latestRefresh = refreshSession
     unsubscribe = sharedHub().subscribe(apiPath`/api/projects/${slug}/events`, handlers)
   })
 

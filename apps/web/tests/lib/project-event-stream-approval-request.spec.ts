@@ -42,7 +42,7 @@ function open(handlers: ProjectEventHandlers): FakeEventSource {
       source = new FakeEventSource()
       return source
     },
-    refreshAuth: async () => true,
+    refreshAuth: async () => 'ok',
     setTimer: () => null,
     clearTimer: () => undefined,
   })

@@ -29,7 +29,7 @@ export interface WorkspaceThreadController extends ThreadController {
 /** The workspace thread page's controller: thread/messages/live state, optimistic send and actions. */
 export function useWorkspaceThread(threadId: string): WorkspaceThreadController {
   const { $api } = useApi()
-  const { refresh } = useAuth()
+  const { refreshSession } = useAuth()
   // True between onMounted and onBeforeUnmount; guards the load()/start() chain so an unmount
   // that races the in-flight load cannot reopen the stream after stop().
   let mounted = false
@@ -43,7 +43,7 @@ export function useWorkspaceThread(threadId: string): WorkspaceThreadController 
         handlers,
         {
           createEventSource: (url) => new EventSource(url) as unknown as EventSourceLike,
-          refreshAuth: () => refresh(),
+          refreshAuth: () => refreshSession(),
           setTimer: (fn, ms) => setTimeout(fn, ms),
           clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
         },

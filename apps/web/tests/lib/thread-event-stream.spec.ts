@@ -63,7 +63,7 @@ function setup() {
       sources.push(es)
       return es
     },
-    refreshAuth: jest.fn(async () => true),
+    refreshAuth: jest.fn(async () => 'ok'),
     setTimer: (fn, ms) => {
       const timer = { fn, ms }
       timers = [...timers, timer]

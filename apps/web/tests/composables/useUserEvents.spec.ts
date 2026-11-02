@@ -25,6 +25,11 @@ describe('useUserEvents (S4a §5)', () => {
 
   test('guards environments without EventSource and refreshes auth through useAuth', () => {
     expect(source).toContain("typeof EventSource === 'undefined'")
-    expect(source).toContain('const { refresh } = useAuth()')
+    expect(source).toContain('const { refreshSession } = useAuth()')
+    expect(source).toContain('latestRefresh = refreshSession')
+  })
+
+  test('US-007: the recovery default fails closed before a component has mounted', () => {
+    expect(source).toContain("let latestRefresh: () => Promise<RefreshOutcome> = async () => 'unauthorized'")
   })
 })

@@ -68,7 +68,7 @@ describe('useThread (US-003)', () => {
     })
     g.EventSource = StubEventSource
     g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
-    g.useAuth = () => ({ refresh: jest.fn(async () => true) })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
 
     const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
       globals: { useApi: g.useApi, useAuth: g.useAuth },
@@ -78,6 +78,37 @@ describe('useThread (US-003)', () => {
     expect(StubEventSource.instances.map(source => source.url)).toEqual(['/api/projects/web/threads/th1/events'])
     expect(get).toHaveBeenCalledWith(THREAD_PATH)
     expect(get).toHaveBeenCalledWith(MESSAGES_PATH, { query: { afterSeq: '0', limit: '200' } })
+
+    app.unmount()
+  })
+
+  test('US-007 AC-14: a terminal stream error recovers through useAuth().refreshSession', async () => {
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      if (path === MESSAGES_PATH) return { items: [] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const refresh = jest.fn(async () => false)
+    const refreshSession = jest.fn(async () => 'unauthorized')
+    g.EventSource = StubEventSource
+    g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
+    g.useAuth = () => ({ refresh, refreshSession })
+
+    const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
+      globals: { useApi: g.useApi, useAuth: g.useAuth },
+    })
+    await settle()
+    expect(StubEventSource.instances).toHaveLength(1)
+
+    const source = StubEventSource.instances[0]
+    source.readyState = 2 // EVENT_SOURCE_CLOSED: a terminal failure, not a transient drop
+    source.onerror?.({})
+    await settle()
+
+    expect(refreshSession).toHaveBeenCalledTimes(1)
+    // The session is gone, so the stream stops instead of reopening; the boolean wrapper is unused.
+    expect(refresh).not.toHaveBeenCalled()
+    expect(StubEventSource.instances).toHaveLength(1)
 
     app.unmount()
   })

@@ -29,7 +29,7 @@ function hub() {
       sources.push(s)
       return s
     },
-    refreshAuth: async () => true,
+    refreshAuth: async () => 'ok',
     setTimer: () => null,
     clearTimer: () => undefined,
   })
