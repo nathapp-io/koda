@@ -71,7 +71,7 @@ export function buildSyncRequest(input: BuildInput): SyncRequest {
     ...(input.capabilities ? { capabilities: input.capabilities } : {}),
     freeSlots,
     commandAcks,
-    tokenRequests: (input.tokenRequests ?? []).slice(0, SYNC_LIMITS.tokenRequests).map((r) => ({ jobId: r.jobId, leaseEpoch: r.leaseEpoch, ...(r.repoId === undefined ? {} : { repoId: r.repoId }) })),
+    tokenRequests: (input.tokenRequests ?? []).slice(0, SYNC_LIMITS.tokenRequests).map((r) => ({ jobId: r.jobId, leaseEpoch: r.leaseEpoch, ...(r.repoId === undefined ? {} : { repoId: r.repoId }), ...(r.fresh === true ? { fresh: true as const } : {}) })),
   };
   let budget = MAX_BODY_BYTES - byteLength({ ...head, jobs: [] });
   const jobs: JobReport[] = [];

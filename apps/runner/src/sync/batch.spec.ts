@@ -118,6 +118,11 @@ describe('token requests (design §3.1)', () => {
     expect(request.tokenRequests).toHaveLength(SYNC_LIMITS.tokenRequests);
     expect(request.tokenRequests[0]).toEqual({ jobId: 'j0', leaseEpoch: 1 });
   });
+  test('AC-16: forwards fresh only for token requests that carry it', () => {
+    const tokenRequests = [{ jobId: 'j1', leaseEpoch: 1, fresh: true as const }, { jobId: 'j2', leaseEpoch: 1 }];
+    expect(build({ tokenRequests }).tokenRequests).toEqual(tokenRequests);
+    expect(build({ tokenRequests }).tokenRequests[1]).not.toHaveProperty('fresh');
+  });
   test('are empty when none are given', () => {
     const request = buildSyncRequest({ journal: Journal.open(':memory:'), bootId: 'b', daemonVersion: 'v', freeSlots: 1, acks: [], scale: FULL_SCALE });
     expect(request.tokenRequests).toEqual([]);
