@@ -3,7 +3,7 @@
   "feature": "review-p2-session-runner",
   "branchName": "feat/review-p2-session-runner",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T16:41:32.766Z",
+  "updatedAt": "2026-11-02T16:53:43.665Z",
   "userStories": [
     {
       "id": "US-001",
@@ -152,14 +152,17 @@
         "review-p2-session-runner"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A standard method addition to the existing executor interface, two implementations and one watch-loop branch; existing ProcessInfo injection and FakeExecutor tick scripting avoid a new process-management abstraction. Ordinary TDD can verify liveness and identity without altering authentication or signaling policy."
+        "reasoning": "A standard method addition to the existing executor interface, two implementations and one watch-loop branch; existing ProcessInfo injection and FakeExecutor tick scripting avoid a new process-management abstraction. Ordinary TDD can verify liveness and identity without altering authentication or signaling policy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/nax-process.ts",
@@ -182,7 +185,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "569347d55ceabdc22e1548b68d8280e1d2dd4ab9"
     },
     {
       "id": "US-004",
