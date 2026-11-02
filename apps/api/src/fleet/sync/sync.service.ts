@@ -119,7 +119,7 @@ export class SyncService {
   }
 
   /** Spec §6.3: fence each request (ABANDON on a stale epoch), then mint outside any transaction. */
-  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number; repoId?: string }>, now: Date) {
+  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }>, now: Date) {
     const gitTokens: GitToken[] = [];
     const gitTokenErrors: GitTokenError[] = [];
     const unknownJobIds: string[] = [];
@@ -151,6 +151,7 @@ export class SyncService {
             leaseEpoch: job.leaseEpoch,
             repo,
             ...(job.command === FleetJobKind.REVIEW ? { purpose: 'review' as const } : job.command === FleetJobKind.FIX ? { purpose: 'fix' as const } : {}),
+            ...(req.fresh === true && (job.command === FleetJobKind.FIX || job.command === FleetJobKind.REVIEW) ? { fresh: true } : {}),
           });
         }
       }

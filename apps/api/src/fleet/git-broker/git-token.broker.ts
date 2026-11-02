@@ -32,7 +32,7 @@ export class GitTokenBroker {
    * It is cached under its own key (per job, epoch and repository), and its result carries the `repoId` so the
    * runner can tell which repository a token belongs to. Write mints are unchanged.
    */
-  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }, now = new Date()): Promise<MintResult> {
+  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix'; fresh?: boolean }, now = new Date()): Promise<MintResult> {
     // FIX always requires a write-capable result; readOnly remains meaningful for purpose-less PROJECT mints.
     const readOnly = req.readOnly === true && req.purpose !== 'fix';
     // Purpose credentials are GitHub-only; reject before cache lookup so a legacy/write entry cannot bypass this.
@@ -44,7 +44,7 @@ export class GitTokenBroker {
       : readOnly ? `${req.jobId}:${req.leaseEpoch}:ro:${req.repo.id}` : `${req.jobId}:${req.leaseEpoch}`;
     const cached = this.cache.get(key);
     const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
-    if (cached && Date.parse(cached.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached };
+    if (!req.fresh && cached && Date.parse(cached.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached };
     try {
       const token = await this.fresh(req, now);
       this.cache = new Map([...[...this.cache].filter(([, t]) => Date.parse(t.expiresAt) > now.getTime()), [key, token]]);

@@ -226,7 +226,7 @@ export interface JobReport { jobId: string; leaseEpoch: number; events: RunnerEv
 export type CommandAckResult = 'ok' | 'rejected';
 export interface CommandAck { commandId: string; leaseEpoch: number; result: CommandAckResult; detail?: string }
 /** Fleet S5b 1c-b: `repoId` asks for one project repository's read-only token (a PROJECT session). */
-export interface TokenRequest { jobId: string; leaseEpoch: number; repoId?: string }
+export interface TokenRequest { jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }
 
 export interface SyncRequest {
   protocolVersion: number;
