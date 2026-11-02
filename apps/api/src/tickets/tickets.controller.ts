@@ -328,9 +328,11 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     const body = this.requireCommentBody(dto.body);
+    const minMode = await this.ticketsService.selfFixApprovalFloor(slug, ref, principal);
     const outcome = await this.routeGate.run<TicketResponseDto>({
       key: 'ticket.transition.verify', variant: TICKET_ROUTE_VARIANTS.verify,
       projectId: project.project.id, input: { slug, ref, body },
+      ...(minMode === 'agent' ? { minMode } : {}),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
@@ -408,10 +410,14 @@ export class TicketsController {
     // M1: validate the required comment body before any approve/reject branching.
     const commentBody = this.requireCommentBody(dto.body);
     const isApproved = approve === 'true' || approve === true;
+    const minMode = isApproved
+      ? await this.ticketsService.selfFixApprovalFloor(slug, ref, principal)
+      : undefined;
     const outcome = await this.routeGate.run<TicketResponseDto>({
       key: isApproved ? 'ticket.transition.verify-fix.approve' : 'ticket.transition.verify-fix.return',
       variant: TICKET_ROUTE_VARIANTS.verifyFix,
       projectId: project.project.id, input: { slug, ref, body: commentBody },
+      ...(minMode === 'agent' ? { minMode } : {}),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
@@ -435,9 +441,11 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     const body = this.requireCommentBody(dto.body);
+    const minMode = await this.ticketsService.selfFixApprovalFloor(slug, ref, principal);
     const outcome = await this.routeGate.run<TicketResponseDto>({
       key: 'ticket.transition.close', variant: TICKET_ROUTE_VARIANTS.close,
       projectId: project.project.id, input: { slug, ref, body },
+      ...(minMode === 'agent' ? { minMode } : {}),
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
