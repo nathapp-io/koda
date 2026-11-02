@@ -51,9 +51,15 @@ describeIntegration('FIX assignment detected-check trust (PG)', () => {
   });
 
   it('AC-5: findRepo reads true and the persisted default false', async () => {
-    expect(await jobs.findRepo(world.repoId)).toEqual(expect.objectContaining({ fixTrustDetectedChecks: false }));
-    await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { fixTrustDetectedChecks: true } });
-    expect(await jobs.findRepo(world.repoId)).toEqual(expect.objectContaining({ fixTrustDetectedChecks: true }));
+    // Do not reuse world.repoId: the dispatch cases mutate its setting. Omitting the setting on a
+    // fresh row keeps this a database-default assertion even when cases run in shuffled order.
+    const target = await prisma.fleetRepo.create({ data: {
+      projectId: world.projectId, provider: 'github', owner: 'acme', name: 'fix-trust-default', defaultBranch: 'main',
+      githubInstallationId: BigInt(77), createdById: world.ids.root,
+    } });
+    expect(await jobs.findRepo(target.id)).toEqual(expect.objectContaining({ fixTrustDetectedChecks: false }));
+    await prisma.fleetRepo.update({ where: { id: target.id }, data: { fixTrustDetectedChecks: true } });
+    expect(await jobs.findRepo(target.id)).toEqual(expect.objectContaining({ fixTrustDetectedChecks: true }));
   });
 
   it('AC-6: dispatch stores true in the actual ASSIGN command for an enabled FIX repo', async () => {
