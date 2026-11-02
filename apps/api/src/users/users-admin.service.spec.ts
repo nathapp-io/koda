@@ -32,7 +32,7 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 describe('UsersAdminService', () => {
   let repo: Record<string, Mock>;
   let cache: { invalidate: Mock };
-  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock };
+  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock; lockOwnerBindings: Mock; invalidatePermissions: Mock };
   let service: UsersAdminService;
   let afterCommit: AfterCommitService;
   let permissionService: { effectiveKeys: Mock };
@@ -56,6 +56,8 @@ describe('UsersAdminService', () => {
       bindBaseline: vi.fn(),
       setGlobalAdmin: vi.fn(),
       isGlobalAdmin: vi.fn().mockResolvedValue(false),
+      lockOwnerBindings: vi.fn(),
+      invalidatePermissions: vi.fn(),
       // B3/B4: the writes run inside `update`'s transaction and `create`'s own one; the stub runs the
       // callback and flushes nothing, exactly as the real service does when it defers nothing.
       afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -206,6 +208,8 @@ describe('UsersAdminService', () => {
       const error = await service.update(actor, 'owner-1', { disabled: true }).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(ForbiddenAppException);
       expect((error as ForbiddenAppException).prefix).toBe('users.owner');
+      expect(membership.lockOwnerBindings.mock.invocationCallOrder[0]).toBeLessThan(permissionService.effectiveKeys.mock.invocationCallOrder[0]);
+      expect(membership.invalidatePermissions.mock.invocationCallOrder[0]).toBeLessThan(permissionService.effectiveKeys.mock.invocationCallOrder[0]);
       expect(repo.updateUser).not.toHaveBeenCalled();
     });
 

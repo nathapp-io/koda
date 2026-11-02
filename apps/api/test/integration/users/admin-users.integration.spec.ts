@@ -132,6 +132,49 @@ describeIntegration('/admin/users (PG)', () => {
     expect(page.hasNext).toBe(true);
   });
 
+  it('serializes a concurrent Owner grant ahead of disable authorization', async () => {
+    const admin = await createUser('owner-race-admin@koda.test', true);
+    const target = await createUser('owner-race-target@koda.test');
+    const adminToken = await loginToken(server, 'owner-race-admin@koda.test');
+    let allowGrant = (): void => {};
+    let locked = (): void => {};
+    const grantAllowed = new Promise<void>((resolve) => { allowGrant = resolve; });
+    const lockHeld = new Promise<void>((resolve) => { locked = resolve; });
+    const grant = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Role" WHERE "key" = 'owner' FOR UPDATE`;
+      locked();
+      await grantAllowed;
+      const ownerRole = await tx.role.findUniqueOrThrow({ where: { key: 'owner' }, select: { id: true } });
+      await tx.roleBinding.create({
+        data: {
+          principalType: 'USER', principalId: target.id, roleId: ownerRole.id, projectId: null,
+          grantedByType: 'SYSTEM', grantedById: 'test',
+        },
+      });
+    }, { timeout: 20_000 });
+    await lockHeld;
+
+    const pending = request(server).patch(`/api/admin/users/${target.id}`).set(auth(adminToken)).send({ disabled: true });
+    pending.catch(() => undefined);
+    try {
+      const outcome = await Promise.race([
+        pending.then((response) => ({ state: 'completed' as const, response })),
+        new Promise<{ state: 'waiting' }>((resolve) => setTimeout(() => resolve({ state: 'waiting' }), 150)),
+      ]);
+      expect(outcome.state).toBe('waiting');
+      allowGrant();
+      await grant;
+      const response = await pending;
+      expect(response.status).toBe(403);
+      expect(response.body.message).toBe('Only an Owner can disable an Owner');
+    } finally {
+      allowGrant();
+      await grant.catch(() => undefined);
+      await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: target.id } });
+      await prisma.user.deleteMany({ where: { id: { in: [target.id, admin.id] } } });
+    }
+  });
+
   it('AC-9..13: only an Owner can disable an Owner; refusals preserve state and token version', async () => {
     const admin = await createUser('owner-guard-admin@koda.test', true);
     const owner = await createUser('owner-guard-target@koda.test');

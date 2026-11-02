@@ -114,6 +114,10 @@ export class UsersAdminService {
 
         const newlyDisabled = disables && !target.disabled;
         if (newlyDisabled) {
+          // Owner-binding writes take this same Role-row lock. Refresh only after acquiring it: the
+          // binding writer's after-commit cache invalidation may run just after releasing that lock.
+          await this.membership.lockOwnerBindings();
+          await this.membership.invalidatePermissions();
           const targetKeys = await this.permissions.effectiveKeys({ type: 'USER', id: userId }, 'global');
           if (targetKeys.has(OWNER_BINDING_KEY)) {
             const actorKeys = await this.permissions.effectiveKeys(actor, 'global');
