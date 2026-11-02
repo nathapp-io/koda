@@ -111,6 +111,10 @@ export interface AssignTicketData {
 
 export interface ITicketRepository {
   findProjectBySlug(slug: string): Promise<TicketProject | null>;
+  findLatestStatusChangeActor(
+    ticketId: string,
+    toStatus: TicketStatus,
+  ): Promise<{ type: 'USER' | 'AGENT'; id: string } | null>;
   findLastTicketInProject(projectId: string): Promise<{ number: number } | null>;
   createTicket(data: CreateTicketData): Promise<TicketDomain>;
   findTicketPage(filters: TicketListFilters, page: IPageOption): Promise<IPageResult<TicketDomain>>;

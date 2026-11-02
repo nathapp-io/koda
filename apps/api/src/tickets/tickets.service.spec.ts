@@ -107,6 +107,7 @@ describe('TicketsService', () => {
     createTicket: vi.fn(),
     findTicketPage: vi.fn(),
     findTicketScoped: vi.fn(),
+    findLatestStatusChangeActor: vi.fn(),
     updateTicket: vi.fn(),
     assignTicket: vi.fn(),
     softDeleteTicket: vi.fn(),
@@ -546,6 +547,86 @@ describe('TicketsService', () => {
         // Invalid refs result in a not-found lookup, which throws AppException
         await expect(service.findByRef('koda', ref)).rejects.toThrow();
       }
+    });
+  });
+
+  describe('selfFixApprovalFloor', () => {
+    const verifyFixTicket = { ...mockTicket, status: TicketStatus.VERIFY_FIX };
+    const agent = { ...mockAgentPrincipal, id: 'agent-1', sub: 'agent-1' };
+    const user = { ...mockUserPrincipal, id: 'u-1', sub: 'u-1' };
+
+    const loadVerifyFixTicket = () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(verifyFixTicket);
+    };
+
+    it('returns agent floor for the current agent as latest VERIFY_FIX actor', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: 'agent-1' });
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).resolves.toBe('agent');
+    });
+
+    it('reads the latest VERIFY_FIX actor once using the ticket id and status', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: 'agent-1' });
+
+      await service.selfFixApprovalFloor('alpha', 'AL-1', agent);
+
+      expect(mockTicketRepo.findLatestStatusChangeActor).toHaveBeenCalledTimes(1);
+      expect(mockTicketRepo.findLatestStatusChangeActor).toHaveBeenCalledWith('ticket-123', TicketStatus.VERIFY_FIX);
+    });
+
+    it('returns undefined when the latest agent actor is a different agent', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'AGENT', id: 'agent-2' });
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).resolves.toBeUndefined();
+    });
+
+    it('does not match actor ids across principal kinds', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'USER', id: 'agent-1' });
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).resolves.toBeUndefined();
+    });
+
+    it('returns agent floor for the matching user actor', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue({ type: 'USER', id: 'u-1' });
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', user)).resolves.toBe('agent');
+    });
+
+    it('returns undefined when there is no latest actor', async () => {
+      loadVerifyFixTicket();
+      mockTicketRepo.findLatestStatusChangeActor.mockResolvedValue(null);
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).resolves.toBeUndefined();
+    });
+
+    it('returns undefined for a ticket outside VERIFY_FIX', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status: TicketStatus.IN_PROGRESS });
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).resolves.toBeUndefined();
+    });
+
+    it('does not read activity for a ticket outside VERIFY_FIX', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status: TicketStatus.IN_PROGRESS });
+
+      await service.selfFixApprovalFloor('alpha', 'AL-1', agent);
+
+      expect(mockTicketRepo.findLatestStatusChangeActor).not.toHaveBeenCalled();
+    });
+
+    it('preserves findByRef not-found behavior', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
+
+      await expect(service.selfFixApprovalFloor('alpha', 'AL-1', agent)).rejects.toThrow(NotFoundAppException);
+      expect(mockTicketRepo.findLatestStatusChangeActor).not.toHaveBeenCalled();
     });
   });
 
