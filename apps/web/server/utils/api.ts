@@ -43,7 +43,7 @@ export function setAuthCookies(
   if (data.accessToken) {
     setCookie(event, ACCESS_COOKIE, data.accessToken, {
       httpOnly: true,
-      sameSite: 'strict',
+      sameSite: 'lax',
       secure: true,
       path: '/',
       maxAge: 60 * 15, // 15-minute access-token window
