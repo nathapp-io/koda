@@ -10,6 +10,7 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { parseBody } from '../approvals/route/parse-body';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { TICKET_EDGE_KEYS } from './state-machine/transition-keys';
 
 function routeBody(input: unknown, key: string): unknown {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return undefined;
@@ -20,6 +21,7 @@ function routeBody(input: unknown, key: string): unknown {
 export const TICKET_ROUTE_VARIANTS = {
   create: 'rest:tickets.create',
   update: 'rest:tickets.update',
+  updateStatus: 'rest:tickets.update-status',
   assign: 'rest:tickets.assign',
   delete: 'rest:tickets.delete',
   verify: 'rest:tickets.verify',
@@ -50,8 +52,8 @@ export class TicketRouteCommands implements OnModuleInit {
       run: (principal, input) => this.service.create(input.slug, input.ticket, principal),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; ref: string; patch: UpdateTicketDto }, Awaited<ReturnType<TicketsService['update']>>>({
-      key: 'ticket.update', variant: TICKET_ROUTE_VARIANTS.update,
+    const updateCommand = (key: string, variant: string) => routeCommand<{ slug: string; ref: string; patch: UpdateTicketDto }, Awaited<ReturnType<TicketsService['update']>>>({
+      key, variant,
       parse: (input) => {
         const { slug, ref } = parseRouteInput(input, ['slug', 'ref']);
         const patch = routeBody(input, 'patch');
@@ -59,7 +61,11 @@ export class TicketRouteCommands implements OnModuleInit {
       },
       run: (principal, input) => this.service.update(input.slug, input.ref, input.patch, principal),
       toResult: (result) => result,
-    }, this.loader));
+    }, this.loader);
+    this.commands.register(updateCommand('ticket.update', TICKET_ROUTE_VARIANTS.update));
+    for (const key of TICKET_EDGE_KEYS) {
+      this.commands.register(updateCommand(key, TICKET_ROUTE_VARIANTS.updateStatus));
+    }
     this.commands.register(routeCommand<{ slug: string; ref: string; assignee: AssignTicketDto }, TicketResponseDto>({
       key: 'ticket.assign', variant: TICKET_ROUTE_VARIANTS.assign,
       parse: (input) => {

@@ -68,11 +68,11 @@ describeIntegration('gated ticket write routes', () => {
     expect((await db.ticket.findUniqueOrThrow({ where: { id: created.id } })).title).toBe('renamed');
   });
 
-  it('AC-4: approved status patch fails when the agent lacks the edge key', async () => {
+  it('AC-4: status patch is refused immediately when the agent lacks the edge key', async () => {
     const created = data<{ ref: string }>(await create(`status refusal ${++counter}`, world.tokens.root).expect(201));
     await seedWaitPolicy(db, 'ticket.update', project.id);
-    const summary = pending(await request(server()).patch(`${path()}/${created.ref}`).set(agentAuth()).send({ status: 'IN_PROGRESS' }));
-    expect(await approve(summary.id)).toMatchObject({ status: 'failed', result: { error: 'execution-failed', name: expect.any(String) } });
+    await request(server()).patch(`${path()}/${created.ref}`).set(agentAuth()).send({ status: 'IN_PROGRESS' }).expect(403);
+    expect(await db.approvalRequest.count({ where: { permissionKey: 'ticket.transition.start' } })).toBe(0);
   });
 
   it('AC-5: approving pending assignment assigns the agent', async () => {

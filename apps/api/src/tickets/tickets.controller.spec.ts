@@ -15,6 +15,7 @@ import { PermissionService } from '../permissions/permission.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
+import { TicketStatus } from '../common/enums';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
@@ -733,11 +734,42 @@ describe('TicketsController', () => {
 describe('ticket write HTTP approval wrappers (US-003)', () => {
   function build() {
     const run = vi.fn();
+    const findByRef = vi.fn();
     const gate = { run } as unknown as ApprovalRouteGate;
-    const controller = new TicketsController({} as TicketsService, {} as TicketTransitionsService, gate);
+    const service = { findByRef } as unknown as TicketsService;
+    const controller = new TicketsController(service, {} as TicketTransitionsService, gate);
     const project = { project: { id: 'project-1', slug: 'alpha' } };
-    return { run, controller, project };
+    return { run, findByRef, controller, project };
   }
+
+  it('AC-4: status patch gates under the transition edge and requires ticket.update too', async () => {
+    const { run, findByRef, controller, project } = build();
+    const patch = { status: 'IN_PROGRESS' } as UpdateTicketDto;
+    findByRef.mockResolvedValue({ status: TicketStatus.CREATED });
+    run.mockResolvedValue({ status: 'executed', result: { id: 'ticket-1' } });
+
+    await controller.update('alpha', 'AL-1', patch, { actorType: 'agent' } as unknown as KodaPrincipal, project);
+
+    expect(findByRef).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1');
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'ticket.transition.start', variant: 'rest:tickets.update-status', projectId: 'project-1',
+      input: { slug: 'alpha', ref: 'AL-1', patch }, alsoKeys: ['ticket.update'],
+    });
+  });
+
+  it('AC-5: status patch without a transition edge keeps the ticket.update gate', async () => {
+    const { run, findByRef, controller, project } = build();
+    const patch = { status: 'CREATED' } as UpdateTicketDto;
+    findByRef.mockResolvedValue({ status: TicketStatus.CLOSED });
+    run.mockResolvedValue({ status: 'executed', result: { id: 'ticket-1' } });
+
+    await controller.update('alpha', 'AL-1', patch, { actorType: 'agent' } as unknown as KodaPrincipal, project);
+
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'ticket.update', variant: 'rest:tickets.update', projectId: 'project-1',
+      input: { slug: 'alpha', ref: 'AL-1', patch },
+    });
+  });
 
   it('update gates the DTO under ticket.update in CurrentProject scope', async () => {
     const { run, controller, project } = build();

@@ -4,6 +4,7 @@ import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loa
 import type { TicketsService } from './tickets.service';
 import type { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketRouteCommands, TICKET_ROUTE_VARIANTS } from './ticket-route.commands';
+import { TICKET_EDGE_KEYS } from './state-machine/transition-keys';
 
 describe('TicketRouteCommands', () => {
   it('AC-8/9/10: registers and executes gated transition commands', async () => {
@@ -80,6 +81,32 @@ describe('TicketRouteCommands', () => {
     expect(await returning.execute(returning.parse(input))).toEqual({ ref: 'AL-1', status: 'CLOSED' });
     expect(transitions.verifyFix).toHaveBeenNthCalledWith(1, 'alpha', 'AL-1', 'good', true, principal);
     expect(transitions.verifyFix).toHaveBeenNthCalledWith(2, 'alpha', 'AL-1', 'good', false, principal);
+  });
+
+  it('AC-1/2/3: registers the status update variant for every transition edge and executes start as ticket.update', async () => {
+    expect([...TICKET_EDGE_KEYS].sort()).toEqual([
+      'ticket.transition.fix',
+      'ticket.transition.reject',
+      'ticket.transition.start',
+      'ticket.transition.verify',
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+    ]);
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'loaded-agent' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = { update: vi.fn().mockResolvedValue({ ref: 'AL-1', status: 'IN_PROGRESS' }) };
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+
+    for (const key of TICKET_EDGE_KEYS) {
+      expect(registry.get(key, TICKET_ROUTE_VARIANTS.updateStatus)).toBeDefined();
+    }
+    expect(TICKET_ROUTE_VARIANTS.updateStatus).toBe('rest:tickets.update-status');
+    const command = registry.get('ticket.transition.start', TICKET_ROUTE_VARIANTS.updateStatus);
+    if (!command) throw new Error('Missing status update command');
+    const parsed = command.parse({ slug: 'alpha', ref: 'AL-1', patch: { status: 'IN_PROGRESS' } });
+    await command.execute(parsed);
+    expect(service.update).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', { status: 'IN_PROGRESS' }, principal);
   });
 
   it('AC-8: registers create and update route commands', () => {
