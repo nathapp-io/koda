@@ -53,7 +53,9 @@ export class UserRouteCommands implements OnModuleInit {
         const source = input as Record<string, unknown>;
         return { id, patch: parseBody(UpdateUserDto, source.patch ?? {}) };
       },
-      run: (principal, input) => this.users.update(principal.id, input.id, input.patch),
+      run: (principal, input) => this.users.update(
+        { type: principal.actorType === 'agent' ? 'AGENT' : 'USER', id: principal.id }, input.id, input.patch,
+      ),
       toResult: (result) => result,
     }, this.loader));
   }

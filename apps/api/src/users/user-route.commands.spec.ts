@@ -21,11 +21,20 @@ describe('UserRouteCommands', () => {
     if (!command || !command.toResult) throw new Error('Missing user command');
     const input = command.parse({ id: 'u2', patch: { disabled: true } });
     const result = await command.execute(input);
-    expect(users.update).toHaveBeenCalledExactlyOnceWith('u1', 'u2', { disabled: true });
+    expect(users.update).toHaveBeenCalledExactlyOnceWith({ type: 'USER', id: 'u1' }, 'u2', { disabled: true });
     expect(command.toResult(result)).toEqual({ id: 'u2', disabled: true });
     expect(command.parse({ id: 'u2' })).toEqual({ id: 'u2', patch: {} });
     expect(() => command.parse({ id: 'u2', patch: { disabled: 'yes' } })).toThrow();
     expect(() => command.parse({ id: '' })).toThrow();
+  });
+
+  it('AC-8: passes agent identity as a PrincipalRef to UsersAdminService.update', async () => {
+    const { registry, users, loader } = build();
+    loader.forContext.mockResolvedValue({ id: 'agent-1', actorType: 'agent' });
+    const command = registry.get('user.update', USER_ROUTE_VARIANTS.update);
+    if (!command) throw new Error('Missing user command');
+    await command.execute(command.parse({ id: 'owner-1', patch: { disabled: true } }));
+    expect(users.update).toHaveBeenCalledExactlyOnceWith({ type: 'AGENT', id: 'agent-1' }, 'owner-1', { disabled: true });
   });
 
   it('AC-10: registers user.create as a redeem command whose redaction drops the password', () => {

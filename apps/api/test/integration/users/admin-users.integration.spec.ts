@@ -132,6 +132,31 @@ describeIntegration('/admin/users (PG)', () => {
     expect(page.hasNext).toBe(true);
   });
 
+  it('AC-9..13: only an Owner can disable an Owner; refusals preserve state and token version', async () => {
+    const admin = await createUser('owner-guard-admin@koda.test', true);
+    const owner = await createUser('owner-guard-target@koda.test');
+    const secondOwner = await createUser('owner-guard-actor@koda.test');
+    await grantRole(prisma, { type: 'USER', id: owner.id }, 'owner');
+    await grantRole(prisma, { type: 'USER', id: secondOwner.id }, 'owner');
+    const adminToken = await loginToken(server, 'owner-guard-admin@koda.test');
+    const secondOwnerToken = await loginToken(server, 'owner-guard-actor@koda.test');
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: owner.id }, select: { disabled: true, tokenVersion: true } });
+
+    const refused = await request(server).patch(`/api/admin/users/${owner.id}`).set(auth(adminToken)).send({ disabled: true }).expect(403);
+    expect(refused.body.message).toBe('Only an Owner can disable an Owner');
+    const afterRefusal = await prisma.user.findUniqueOrThrow({ where: { id: owner.id }, select: { disabled: true, tokenVersion: true } });
+    expect(afterRefusal.disabled).toBe(false);
+    expect(afterRefusal.tokenVersion).toBe(before.tokenVersion);
+
+    await request(server).patch(`/api/admin/users/${owner.id}`).set(auth(secondOwnerToken)).send({ disabled: true }).expect(200);
+    const afterOwnerDisable = await prisma.user.findUniqueOrThrow({ where: { id: owner.id }, select: { disabled: true } });
+    expect(afterOwnerDisable.disabled).toBe(true);
+    // Keep the admin fixture meaningful: the target is an Owner, while a distinct active admin remains.
+    expect(await prisma.user.count({ where: { id: admin.id, disabled: false } })).toBe(1);
+    await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: { in: [owner.id, secondOwner.id, admin.id] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [owner.id, secondOwner.id, admin.id] } } });
+  });
+
   it('disabling kills a session that is already in use (cached state)', async () => {
     const carol = await createUser('carol@koda.test');
     const token = await loginToken(server, 'carol@koda.test');
@@ -213,7 +238,8 @@ describeIntegration('/admin/users (PG)', () => {
    * reload — which is also correct, but it would hide a lock that stopped serializing.
    */
   it('two admins disabling each other at once refuse exactly one with users.lastAdmin', async () => {
-    const eve = await createUser('eve@koda.test', true);
+    const eve = await createUser('eve@koda.test');
+    await grantRole(prisma, { type: 'USER', id: eve.id }, 'owner');
     const eveToken = await loginToken(server, 'eve@koda.test');
     // Root and Eve are the only active admins (Dave was demoted above).
     expect(await enabledAdminCount()).toBe(2);
