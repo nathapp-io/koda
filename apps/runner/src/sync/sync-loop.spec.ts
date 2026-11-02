@@ -373,6 +373,34 @@ describe('bad-batch probes (US-002)', () => {
     expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
   });
 
+  test('F1: a rejecting probe command handler returns retry and keeps the event', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {});
+    const loop = makeLoop({ handleCommands: async () => { throw new Error('handler failed'); } });
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, ok({ commands: [assignCmd] }));
+    expect(await loop.syncOnce()).toMatchObject({ kind: 'retry' });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
+  test('F2: a probe that resolves after stop returns woken without replacing the event', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {});
+    const loop = makeLoop();
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    let startedProbe: () => void = () => undefined;
+    let resolveProbe: (response: SyncResponse) => void = () => undefined;
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, (_req) => new Promise<SyncResponse>((resolve) => {
+      resolveProbe = resolve;
+      startedProbe();
+    }));
+    const probeStarted = new Promise<void>((resolve) => { startedProbe = resolve; });
+    const pending = loop.syncOnce();
+    await probeStarted;
+    loop.stop();
+    resolveProbe(empty);
+    expect(await pending).toEqual({ kind: 'woken' });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
   test('AC-12: a smallest-scale 413 also probes jobs: []', async () => {
     add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
     const loop = makeLoop();

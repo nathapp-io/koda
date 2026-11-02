@@ -133,7 +133,7 @@ export class SyncLoop {
       const response = await this.deps.client.sync(request, controller.signal);
       return await this.apply(request, response, report);
     } catch (error) {
-      return this.classify(error, request, controller, report);
+      return await this.classify(error, request, controller, report);
     } finally {
       this.inflight = null;
     }
@@ -210,7 +210,14 @@ export class SyncLoop {
       }
       return this.retry(probeError);
     }
-    await this.apply(probe, response, report);
+    if (controller.signal.aborted) return { kind: 'woken' };
+    try {
+      await this.apply(probe, response, report);
+    } catch (applyError) {
+      if (controller.signal.aborted) return { kind: 'woken' };
+      return this.retry(applyError);
+    }
+    if (controller.signal.aborted) return { kind: 'woken' };
     const message = `event ${event.seq} (${event.type}) dropped: the server rejected it (${error.status})`;
     this.deps.journal.replaceEvent(job.jobId, job.leaseEpoch, event.seq, 'lifecycle', { level: 'error', message });
     this.deps.log.error(message, { jobId: job.jobId, seq: event.seq, type: event.type });
