@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { FleetSweeper } from './fleet-sweeper';
@@ -73,5 +74,49 @@ describe('FleetSweeper tick (S1.5 2a: job leaves RUNNING)', () => {
     });
     expect(live.publish).toHaveBeenCalledWith([JOB_LIVE]);
     expect(ticketEffects.onTerminal).toHaveBeenCalledWith([job.id]);
+  });
+
+  it('US-002 AC-1..4 isolates a transition failure, counts only success, and logs only its name', async () => {
+    const now = new Date('2026-10-03T10:00:00.000Z');
+    const jobs = ['j1', 'j2'].map((id) => ({ id, projectId: 'p1', runnerId: 'r1', state: 'RUNNING' }));
+    const repo = {
+      findSilentHeldIds: vi.fn().mockResolvedValue(['j1', 'j2']),
+      lockById: vi.fn(async (id: string) => jobs.find((job) => job.id === id)),
+      findPlacementRunners: vi.fn().mockResolvedValue([{ lastSeenAt: new Date(0) }]),
+    };
+    const transitionError = Object.assign(new Error('secret-detail'), { name: 'TransitionError' });
+    const transitions = { apply: vi.fn(async ({ job }: { job: (typeof jobs)[number] }) => {
+      if (job.id === 'j1') throw transitionError;
+      return { job, live: { id: 'e2', type: 'fleet_job', projectId: 'p1', jobId: 'j2', state: 'CRASHED', at: now.toISOString() } as LiveFleetJobEvent };
+    }) };
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockClear();
+    const sweeper = new FleetSweeper(repo as never, transitions as never, { publish: vi.fn() } as never,
+      { run: (fn: () => unknown) => fn() } as never, testFleetConfig({ jobCrashSec: 60 }),
+      { attribute: vi.fn() } as never, { onTerminal: vi.fn() } as never, mockAuditRecorder);
+
+    await expect(sweeper.sweep(now)).resolves.toBe(1);
+
+    expect(transitions.apply).toHaveBeenCalledTimes(2);
+    expect(transitions.apply).toHaveBeenLastCalledWith(expect.objectContaining({ job: jobs[1], to: 'CRASHED' }));
+    expect(warn).toHaveBeenCalledWith('Silent-runner crash of job j1 failed: TransitionError');
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('secret-detail');
+    warn.mockRestore();
+  });
+
+  it('US-002 AC-5 continues after an item lock failure', async () => {
+    const now = new Date('2026-10-03T10:00:00.000Z');
+    const job = { id: 'j2', projectId: 'p1', runnerId: 'r1', state: 'RUNNING' };
+    const repo = {
+      findSilentHeldIds: vi.fn().mockResolvedValue(['j1', 'j2']),
+      lockById: vi.fn(async (id: string) => { if (id === 'j1') throw new Error('lock failed'); return job; }),
+      findPlacementRunners: vi.fn().mockResolvedValue([{ lastSeenAt: new Date(0) }]),
+    };
+    const transitions = { apply: vi.fn(async () => ({ job, live: {} as LiveFleetJobEvent })) };
+    const sweeper = new FleetSweeper(repo as never, transitions as never, { publish: vi.fn() } as never,
+      { run: (fn: () => unknown) => fn() } as never, testFleetConfig({ jobCrashSec: 60 }),
+      { attribute: vi.fn() } as never, { onTerminal: vi.fn() } as never, mockAuditRecorder);
+
+    await expect(sweeper.sweep(now)).resolves.toBe(1);
+    expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ job, to: 'CRASHED' }));
   });
 });
