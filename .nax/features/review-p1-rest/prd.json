@@ -3,7 +3,7 @@
   "feature": "review-p1-rest",
   "branchName": "feat/review-p1-rest",
   "createdAt": "2026-11-02T00:00:00.000Z",
-  "updatedAt": "2026-11-02T12:59:17.243Z",
+  "updatedAt": "2026-11-02T13:06:32.772Z",
   "userStories": [
     {
       "id": "US-001",
@@ -655,14 +655,17 @@
         "fleet-protocol"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "An additive type-only flag, parser branch, purpose-conditioned forwarding and cache predicate reuse existing sync fencing and mint paths without new abstractions; credential handling requires security-isolated TDD."
+        "reasoning": "An additive type-only flag, parser branch, purpose-conditioned forwarding and cache predicate reuse existing sync fencing and mint paths without new abstractions; credential handling requires security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/sync-request.parser.ts",
@@ -710,7 +713,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ba65cad440e420f5e16729c474c58275183d0e31"
     },
     {
       "id": "US-009",
