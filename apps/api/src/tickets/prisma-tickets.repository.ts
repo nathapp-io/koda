@@ -341,7 +341,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
   async findTicketWithComments(id: string): Promise<(TicketDomain & { comments: { type: string; body: string }[] }) | null> {
     return this.db.ticket.findUnique({
       where: { id },
-      include: { comments: true },
+      include: { comments: { where: { deletedAt: null } } },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any;
   }

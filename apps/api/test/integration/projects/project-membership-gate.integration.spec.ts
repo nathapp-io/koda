@@ -440,7 +440,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     const res = await send('delete', `/api/comments/${adminTargetCommentId}`, 'root');
 
     expect(res.status).toBe(204);
-    await expect(prisma.comment.findUnique({ where: { id: adminTargetCommentId } })).resolves.toBeNull();
+    const retained = await prisma.comment.findUnique({ where: { id: adminTargetCommentId } });
+    expect(retained).not.toBeNull();
+    expect(retained?.deletedAt).toBeInstanceOf(Date);
   }, TEST_TIMEOUT_MS);
 
   it('AC5 boundary: DELETE /api/comments/:id returns 404 for a non-member DEVELOPER', async () => {

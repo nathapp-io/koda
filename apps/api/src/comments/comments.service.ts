@@ -240,7 +240,7 @@ export class CommentsService {
 
     await this.audit.audited(
       async () => {
-        await this.commentRepo.delete(commentId);
+        await this.commentRepo.softDelete(commentId);
         return commentId;
       },
       (id) => ({

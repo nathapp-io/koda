@@ -9,11 +9,15 @@ describe('PrismaCommentRepository', () => {
 
   const mockFindMany = vi.fn();
   const mockCount = vi.fn();
+  const mockUpdateMany = vi.fn();
+  const mockFindUnique = vi.fn();
   const mockPrisma = {
     client: {
       comment: {
         findMany: mockFindMany,
         count: mockCount,
+        updateMany: mockUpdateMany,
+        findUnique: mockFindUnique,
       },
     },
   };
@@ -44,7 +48,7 @@ describe('PrismaCommentRepository', () => {
     const result = await repo.findByTicketId('t1');
 
     expect(mockFindMany).toHaveBeenCalledWith({
-      where: { ticketId: 't1' },
+      where: { ticketId: 't1', deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
     expect(result).toEqual([
@@ -81,17 +85,34 @@ describe('PrismaCommentRepository', () => {
     const result = await repo.findRecentByTicketId('t1', 10);
 
     expect(mockFindMany).toHaveBeenCalledWith({
-      where: { ticketId: 't1' },
+      where: { ticketId: 't1', deletedAt: null },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 10,
     });
     expect(result.map((comment) => comment.id)).toEqual(['c1', 'c2', 'c3']);
   });
 
+  it('softDelete sets deletedAt without hard-deleting the row', async () => {
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    await repo.softDelete('c1');
+
+    expect(mockUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'c1', deletedAt: null },
+      data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  it('findOwningProjectAndTicket returns null for a tombstone', async () => {
+    mockFindUnique.mockResolvedValue({ deletedAt: new Date() });
+
+    await expect(repo.findOwningProjectAndTicket('c1')).resolves.toBeNull();
+  });
+
   it('countByTicketId counts the comments of one ticket', async () => {
     mockCount.mockResolvedValue(12);
 
     expect(await repo.countByTicketId('t1')).toBe(12);
-    expect(mockCount).toHaveBeenCalledWith({ where: { ticketId: 't1' } });
+    expect(mockCount).toHaveBeenCalledWith({ where: { ticketId: 't1', deletedAt: null } });
   });
 });

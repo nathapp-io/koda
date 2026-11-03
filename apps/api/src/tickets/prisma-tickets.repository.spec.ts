@@ -18,6 +18,20 @@ describe('PrismaTicketsRepository — updateTicketStatusIf (M3 hardening)', () =
   });
 });
 
+describe('PrismaTicketsRepository comment aggregation', () => {
+  it('filters soft-deleted comments from findTicketWithComments', async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: 't1', comments: [] });
+    const repo = new PrismaTicketsRepository({ client: { ticket: { findUnique } } } as never);
+
+    await repo.findTicketWithComments('t1');
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: 't1' },
+      include: { comments: { where: { deletedAt: null } } },
+    });
+  });
+});
+
 describe('PrismaTicketsRepository assignee mapping (M26)', () => {
   const row = (over: Record<string, unknown>) => ({
     id: 't1', projectId: 'p1', number: 1, type: 'BUG', title: 'x', description: null, status: 'CREATED', priority: 'LOW',

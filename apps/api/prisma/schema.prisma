@@ -247,6 +247,7 @@ model Comment {
   type          String   @default("GENERAL") // GENERAL | VERIFICATION | FIX_REPORT | REVIEW
   authorUserId  String?
   authorAgentId String?
+  deletedAt     DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
