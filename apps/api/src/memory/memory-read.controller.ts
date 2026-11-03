@@ -15,6 +15,7 @@ import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ownerTypeFor } from './memory-write.guard';
+import { MemoryWriteModeService, type MemoryWriteMode } from './memory-write-mode.service';
 
 /**
  * The project memory listing (permissions P1 US-008) and the incremental export of it (memory-notes
@@ -33,7 +34,23 @@ export class MemoryReadController {
   constructor(
     private readonly governance: MemoryGovernanceService,
     private readonly projectAccess: ProjectAccessService,
+    private readonly writeModeService: MemoryWriteModeService,
   ) {}
+
+  @Get('write-mode')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('memory.read')
+  @ApiOperation({ summary: 'Get the caller\'s effective memory.create write mode (memory.read)' })
+  @ApiResponse({ status: 200, description: "Returns { mode: 'direct' | 'proposal', policyId: string | null, source: 'policy' | 'default' | 'not-approvable', agentPolicy: { id, mode } | null }" })
+  @ApiResponse({ status: 403, description: 'memory.read is missing, or the caller is not a member' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async writeMode(
+    @Param('slug') slug: string,
+    @Principal() principal: KodaPrincipal,
+  ): Promise<JsonResponse<MemoryWriteMode>> {
+    const projectId = await this.projectAccess.findProjectIdBySlug(slug);
+    return JsonResponse.Ok(await this.writeModeService.resolve(projectId, principal)) as JsonResponse<MemoryWriteMode>;
+  }
 
   @Get('export')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)

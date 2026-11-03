@@ -1656,6 +1656,41 @@
         ]
       }
     },
+    "/api/projects/{slug}/memory/write-mode": {
+      "get": {
+        "operationId": "MemoryReadController_writeMode",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns { mode: 'direct' | 'proposal', policyId: string | null, source: 'policy' | 'default' | 'not-approvable', agentPolicy: { id, mode } | null }"
+          },
+          "403": {
+            "description": "memory.read is missing, or the caller is not a member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the caller's effective memory.create write mode (memory.read)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/projects/{slug}/memory/export": {
       "get": {
         "operationId": "MemoryReadController_exportMemory",

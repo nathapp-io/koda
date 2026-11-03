@@ -6,6 +6,7 @@ import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryItem } from './memory-item-repository';
 import { MemoryReadController } from './memory-read.controller';
 import { ProjectAccessService } from '../projects/project-access.service';
+import type { MemoryWriteModeService } from './memory-write-mode.service';
 
 const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
@@ -37,13 +38,34 @@ describe('MemoryReadController', () => {
   const mockProjectAccessService = {
     findProjectIdBySlug: vi.fn(),
   };
+  const mockWriteModeService = { resolve: vi.fn() };
 
   beforeEach(() => {
     vi.clearAllMocks();
     controller = new MemoryReadController(
       mockGovernanceService as unknown as MemoryGovernanceService,
       mockProjectAccessService as unknown as ProjectAccessService,
+      mockWriteModeService as unknown as MemoryWriteModeService,
     );
+  });
+
+  describe('writeMode (memory-notes US-007)', () => {
+    it('resolves the slug, returns caller write mode in the JSON envelope, and declares guarded memory.read access', async () => {
+      const principal = agent('agent-A');
+      const resultBody = { mode: 'proposal', policyId: 'pol1', source: 'policy', agentPolicy: null };
+      mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
+      mockWriteModeService.resolve.mockResolvedValue(resultBody);
+
+      const result = await controller.writeMode('my-project', principal);
+
+      expect(mockWriteModeService.resolve).toHaveBeenCalledWith('project-resolved-id', principal);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(resultBody);
+      const guards = Reflect.getMetadata('__guards__', MemoryReadController.prototype.writeMode) as unknown[];
+      const requires = Reflect.getMetadata('koda:requires', MemoryReadController.prototype.writeMode) as { keys: string[] };
+      expect(guards?.map((guard) => (guard as { name: string }).name)).toEqual(['ProjectMembershipGuard', 'RequiresGuard']);
+      expect(requires).toMatchObject({ keys: ['memory.read'] });
+    });
   });
 
   describe('getMemory', () => {

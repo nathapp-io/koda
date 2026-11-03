@@ -25,6 +25,7 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
 import { MemoryMcpTools } from './mcp/memory-mcp-tools';
 import { ReviewDecisionsService } from './review-decisions.service';
+import { MemoryWriteModeService } from './memory-write-mode.service';
 
 @Module({
   // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
@@ -57,6 +58,7 @@ import { ReviewDecisionsService } from './review-decisions.service';
     MemoryOutboxSubscriber,
     MemoryMcpTools,
     ReviewDecisionsService,
+    MemoryWriteModeService,
   ],
   exports: [
     TimelineService,
