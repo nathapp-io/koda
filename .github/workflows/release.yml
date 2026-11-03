@@ -8,20 +8,21 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to re-publish (e.g. v0.1.0)"
+        description: "Existing tag to re-publish (e.g. v0.1.0). Builds that tag's commit, never main."
         required: true
         type: string
 
-permissions:
-  contents: write
-  packages: write
-  id-token: write
+# Review E/SEC-8: nothing by default; each job asks for only what it needs. Third-party actions are pinned to
+# full commit SHAs (the comment names the version); Dependabot bumps them (.github/dependabot.yml).
+permissions: {}
 
 # ─── Shared info ──────────────────────────────────────────────────────────────
 
 jobs:
   info:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.info.outputs.tag }}
       version: ${{ steps.info.outputs.version }}
@@ -31,12 +32,17 @@ jobs:
       docker_tags_api: ${{ steps.docker.outputs.tags_api }}
       docker_tags_web: ${{ steps.docker.outputs.tags_web }}
     steps:
-      - uses: actions/checkout@v7
-
+      # Review E/SEC-9: workflow inputs reach scripts through env, never through ${{ }} inside run:.
       - name: Set release info
         id: info
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="$RAW_TAG"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-canary\.[0-9]+)?$ ]]; then
+            echo "❌ Not a release tag: $TAG"
+            exit 1
+          fi
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -51,9 +57,16 @@ jobs:
             echo "notify=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Review E/BUG-4: every job checks out the tag itself. A re-publish of v0.4.0 rebuilds v0.4.0's commit
+      # (and fails when the tag does not exist) instead of pushing main under a published version tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.info.outputs.tag }}
+
       - name: Validate version
+        env:
+          TAG: ${{ steps.info.outputs.tag }}
         run: |
-          TAG="${{ steps.info.outputs.tag }}"
           PKG_VERSION="v$(node -p "require('./package.json').version")"
           if [ "$TAG" != "$PKG_VERSION" ]; then
             echo "❌ Tag $TAG does not match package.json version $PKG_VERSION"
@@ -63,10 +76,10 @@ jobs:
 
       - name: Compute Docker tags
         id: docker
+        env:
+          TAG: ${{ steps.info.outputs.tag }}
+          VERSION: ${{ steps.info.outputs.version }}
         run: |
-          TAG="${{ steps.info.outputs.tag }}"
-          VERSION="${{ steps.info.outputs.version }}"
-
           if [[ "$TAG" == *"-canary."* ]]; then
             echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
             echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
@@ -83,57 +96,88 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
+    permissions:
+      contents: read
+      id-token: write # npm provenance
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.info.outputs.tag }}
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
+      # A re-publish retries the Docker images after a partial failure; npm versions are immutable, so a
+      # version that is already on npm is left alone instead of failing the run (and blocking the images).
+      - name: Check npm for this version
+        id: npm
+        env:
+          VERSION: ${{ needs.info.outputs.version }}
+        run: |
+          if npm view "@nathapp/koda-cli@${VERSION}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@nathapp/koda-cli@${VERSION} is already on npm; skipping publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
+        if: steps.npm.outputs.published != 'true'
         run: bun install --frozen-lockfile
 
       - name: Generate Prisma client
+        if: steps.npm.outputs.published != 'true'
         run: bun run db:generate
 
       - name: Generate OPENAPI types
-        run: bun run generate:cli        
+        if: steps.npm.outputs.published != 'true'
+        run: bun run generate:cli
 
       - name: Build CLI
+        if: steps.npm.outputs.published != 'true'
         run: bunx turbo run build --filter=@nathapp/koda-cli
 
       - name: Publish to npm
+        if: steps.npm.outputs.published != 'true'
         working-directory: apps/cli
-        run: npm publish --access public --tag ${{ needs.info.outputs.npm_tag }} --provenance
         env:
+          NPM_TAG: ${{ needs.info.outputs.npm_tag }}
           NPM_CONFIG_PROVENANCE: "true"
+        run: npm publish --access public --tag "$NPM_TAG" --provenance
 
   # ─── Docker: API ──────────────────────────────────────────────────────────────
 
+  # Images push only after the CLI job succeeded (review E/BUG-4), so a failed release never leaves new images
+  # behind a version that npm rejected.
   docker-api:
-    needs: info
+    needs: [info, cli]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.info.outputs.tag }}
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push API
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: apps/api/Dockerfile
@@ -153,24 +197,28 @@ jobs:
   # ─── Docker: Web ──────────────────────────────────────────────────────────────
 
   docker-web:
-    needs: info
+    needs: [info, cli]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.info.outputs.tag }}
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Web
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: apps/web/Dockerfile
@@ -192,9 +240,11 @@ jobs:
   release:
     needs: [info, cli, docker-api, docker-web]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
     steps:
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.info.outputs.tag }}
           name: ${{ needs.info.outputs.tag }}
@@ -207,12 +257,14 @@ jobs:
     needs: [info, release]
     if: needs.info.outputs.notify == 'true' && vars.TELEGRAM_CHAT_ID != ''
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - uses: actions/checkout@v7
-
       - name: Send Telegram notification
+        env:
+          VERSION: ${{ needs.info.outputs.tag }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
         run: |
-          VERSION="${{ needs.info.outputs.tag }}"
           MSG="🚀 *Koda ${VERSION} released*
 
           \`\`\`
@@ -223,7 +275,7 @@ jobs:
 
           https://github.com/nathapp-io/koda/releases/tag/${VERSION}"
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ vars.TELEGRAM_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="Markdown" \
             -d text="$MSG" || true

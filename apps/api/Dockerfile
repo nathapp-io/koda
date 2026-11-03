@@ -104,5 +104,17 @@ COPY ./apps/${BUILD_APP}/package.json ./package.json
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s \
   CMD wget -qO- http://127.0.0.1:3100/api/health || exit 1
 
+# Run as an unprivileged user (review E/SEC-4), like the web image. The code under /app stays root-owned and
+# read-only to the process. Only the data directories are writable: /data (the compose volume: LanceDB and
+# fleet artifacts), plus /app/data and /app/lancedb (the FLEET_ARTIFACT_DIR and LANCEDB_PATH defaults when they
+# are unset). A volume created by an older root image keeps root-owned files: chown it once to 1001:1001
+# (deployments/example/deploy.sh does this on every deploy).
+RUN addgroup --system --gid 1001 koda && \
+    adduser --system --uid 1001 --ingroup koda koda && \
+    mkdir -p /data /app/data /app/lancedb && \
+    chown koda:koda /data /app/data /app/lancedb
+
+USER koda
+
 # use bun run instead of bun dist/main to ensure package version is correctly picked up by the app
 CMD ["bun", "run", "start:prod-runtime"]

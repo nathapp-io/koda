@@ -33,6 +33,30 @@ describe('env validation', () => {
     expect(() => validate({ ...REQUIRED, FLEET_PR_REVIEW_MAX_DISPATCH: '0' })).toThrow();
   });
 
+  describe('placeholder secrets (review E/SEC-3)', () => {
+    const PLACEHOLDER_KEYS = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'API_KEY_SECRET'] as const;
+
+    it.each(PLACEHOLDER_KEYS)('rejects a change-me %s when ENV_NAME is production', (key) => {
+      expect(() => validate({ ...REQUIRED, ENV_NAME: 'production', [key]: 'change-me-in-production' })).toThrow(key);
+    });
+
+    it.each(PLACEHOLDER_KEYS)('rejects a change-me %s when NODE_ENV is production', (key) => {
+      expect(() => validate({ ...REQUIRED, NODE_ENV: 'production', [key]: 'change-me' })).toThrow(key);
+    });
+
+    it('rejects the placeholder regardless of case', () => {
+      expect(() => validate({ ...REQUIRED, ENV_NAME: 'production', JWT_SECRET: 'CHANGE-ME' })).toThrow('JWT_SECRET');
+    });
+
+    it('accepts real secrets in production', () => {
+      expect(() => validate({ ...REQUIRED, ENV_NAME: 'production' })).not.toThrow();
+    });
+
+    it('accepts a change-me secret outside production (dev compose defaults)', () => {
+      expect(() => validate({ ...REQUIRED, JWT_SECRET: 'change-me-dev', JWT_REFRESH_SECRET: 'change-me-dev-refresh' })).not.toThrow();
+    });
+  });
+
   it('accepts empty SMTP_URL / EMAIL_FROM / WEB_PUBLIC_URL as "email off" (S4b review I1)', () => {
     expect(() => validate({ ...REQUIRED, SMTP_URL: '', EMAIL_FROM: '', WEB_PUBLIC_URL: '' })).not.toThrow();
   });

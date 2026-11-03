@@ -2,6 +2,21 @@ import * as Joi from 'joi';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { parseAllowedHosts } from './webhook.config';
 
+// Review E/SEC-3: the shipped examples carry `change-me...` secrets. Outside production they are fine
+// (dev compose defaults); in a production image (ENV_NAME, set by the Dockerfile) or NODE_ENV=production
+// they would sign tokens with a published string, so boot fails instead. The message never echoes the value.
+const PLACEHOLDER_SECRET = /^change-me/i;
+const PRODUCTION = Joi.string().valid('production').insensitive().required();
+
+function secret(base: Joi.StringSchema): Joi.AnySchema {
+  const refuse = base
+    .pattern(PLACEHOLDER_SECRET, { invert: true, name: 'placeholder' })
+    .messages({ 'string.pattern.invert.name': '{{#label}} is a change-me placeholder; set a real secret' });
+  return base
+    .when('ENV_NAME', { is: PRODUCTION, then: refuse })
+    .when('NODE_ENV', { is: PRODUCTION, then: refuse });
+}
+
 const envSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
@@ -9,11 +24,11 @@ const envSchema = Joi.object({
   API_PORT: Joi.number().integer().default(3100),
   GLOBAL_PREFIX: Joi.string().default('api'),
   DATABASE_URL: Joi.string().required(),
-  JWT_SECRET: Joi.string().required(),
+  JWT_SECRET: secret(Joi.string().required()),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
-  JWT_REFRESH_SECRET: Joi.string().required().invalid(Joi.ref('JWT_SECRET')),
+  JWT_REFRESH_SECRET: secret(Joi.string().required().invalid(Joi.ref('JWT_SECRET'))),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
-  API_KEY_SECRET: Joi.string().required(),
+  API_KEY_SECRET: secret(Joi.string().required()),
   VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
   VCS_DEFAULT_POLLING_INTERVAL_MS: Joi.number().integer().min(60000).optional(),
   GITHUB_API_URL: Joi.string().uri().optional(),
