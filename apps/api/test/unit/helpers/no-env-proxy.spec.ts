@@ -4,6 +4,8 @@
  * `407 Proxy Authentication Required`) and fails an unrelated assertion.
  */
 import { createServer, type Server } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 import { disableEnvProxy, LOOPBACK_HOSTS } from '../../helpers/no-env-proxy';
 
@@ -58,6 +60,21 @@ describe('disableEnvProxy', () => {
 
     expect(process.env.NO_PROXY).toBe(first);
     expect(noProxyHosts().filter((host) => host === 'localhost')).toHaveLength(1);
+  });
+});
+
+describe('the test runner config', () => {
+  /**
+   * A worker cannot undo a proxy that was already in effect when it was forked, and `globalSetup` (which
+   * talks to the test Postgres) runs in the main process before any worker exists. The config therefore
+   * removes the proxy itself, at module scope, so the whole run starts hermetic — `test-setup.ts` repeats
+   * the call per worker for the paths this file cannot reach.
+   */
+  it('disables the environment proxy in the runner process, before workers and globalSetup run', () => {
+    const config = readFileSync(join(__dirname, '../../../vitest.config.ts'), 'utf8');
+
+    expect(config).toContain("from './test/helpers/no-env-proxy'");
+    expect(config).toContain('disableEnvProxy();');
   });
 });
 
