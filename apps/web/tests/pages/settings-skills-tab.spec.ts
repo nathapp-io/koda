@@ -20,6 +20,15 @@ const ProjectSkillsPanelStub = {
 
 /** Records the slug each SettingsKnowledgeCard receives (US-007). */
 const knowledgeSpy = jest.fn()
+const memoryCardSpy = jest.fn()
+const SettingsMemoryCardStub = {
+  name: 'StubSettingsMemoryCard',
+  props: ['slug'],
+  setup(props: { slug?: string }) {
+    memoryCardSpy(props.slug)
+    return () => Vue.h('x-stub-stub', { 'data-stub': 'memory-card', 'data-slug': props.slug ?? '' })
+  },
+}
 const SettingsKnowledgeCardStub = {
   name: 'StubSettingsKnowledgeCard',
   props: ['slug'],
@@ -55,6 +64,7 @@ function mountSettings() {
       SettingsProjectCard: inert('project-card'),
       SettingsVcsCard: inert('vcs-card'),
       SettingsKnowledgeCard: SettingsKnowledgeCardStub,
+      SettingsMemoryCard: SettingsMemoryCardStub,
       LoadingState: inert('loading'),
       ErrorState: inert('error'),
     },
@@ -73,6 +83,7 @@ function mountSettings() {
 afterEach(() => {
   panelSpy.mockClear()
   knowledgeSpy.mockClear()
+  memoryCardSpy.mockClear()
 })
 
 describe('settings page skills tab (US-007)', () => {
@@ -103,6 +114,30 @@ describe('settings page skills tab (US-007)', () => {
 
     const projectContent = app.find('[data-stub="tabs-content"]').filter((c) => c.props.value === 'project')
     expect(app.find('[data-stub="project-skills-panel"]', projectContent[0])).toHaveLength(0)
+    app.unmount()
+  })
+})
+
+describe('settings page memory and knowledge settings (US-009)', () => {
+  test('AC-7: renders SettingsMemoryCard with the project route slug', () => {
+    const app = mountSettings()
+
+    const cards = app.find('[data-stub="memory-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0].props['data-slug']).toBe('web')
+    expect(memoryCardSpy).toHaveBeenCalledWith('web')
+    app.unmount()
+  })
+
+  test('AC-10: the knowledge tab still renders SettingsKnowledgeCard with the project slug', () => {
+    const app = mountSettings()
+
+    const content = app.find('[data-stub="tabs-content"]').filter((c) => c.props.value === 'knowledge')
+    expect(content).toHaveLength(1)
+    const cards = app.find('[data-stub="knowledge-card"]', content[0])
+    expect(cards).toHaveLength(1)
+    expect(cards[0].props['data-slug']).toBe('web')
+    expect(knowledgeSpy).toHaveBeenCalledWith('web')
     app.unmount()
   })
 })

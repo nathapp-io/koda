@@ -478,6 +478,12 @@
     }
   },
   "memory": {
+    "settings": {
+      "title": "代理记忆写入",
+      "description": "选择代理的记忆写入是立即生效还是等待人工审批。",
+      "direct": "直接生效",
+      "proposal": "需要审批"
+    },
     "empty": "暂无记忆项。",
     "error": "加载记忆项失败。",
     "loadMore": "加载更多",
