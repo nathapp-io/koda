@@ -3968,6 +3968,67 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-011 Note retirement: POST /api/memory/notes/:id/retire
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-011 note retirement', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-retire-note-${++serial}`;
+
+    /** `POST /api/memory` of the standard note, answering the stored row's id. */
+    const postNote = async (): Promise<{ id: string; projectId: string }> => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const res = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          projectId: project.id, kind: 'NOTE', subject: uniqueSlug(), predicate: 'project',
+          object: 'Budget stays 2,048 MiB.', description: 'replay budget',
+        })
+        .expect(201);
+      return { id: body<{ id: string }>(res).id, projectId: project.id };
+    };
+
+    const retireNote = (id: string) => request(httpServer)
+      .post(`/api/memory/notes/${id}/retire`)
+      .set('Authorization', `Bearer ${userAccessToken}`)
+      .send({});
+
+    it('AC-1: POST /api/memory/notes/:id/retire — 201 retires the note', async () => {
+      const note = await postNote();
+
+      const res = await retireNote(note.id).expect(201);
+
+      expect(body<{ id: string; status: string }>(res)).toMatchObject({ id: note.id, status: 'rejected' });
+      const db = fixtureDb(app);
+      expect(await db.memoryItem.findUniqueOrThrow({ where: { id: note.id } }))
+        .toMatchObject({ status: 'rejected', activeKey: null });
+    });
+
+    it('AC-6: POST /api/memory/notes/:id/retire — 404 for an unknown id', async () => {
+      const res = await retireNote('e2e-unknown-note-id').expect(404);
+
+      refusal(res, 'memory.notFound.404');
+    });
+
+    it('AC-4: POST /api/memory/notes/:id/retire — 422 for a FACT id, which is left active', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const subject = uniqueSlug();
+      const created = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectId: project.id, kind: 'FACT', subject, predicate: 'stays', object: '2048 MiB' })
+        .expect(201);
+      const factId = body<{ id: string }>(created).id;
+
+      const res = await retireNote(factId).expect(422);
+
+      refusal(res, 'memory.retireNotDecision.422');
+      expect(await db.memoryItem.findUniqueOrThrow({ where: { id: factId } })).toMatchObject({ status: 'active' });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // US-003 Thread create, list, get and messages routes
   // ─────────────────────────────────────────────────────────────────
 

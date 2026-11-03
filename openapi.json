@@ -1605,6 +1605,78 @@
         ]
       }
     },
+    "/api/memory/notes/{id}/retire": {
+      "post": {
+        "operationId": "MemoryController_retireNote",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireNoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Note retired"
+          },
+          "202": {
+            "description": "The project holds agent memory writes for approval; the request is pending\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A user note was named without a projectId"
+          },
+          "403": {
+            "description": "Permission refused, or the note may not be replaced by this caller"
+          },
+          "404": {
+            "description": "Memory item not found"
+          },
+          "409": {
+            "description": "Note is not active"
+          },
+          "422": {
+            "description": "Memory item is not a note"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retire a note (memory.create)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/memory": {
       "post": {
         "operationId": "MemoryController_createMemory",
@@ -15724,6 +15796,20 @@
             "type": "string",
             "maxLength": 500,
             "description": "Why the decision is being retired"
+          }
+        }
+      },
+      "RetireNoteDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project the caller is a member of. Required for a user-scoped note (which has no project of its own); ignored for a project note."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Why the note is being retired"
           }
         }
       },

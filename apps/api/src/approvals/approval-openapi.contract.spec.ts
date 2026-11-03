@@ -115,6 +115,8 @@ const gatedOperations = [
   ['post', '/api/memory'],
   ['post', '/api/memory/decisions'],
   ['post', '/api/memory/{id}/retire'],
+  // memory-notes US-011: the note retire is a gated `memory.create` write of its own route.
+  ['post', '/api/memory/notes/{id}/retire'],
   ['post', '/api/memory/extract'],
   ['post', '/api/projects/{slug}/vcs/sync-pr'],
   ['post', '/api/projects/{slug}/vcs/sync'],
@@ -175,7 +177,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 128 gated operations', () => {
+describe('OpenAPI contract for 129 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -256,9 +258,9 @@ describe('OpenAPI contract for 128 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 128 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 129 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(128);
+    expect(expected).toHaveLength(129);
     expect(operationsWith202()).toEqual(expected);
   });
 });

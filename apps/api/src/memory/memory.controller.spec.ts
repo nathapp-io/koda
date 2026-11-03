@@ -10,6 +10,8 @@ import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { MemoryWriteGuard } from './memory-write.guard';
+import { MemoryRetireException } from './memory-retire.exception';
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import { MemoryKind } from '../common/enums';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
@@ -227,3 +229,72 @@ describe('MemoryController gated writes', () => {
     expect(repository.upsert).not.toHaveBeenCalled();
   });
 });
+
+describe('MemoryController note retirement (memory-notes US-011)', () => {
+  it('AC-1: retireNote resolves the target project first, then asks memory.create for the note-retire variant', async () => {
+    const run = vi.fn().mockResolvedValue({ status: 'executed', result: { id: 'note-1', status: 'rejected' } });
+    const writes = {
+      retireNoteTarget: vi.fn().mockResolvedValue({ projectId: 'p1' }),
+      retireNote: vi.fn().mockResolvedValue({ id: 'note-1', status: 'rejected' }),
+    };
+    const controller = new MemoryController(writes as unknown as MemoryWriteService, { run } as unknown as ApprovalRouteGate);
+    const principal = makePrincipal();
+    const body = { reason: 'stale' };
+
+    const result = await controller.retireNote('note-1', body, principal);
+
+    // The batch order matters: a bad target answers before any approval request is opened, so the target is
+    // resolved first and the gate runs with the project that resolution answered.
+    expect(writes.retireNoteTarget).toHaveBeenCalledWith(principal, 'note-1', undefined);
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.create', variant: 'rest:memory.note.retire', projectId: 'p1', input: { id: 'note-1', body },
+    });
+    expect(result).toEqual(JsonResponse.Ok({ id: 'note-1', status: 'rejected' }));
+  });
+
+  it('AC-8: retireNote passes the body projectId to the target resolution and answers the gate result', async () => {
+    const run = vi.fn().mockResolvedValue({ status: 'executed', result: { id: 'note-2', status: 'rejected' } });
+    const writes = {
+      retireNoteTarget: vi.fn().mockResolvedValue({ projectId: 'p9' }),
+      retireNote: vi.fn(),
+    };
+    const controller = new MemoryController(writes as unknown as MemoryWriteService, { run } as unknown as ApprovalRouteGate);
+    const principal = makePrincipal();
+    const body = { projectId: 'p9' };
+
+    const result = await controller.retireNote('note-2', body, principal);
+
+    expect(writes.retireNoteTarget).toHaveBeenCalledWith(principal, 'note-2', 'p9');
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      key: 'memory.create', variant: 'rest:memory.note.retire', projectId: 'p9', input: { id: 'note-2', body },
+    });
+    expect(result).toEqual(JsonResponse.Ok({ id: 'note-2', status: 'rejected' }));
+  });
+
+  it('AC-12: a pending gate outcome answers 202 with the request and never runs the write', async () => {
+    const request = { id: 'approval-1' };
+    const run = vi.fn().mockResolvedValue({ status: 'pending', request });
+    const writes = {
+      retireNoteTarget: vi.fn().mockResolvedValue({ projectId: 'p1' }),
+      retireNote: vi.fn(),
+    };
+    const controller = new MemoryController(writes as unknown as MemoryWriteService, { run } as unknown as ApprovalRouteGate);
+
+    const error = await controller.retireNote('note-1', {}, makePrincipal()).catch((rejection: unknown) => rejection);
+
+    expect(error).toBeInstanceOf(ApprovalPending);
+    expect((error as ApprovalPending).request).toBe(request);
+    expect(writes.retireNote).not.toHaveBeenCalled();
+  });
+
+  it('AC-4: retireNote never reaches the gate when the target resolution refuses', async () => {
+    const run = vi.fn();
+    const refusal = new MemoryRetireException(MemoryKind.FACT);
+    const writes = { retireNoteTarget: vi.fn().mockRejectedValue(refusal), retireNote: vi.fn() };
+    const controller = new MemoryController(writes as unknown as MemoryWriteService, { run } as unknown as ApprovalRouteGate);
+
+    await expect(controller.retireNote('fact-1', {}, makePrincipal())).rejects.toBe(refusal);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+

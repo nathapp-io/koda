@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
-import { MemoryItemInput, type MemoryItem } from './memory-item-repository';
+import { MemoryItemInput, memoryOwnerKey, type MemoryItem } from './memory-item-repository';
 import { MemoryRetireException } from './memory-retire.exception';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { MemoryKind, MemoryScope } from '../common/enums';
@@ -246,6 +246,97 @@ export class MemoryWriteService {
     });
   }
 
+  /**
+   * memory-notes US-011: the row a note retire names, once every check that needs no row lock has passed.
+   *
+   * The order is the route's answer order and it is load-bearing: a caller must not learn from a refusal that
+   * a row it may not see exists, so the row's existence, a user row's ownership and the membership of the
+   * project all answer the same 404 `memory.notFound` before the row's kind (422) and its status (409) are
+   * looked at. Every one of them runs before the approval gate, so a bad target never opens a request.
+   *
+   * The project this answers is the *gate's* project, and the two kinds resolve it differently. A project note
+   * is authorised in its own project — a `projectId` in the body is ignored there, so naming a project the
+   * caller administers cannot retire another project's note. A user note has no project of its own (US-004), so
+   * the body has to name one, and membership of that project is what authorises the retire (a missing
+   * `projectId` is a 400 naming it, which is the one refusal a body-only mistake earns).
+   */
+  private async resolveNoteRetireTarget(
+    principal: KodaPrincipal,
+    item: MemoryItem | null,
+    bodyProjectId: string | undefined,
+  ): Promise<{ item: MemoryItem; projectId: string }> {
+    // 1. the row exists and is not soft-deleted.
+    if (!item || item.deletedAt) throw new NotFoundAppException({}, 'memory.notFound');
+
+    const named = namedProjectId(bodyProjectId);
+    let projectId = item.projectId;
+    if (item.scope === MemoryScope.USER) {
+      // 2. a user row is the caller's own, or it is nothing this route can see.
+      if (item.ownerKey !== memoryOwnerKey({ ownerType: ownerTypeFor(principal), ownerId: principal.id })) {
+        throw new NotFoundAppException({}, 'memory.notFound');
+      }
+      // 3. and the caller names the project that authorises the retire.
+      if (named === undefined) throw new ValidationAppException({ field: 'projectId' }, 'memory');
+      projectId = named;
+    }
+    // A project row always names its project; a null one could not be authorised in anything.
+    if (projectId === null) throw new NotFoundAppException({}, 'memory.notFound');
+
+    // 4. membership of the gate's project, refused as a missing row (as a decision retire refuses it).
+    try {
+      await this.projectAccess.assertProjectMembership(projectId, principal);
+    } catch (error) {
+      if (error instanceof ForbiddenAppException) throw new NotFoundAppException({}, 'memory.notFound');
+      throw error;
+    }
+
+    // 5. only a NOTE retires here — the decision route stays decision-only (and vice versa).
+    if (item.kind !== MemoryKind.NOTE) throw new MemoryRetireException(item.kind);
+    // 6. and only an active one.
+    if (item.status !== 'active') throw new ConflictAppException({}, 'memory.retireNotActive');
+    return { item, projectId };
+  }
+
+  /**
+   * The project a note retire is authorised in, for the handler's gate call: the target's own project for a
+   * project note, the body's project for a user note. Nothing is written.
+   */
+  async retireNoteTarget(principal: KodaPrincipal, id: string, projectId?: string): Promise<{ projectId: string }> {
+    const resolved = await this.resolveNoteRetireTarget(principal, await this.repository.findById(id), projectId);
+    return { projectId: resolved.projectId };
+  }
+
+  /**
+   * memory-notes US-011: retire a NOTE through `PrismaMemoryItemRepository.retire`, whose transaction locks the
+   * row, re-runs the same resolution and audits the retirement before it commits.
+   *
+   * Re-running the whole resolution inside the lock is what keeps a deferred execution honest: an approved
+   * request runs later as the original requester, so the row, its owner and the caller's membership are all
+   * read again at the moment of the write — a grant or an ownership that changed after the ask cannot
+   * silently authorise the execution. The replace check is the one thing added here rather than preflighted:
+   * a project note may only be retired by a principal that may replace it (`memory.update` with its owner as
+   * the resource), which a Developer's `memory.update.own` does not grant for someone else's row. A user note
+   * is the caller's own by then, so there is no one else's row to ask about.
+   *
+   * The row becomes `rejected` with a null `activeKey`, and the audit entry is the write's own key —
+   * `memory.create`, this route's key — with `retired NOTE` (and the reason) as its summary. A user row has no
+   * project of its own, so its entry names the project the body named.
+   */
+  async retireNote(principal: KodaPrincipal, id: string, projectId?: string, reason?: string) {
+    return this.repository.retire(id, async (target) => {
+      const { item, projectId: gateProject } = await this.resolveNoteRetireTarget(principal, target, projectId);
+      if (item.scope !== MemoryScope.USER && !(await this.writeGuard.mayReplace(principal, gateProject, item))) {
+        throw new ForbiddenAppException({}, 'permissions');
+      }
+    }, async (item) => {
+      await this.audit.record({
+        key: 'memory.create', resourceType: 'memory-item', resourceId: item.id,
+        projectId: item.projectId ?? namedProjectId(projectId) ?? null,
+        summary: reason ? `retired NOTE: ${reason}` : 'retired NOTE',
+      });
+    });
+  }
+
   async create(principal: KodaPrincipal, input: CreateMemoryDto) {
     await this.assertMayWrite(principal, 'memory.create', input.projectId);
 
@@ -305,4 +396,13 @@ export class MemoryWriteService {
       confidence: input.confidence ?? 0.8,
     });
   }
+}
+
+/**
+ * The project a note retire body names, or undefined when it names none. A blank value is no name: the DTO
+ * accepts any string (the pipe's contract is the shared one), so `''` is answered as a missing `projectId`
+ * rather than looked up as a project id.
+ */
+function namedProjectId(value: string | undefined): string | undefined {
+  return value !== undefined && value.trim().length > 0 ? value : undefined;
 }

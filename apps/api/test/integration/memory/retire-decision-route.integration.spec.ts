@@ -1,4 +1,6 @@
 import request from 'supertest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
@@ -13,6 +15,17 @@ import { ModulesContainer } from '@nestjs/core';
 import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
+
+/**
+ * memory-notes US-011 reworded the two retirement refusals to cover notes as well as decisions, so the
+ * expected sentences are read from the shipped catalog instead of being restated here.
+ */
+const MEMORY_CATALOG = JSON.parse(
+  readFileSync(join(__dirname, '../../../src/i18n/en/memory.json'), 'utf8'),
+) as { retireNotDecision: Record<string, string>; retireNotActive: Record<string, string> };
+const NOT_A_DECISION = MEMORY_CATALOG.retireNotDecision['422'];
+const NOT_ACTIVE = MEMORY_CATALOG.retireNotActive['409'];
+
 describeDb('decision retirement REST', () => {
   let app: NathApplication;
   let db: ReturnType<typeof fixtureDb>;
@@ -75,11 +88,11 @@ describeDb('decision retirement REST', () => {
   it('soft-deleted decision is hidden', async () => { await retire((await item({ deletedAt: new Date() })).id).expect(404); });
   it('AC-12: FACT is memory.retireNotDecision', async () => {
     const response = await retire((await item({ kind: 'FACT' })).id).expect(422);
-    expect(response.body.message).toBe('Only decisions can be retired');
+    expect(response.body.message).toBe(NOT_A_DECISION);
   });
   it('AC-13: superseded decision is memory.retireNotActive', async () => {
     const response = await retire((await item({ status: 'superseded' })).id).expect(409);
-    expect(response.body.message).toBe('Only active decisions can be retired');
+    expect(response.body.message).toBe(NOT_ACTIVE);
   });
   it('AC-14: reason is bounded to 500 characters', async () => {
     await retire((await item()).id, 'root', { reason: 'x'.repeat(501) }).expect(400);

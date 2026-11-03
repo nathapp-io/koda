@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Param } from '@nestjs/common';
 import { RetireDecisionDto } from './dto/retire-decision.dto';
+import { RetireNoteDto } from './dto/retire-note.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { Requires } from '../permissions/requires.decorator';
@@ -67,6 +68,36 @@ export class MemoryController {
     const { projectId } = await this.memoryWrites.retireTarget(principal, id);
     const outcome = await this.routeGate.run<Awaited<ReturnType<MemoryWriteService['retireDecision']>>>({
       key: 'memory.decision.retire', variant: MEMORY_ROUTE_VARIANTS.retire, projectId,
+      input: { id, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  /**
+   * memory-notes US-011: retire a NOTE. No new permission key — a retirement is a `memory.create` write (the
+   * key that opens the approval request, with its own variant so the inbox shows the two apart), and the
+   * replace decision stays a `memory.update` check in the service.
+   *
+   * The target is resolved before the gate: a note of another kind, an inactive one, a row the caller may not
+   * see or a user note that names no project all answer here, so a call that cannot succeed never opens an
+   * approval request.
+   */
+  @Post('notes/:id/retire')
+  @ApprovalGated()
+  @Requires(['memory.create', 'memory.update'], { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Retire a note (memory.create)' })
+  @ApiResponse({ status: 201, description: 'Note retired' })
+  @ApiResponse({ status: 202, description: 'The project holds agent memory writes for approval; the request is pending' })
+  @ApiResponse({ status: 400, description: 'A user note was named without a projectId' })
+  @ApiResponse({ status: 403, description: 'Permission refused, or the note may not be replaced by this caller' })
+  @ApiResponse({ status: 404, description: 'Memory item not found' })
+  @ApiResponse({ status: 409, description: 'Note is not active' })
+  @ApiResponse({ status: 422, description: 'Memory item is not a note' })
+  async retireNote(@Param('id') id: string, @Body() body: RetireNoteDto, @Principal() principal: KodaPrincipal) {
+    const { projectId } = await this.memoryWrites.retireNoteTarget(principal, id, body.projectId);
+    const outcome = await this.routeGate.run<Awaited<ReturnType<MemoryWriteService['retireNote']>>>({
+      key: 'memory.create', variant: MEMORY_ROUTE_VARIANTS.retireNote, projectId,
       input: { id, body },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);

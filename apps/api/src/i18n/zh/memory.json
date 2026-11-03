@@ -1,7 +1,7 @@
 {
   "notFound": { "404": "未找到记忆条目" },
-  "retireNotDecision": { "422": "只能撤销决策" },
-  "retireNotActive": { "409": "只能撤销有效的决策" },
+  "retireNotDecision": { "422": "只能撤销决策和笔记" },
+  "retireNotActive": { "409": "只能撤销有效的决策和笔记" },
   "export": { "-2": "无效的记忆导出查询：{field}" },
   "-2": "无效的记忆写入：{field}"
 }
