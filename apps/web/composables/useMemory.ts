@@ -35,7 +35,7 @@ export function buildMemoryQuery(
   const query: Record<string, string> = {}
   if (filters.kind) query.kind = filters.kind
   if (filters.status) query.status = filters.status
-  if (filters.text) query.text = filters.text
+  if (filters.text) query.text = filters.text.slice(0, 100)
   if (filters.page && filters.page > 1) query.current = String(filters.page)
   return query
 }

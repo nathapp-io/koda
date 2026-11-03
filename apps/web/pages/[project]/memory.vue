@@ -86,7 +86,7 @@ function formatConfidence(value: number) {
       </div>
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.search') }}</label>
-        <input v-model="textFilter" type="search" :placeholder="t('memory.searchPlaceholder')" class="rounded-md border border-border bg-background px-2 py-1 text-sm">
+        <input v-model="textFilter" type="search" maxlength="100" :placeholder="t('memory.searchPlaceholder')" class="rounded-md border border-border bg-background px-2 py-1 text-sm">
       </div>
     </FilterBar>
 

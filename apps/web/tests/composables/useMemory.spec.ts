@@ -364,6 +364,39 @@ describe('AC5 page contract: error propagates so page-level catch can feed extra
 describe('US-008 memory notes and search', () => {
   beforeEach(resetGlobals)
 
+  test('bound search issues API requests only at 300ms, including a debounced clear', async () => {
+    jest.useFakeTimers()
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory, watchDebouncedMemorySearch } = await import(composablePath)
+    const scope = effectScope()
+    let memory: ReturnType<typeof useMemory> | undefined
+    scope.run(() => {
+      const scopedMemory = useMemory('acme')
+      memory = scopedMemory
+      watchDebouncedMemorySearch(scopedMemory.textFilter, () => { void scopedMemory.applyFilters() })
+    })
+    if (!memory) throw new Error('Memory composable did not initialize in scope')
+    const mem = memory
+    mem.textFilter.value = 'deploy'
+    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(299)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await jest.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query.text).toBe('deploy')
+
+    mem.textFilter.value = ''
+    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(299)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1][1] as { query: Record<string, string> }).query).not.toHaveProperty('text')
+    scope.stop()
+    jest.useRealTimers()
+  })
+
   test('search triggers once only after 300ms without typing and a clear is debounced too', async () => {
     jest.useFakeTimers()
     const { watchDebouncedMemorySearch } = await import(composablePath)
@@ -397,6 +430,11 @@ describe('US-008 memory notes and search', () => {
     await mem.loadMemory()
     expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query.text).toBe('deploy')
     expect(mem.items.value[0]).toMatchObject({ description: 'Deployment preference', scope: 'user' })
+  })
+
+  test('text query is capped at the API 100-character limit', async () => {
+    const { buildMemoryQuery } = await import(composablePath)
+    expect(buildMemoryQuery({ text: 'x'.repeat(150) }).text).toBe('x'.repeat(100))
   })
 
   test('cleared text is omitted from the query', async () => {

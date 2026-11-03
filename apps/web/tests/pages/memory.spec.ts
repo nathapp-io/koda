@@ -403,6 +403,7 @@ describe('US-008 notes, scope, search and locale behavior', () => {
       expect(source).toContain(`memory.${key}`)
     }
     expect(source).toContain('watchDebouncedMemorySearch(textFilter')
+    expect(source).toMatch(/type="search"[^>]*maxlength="100"/)
     expect(source).toContain('@click="toggleNote(item.id)"')
     expect(source).toMatch(/withToastError\s*\(\s*applyFilters/)
     expect(readFileSync(composablePath, 'utf-8')).toMatch(/onScopeDispose/)
