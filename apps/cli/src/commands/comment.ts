@@ -5,7 +5,7 @@ import {
   commentsControllerUpdateFromHttp,
   commentsControllerDeleteFromHttp,
 } from '../generated';
-import { success, error, table } from '../utils/output';
+import { success, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
