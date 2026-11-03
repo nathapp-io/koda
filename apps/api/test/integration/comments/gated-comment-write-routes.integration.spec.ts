@@ -34,7 +34,7 @@ describeIntegration('gated comment write routes', () => {
 
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null, swagger: true });
     db = fixtureDb(app);
     world = await seedFleetHttpWorld(server(), db);
     project = data(await request(server()).post('/api/projects').set(rootAuth()).send({ name: 'Comment gates', slug: 'comment-gates', key: 'CG' }).expect(201));
@@ -125,6 +125,11 @@ describeIntegration('gated comment write routes', () => {
     const before = await db.comment.count({ where: { ticketId: ticket.id } });
     await request(server()).post(commentPath()).set(agentAuth()).send({ body: 'workflow', type: 'REVIEW' }).expect(400);
     expect(await db.comment.count({ where: { ticketId: ticket.id } })).toBe(before);
+  });
+
+  it('AC-13: served Swagger documents only GENERAL as the comment-create type', async () => {
+    const response = await request(server()).get('/swagger-ui.html-json').expect(200);
+    expect(response.body.components.schemas.CreateCommentDto.properties.type.enum).toEqual(['GENERAL']);
   });
 
   it('AC-11/12: member cannot edit FIX_REPORT; returns localized 409 and preserves body', async () => {
