@@ -205,7 +205,10 @@ For server deployment with automatic Prisma migration step, see:
 `deploy.sh` runs `prisma migrate deploy` as a one-off step before starting `api` + `web`.
 The root `docker-compose.yml` (build from source) does the same with a one-off `migrate`
 service; `api` starts only after it succeeds. The api never migrates on boot.
-Both require `POSTGRES_PASSWORD` in `.env` (see `.env.example`).
+Both require `POSTGRES_PASSWORD`, `JWT_SECRET`, `JWT_REFRESH_SECRET` and `API_KEY_SECRET` in `.env` (see
+`.env.example`). Replace the `change-me-*` placeholders first: the production image refuses to boot with them
+(generate each with `openssl rand -hex 32`). The API is published on `127.0.0.1` only; see
+`deployments/example/README.md` for network exposure.
 
 ---
 
