@@ -8,6 +8,9 @@ import { IsOptional, IsString, MaxLength } from 'class-validator';
  * row has no project of its own, and the project named here is the one membership, `memory.create` and the
  * approval policy are checked against. A project note ignores it (its own project is what authorises the
  * retire), which is why it stays optional. `reason` is bounded exactly as `RetireDecisionDto.reason` is.
+ *
+ * `@IsOptional()` lets an explicit `null` through exactly as it lets an absent field through, so `null` means
+ * "no project named": a project note ignores it and a user note answers the same 400 a missing field earns.
  */
 export class RetireNoteDto {
   @ApiProperty({

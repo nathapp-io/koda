@@ -346,6 +346,39 @@ describe('memoryCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
+    it('reaches a later result page with --page', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: { ...page, current: 2 } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'search', 'deployed runner', '--project', 'alpha', '--page', '2',
+      ]);
+      expect(mockGetMemory).toHaveBeenCalledWith({
+        path: { slug: 'alpha' },
+        query: { text: 'deployed runner', current: 2 },
+      });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('names the next page when a search page has one', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: { ...page, current: 2, hasNext: true } });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--page', '2']);
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('Next: --page 3');
+    });
+
+    it('does not name a next page when the search result is the last page', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner']);
+      expect(logSpy.mock.calls.flat().join('\n')).not.toContain('Next: --page');
+    });
+
+    it('rejects an invalid search page before context resolution', async () => {
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--page', '0']);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --page value: 0'));
+      expect(mockGetMemory).not.toHaveBeenCalled();
+      expect(mockResolveContext).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
     it('rejects invalid page before context resolution', async () => {
       await program.parseAsync(['node', 'koda', 'memory', 'list', '--page', '0']);
       expect(mockGetMemory).not.toHaveBeenCalled();

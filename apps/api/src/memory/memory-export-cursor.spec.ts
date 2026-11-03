@@ -39,4 +39,20 @@ describe('memory export cursor (memory-notes US-006)', () => {
   ])('AC-2: %j decodes to null', (cursor) => {
     expect(decodeMemoryExportCursor(cursor)).toBeNull();
   });
+
+  it.each([
+    // Node's decoder skips characters outside its alphabet, so these would decode to a valid cursor unchecked.
+    ['!!'],
+    ['%20'],
+    [' '],
+    // Standard base64's own characters and padding: not what this module writes.
+    ['+'],
+    ['/'],
+    ['='],
+  ])('AC-2: a cursor with %j appended is refused, not silently trimmed', (junk) => {
+    const valid = encodeMemoryExportCursor({ updatedAt: new Date('2026-11-21T09:03:00.123Z'), id: 'mem-01' });
+
+    expect(decodeMemoryExportCursor(valid)).not.toBeNull();
+    expect(decodeMemoryExportCursor(valid + junk)).toBeNull();
+  });
 });

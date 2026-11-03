@@ -117,6 +117,18 @@ describeIntegration('memory notes: POST /memory and slug-keyed supersession (US-
     expect(await rowsOf('replay-budget')).toHaveLength(1);
   });
 
+  it('AC-14: re-saving the same note through the route, with no source named, writes no row', async () => {
+    // The REST route defaults `sourceType` to `manual` and leaves `sourceId` out entirely, so the stored row
+    // carries a null `sourceId` while the replay carries `undefined`: one source, so one note — no supersede,
+    // no second insert, and no second audit entry on a write that changed nothing.
+    const first = data<{ id: string }>(await postMemory(note()).expect(201));
+    const replay = data<{ id: string }>(await postMemory(note()).expect(201));
+
+    expect(replay.id).toBe(first.id);
+    expect(await rowsOf('replay-budget')).toHaveLength(1);
+    expect(await db.auditEntry.count({ where: { resourceId: first.id, key: 'memory.create' } })).toBe(1);
+  });
+
   it('AC-15: a note differing from the active one only in its index line supersedes it', async () => {
     const source = { sourceType: 'manual', sourceId: 'note-replay-budget' };
     const first = await repository.upsert(storedNote(source));

@@ -57,9 +57,16 @@ export interface ProjectMemoryQuery {
   projectId: string;
   kind?: MemoryKind;
   subject?: string;
-  /** Case-insensitive substring of `subject`, `predicate` or `object` (S5b US-004). */
+  /**
+   * memory-notes US-003: the search text. When `websearch_to_tsquery` finds lexemes in it, the page is ranked
+   * full-text: `ts_rank` over subject, predicate, description and object, best match first (unless `orderBy`
+   * names another order), and Postgres decides the matches. A text with no lexemes (stopwords, punctuation) —
+   * or one whose full-text search matches nothing, as unsegmented Chinese does — falls back to the pre-feature
+   * case-insensitive substring match over `subject`, `predicate` and `object`, in the requested order.
+   */
   text?: string;
   status?: string;
+  /** Absent with a `text` that has lexemes means rank order; otherwise the repository's default, confidence. */
   orderBy?: 'confidence' | 'updatedAt' | 'createdAt';
   /**
    * US-005: the caller whose user-scoped notes the page includes. Absent keeps the read project-only, whatever

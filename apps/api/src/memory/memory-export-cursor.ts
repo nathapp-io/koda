@@ -20,6 +20,8 @@ export interface MemoryExportKey {
 const SEPARATOR = '|';
 // Anchored ISO-8601 UTC timestamp as produced by Date#toISOString().
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+// The base64url alphabet `Buffer#toString('base64url')` writes: no padding, no `+`, no `/`, no whitespace.
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 export function encodeMemoryExportCursor(key: MemoryExportKey): string {
   return Buffer.from(`${key.updatedAt.toISOString()}${SEPARATOR}${key.id}`, 'utf8').toString('base64url');
@@ -28,7 +30,13 @@ export function encodeMemoryExportCursor(key: MemoryExportKey): string {
 /** Returns null for anything that is not a cursor this module produced. */
 export function decodeMemoryExportCursor(cursor: string): MemoryExportKey | null {
   if (!cursor) return null;
-  const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+  // Node's base64 decoder skips characters outside its alphabet and ignores non-canonical trailing bits, so a
+  // cursor with junk appended would otherwise decode to the same bytes and be accepted. The alphabet probe and
+  // the re-encode check are what make "strict on the way back in" true.
+  if (!BASE64URL.test(cursor)) return null;
+  const bytes = Buffer.from(cursor, 'base64url');
+  if (bytes.toString('base64url') !== cursor) return null;
+  const decoded = bytes.toString('utf8');
   // The id may itself contain a separator, so only the first one splits the pair.
   const at = decoded.indexOf(SEPARATOR);
   if (at < 0) return null;

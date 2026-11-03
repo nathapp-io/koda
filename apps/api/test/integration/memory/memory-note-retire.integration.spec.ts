@@ -441,6 +441,39 @@ describeIntegration('memory note retirement: POST /memory/notes/:id/retire (memo
     expect(await pendingCount()).toBe(0);
   });
 
+  it('AC-10: a null projectId is no projectId — a project note ignores it and still retires', async () => {
+    // `@IsOptional()` lets an explicit null through validation exactly as it lets an absent field through, so
+    // null has to mean "absent" here. A project note ignores the body entirely: the note's own project
+    // authorises and audits the retire, and nothing about the body can turn it into a server error.
+    const created = await postNote(alice.apiKey);
+    const id = itemId(created);
+
+    await retireNote(alice.apiKey, id, { projectId: null }).expect(201);
+
+    expect(await row(id)).toMatchObject({ status: 'rejected', projectId: world.projectId });
+    const entries = await db.auditEntry.findMany({ where: { resourceId: id, summary: 'retired NOTE' } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ key: 'memory.create', projectId: world.projectId });
+  });
+
+  it("AC-10: a null projectId answers 400 for the caller's own user note and 404 for another principal's", async () => {
+    const own = itemId(await postMemory(alice.apiKey, note({ scope: 'user', predicate: 'user' })).expect(201));
+
+    // Her own user note has no project of its own, so a null body is the missing projectId — a 400 naming the
+    // field, never a 500 from reading the body before the row's ownership is known.
+    const unnamed = await retireNote(alice.apiKey, own, { projectId: null }).expect(400);
+    expect(unnamed.body).toMatchObject({ ret: -2, message: invalidField('projectId') });
+    expect(await row(own)).toMatchObject({ status: 'active' });
+
+    // Bob's user note is not hers to see: the ownership check answers 404 before the body is ever read, so a
+    // null there tells him nothing — and never becomes the validation shape of a body he cannot use.
+    const foreign = itemId(await postMemory(bob.apiKey, note({ scope: 'user', predicate: 'user' })).expect(201));
+    const refused = await retireNote(alice.apiKey, foreign, { projectId: null }).expect(404);
+    expect(refused.body.message).toBe(NOT_FOUND);
+    expect(await row(foreign)).toMatchObject({ status: 'active' });
+    expect(await pendingCount()).toBe(0);
+  });
+
   // -------------------------------------------------------------------------
   // AC-11 / AC-15 — a bad target never opens an approval request
   // -------------------------------------------------------------------------

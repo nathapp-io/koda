@@ -20,6 +20,17 @@ async function resolveProjectId(slug: string): Promise<string> {
   }
 }
 
+/**
+ * The 1-based page a `--page` option names: the number, `undefined` when the option is absent, or `null` when
+ * the value is not a page. Shared by `list` and `search` so both commands accept and refuse the same values,
+ * and neither reads the API's first page only.
+ */
+function pageOption(page: string | undefined): number | undefined | null {
+  if (page === undefined) return undefined;
+  const current = Number(page);
+  return /^[0-9]+$/.test(page) && Number.isSafeInteger(current) && current >= 1 ? current : null;
+}
+
 export function memoryCommand(program: Command): void {
   const memory = program.command('memory');
   memory.description('View project memory and timeline');
@@ -146,10 +157,9 @@ export function memoryCommand(program: Command): void {
         handleApiError(new Error(`Invalid --scope value: ${options.scope}`), { validationError: true });
         return;
       }
-      const page = options.page;
-      const current = page === undefined ? undefined : Number(page);
-      if (page !== undefined && (current === undefined || !/^[0-9]+$/.test(page) || !Number.isSafeInteger(current) || current < 1)) {
-        handleApiError(new Error(`Invalid --page value: ${page}`), { validationError: true });
+      const current = pageOption(options.page);
+      if (current === null) {
+        handleApiError(new Error(`Invalid --page value: ${options.page}`), { validationError: true });
         return;
       }
       try {
@@ -168,21 +178,33 @@ export function memoryCommand(program: Command): void {
       } catch (err: unknown) { handleApiError(err); }
     });
 
-  memory.command('search <text>').description('Search project memory')
+  memory.command('search <text>').description('Search project memory, best match first')
     .option('--project <slug>', 'Project slug')
+    .option('--page <n>', 'Page number (1-based)')
     .option('--json', 'Output as JSON')
-    .action(async (text: string, options: { project?: string; json?: boolean }) => {
+    .action(async (text: string, options: { project?: string; page?: string; json?: boolean }) => {
+      const current = pageOption(options.page);
+      if (current === null) {
+        handleApiError(new Error(`Invalid --page value: ${options.page}`), { validationError: true });
+        return;
+      }
       try {
         const ctx = await withContext({ projectSlug: options.project });
-        const response = await memoryReadControllerGetMemory({ path: { slug: ctx.projectSlug }, query: { text } });
+        const response = await memoryReadControllerGetMemory({
+          path: { slug: ctx.projectSlug },
+          // The page is only sent when it was asked for; the API answers its first page otherwise.
+          query: current === undefined ? { text } : { text, current },
+        });
         const data = unwrap(response);
         if (options.json) console.log(JSON.stringify(data, null, 2));
         else {
-          const page = data as { records?: Array<Record<string, unknown>> };
+          const page = data as { records?: Array<Record<string, unknown>>; current?: number; hasNext?: boolean };
           for (const item of page.records ?? []) {
             const detail = item['kind'] === 'NOTE' ? item['description'] : `${item['subject'] ?? ''} ${item['predicate'] ?? ''}`;
             console.log(`${item['id'] ?? ''} ${item['kind'] ?? ''} ${item['scope'] ?? ''} ${detail ?? ''}`.trim());
           }
+          // A result page is not the whole result: say so, and name the page that continues it.
+          if (page.hasNext) console.log(`\nNext: --page ${(page.current ?? current ?? 1) + 1}`);
         }
         process.exit(0);
       } catch (err: unknown) { handleApiError(err); }

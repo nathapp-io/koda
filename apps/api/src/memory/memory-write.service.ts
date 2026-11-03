@@ -263,19 +263,20 @@ export class MemoryWriteService {
   private async resolveNoteRetireTarget(
     principal: KodaPrincipal,
     item: MemoryItem | null,
-    bodyProjectId: string | undefined,
+    bodyProjectId: string | null | undefined,
   ): Promise<{ item: MemoryItem; projectId: string }> {
     // 1. the row exists and is not soft-deleted.
     if (!item || item.deletedAt) throw new NotFoundAppException({}, 'memory.notFound');
 
-    const named = namedProjectId(bodyProjectId);
     let projectId = item.projectId;
     if (item.scope === MemoryScope.USER) {
       // 2. a user row is the caller's own, or it is nothing this route can see.
       if (item.ownerKey !== memoryOwnerKey({ ownerType: ownerTypeFor(principal), ownerId: principal.id })) {
         throw new NotFoundAppException({}, 'memory.notFound');
       }
-      // 3. and the caller names the project that authorises the retire.
+      // 3. and the caller names the project that authorises the retire. The body is read here, after the
+      // ownership check, so no body value is ever inspected for a row this caller may not see.
+      const named = namedProjectId(bodyProjectId);
       if (named === undefined) throw new ValidationAppException({ field: 'projectId' }, 'memory');
       projectId = named;
     }
@@ -301,7 +302,11 @@ export class MemoryWriteService {
    * The project a note retire is authorised in, for the handler's gate call: the target's own project for a
    * project note, the body's project for a user note. Nothing is written.
    */
-  async retireNoteTarget(principal: KodaPrincipal, id: string, projectId?: string): Promise<{ projectId: string }> {
+  async retireNoteTarget(
+    principal: KodaPrincipal,
+    id: string,
+    projectId?: string | null,
+  ): Promise<{ projectId: string }> {
     const resolved = await this.resolveNoteRetireTarget(principal, await this.repository.findById(id), projectId);
     return { projectId: resolved.projectId };
   }
@@ -341,7 +346,7 @@ export class MemoryWriteService {
    * `memory.create`, this route's key — with `retired NOTE` (and the reason) as its summary. A user row has no
    * project of its own, so its entry names the project the body named.
    */
-  async retireNote(principal: KodaPrincipal, id: string, projectId?: string, reason?: string) {
+  async retireNote(principal: KodaPrincipal, id: string, projectId?: string | null, reason?: string) {
     return this.repository.retire(id, async (target) => {
       const { item, projectId: gateProject } = await this.resolveNoteRetireTarget(principal, target, projectId);
       // Both declared keys, in the project the resolution just proved the caller is a member of: `memory.create`
@@ -422,10 +427,13 @@ export class MemoryWriteService {
 }
 
 /**
- * The project a note retire body names, or undefined when it names none. A blank value is no name: the DTO
- * accepts any string (the pipe's contract is the shared one), so `''` is answered as a missing `projectId`
- * rather than looked up as a project id.
+ * The project a note retire body names, or undefined when it names none.
+ *
+ * A blank value is no name: the DTO accepts any string (the pipe's contract is the shared one), so `''` is
+ * answered as a missing `projectId` rather than looked up as a project id. `null` is no name either — the DTO
+ * is `@IsOptional()`, which lets an explicit `null` through validation exactly as it lets an absent field
+ * through, so it has to mean "absent" here rather than reach `trim()`.
  */
-function namedProjectId(value: string | undefined): string | undefined {
-  return value !== undefined && value.trim().length > 0 ? value : undefined;
+function namedProjectId(value: string | null | undefined): string | undefined {
+  return value !== null && value !== undefined && value.trim().length > 0 ? value : undefined;
 }

@@ -437,6 +437,19 @@ describe('US-008 memory notes and search', () => {
     expect(buildMemoryQuery({ text: 'x'.repeat(150) }).text).toBe('x'.repeat(100))
   })
 
+  test('the cap never splits a surrogate pair into a lone half', async () => {
+    const { buildMemoryQuery } = await import(composablePath)
+    // 99 ASCII characters then an emoji: a 100-code-unit cut lands in the middle of its pair.
+    const text = `${'x'.repeat(99)}😀tail`
+    const sent = buildMemoryQuery({ text }).text as string
+
+    expect(sent).toBe('x'.repeat(99))
+    expect(sent.length).toBeLessThanOrEqual(100)
+    // A lone surrogate is what `slice` would have left behind; nothing unpaired is sent.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(sent)).toBe(false)
+    expect(/[\uDC00-\uDFFF]/.test(sent)).toBe(false)
+  })
+
   test('cleared text is omitted from the query', async () => {
     const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })

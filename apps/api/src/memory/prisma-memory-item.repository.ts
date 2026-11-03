@@ -373,13 +373,17 @@ export class PrismaMemoryItemRepository
         // same source is a no-op instead of superseding an identical row. A note
         // compares its type and index line too (US-001), so a restatement of the
         // whole note is the no-op while a changed type or description supersedes.
+        //
+        // Every optional field is compared in its stored form: the row holds `null` where the input says
+        // `undefined`, so a raw `===` would call an omitted `sourceId` a change and supersede the row it is
+        // restating (US-001 AC-14, re-saved from the REST route with no source at all).
         if (
           existingActive &&
           existingActive.object === (item.object ?? null) &&
           existingActive.predicate === item.predicate &&
           existingActive.description === (item.description ?? null) &&
-          existingActive.sourceType === item.sourceType &&
-          existingActive.sourceId === item.sourceId
+          (existingActive.sourceType ?? null) === (item.sourceType ?? null) &&
+          (existingActive.sourceId ?? null) === (item.sourceId ?? null)
         ) {
           return this.toDomain(existingActive);
         }

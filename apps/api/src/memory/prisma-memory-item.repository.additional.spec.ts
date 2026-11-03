@@ -337,6 +337,42 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         }),
       );
     });
+
+    it('AC-14: a note restated with no sourceId matches the stored null and writes no row', async () => {
+      // The REST route leaves `sourceId` out entirely, so the stored row carries `null` while the replay
+      // carries `undefined`: the two name the same source, so this is the no-op, not a supersede.
+      const existingRow = makeModelRow({
+        id: 'note-1',
+        kind: 'NOTE',
+        subject: 'replay-budget',
+        predicate: 'project',
+        object: 'Budget stays 2,048 MiB.',
+        description: 'replay budget',
+        activeKey: 'NOTE:replay-budget',
+        sourceType: 'manual',
+        sourceId: null,
+      });
+      const client = {
+        findFirst: vi.fn().mockResolvedValue(existingRow),
+        create: vi.fn(),
+        update: vi.fn(),
+      };
+      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+
+      const result = await repository.upsert({
+        projectId: 'project-123',
+        kind: MemoryKind.NOTE,
+        subject: 'replay-budget',
+        predicate: 'project',
+        object: 'Budget stays 2,048 MiB.',
+        description: 'replay budget',
+        sourceType: 'manual',
+      });
+
+      expect(result.id).toBe('note-1');
+      expect(client.create).not.toHaveBeenCalled();
+      expect(client.update).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
