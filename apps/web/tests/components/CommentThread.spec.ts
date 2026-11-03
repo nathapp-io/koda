@@ -1,9 +1,51 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
+import { defineComponent, h, ref } from 'vue'
+import { useField } from 'vee-validate'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import { settle } from '../helpers/roles-dom'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const componentPath = join(webDir, 'components', 'CommentThread.vue')
+const threadFile = webFile('components', 'CommentThread.vue')
+
+const FormField = defineComponent({
+  props: { name: { type: String, required: true } },
+  setup(props, { slots }) {
+    const { value, handleChange, handleBlur } = useField<string>(() => props.name)
+    return () => slots.default?.({ componentField: {
+      modelValue: value.value,
+      'onUpdate:modelValue': handleChange,
+      onBlur: handleBlur,
+    } })
+  },
+})
+const MarkdownEditor = defineComponent({
+  props: { modelValue: String },
+  emits: ['update:modelValue'],
+  setup(props, { attrs, emit }) {
+    return () => h('textarea', { ...attrs, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value) })
+  },
+})
+
+function mountThread(comments: unknown[] = []) {
+  const api = { get: jest.fn(async () => comments), post: jest.fn(async () => ({})), patch: jest.fn(async () => ({})), delete: jest.fn(async () => ({})) }
+  const toast = { success: jest.fn(), error: jest.fn() }
+  const app = mountSfc(threadFile, {
+    props: { projectSlug: 'proj', ticketRef: 'ABC-1' },
+    globals: {
+      useApi: () => ({ $api: api }),
+      useI18n: () => enI18n(),
+      useAppToast: () => toast,
+      useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => undefined }),
+      useAsyncData: () => ({ data: ref(comments), pending: ref(false), error: ref(null), refresh: async () => undefined }),
+    },
+    components: { ...uiStubs, FormField, MarkdownEditor },
+  })
+  return { app, api }
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
@@ -171,11 +213,12 @@ describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor', ()
     expect(source).toContain('MarkdownEditor')
   })
 
-  test('source does not include a type selector in the add form', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    const form = source.match(/<!-- Add comment form -->[\s\S]*?<\/form>/)?.[0] ?? ''
-    expect(form).not.toContain('<Select')
-    expect(form).not.toContain('name="type"')
+  test('mounted ticket thread renders no comment type select or type field', () => {
+    const { app } = mountThread()
+    expect(app.find('[data-stub="select"]')).toHaveLength(0)
+    expect(app.find('[data-stub="select-trigger"]')).toHaveLength(0)
+    expect(app.find('[data-stub="form-field"]').some((field) => field.props.name === 'type')).toBe(false)
+    app.unmount()
   })
 
   test('source has a submit button for the form', () => {
@@ -190,9 +233,19 @@ describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor', ()
 })
 
 describe('US-011 AC-2: comment submission always posts GENERAL', () => {
-  test('submission payload uses the literal GENERAL type, not form input', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toMatch(/\$api\.post\(commentsEndpoint,\s*\{\s*body:\s*values\.body,\s*type:\s*'GENERAL'/)
+  test('submitting the form sends the comments endpoint and GENERAL payload', async () => {
+    const { app, api } = mountThread()
+    const body = app.one('textarea')
+    expect(body).toBeDefined()
+    ;(body?.props.onInput as (event: Event) => void)({ target: { value: 'Typed comment' } } as unknown as Event)
+    await settle()
+    const form = app.one('form')
+    expect(form).toBeDefined()
+    await (form?.props.onSubmit as (event: Event) => Promise<void>)({ preventDefault: () => undefined } as unknown as Event)
+    await settle()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).toHaveBeenCalledWith('/projects/proj/tickets/ABC-1/comments', { body: 'Typed comment', type: 'GENERAL' })
+    app.unmount()
   })
 })
 
