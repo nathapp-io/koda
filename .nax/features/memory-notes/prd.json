@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T12:53:42.283Z",
+  "updatedAt": "2026-11-03T13:38:19.306Z",
   "userStories": [
     {
       "id": "US-001",
@@ -378,14 +378,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Nullable project storage and owner-key identity span schema, repository, service and audit, but reuse existing transactions and approval commands; ownership/attribution changes still mandate strict security TDD."
+        "reasoning": "Nullable project storage and owner-key identity span schema, repository, service and audit, but reuse existing transactions and approval commands; ownership/attribution changes still mandate strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/memory/memory-write.service.ts",
@@ -452,7 +455,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bf79e9a196f93048f42092bd734ebd8dfd7434e7"
     },
     {
       "id": "US-005",
