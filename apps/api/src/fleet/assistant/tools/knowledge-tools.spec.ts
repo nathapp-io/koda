@@ -171,14 +171,27 @@ describe('knowledge tools (US-004)', () => {
 });
 
 describe('koda_memory_search execute (US-004)', () => {
-  it('asks for the thread project newest-updatedAt first, one page of 20', async () => {
+  // memory-notes US-003: with a text the tool sends no orderBy, so the API answers in rank order; without
+  // one it keeps asking for newest-updatedAt first.
+  it('AC-16: asks for the thread project one page of 20 with no orderBy when a text is given', async () => {
     const { getProjectMemory, tool } = toolWith(page([item()]));
 
     await tool.execute(ctx, tool.parse({ text: 'deploy', kind: 'FACT', status: 'active', page: 3 }));
 
+    const query = getProjectMemory.mock.calls[0][0] as Record<string, unknown>;
+    expect(query).toEqual({ projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active' });
+    expect('orderBy' in query).toBe(false);
+    expect(getProjectMemory.mock.calls[0][1]).toEqual({ current: 3, size: 20 });
+  });
+
+  it('AC-16: asks for newest-updatedAt first when no text is given', async () => {
+    const { getProjectMemory, tool } = toolWith(page([item()]));
+
+    await tool.execute(ctx, tool.parse({ kind: 'FACT', page: 2 }));
+
     expect(getProjectMemory).toHaveBeenCalledWith(
-      { projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active', orderBy: 'updatedAt' },
-      { current: 3, size: 20 },
+      { projectId: 'project-1', text: undefined, kind: 'FACT', status: undefined, orderBy: 'updatedAt' },
+      { current: 2, size: 20 },
     );
   });
 

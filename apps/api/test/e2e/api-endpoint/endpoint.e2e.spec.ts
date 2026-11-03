@@ -3873,6 +3873,47 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-003 Memory full-text search: GET /api/projects/:slug/memory?text=
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-003 full-text search', () => {
+    /** One stored row of `projectSlug` written straight to Postgres, so its texts are exactly as stated. */
+    const insertItem = async (over: Record<string, unknown>) => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      return db.memoryItem.create({
+        data: {
+          projectId: project.id, kind: 'FACT', subject: 'e2e-fts-subject', predicate: 'state',
+          object: 'a value', status: 'active', confidence: 0.8, ...over,
+        },
+      });
+    };
+
+    it('AC-17: GET /api/projects/:slug/memory?text= answers the stemmed, multi-word match', async () => {
+      const item = await insertItem({ subject: 'e2e-fts-pipeline', object: 'the runner deploys nightly' });
+      await insertItem({ subject: 'e2e-fts-decoy', object: 'nothing to see here' });
+
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ text: 'deployed' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const page = body<{ total: number; records: Array<{ id: string; object?: string }> }>(res);
+      expect(page.records.map((record) => record.id)).toContain(item.id);
+      expect(page.records.map((record) => record.object)).not.toContain('nothing to see here');
+    });
+
+    it('AC-15: GET /api/projects/:slug/memory — 400 for a text longer than 100 characters', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ text: 'a'.repeat(101) })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // US-003 Thread create, list, get and messages routes
   // ─────────────────────────────────────────────────────────────────
 

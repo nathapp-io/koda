@@ -149,10 +149,10 @@ export interface GetMemoryInput {
 }
 
 /**
- * `koda_memory_search` (US-004): one page of the project's memory items, newest `updatedAt` first. Every user-written
- * field of an item — all three of `subject`, `predicate` and `object` — is fenced, so it can never read as
- * instructions. `status` is passed through only when given: without it the service applies its own default (active
- * and not expired by `ttlAt`).
+ * `koda_memory_search` (US-004): one page of the project's memory items — ranked by the `text` it was given
+ * (memory-notes US-003), newest `updatedAt` first otherwise. Every user-written field of an item — all three of
+ * `subject`, `predicate` and `object` — is fenced, so it can never read as instructions. `status` is passed
+ * through only when given: without it the service applies its own default (active and not expired by `ttlAt`).
  */
 export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool<MemorySearchInput> {
   return {
@@ -170,7 +170,15 @@ export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool
     },
     async execute(ctx: ToolContext, input: MemorySearchInput): Promise<string> {
       const page = await memory.getProjectMemory(
-        { projectId: ctx.projectId, text: input.text, kind: input.kind, status: input.status, orderBy: 'updatedAt' },
+        {
+          projectId: ctx.projectId,
+          text: input.text,
+          kind: input.kind,
+          status: input.status,
+          // memory-notes US-003: a text is answered in rank order, so the tool sends no orderBy with one;
+          // without a text the list stays newest-updatedAt first.
+          ...(input.text === undefined ? { orderBy: 'updatedAt' as const } : {}),
+        },
         { current: input.page, size: PAGE_SIZE },
       );
       if (page.records.length === 0) return 'no memory items';

@@ -51,6 +51,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   const mockPrismaClient = {
     memoryItem: mockMemoryItem,
     $transaction: mockTransaction,
+    // memory-notes US-003: the lexeme probe in front of the ranked full-text path answers "no lexeme" by
+    // default, so a text here keeps taking the pre-feature `contains` path.
+    $queryRaw: vi.fn().mockResolvedValue([{ lexemes: 0 }]),
   };
 
   const mockPrismaService = {

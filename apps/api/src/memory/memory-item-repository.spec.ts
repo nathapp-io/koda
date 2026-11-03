@@ -12,6 +12,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   };
 
   const mockPrismaService = {
@@ -37,6 +38,9 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
     vi.clearAllMocks();
+    // memory-notes US-003: the lexeme probe gates the ranked path. "No lexeme" is the default here, so the
+    // pre-feature `contains` path is the one these tests describe.
+    mockPrismaClient.$queryRaw.mockResolvedValue([{ lexemes: 0 }]);
   });
 
   describe('default active filter', () => {
@@ -255,6 +259,133 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
           size: 10,
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-003 — the ranked full-text path and its fallback
+  // -------------------------------------------------------------------------
+
+  describe('ranked full-text path (US-003)', () => {
+    const row = (id: string) => ({
+      id, projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status',
+      confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    });
+
+    /** `$queryRaw` in call order: the probe, the page of ids, the count — each as the SQL it was given. */
+    const rawCalls = (): Array<{ sql: string; values: unknown[] }> =>
+      mockPrismaClient.$queryRaw.mock.calls.map((call) => call[0] as { sql: string; values: unknown[] });
+
+    /** The probe found a lexeme, the page answers `ids` and the count answers `total`. */
+    const ranked = (ids: string[], total: number): void => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce(ids.map((id) => ({ id })))
+        .mockResolvedValueOnce([{ total }]);
+    };
+
+    it('asks Postgres for the lexemes of the text before it ranks anything', async () => {
+      ranked([], 0);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
+
+      expect(rawCalls()[0].sql).toContain('numnode(websearch_to_tsquery(');
+      expect(rawCalls()[0].values).toContain('deploy');
+      expect(rawCalls()[0].values).toContain('english');
+    });
+
+    it('ranks, filters and pages in SQL, then loads the rows by id and keeps rank order', async () => {
+      ranked(['mem-2', 'mem-1'], 2);
+      // `in` answers in its own order on purpose: the ranked order must be restored from the id list.
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', kind: 'FACT', subject: 'a_b' },
+        { current: 2, size: 5 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).toContain('FROM "MemoryItem" m');
+      expect(idsQuery.sql).toContain('ORDER BY ts_rank(m."searchVector", websearch_to_tsquery(');
+      expect(idsQuery.sql).toContain(`starts_with(m."subject", ?)`);
+      expect(idsQuery.sql).toContain(`m."deletedAt" IS NULL`);
+      expect(idsQuery.sql).toContain(`m."status" = 'active'`);
+      // The text term is an AND with the TTL bound, never an OR next to it (S5b US-004 invariant).
+      expect(idsQuery.sql).toContain('OR m."ttlAt" > ');
+      expect(idsQuery.sql).toMatch(/OFFSET \? LIMIT \?$/);
+      expect(idsQuery.values).toEqual(expect.arrayContaining(['project-123', 'FACT', 'a_b', 'deploy']));
+      // resolvePageOption: page 2 of 5 skips 5 and takes 5.
+      expect(idsQuery.values.slice(-2)).toEqual([5, 5]);
+
+      expect(rawCalls()[2].sql).toContain('count(*)::int');
+      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['mem-2', 'mem-1'] }, deletedAt: null },
+      });
+      expect(result.records.map((item) => item.id)).toEqual(['mem-2', 'mem-1']);
+      expect(result).toEqual(expect.objectContaining({ total: 2, current: 2, size: 5 }));
+    });
+
+    it('applies the requested orderBy instead of rank when the caller names one', async () => {
+      ranked(['mem-1'], 1);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1')]);
+
+      await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', orderBy: 'updatedAt' },
+        { current: 1, size: 10 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).not.toContain('ts_rank');
+      expect(idsQuery.sql).toContain('ORDER BY m."updatedAt" DESC, m."confidence" DESC, m."createdAt" DESC, m."id" DESC');
+    });
+
+    it('applies an explicit status without the TTL bound', async () => {
+      ranked(['mem-1'], 1);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1')]);
+
+      await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', status: 'superseded' },
+        { current: 1, size: 10 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).toContain(`m."status" = ?`);
+      expect(idsQuery.sql).not.toContain('ttlAt');
+      expect(idsQuery.values).toContain('superseded');
+    });
+
+    it('falls back to the contains path when the ranked query matched nothing', async () => {
+      ranked([], 0);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: '预算' }, { current: 1, size: 10 });
+
+      expect(rawCalls()).toHaveLength(3);
+      expect(mockPrismaClient.memoryItem.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { subject: { contains: '预算', mode: 'insensitive' } },
+                { predicate: { contains: '预算', mode: 'insensitive' } },
+                { object: { contains: '预算', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      });
+    });
+
+    it('never probes or ranks for a blank text', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: '   ' }, { current: 1, size: 10 });
+
+      expect(mockPrismaClient.$queryRaw).not.toHaveBeenCalled();
     });
   });
 });

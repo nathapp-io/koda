@@ -1717,6 +1717,17 @@
             }
           },
           {
+            "name": "text",
+            "required": false,
+            "in": "query",
+            "description": "Full-text search text (1-100 characters)",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
             "name": "status",
             "required": false,
             "in": "query",
@@ -1734,8 +1745,8 @@
             "name": "orderBy",
             "required": false,
             "in": "query",
+            "description": "Defaults to rank when text is given, confidence otherwise",
             "schema": {
-              "default": "confidence",
               "type": "string",
               "enum": [
                 "confidence",

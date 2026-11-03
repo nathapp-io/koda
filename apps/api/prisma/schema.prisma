@@ -662,6 +662,9 @@ model MemoryItem {
   status       String    @default("active") // active | superseded | rejected
   supersededBy String? // ID of the MemoryItem that superseded this one
   activeKey    String? // set only for active rows; null for superseded/rejected
+  // memory-notes US-003: full-text search over subject, predicate, description and object. A generated
+  // column the migration writes by hand; Unsupported keeps Prisma from trying to drop it.
+  searchVector Unsupported("tsvector")?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // soft delete
@@ -677,6 +680,7 @@ model MemoryItem {
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
   @@index([sourceType, sourceId])
+  @@index([searchVector], type: Gin)
 }
 
 // ---------------------------------------------------------------------------
