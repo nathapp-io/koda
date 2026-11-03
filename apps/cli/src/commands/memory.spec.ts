@@ -46,6 +46,7 @@ describe('memoryCommand', () => {
   let program: Command;
   let exitSpy: jest.SpyInstance;
   let logSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     program = new Command();
@@ -54,7 +55,7 @@ describe('memoryCommand', () => {
     mockResolveContext.mockResolvedValue(CTX);
     exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -265,6 +266,42 @@ describe('memoryCommand', () => {
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'mem-2' }, null, 2));
     });
 
+    it('creates a NOTE with description and exits successfully', async () => {
+      mockCreateMemory.mockResolvedValue({ ret: 0, data: { id: 'note-1' } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 'replay-budget',
+        '--predicate', 'project', '--object', 'body', '--description', 'replay budget',
+      ]);
+      expect(mockCreateMemory).toHaveBeenCalledWith({ body: expect.objectContaining({ kind: 'NOTE', description: 'replay budget' }) });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('forwards user scope and rejects invalid scope before resolving context', async () => {
+      mockCreateMemory.mockResolvedValue({ ret: 0, data: { id: 'note-2' } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 's', '--predicate', 'p', '--description', 'd', '--scope', 'user',
+      ]);
+      expect(mockCreateMemory).toHaveBeenCalledWith({ body: expect.objectContaining({ scope: 'user' }) });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+
+      jest.clearAllMocks();
+      mockResolveContext.mockResolvedValue(CTX);
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 's', '--predicate', 'p', '--scope', 'org',
+      ]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --scope value: org'));
+      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(mockResolveContext).not.toHaveBeenCalled();
+      expect(mockCreateMemory).not.toHaveBeenCalled();
+    });
+
+    it('prints create API failures to stderr and exits 1', async () => {
+      mockCreateMemory.mockRejectedValue(Object.assign(new Error('create unavailable'), { statusCode: 500 }));
+      await program.parseAsync(['node', 'koda', 'memory', 'create', '--kind', 'FACT', '--subject', 's', '--predicate', 'p']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ create unavailable');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
     it('exits with code 3 on a non-numeric --confidence instead of silently defaulting', async () => {
       await program.parseAsync([
         'node', 'koda', 'memory', 'create',
@@ -314,6 +351,20 @@ describe('memoryCommand', () => {
       expect(mockGetMemory).not.toHaveBeenCalled();
       expect(mockResolveContext).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('prints list HTTP 500 errors to stderr and exits 1', async () => {
+      mockGetMemory.mockRejectedValue(Object.assign(new Error('server failed'), { statusCode: 500 }));
+      await program.parseAsync(['node', 'koda', 'memory', 'list']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ server failed');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('prints search network errors to stderr and exits 1', async () => {
+      mockGetMemory.mockRejectedValue(new Error('network unavailable'));
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ network unavailable');
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 });
