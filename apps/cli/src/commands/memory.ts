@@ -146,9 +146,10 @@ export function memoryCommand(program: Command): void {
         handleApiError(new Error(`Invalid --scope value: ${options.scope}`), { validationError: true });
         return;
       }
-      const current = options.page === undefined ? undefined : Number(options.page);
-      if (current !== undefined && (!/^[0-9]+$/.test(options.page!) || !Number.isSafeInteger(current) || current < 1)) {
-        handleApiError(new Error(`Invalid --page value: ${options.page}`), { validationError: true });
+      const page = options.page;
+      const current = page === undefined ? undefined : Number(page);
+      if (page !== undefined && (!/^[0-9]+$/.test(page) || !Number.isSafeInteger(current) || current < 1)) {
+        handleApiError(new Error(`Invalid --page value: ${page}`), { validationError: true });
         return;
       }
       try {
