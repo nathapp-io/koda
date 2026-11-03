@@ -7,6 +7,11 @@ import type { Mock } from 'vitest';
  *
  * The role-write half is gone: an agent's roles are role bindings now, so creation must touch no
  * `AgentRoleEntry` row at all.
+ *
+ * Review P2 remainder (US-007): the hard deletes are gone. `softDeleteById` reads the live row, writes
+ * a conditional tombstone (dead key, renamed slug, OFFLINE) and re-reads it with its capabilities —
+ * `updateManyAndReturn` cannot `include`. The DB-level half is in
+ * test/integration/agents/agent-soft-delete.integration.spec.ts.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
@@ -61,22 +66,45 @@ describe('PrismaAgentRepository.createCapabilities (US-005)', () => {
     vi.clearAllMocks();
   });
 
-  it('F3: deletes exactly the frozen agent id and returns its capabilities', async () => {
-    const row = { id: 'original', slug: 'renamed', capabilities: [] };
-    const deleteAgent = vi.fn().mockResolvedValue(row);
-    prisma.client.agent = { delete: deleteAgent };
-    expect(await repository.deleteById('original')).toBe(row);
-    expect(deleteAgent).toHaveBeenCalledExactlyOnceWith({ where: { id: 'original' }, include: { capabilities: true } });
+  it('F3: tombstones the frozen agent id and answers its capabilities with the original slug', async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: 'original', slug: 'reusable' });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUnique = vi.fn().mockResolvedValue({ id: 'original', slug: 'reusable~deleted-original', capabilities: [{ capability: 'nax' }] });
+    prisma.client.agent = { findFirst, updateMany, findUnique };
+
+    const result = await repository.softDeleteById('original');
+
+    expect(findFirst).toHaveBeenCalledExactlyOnceWith({ where: { id: 'original', deletedAt: null } });
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    const write = updateMany.mock.calls[0][0];
+    // The write is conditional on the row still being live, so a concurrent delete cannot win twice.
+    expect(write.where).toEqual({ id: 'original', deletedAt: null });
+    expect(write.data.deletedAt).toBeInstanceOf(Date);
+    expect(write.data.status).toBe('OFFLINE');
+    expect(write.data.slug).toBe('reusable~deleted-original');
+    expect(write.data.apiKeyHash).toMatch(/^deleted:[a-f0-9]{64}$/);
+    expect(findUnique).toHaveBeenCalledExactlyOnceWith({ where: { id: 'original' }, include: { capabilities: true } });
+    // `updateManyAndReturn` cannot `include`, so the row is re-read; the answer restores the slug.
+    expect(result).toEqual({ id: 'original', slug: 'reusable', capabilities: [{ capability: 'nax' }] });
   });
 
-  it('F3: maps a missing id to null but propagates other DB errors', async () => {
-    const { Prisma } = await import('../generated/prisma/client');
-    const deleteAgent = vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError('gone', { code: 'P2025', clientVersion: 'test' }));
-    prisma.client.agent = { delete: deleteAgent };
-    expect(await repository.deleteById('original')).toBeNull();
-    const error = new Error('database down');
-    deleteAgent.mockRejectedValue(error);
-    await expect(repository.deleteById('original')).rejects.toBe(error);
+  it('F3: answers null when the row is gone or already tombstoned, and propagates other DB errors', async () => {
+    const updateMany = vi.fn();
+    prisma.client.agent = { findFirst: vi.fn().mockResolvedValue(null), updateMany, findUnique: vi.fn() };
+    expect(await repository.softDeleteById('gone')).toBeNull();
+    expect(updateMany).not.toHaveBeenCalled();
+
+    // The row was tombstoned between the read and the write: the conditional update matches nothing.
+    prisma.client.agent = {
+      findFirst: vi.fn().mockResolvedValue({ id: 'original', slug: 'reusable' }),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findUnique: vi.fn(),
+    };
+    expect(await repository.softDeleteById('original')).toBeNull();
+
+    const failure = new Error('database down');
+    prisma.client.agent = { findFirst: vi.fn().mockRejectedValue(failure), updateMany: vi.fn(), findUnique: vi.fn() };
+    await expect(repository.softDeleteById('original')).rejects.toBe(failure);
   });
 
   it('AC-10: issues one agentCapabilityEntry.createMany on the ambient client and no role write', async () => {

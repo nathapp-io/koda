@@ -306,33 +306,43 @@ export class AgentsService {
     return AgentResponseDto.from(updated);
   }
 
+  /**
+   * Review P2 remainder (US-007): deleting an agent tombstones it — the row stays so its comments and
+   * tickets keep their author — and drops the bindings it held. Bindings have no principal foreign key,
+   * so they are removed in the same transaction, with the nested membership write's cache invalidation
+   * deferred until the outer commit.
+   *
+   * The response names the agent as it was when it was deleted: `softDeleteById` renames the stored slug
+   * and answers the original one.
+   */
   async remove(slug: string): Promise<AgentResponseDto> {
     const agent = await this.agentRepo.findBySlug(slug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    // Bindings have no principal foreign key. Delete both in one transaction and defer
-    // the nested membership write's cache invalidation until the outer commit.
-    await this.membership.afterCommit(() => this.audit.audited(
+    const deleted = await this.membership.afterCommit(() => this.audit.audited(
       async () => {
-        await this.agentRepo.deleteBySlug(slug);
+        const tombstone = await this.agentRepo.softDeleteById(agent.id);
+        // The row was tombstoned between the slug read and the write (a concurrent delete).
+        if (!tombstone) throw new NotFoundAppException({}, 'agents');
         await this.membership.removeAllBindings({ type: 'AGENT', id: agent.id });
+        return tombstone;
       },
-      () => ({ key: 'agent.delete', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: `deleted ${agent.slug}` }),
+      (tombstone) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: tombstone.id, projectId: null, summary: `deleted ${tombstone.slug}` }),
     ));
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-    return AgentResponseDto.from(agent);
+    return AgentResponseDto.from(deleted);
   }
 
   /** The REST approval path targets the id resolved when the request opened, not a reused slug. */
   async removeById(id: string): Promise<AgentResponseDto> {
     const agent = await this.membership.afterCommit(() => this.audit.audited(
       async () => {
-        const deleted = await this.agentRepo.deleteById(id);
-        if (!deleted) throw new NotFoundAppException({}, 'agents');
+        const tombstone = await this.agentRepo.softDeleteById(id);
+        if (!tombstone) throw new NotFoundAppException({}, 'agents');
         await this.membership.removeAllBindings({ type: 'AGENT', id });
-        return deleted;
+        return tombstone;
       },
-      (deleted) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: deleted.id, projectId: null, summary: `deleted ${deleted.slug}` }),
+      (tombstone) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: tombstone.id, projectId: null, summary: `deleted ${tombstone.slug}` }),
     ));
     await this.invalidateAfterCommit(id);
     return AgentResponseDto.from(agent);

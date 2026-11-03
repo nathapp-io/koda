@@ -83,7 +83,9 @@ describeIntegration('gated project, agent and skill-source deletes', () => {
     expect(await approve(summary.id)).toMatchObject({ status: 'failed', result: {
       error: 'execution-failed', name: new NotFoundAppException({}, 'agents').name,
     } });
-    expect(await db.agent.findUnique({ where: { id: replacement.id } })).not.toBeNull();
+    // US-007: the frozen id is already tombstoned, and the replacement is untouched.
+    expect(await db.agent.findUnique({ where: { id: original.id } })).toMatchObject({ deletedAt: expect.any(Date) });
+    expect(await db.agent.findUnique({ where: { id: replacement.id } })).toMatchObject({ deletedAt: null });
   });
   it('AC-2: root project deletion preserves 204 and opens no request', async () => {
     const p = await project();
@@ -91,19 +93,22 @@ describeIntegration('gated project, agent and skill-source deletes', () => {
     expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).deletedAt).toBeInstanceOf(Date);
     expect(await db.approvalRequest.count()).toBe(0);
   });
-  it('AC-3/AC-4: agent deletion waits, hard-deletes and stores the deleted DTO', async () => {
+  it('AC-3/AC-4: agent deletion waits, then tombstones and stores the deleted DTO', async () => {
     const target = await seedFleetHttpAgent(server(), world.tokens.root);
     const summary = pending(await remove(`agents/${target.slug}`));
     expect(summary).toMatchObject({ permissionKey: 'agent.delete', projectId: null });
-    expect(await db.agent.findUnique({ where: { id: target.id } })).not.toBeNull();
+    expect(await db.agent.findUnique({ where: { id: target.id } })).toMatchObject({ deletedAt: null });
     expect(await approve(summary.id)).toMatchObject({ status: 'executed', result: { slug: target.slug } });
-    expect(await db.agent.findUnique({ where: { id: target.id } })).toBeNull();
+    // US-007: a soft delete, so the row survives as a tombstone with the original slug restored.
+    expect(await db.agent.findUnique({ where: { id: target.id } })).toMatchObject({
+      deletedAt: expect.any(Date), status: 'OFFLINE', slug: `${target.slug}~deleted-${target.id}`,
+    });
   });
   it('AC-5: root agent deletion preserves 200 and opens no request', async () => {
     const target = await seedFleetHttpAgent(server(), world.tokens.root);
     const res = await remove(`agents/${target.slug}`, world.tokens.root).expect(200);
     expect(data(res)).toMatchObject({ slug: target.slug });
-    expect(await db.agent.findUnique({ where: { id: target.id } })).toBeNull();
+    expect(await db.agent.findUnique({ where: { id: target.id } })).toMatchObject({ deletedAt: expect.any(Date) });
     expect(await db.approvalRequest.count()).toBe(0);
   });
   it('AC-6: source deletion waits then deletes on approval', async () => {
