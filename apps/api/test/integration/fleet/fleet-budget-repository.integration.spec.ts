@@ -91,7 +91,7 @@ describeIntegration('budget repository (PG)', () => {
     await expect(createPolicy()).rejects.toBeInstanceOf(DuplicateBudgetPolicyError);
   });
 
-  it('knows which scope rows exist, treating a soft-deleted project as gone (D166)', async () => {
+  it('knows which scope rows exist, keeping a soft-deleted project (review P2 US-002, was D166)', async () => {
     const runner = await insertRunner(prisma);
     expect(await repo.scopeExists({ scopeType: 'global', scopeId: null })).toBe(true);
     expect(await repo.scopeExists({ scopeType: 'project', scopeId: base.projectId })).toBe(true);
@@ -102,7 +102,9 @@ describeIntegration('budget repository (PG)', () => {
     expect(await repo.findRepoProjectId('gone')).toBeNull();
     const other = await seedFleetBase(prisma);
     await prisma.project.update({ where: { id: other.projectId }, data: { deletedAt: new Date() } });
-    expect(await repo.scopeExists({ scopeType: 'project', scopeId: other.projectId })).toBe(false);
+    // Review P2 US-002: a soft delete keeps the row, so the project scope still exists and the sweep
+    // never deletes a paused policy of a deleted project (the pause holds until a hard delete).
+    expect(await repo.scopeExists({ scopeType: 'project', scopeId: other.projectId })).toBe(true);
   });
 
   it('lists QUEUED jobs pinned to a runner scope and the ASSIGNED or RUNNING jobs it holds', async () => {

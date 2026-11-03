@@ -87,6 +87,20 @@ describeIntegration('budget sweeper (PG)', () => {
     expect((await reload(p.id))?.pausedAt).not.toBeNull();
   });
 
+  it('keeps a paused policy of a soft-deleted project, so the pause still holds (review P2 US-002)', async () => {
+    const other = await seedFleetBase(prisma);
+    const paused = await policy({
+      scopeType: 'project', scopeId: other.projectId, scopeKey: `project:${other.projectId}`, projectId: other.projectId,
+      pausedAt: NOV, pausedWindowStart: NOV_START,
+    });
+    await prisma.project.update({ where: { id: other.projectId }, data: { deletedAt: new Date() } });
+
+    const result = await sweeper.tick(NOV);
+
+    expect(result.deleted).toBe(0);
+    expect(await reload(paused.id)).toEqual(expect.objectContaining({ pausedAt: NOV, pausedWindowStart: NOV_START }));
+  });
+
   it('deletes the policy of a gone runner with its incidents; the leftover never blocks a dispatch (review focus 5)', async () => {
     const runner = await insertRunner(prisma);
     const orphan = await policy({

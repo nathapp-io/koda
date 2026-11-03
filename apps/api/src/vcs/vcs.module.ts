@@ -13,6 +13,7 @@ import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { VcsProjectDeletionListener } from './vcs-project-deletion.listener';
 import { ProjectsModule } from '../projects/projects.module';
 import { RagModule } from '../rag/rag.module';
 import { VCS_REPOSITORY } from './domain/vcs.repository';
@@ -33,6 +34,8 @@ import { WebhookSecurityModule } from '../webhook-security/webhook-security.modu
     VcsPollingService,
     VcsPrSyncService,
     VcsLinkExtractorService,
+    // Review P2 remainder (US-002): a soft-deleted project's VCS polling stops.
+    VcsProjectDeletionListener,
   ],
   exports: [VCS_REPOSITORY, VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })

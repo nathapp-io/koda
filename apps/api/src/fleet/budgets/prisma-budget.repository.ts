@@ -94,7 +94,9 @@ export class PrismaBudgetRepository implements IBudgetRepository {
     if (!scope.scopeId) return false;
     const id = scope.scopeId;
     switch (scope.scopeType) {
-      case 'project': return (await this.db.project.count({ where: { id, deletedAt: null } })) > 0;
+      // Review P2 remainder (US-002): a soft-deleted project keeps its row, so its scope still exists and
+      // the sweep never deletes its (possibly paused) policies. Only a hard delete removes the scope.
+      case 'project': return (await this.db.project.count({ where: { id } })) > 0;
       case 'repo': return (await this.db.fleetRepo.count({ where: { id } })) > 0;
       case 'runner': return (await this.db.runner.count({ where: { id } })) > 0;
     }
