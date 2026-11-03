@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { bookkeeping } from '../action-context/audit-coverage';
-import { isRecordNotFound } from '../common/utils/prisma-errors';
+import { isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
 import type { Ticket, VcsSyncLog, VcsConnection } from '../generated/prisma/client';
@@ -224,44 +224,58 @@ export class PrismaVcsRepository implements IVcsRepository {
    * Allocates ticket number as MAX(number)+1 scoped to the project; retried on a concurrent-number conflict (M6).
    * `onCreated` runs inside the same attempt, after the insert, so a failure in it rolls the ticket back
    * and is not retried as a number conflict (Permissions P2 US-002).
+   *
+   * Review P2 remainder (US-003): the project holds one ticket per externalVcsId, so the insert decides an
+   * import race. Outside a transaction this attempt owns its transaction and the retry helper has already
+   * rolled it back when the P2002 arrives, so a lost race answers null (the caller reports `skipped`).
+   * Inside an enclosing transaction the attempt never owned one: the violation has aborted the caller's
+   * transaction, so answering null would hide a doomed transaction — it is rethrown instead. The ambient
+   * state is captured before the retry helper runs, because the helper's own `run` would report the
+   * attempt's transaction rather than the caller's.
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
     externalVcsId: string,
     onCreated?: OnTicketCreated,
-  ): Promise<CreateTicketFromIssueResult> {
-    return runWithTicketNumberRetry(this.txManager, async () => {
-      const lastTicket = await this.db.ticket.findFirst({
-        where: { projectId: project.id },
-        orderBy: { number: 'desc' },
+  ): Promise<CreateTicketFromIssueResult | null> {
+    const inTransaction = this.txManager.isInTransaction();
+    try {
+      return await runWithTicketNumberRetry(this.txManager, async () => {
+        const lastTicket = await this.db.ticket.findFirst({
+          where: { projectId: project.id },
+          orderBy: { number: 'desc' },
+        });
+
+        const nextNumber = (lastTicket?.number ?? 0) + 1;
+
+        const ticket = await this.db.ticket.create({
+          data: {
+            projectId: project.id,
+            number: nextNumber,
+            type: 'TASK',
+            title: issue.title,
+            description: issue.body,
+            status: 'CREATED',
+            priority: 'MEDIUM',
+            externalVcsId,
+            externalVcsUrl: issue.url,
+            vcsSyncedAt: new Date(),
+          },
+        });
+
+        if (onCreated) await onCreated({ id: ticket.id, number: ticket.number });
+
+        return {
+          id: ticket.id,
+          number: ticket.number,
+          title: ticket.title,
+        };
       });
-
-      const nextNumber = (lastTicket?.number ?? 0) + 1;
-
-      const ticket = await this.db.ticket.create({
-        data: {
-          projectId: project.id,
-          number: nextNumber,
-          type: 'TASK',
-          title: issue.title,
-          description: issue.body,
-          status: 'CREATED',
-          priority: 'MEDIUM',
-          externalVcsId,
-          externalVcsUrl: issue.url,
-          vcsSyncedAt: new Date(),
-        },
-      });
-
-      if (onCreated) await onCreated({ id: ticket.id, number: ticket.number });
-
-      return {
-        id: ticket.id,
-        number: ticket.number,
-        title: ticket.title,
-      };
-    });
+    } catch (error) {
+      if (!inTransaction && isUniqueViolation(error, 'externalVcsId')) return null;
+      throw error;
+    }
   }
 
   async findTicketWithProject(

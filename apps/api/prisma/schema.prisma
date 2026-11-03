@@ -226,6 +226,8 @@ model Ticket {
   watchers        TicketWatcher[]
 
   @@unique([projectId, number])
+  // Review P2 remainder (US-003): one ticket per imported issue per project; the import race is decided here.
+  @@unique([projectId, externalVcsId])
   @@index([projectId, status])
   @@index([projectId, assignedToUserId])
   @@index([projectId, assignedToAgentId])

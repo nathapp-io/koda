@@ -106,12 +106,18 @@ export interface PrStateWriteOutcome {
 export interface IVcsRepository {
   // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
+  /**
+   * Review P2 remainder (US-003): the import insert. Null means another import of the same
+   * (projectId, externalVcsId) won the race while this call ran outside any transaction — the caller
+   * reports `skipped`. Inside an enclosing transaction the violation is rethrown, because that
+   * transaction is already aborted.
+   */
   createTicketFromIssue(
     project: { id: string },
     issue: { number: number; title: string; body: string | null },
     externalVcsId: string,
     onCreated?: OnTicketCreated,
-  ): Promise<CreateTicketFromIssueResult>;
+  ): Promise<CreateTicketFromIssueResult | null>;
 
   // TicketLink operations
   /** C9 §3.6: active PR links of the project that belong to the connection's repo (D458). */

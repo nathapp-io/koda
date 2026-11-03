@@ -181,6 +181,19 @@ describe('VcsSyncService', () => {
 
       expect(auditRecord).not.toHaveBeenCalled();
     });
+
+    it('AC-7: answers skipped when the insert lost the import race outside a transaction', async () => {
+      const project = makeProject();
+      const issue = makeIssue({ number: 12 });
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
+      // The unique index rejected this insert: another import of the same issue won after the pre-check.
+      mockRepo.createTicketFromIssue.mockResolvedValue(null);
+
+      const result = await service.syncIssue(project, issue, 'webhook', makeConnection(), 'system.vcs.webhook-intake');
+
+      expect(result).toEqual({ action: 'skipped', reason: 'Ticket with this external VCS ID already exists' });
+      expect(auditRecord).not.toHaveBeenCalled();
+    });
   });
 
   describe('M11: repo-qualified external ids', () => {

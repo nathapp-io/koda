@@ -28,6 +28,12 @@ function cappedWarning(cursor: Date | null): string {
 export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VcsPollingService.name);
   private readonly scheduledConnectionIds = new Set<string>();
+  /**
+   * Review P2 remainder (US-003): connections whose poll has not settled. A tick that fires while the
+   * previous poll of the same connection still runs returns at once, so an overlapping interval (or a
+   * slow provider) cannot import the same issues twice. Entries leave the set in `finally`.
+   */
+  private readonly inFlight = new Set<string>();
 
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
@@ -119,6 +125,11 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async pollConnection(connectionId: string): Promise<void> {
+    // Review P2 remainder (US-003): one poll per connection at a time. A tick that finds the connection
+    // already in flight returns without polling (and without touching its schedule); the entry is removed
+    // in `finally`, so a failed poll never blocks the connection's next tick.
+    if (this.inFlight.has(connectionId)) return;
+    this.inFlight.add(connectionId);
     try {
       const connection = await this.vcsRepo.findVcsConnectionById(connectionId);
       if (!connection || !connection.isActive || connection.syncMode !== 'polling') {
@@ -128,6 +139,8 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       await this.poll(connection);
     } catch (error) {
       this.logger.error(`Polling tick failed for connection ${connectionId}: ${messageOf(error)}`);
+    } finally {
+      this.inFlight.delete(connectionId);
     }
   }
 

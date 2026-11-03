@@ -66,6 +66,17 @@ export class VcsSyncService {
       });
     });
 
+    // Review P2 remainder (US-003): another import of this issue won the race between the pre-check and
+    // the insert. Outside a transaction that attempt is already rolled back, so this is a plain skip —
+    // the same answer the pre-check gives. Inside an enclosing transaction the repository rethrows, so a
+    // doomed transaction is never reported as a skip.
+    if (!result) {
+      return {
+        action: 'skipped',
+        reason: 'Ticket with this external VCS ID already exists',
+      };
+    }
+
     return {
       action: 'created',
       ticketId: result.id,
