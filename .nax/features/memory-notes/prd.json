@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T14:33:19.199Z",
+  "updatedAt": "2026-11-03T14:45:34.174Z",
   "userStories": [
     {
       "id": "US-001",
@@ -763,14 +763,17 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Standard existing-page/composable changes with debounce, collapsed display and locale additions; server remains responsible for ownership authorization."
+        "reasoning": "Standard existing-page/composable changes with debounce, collapsed display and locale additions; server remains responsible for ownership authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/memory.vue",
@@ -816,7 +819,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ba9e6a22933c5d8ddca6d66d5f8112f5e27f5a13"
     },
     {
       "id": "US-009",
