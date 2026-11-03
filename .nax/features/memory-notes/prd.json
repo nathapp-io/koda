@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T12:34:38.450Z",
+  "updatedAt": "2026-11-03T12:53:42.283Z",
   "userStories": [
     {
       "id": "US-001",
@@ -259,14 +259,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Generated-column/test-schema parity and ranked SQL paging are cross-cutting; raw SQL must preserve project access boundaries and resist injection."
+        "reasoning": "Generated-column/test-schema parity and ranked SQL paging are cross-cutting; raw SQL must preserve project access boundaries and resist injection.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -343,7 +346,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "146589107291494ead36e5db334cbe4cfd163ad2"
     },
     {
       "id": "US-004",
