@@ -30,11 +30,12 @@ export interface MemoryNoteInput {
   subject: string;
   predicate: string;
   object?: string;
-  description?: string;
+  /** `null` is how a JSON body spells "no value", so it reads as absent. */
+  description?: string | null;
 }
 
 /** The trimmed description, or '' when the write carries none. */
-function presentDescription(description: string | undefined): string {
+function presentDescription(description: string | null | undefined): string {
   return (description ?? '').trim();
 }
 
@@ -59,11 +60,12 @@ function noteFieldProblem(input: MemoryNoteInput): MemoryNoteField | null {
  *
  * For `kind: 'NOTE'` it checks, in this order, the slug, the type, the body (required, not blank, at most
  * 8192 UTF-8 bytes) and the description (required, 1..200 characters after trim). Every other kind keeps the
- * triple rules it has always had and must carry no description (a blank one is no description). It is pure
- * and synchronous so both write paths — the REST route and the assistant tool — can call it before anything
- * is read or written.
+ * triple rules it has always had and must carry no description **at all**: any supplied value is refused,
+ * including one that is empty or only whitespace, so a triple row can never store an index line nothing reads.
+ * `undefined` and `null` are the two ways of supplying nothing. It is pure and synchronous so both write paths
+ * — the REST route and the assistant tool — can call it before anything is read or written.
  */
 export function noteFieldError(input: MemoryNoteInput): MemoryNoteField | null {
   if (input.kind === MemoryKind.NOTE) return noteFieldProblem(input);
-  return presentDescription(input.description).length > 0 ? 'description' : null;
+  return input.description === undefined || input.description === null ? null : 'description';
 }

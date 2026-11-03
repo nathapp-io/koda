@@ -146,4 +146,13 @@ describeIntegration('memory notes: POST /memory and slug-keyed supersession (US-
     expect(response.body).toMatchObject({ ret: -2, message: invalidField('description') });
     expect(await db.memoryItem.count({ where: { projectId: world.projectId } })).toBe(0);
   });
+
+  it('AC-17: a triple write carrying a blank description is refused, never stored as an empty string', async () => {
+    const response = await postMemory({
+      kind: MemoryKind.FACT, subject: 'budget-blank', predicate: 'stays', object: '2048 MiB', description: '   ',
+    }).expect(400);
+
+    expect(response.body).toMatchObject({ ret: -2, message: invalidField('description') });
+    expect(await db.memoryItem.count({ where: { projectId: world.projectId } })).toBe(0);
+  });
 });

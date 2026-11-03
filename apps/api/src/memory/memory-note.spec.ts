@@ -78,9 +78,16 @@ describe('US-001 memory notes', () => {
     expect(noteFieldError({ ...validNote, description: '   ' })).toBe('description');
   });
 
-  it('AC-9: a non-note kind may carry no description', () => {
+  it('AC-9: a non-note kind may carry no description at all', () => {
     expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: 'x' })).toBe('description');
     expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p' })).toBeNull();
+    // A supplied description is refused even when it is blank: trimming must never make a present value look
+    // absent, or a triple row would store an index line nothing can read.
+    expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: '' })).toBe('description');
+    expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: '   ' })).toBe('description');
+    expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: '\n\t' })).toBe('description');
+    // `null` is how JSON says "no value", so it reads as absent, as it does for every optional field.
+    expect(noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: null })).toBeNull();
   });
 
   it('AC-10: a note keys on its slug alone, every other kind on its triple', () => {
