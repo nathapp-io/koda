@@ -96,7 +96,7 @@ Symbols the feature only reads (verified at `56f2f96d`):
   `EntityGraphOutboxSubscriber` registers `ticket_event` on `FanOutPublisher` and maps the payload to
   `EntityGraphService.onTicketEvent`.
 - `LanceTableManager.exclusive(tableName, fn)` is a non-reentrant promise-chain mutex: awaiting it from inside a
-  section that already holds the same table deadlocks. `VectorStoreService.addDocument` calls
+  section that already holds the same table deadlocks. `VectorStoreService.indexDocument` calls
   `optimizeStrategy.onInsert` both outside and inside a held KB write session (`this.writeSession`).
 - `ConflictAppException(args, prefix)` resolves the message `<prefix>.409`; the i18n precedent is
   `"jobState": { "409": "..." }` in `apps/api/src/i18n/en/fleet.json`.
@@ -227,7 +227,7 @@ awaiting `exclusive` there deadlocks; the queued optimize runs once the session 
 same kind of task.
 
 **US-007.** `PrismaAgentRepository.softDeleteById(id): Promise<AgentWithCapabilities | null>` runs, inside the
-caller's transaction, `updateMany({ where: { id, deletedAt: null }, data: { deletedAt: now, status: 'OFFLINE', slug: \`${slug}~deleted-${id}\`, apiKeyHash: 'deleted:' + randomBytes(32).toString('hex') } })`
+caller's transaction, `updateMany({ where: { id, deletedAt: null }, data: { deletedAt: now, status: 'OFFLINE', slug: slug + '~deleted-' + id, apiKeyHash: 'deleted:' + randomBytes(32).toString('hex') } })`
 (the slug read first with `findFirst({ where: { id, deletedAt: null } })`), answers null when no row was found or
 updated, and otherwise re-reads the row with `findUnique({ where: { id }, include: { capabilities: true } })`
 (`updateManyAndReturn` cannot `include`). Renaming the slug frees it, so a new agent may take the old slug.
@@ -483,6 +483,10 @@ Depends on US-009. Workdir: apps/cli. A/ENH-1 (cli): `koda comment add` drops `-
 
 - `apps/api/test/integration/entity-graph/assign-owner-link.integration.spec.ts`
 
+**US-006**
+
+- `apps/api/test/integration/rag/fts-optimize-lock.integration.spec.ts`
+
 **US-007**
 
 - `apps/api/prisma/migrations/20261120100000_agent_soft_delete/migration.sql`
@@ -596,8 +600,8 @@ Depends on US-009. Workdir: apps/cli. A/ENH-1 (cli): `koda comment add` drops `-
 - US-001: `ProjectsService.softDeleteById` emits the event (same story); the integration AC triggers
   `ProjectsService.softDeleteById` with a real `EventEmitter2` and asserts the listener's effect once it resolves.
 - US-004: `fillRunner` calls `findQueuedPage` (same story); the ACs trigger `fillRunner` and `fillRunnerThreads`.
-- US-006: `VectorStoreService.addDocument` passes an `OptimizeTask` to `onInsert` (same story); the AC triggers
-  `addDocument` and asserts `exclusive` wrapped the optimize.
+- US-006: `VectorStoreService.indexDocument` passes an `OptimizeTask` to `onInsert` (same story); the AC triggers
+  `indexDocument` and asserts `exclusive` wrapped the optimize.
 - US-007 → US-008: `Agent.deletedAt` (created in US-007) is the column US-008 filters on.
 - US-009 → US-011, US-012: the 400 for a workflow `type` on create is the contract the web form and the CLI follow.
 
@@ -681,9 +685,9 @@ Depends on US-009. Workdir: apps/cli. A/ENH-1 (cli): `koda comment add` drops `-
 - `[unit]` `CronOptimizeStrategy.onInsert('p1', optimize)` does not call `optimize`, and the next `optimizeDirtyTables()` calls it once.
 - `[unit]` a second `optimizeDirtyTables()` with no insert in between does not call that task again.
 - `[unit]` `ManualOptimizeStrategy.onFirstAccess('p1', optimize)` calls `optimize` once without awaiting it.
-- `[unit]` `VectorStoreService.addDocument` for project p1 calls `onInsert` with `'p1'` and a task that, when run, calls `LanceTableManager.exclusive` with `'project_p1'` and only inside it `table.optimize`.
+- `[unit]` `VectorStoreService.indexDocument` for project p1 calls `onInsert` with `'p1'` and a task that, when run, calls `LanceTableManager.exclusive` with `'project_p1'` and only inside it `table.optimize`.
 - `[unit]` the first-access hook built by `VectorStoreService.getOrCreateTable('p1')` passes `onFirstAccess` a task that runs `table.optimize` inside `exclusive('project_p1', ...)`.
-- `[integration]` with a held KB write session on project p1's table, an `addDocument` inside it that reaches the counter threshold completes, and the optimize runs after the session ends.
+- `[integration]` with a held KB write session on project p1's table, an `indexDocument` inside it that reaches the counter threshold completes, and the optimize runs after the session ends.
 
 ### US-007: Deleting an agent is a soft delete that frees its slug
 
