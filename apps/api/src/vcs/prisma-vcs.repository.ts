@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { bookkeeping } from '../action-context/audit-coverage';
-import { isRecordNotFound } from '../common/utils/prisma-errors';
+import { isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
 import type { Ticket, VcsSyncLog, VcsConnection } from '../generated/prisma/client';
@@ -106,8 +107,10 @@ export class PrismaVcsRepository implements IVcsRepository {
   }
 
   async findVcsConnectionById(connectionId: string): Promise<VcsConnectionWithProjectDomain | null> {
-    const m = await this.db.vcsConnection.findUnique({
-      where: { id: connectionId },
+    // Review P2 remainder (US-002): a deleted project's connection is gone for polling, so the next
+    // tick unschedules it (a `findFirst`, since the project filter is not a unique key).
+    const m = await this.db.vcsConnection.findFirst({
+      where: { id: connectionId, project: { deletedAt: null } },
       include: { project: true },
     });
     return m ? this.toConnectionWithProjectDomain(m) : null;
@@ -122,8 +125,9 @@ export class PrismaVcsRepository implements IVcsRepository {
   }
 
   async findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]> {
+    // Review P2 remainder (US-002): a soft-deleted project is never polled, so boot does not resume it.
     const rows = await this.db.vcsConnection.findMany({
-      where: { syncMode: 'polling', isActive: true },
+      where: { syncMode: 'polling', isActive: true, project: { deletedAt: null } },
       include: { project: true },
     });
     return rows.map((m) => this.toConnectionWithProjectDomain(m));
@@ -175,6 +179,21 @@ export class PrismaVcsRepository implements IVcsRepository {
     await this.db.vcsConnection.delete({ where: { projectId } });
   }
 
+  /**
+   * Review P2 remainder (US-002): the soft-deleted project's active connections stop polling.
+   *
+   * One statement, so the rows answered are exactly the rows that changed — no read-then-write window in
+   * which a connection activated concurrently is left active but unscheduled.
+   */
+  async deactivateConnectionsForProject(projectId: string): Promise<string[]> {
+    const rows = await this.db.vcsConnection.updateManyAndReturn({
+      where: { projectId, isActive: true },
+      data: { isActive: false },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
   // ---------------------------------------------------------------------------
   // VcsSyncLog
   // ---------------------------------------------------------------------------
@@ -206,44 +225,66 @@ export class PrismaVcsRepository implements IVcsRepository {
    * Allocates ticket number as MAX(number)+1 scoped to the project; retried on a concurrent-number conflict (M6).
    * `onCreated` runs inside the same attempt, after the insert, so a failure in it rolls the ticket back
    * and is not retried as a number conflict (Permissions P2 US-002).
+   *
+   * Review P2 remainder (US-003): the project holds one ticket per externalVcsId, so the insert decides an
+   * import race. Outside a transaction this attempt owns its transaction and the retry helper has already
+   * rolled it back when the P2002 arrives, so a lost race answers null (the caller reports `skipped`).
+   * Inside an enclosing transaction the attempt never owned one: the violation has aborted the caller's
+   * transaction, so answering null would hide a doomed transaction — it is rethrown instead. The ambient
+   * state is captured before the retry helper runs, because the helper's own `run` would report the
+   * attempt's transaction rather than the caller's.
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
     externalVcsId: string,
     onCreated?: OnTicketCreated,
-  ): Promise<CreateTicketFromIssueResult> {
-    return runWithTicketNumberRetry(this.txManager, async () => {
-      const lastTicket = await this.db.ticket.findFirst({
-        where: { projectId: project.id },
-        orderBy: { number: 'desc' },
+  ): Promise<CreateTicketFromIssueResult | null> {
+    const inTransaction = this.txManager.isInTransaction();
+    try {
+      return await runWithTicketNumberRetry(this.txManager, async () => {
+        // Fence every import entry point against project deletion. The delete's UPDATE takes
+        // this same row lock, so either the import (including audit) commits first, or a
+        // stale fetch observes the tombstone after waiting and cannot allocate/insert.
+        const live = await this.db.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "Project" WHERE "id" = ${project.id} AND "deletedAt" IS NULL FOR UPDATE
+        `;
+        if (live.length === 0) throw new NotFoundAppException({}, 'projects');
+
+        const lastTicket = await this.db.ticket.findFirst({
+          where: { projectId: project.id },
+          orderBy: { number: 'desc' },
+        });
+
+        const nextNumber = (lastTicket?.number ?? 0) + 1;
+
+        const ticket = await this.db.ticket.create({
+          data: {
+            projectId: project.id,
+            number: nextNumber,
+            type: 'TASK',
+            title: issue.title,
+            description: issue.body,
+            status: 'CREATED',
+            priority: 'MEDIUM',
+            externalVcsId,
+            externalVcsUrl: issue.url,
+            vcsSyncedAt: new Date(),
+          },
+        });
+
+        if (onCreated) await onCreated({ id: ticket.id, number: ticket.number });
+
+        return {
+          id: ticket.id,
+          number: ticket.number,
+          title: ticket.title,
+        };
       });
-
-      const nextNumber = (lastTicket?.number ?? 0) + 1;
-
-      const ticket = await this.db.ticket.create({
-        data: {
-          projectId: project.id,
-          number: nextNumber,
-          type: 'TASK',
-          title: issue.title,
-          description: issue.body,
-          status: 'CREATED',
-          priority: 'MEDIUM',
-          externalVcsId,
-          externalVcsUrl: issue.url,
-          vcsSyncedAt: new Date(),
-        },
-      });
-
-      if (onCreated) await onCreated({ id: ticket.id, number: ticket.number });
-
-      return {
-        id: ticket.id,
-        number: ticket.number,
-        title: ticket.title,
-      };
-    });
+    } catch (error) {
+      if (!inTransaction && isUniqueViolation(error, 'externalVcsId')) return null;
+      throw error;
+    }
   }
 
   async findTicketWithProject(

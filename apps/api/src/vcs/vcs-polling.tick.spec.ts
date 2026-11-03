@@ -79,6 +79,123 @@ describe('VcsPollingService tick (M10)', () => {
 
   const tick = () => vi.advanceTimersByTimeAsync(INTERVAL);
 
+  /** Let the poll chain this tick started run to its next await (fake timers do not await it). */
+  const settle = async () => {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  };
+
+  describe('Review P2 remainder (US-003): one poll per connection at a time', () => {
+    let release: (() => void) | undefined;
+
+    /** The next fetch never settles until the returned function is called. */
+    const hangFetch = () => {
+      fetchIssues.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ issues: [], cursor: null, capped: false });
+          }),
+      );
+      return () => release?.();
+    };
+
+    afterEach(() => {
+      release?.();
+      release = undefined;
+    });
+
+    it('AC-10: a tick during an unsettled poll of the same connection does not poll it again', async () => {
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      const finishFirstPoll = hangFetch();
+      service.schedulePolling(connection());
+
+      await tick();
+      await settle();
+      expect(fetchIssues).toHaveBeenCalledTimes(1);
+
+      // The previous poll of c1 never settled; this tick returns without re-reading the connection.
+      await tick();
+      await settle();
+
+      expect(repo.findVcsConnectionById).toHaveBeenCalledTimes(1);
+      finishFirstPoll();
+      await settle();
+    });
+
+    it('AC-11: after a poll rejects, the next tick polls the same connection again', async () => {
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      fetchIssues
+        .mockRejectedValueOnce(new Error('GitHub down'))
+        .mockResolvedValue({ issues: [], cursor: null, capped: false });
+      service.schedulePolling(connection());
+
+      await tick();
+      await settle();
+      expect(fetchIssues).toHaveBeenCalledTimes(1);
+
+      await tick();
+      await settle();
+
+      expect(fetchIssues).toHaveBeenCalledTimes(2);
+      expect(repo.findVcsConnectionById).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-12: a tick for another connection still polls while c1 is in flight', async () => {
+      repo.findVcsConnectionById.mockImplementation(async (id: string) =>
+        id === 'conn-1' ? connection() : connection({ id: 'conn-2', projectId: 'proj-2', project: { id: 'proj-2', key: 'Q', slug: 'q' } }),
+      );
+      const finishFirstPoll = hangFetch();
+      service.schedulePolling(connection());
+
+      await tick();
+      await settle();
+      expect(fetchIssues).toHaveBeenCalledTimes(1);
+
+      service.schedulePolling(connection({ id: 'conn-2', projectId: 'proj-2', project: { id: 'proj-2', key: 'Q', slug: 'q' } }));
+      await tick();
+      await settle();
+
+      expect(repo.findVcsConnectionById).toHaveBeenCalledWith('conn-2');
+      // c2 finished and wrote its sync log while c1's poll is still unsettled.
+      expect(repo.createVcsSyncLog).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ vcsConnectionId: 'conn-2' }));
+
+      finishFirstPoll();
+      await settle();
+      expect(repo.createVcsSyncLog).toHaveBeenCalledWith(expect.objectContaining({ vcsConnectionId: 'conn-1' }));
+    });
+  });
+
+  it('stops an in-flight fetch when project quiesce unschedules its connection', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    let release!: (value: unknown) => void;
+    fetchIssues.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    service.schedulePolling(connection());
+    await tick();
+    expect(fetchIssues).toHaveBeenCalledTimes(1);
+
+    service.unschedulePolling('conn-1');
+    release({ issues: [issue(1)], cursor: new Date(), capped: false });
+    await settle();
+
+    expect(sync.syncIssue).not.toHaveBeenCalled();
+    expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+    expect(prSync.syncPrStatus).not.toHaveBeenCalled();
+  });
+
+  it('stops the remaining batch if quiesce runs while an import is settling', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    fetchIssues.mockResolvedValue({ issues: [issue(1), issue(2)], cursor: new Date(), capped: false });
+    sync.syncIssue.mockImplementationOnce(async () => {
+      service.unschedulePolling('conn-1');
+      return { action: 'created' };
+    });
+    service.schedulePolling(connection());
+    await tick();
+
+    expect(sync.syncIssue).toHaveBeenCalledTimes(1);
+    expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+    expect(prSync.syncPrStatus).not.toHaveBeenCalled();
+  });
+
   it('polls with the connection as it is now, not as it was scheduled', async () => {
     const cursor = new Date('2026-09-20T00:00:00Z');
     repo.findVcsConnectionById.mockResolvedValue(connection({ lastSyncedAt: cursor }));

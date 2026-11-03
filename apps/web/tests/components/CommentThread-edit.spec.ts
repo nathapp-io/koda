@@ -1,9 +1,36 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
+import { defineComponent, h, ref } from 'vue'
+import { useField } from 'vee-validate'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { uiStubs, enI18n } from '../helpers/fleet-harness'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const componentPath = join(webDir, 'components', 'CommentThread.vue')
+const threadFile = webFile('components', 'CommentThread.vue')
+const FormField = defineComponent({
+  props: { name: { type: String, required: true } },
+  setup(props, { slots }) {
+    const { value, handleChange, handleBlur } = useField<string>(() => props.name)
+    return () => slots.default?.({ componentField: { modelValue: value.value, 'onUpdate:modelValue': handleChange, onBlur: handleBlur } })
+  },
+})
+const MarkdownEditor = defineComponent({ props: { modelValue: String }, emits: ['update:modelValue'], setup(props, { attrs, emit }) {
+  return () => h('textarea', { ...attrs, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value) })
+} })
+function mountComments(comments: unknown[]) {
+  return mountSfc(threadFile, {
+    props: { projectSlug: 'proj', ticketRef: 'ABC-1' },
+    globals: {
+      useApi: () => ({ $api: { get: async () => comments, post: async () => ({}), patch: async () => ({}), delete: async () => ({}) } }),
+      useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
+      useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => undefined }),
+      useAsyncData: () => ({ data: ref(comments), pending: ref(false), error: ref(null), refresh: async () => undefined }),
+    },
+    components: { ...uiStubs, FormField, MarkdownEditor },
+  })
+}
 
 function getSource(): string {
   return readFileSync(componentPath, 'utf-8')
@@ -199,6 +226,24 @@ describe('US-004 AC4: failed edit preserves inline draft', () => {
       source.includes('v-model') &&
       (source.includes('draft') || source.includes('editDraft'))
     expect(hasVModelForEdit).toBe(true)
+  })
+})
+
+describe('US-011 AC-3/AC-4: listed comments expose edit only for GENERAL', () => {
+  test('GENERAL has Edit; FIX_REPORT has no Edit and keeps its type pill', () => {
+    const app = mountComments([
+      { id: 'general', type: 'GENERAL', body: 'General body', createdAt: 'now' },
+      { id: 'fix', type: 'FIX_REPORT', body: 'Fix body', createdAt: 'now' },
+    ])
+    const rows = app.find('div').filter((node) => String(node.props.class ?? '').includes('border rounded-md p-4'))
+    expect(rows).toHaveLength(2)
+    const generalEdit = app.find('[data-stub="button"]', rows[0]).find((button) => app.textOf(button) === 'Edit')
+    const fixEdit = app.find('[data-stub="button"]', rows[1]).find((button) => app.textOf(button) === 'Edit')
+    expect(generalEdit).toBeDefined()
+    expect(fixEdit).toBeUndefined()
+    expect(app.textOf(rows[1])).toContain('Fix Report')
+    expect(app.find('span', rows[1]).some((pill) => String(pill.props.class ?? '').includes('bg-orange-100 text-orange-800'))).toBe(true)
+    app.unmount()
   })
 })
 

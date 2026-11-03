@@ -22,6 +22,8 @@ export interface HttpAppOptions {
    * it, so a suite never inherits an owner email from the machine it runs on.
    */
   ownerEmail?: string | null;
+  /** Serve Swagger in integration tests that assert the live API contract. */
+  swagger?: boolean;
 }
 
 /**
@@ -47,6 +49,9 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
       : await AppFactory.create(AppModule);
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
+    if (opts.swagger) {
+      app.useSwaggerUI({ name: 'Koda API', description: 'Integration-test API', version: '1.0.0' });
+    }
     await app.init();
     const close = app.close.bind(app);
     app.close = async () => {

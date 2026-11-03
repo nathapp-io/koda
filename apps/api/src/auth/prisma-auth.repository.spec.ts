@@ -24,6 +24,15 @@ describe('PrismaAuthRepository agent methods', () => {
     expect(result).toEqual({ id: 'a1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'hash123' });
   });
 
+  it('findAgentByKeyHash filters out deleted agents', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const db = createMock<PrismaService>({ client: { agent: { findFirst } } as any });
+    const repository = new PrismaAuthRepository(db as any, txManager);
+
+    await expect(repository.findAgentByKeyHash('hash123')).resolves.toBeNull();
+    expect(findFirst).toHaveBeenCalledExactlyOnceWith({ where: { apiKeyHash: 'hash123', deletedAt: null } });
+  });
+
   it('findAgentCapabilities returns capability strings', async () => {
     expect(await repo.findAgentCapabilities('a1')).toEqual(['read:tickets']);
   });
@@ -34,7 +43,7 @@ describe('PrismaAuthRepository agent methods', () => {
     const repository = new PrismaAuthRepository(db as any, txManager);
     await expect(repository.findAgentById('a1')).resolves.toEqual(mockAgent);
     expect(findUnique).toHaveBeenCalledWith({
-      where: { id: 'a1' }, select: { id: true, slug: true, status: true, apiKeyHash: true },
+      where: { id: 'a1', deletedAt: null }, select: { id: true, slug: true, status: true, apiKeyHash: true },
     });
   });
 

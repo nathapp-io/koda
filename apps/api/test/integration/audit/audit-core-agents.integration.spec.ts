@@ -109,11 +109,14 @@ describeIntegration('audited agent writes', () => {
     expect(await rows('agent.capabilities.update', result.agent.id)).toHaveLength(0);
   });
 
-  it('AC-13/14: delete removes agent and bindings with one audit entry', async () => {
+  it('AC-13/14: delete tombstones the agent and removes its bindings with one audit entry', async () => {
     const result = await create();
     await grantRole(db, { type: 'AGENT', id: result.agent.id }, 'viewer', projectId);
     await request(server).delete(`/api/agents/${result.agent.slug}`).set(auth()).expect(200);
-    expect(await db.agent.findUnique({ where: { id: result.agent.id } })).toBeNull();
+    // US-007: the row stays as a tombstone, so the agent's past comments and tickets keep their author.
+    expect(await db.agent.findUnique({ where: { id: result.agent.id } })).toMatchObject({
+      deletedAt: expect.any(Date), status: 'OFFLINE', slug: `${result.agent.slug}~deleted-${result.agent.id}`,
+    });
     expect(await db.roleBinding.count({ where: { principalType: 'AGENT', principalId: result.agent.id } })).toBe(0);
     const entries = await rows('agent.delete', result.agent.id);
     expect(entries).toHaveLength(1);
@@ -124,6 +127,6 @@ describeIntegration('audited agent writes', () => {
     const result = await create();
     await request(server).delete(`/api/agents/${result.agent.slug}`).set(auth(memberToken)).expect(403);
     expect(await rows('agent.delete', result.agent.id)).toHaveLength(0);
-    expect(await db.agent.count({ where: { id: result.agent.id } })).toBe(1);
+    expect(await db.agent.findUnique({ where: { id: result.agent.id } })).toMatchObject({ deletedAt: null });
   });
 });

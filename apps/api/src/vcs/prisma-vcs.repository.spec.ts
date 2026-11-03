@@ -1,4 +1,5 @@
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
@@ -18,6 +19,10 @@ describe('PrismaVcsRepository', () => {
   const mockCommentCreate = vi.fn();
   const mockActivityCreate = vi.fn();
   const mockQueryRaw = vi.fn();
+  // Review P2 remainder (US-002): the connection reads and the bulk deactivation behind them.
+  const mockVcsFindFirst = vi.fn();
+  const mockVcsFindMany = vi.fn();
+  const mockVcsUpdateManyAndReturn = vi.fn();
 
   const mockPrisma = {
     client: {
@@ -25,7 +30,12 @@ describe('PrismaVcsRepository', () => {
       ticketLink: { findMany: mockFindMany, update: mockUpdate, upsert: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
       comment: { create: mockCommentCreate },
       ticketActivity: { create: mockActivityCreate },
-      vcsConnection: { update: vi.fn() },
+      vcsConnection: {
+        update: vi.fn(),
+        findFirst: mockVcsFindFirst,
+        findMany: mockVcsFindMany,
+        updateManyAndReturn: mockVcsUpdateManyAndReturn,
+      },
       $queryRaw: mockQueryRaw,
     },
   };
@@ -34,6 +44,7 @@ describe('PrismaVcsRepository', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueryRaw.mockReset().mockResolvedValue([{ id: 'p1' }]);
     mockUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     mockTxManager.isInTransaction.mockReturnValue(false);
     repo = new PrismaVcsRepository(mockTxManager as never, mockPrisma as never);
@@ -52,6 +63,21 @@ describe('PrismaVcsRepository', () => {
     expect(sql.join('?')).toContain('SELECT * FROM "VcsConnection" WHERE "projectId" = ? FOR UPDATE');
     expect(projectId).toBe('p1');
     expect(mockRun).not.toHaveBeenCalled();
+  });
+
+  it('refuses a stale import after the project was deleted, before allocation or audit', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 'late', number: 1, title: 'late issue' });
+    const onCreated = vi.fn();
+    await expect(repo.createTicketFromIssue(
+      { id: 'p1' }, { number: 99, title: 'late issue', body: null, url: 'http://gh/99' } as never,
+      'acme/widgets#99', onCreated,
+    )).rejects.toThrow(NotFoundAppException);
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it('createTicketFromIssue allocates next number in txManager.run', async () => {
@@ -76,6 +102,11 @@ describe('PrismaVcsRepository', () => {
       }),
     );
     expect(result).toEqual({ id: 't1', number: 8, title: 'Issue title' });
+    const [sql, projectId] = mockQueryRaw.mock.calls[0];
+    expect(sql.join('?')).toContain('FROM "Project" WHERE "id" = ? AND "deletedAt" IS NULL FOR UPDATE');
+    expect(projectId).toBe('p1');
+    expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeGreaterThan(mockRun.mock.invocationCallOrder[0]);
+    expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockFindFirst.mock.invocationCallOrder[0]);
   });
 
   it('createTicketFromIssue awaits onCreated after the insert, inside the attempt', async () => {
@@ -271,6 +302,54 @@ describe('PrismaVcsRepository', () => {
     expect(transitioned).toBe(true);
     expect(mockCommentCreate).toHaveBeenCalled();
     expect(mockActivityCreate).toHaveBeenCalled();
+  });
+
+  describe('review P2 US-002: a soft-deleted project stops polling', () => {
+    beforeEach(() => {
+      mockVcsFindFirst.mockReset();
+      mockVcsFindMany.mockReset();
+      mockVcsUpdateManyAndReturn.mockReset();
+    });
+
+    it('deactivates the project active connections in one statement and answers their ids', async () => {
+      mockVcsUpdateManyAndReturn.mockResolvedValue([{ id: 'c1' }, { id: 'c2' }]);
+
+      await expect(repo.deactivateConnectionsForProject('p1')).resolves.toEqual(['c1', 'c2']);
+
+      expect(mockVcsUpdateManyAndReturn).toHaveBeenCalledExactlyOnceWith({
+        where: { projectId: 'p1', isActive: true },
+        data: { isActive: false },
+        select: { id: true },
+      });
+    });
+
+    it('answers no ids when the project has no active connection', async () => {
+      mockVcsUpdateManyAndReturn.mockResolvedValue([]);
+
+      await expect(repo.deactivateConnectionsForProject('p1')).resolves.toEqual([]);
+    });
+
+    it('reads a connection only while its project lives', async () => {
+      mockVcsFindFirst.mockResolvedValue(null);
+
+      await expect(repo.findVcsConnectionById('c1')).resolves.toBeNull();
+
+      expect(mockVcsFindFirst).toHaveBeenCalledWith({
+        where: { id: 'c1', project: { deletedAt: null } },
+        include: { project: true },
+      });
+    });
+
+    it('lists only the polling connections of live projects', async () => {
+      mockVcsFindMany.mockResolvedValue([]);
+
+      await expect(repo.findPollingConnections()).resolves.toEqual([]);
+
+      expect(mockVcsFindMany).toHaveBeenCalledWith({
+        where: { syncMode: 'polling', isActive: true, project: { deletedAt: null } },
+        include: { project: true },
+      });
+    });
   });
 
   describe('updateVcsConnectionById (US-003 F1)', () => {

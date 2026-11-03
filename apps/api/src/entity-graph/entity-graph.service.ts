@@ -238,35 +238,19 @@ export class EntityGraphService {
           );
         }
 
-        const assignedToUserId = event.data?.assignedToUserId as string | undefined;
-        const assignedToAgentId = event.data?.assignedToAgentId as string | undefined;
+        const assignedTo = event.data?.assignedTo;
+        const assigneeType = event.data?.assigneeType;
 
-        if (assignedToUserId) {
-          const ownerEntityId = `owner:${assignedToUserId}`;
+        if (typeof assignedTo !== 'string' || assignedTo.length === 0) break;
+
+        if (assigneeType === 'user' || assigneeType === 'agent') {
+          const ownerEntityId = `owner:${assignedTo}`;
           await this.entityStore.upsertNode(
             event.projectId,
             ownerEntityId,
             EntityNodeType.OWNER,
-            `User ${assignedToUserId}`,
-            { userId: assignedToUserId },
-          );
-          await this.entityStore.upsertLink(
-            event.projectId,
-            ticketId,
-            ownerEntityId,
-            EntityLinkRelation.TICKET_TO_OWNER,
-            {},
-          );
-        }
-
-        if (assignedToAgentId) {
-          const ownerEntityId = `owner:${assignedToAgentId}`;
-          await this.entityStore.upsertNode(
-            event.projectId,
-            ownerEntityId,
-            EntityNodeType.OWNER,
-            `Agent ${assignedToAgentId}`,
-            { agentId: assignedToAgentId },
+            `${assigneeType === 'user' ? 'User' : 'Agent'} ${assignedTo}`,
+            assigneeType === 'user' ? { userId: assignedTo } : { agentId: assignedTo },
           );
           await this.entityStore.upsertLink(
             event.projectId,

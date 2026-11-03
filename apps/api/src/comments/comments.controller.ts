@@ -129,7 +129,7 @@ export class CommentsController {
     @Body() updateCommentDto: UpdateCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const projectId = await this.commentsService.resolveCommentProject(id, principal);
+    const projectId = await this.commentsService.resolveCommentProject(id, principal, 'update');
     const outcome = await this.routeGate.run({
       key: 'comment.update', variant: COMMENT_ROUTE_VARIANTS.update, projectId,
       input: { id, patch: updateCommentDto },

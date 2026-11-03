@@ -120,78 +120,20 @@ describe('commentCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('posts comment with explicit uppercase type FIX_REPORT', async () => {
-      const mockComment = {
-        id: 'comment-1',
-        body: 'Fix report',
-        type: 'FIX_REPORT',
-        ticketId: 'ticket-1',
-        createdAt: new Date().toISOString(),
-      };
+    it('rejects --type as an unknown option with exit code 1 before calling the API', async () => {
+      const addCmd = program.commands.find((cmd) => cmd.name() === 'comment')?.commands.find((cmd) => cmd.name() === 'add');
+      addCmd?.exitOverride();
 
-      (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
+      await expect(addCmd?.parseAsync([
+        'node', 'test', 'KODA-42', '--body', 'Test comment', '--type', 'FIX_REPORT',
+      ])).rejects.toMatchObject({ code: 'commander.unknownOption', exitCode: 1 });
 
-      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
-      const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
-
-      await addCmd?.parseAsync([
-        'node',
-        'test',
-        'KODA-42',
-        '--body',
-        'Fix report',
-        '--type',
-        'FIX_REPORT',
-      ]).catch(() => undefined);
-
-      expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({ body: expect.objectContaining({
-            body: 'Fix report',
-            type: 'FIX_REPORT',
-          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
-      );
+      expect(commentsControllerCreateFromHttp).not.toHaveBeenCalled();
     });
 
-    it('exits with code 3 when --type is lowercase general', async () => {
-      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
-      const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
-
-      await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment', '--type', 'general']).catch(() => undefined);
-
-      expect(exitSpy).toHaveBeenCalledWith(3);
-    });
-
-    it('supports all uppercase comment types', async () => {
-      const types = ['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'GENERAL'];
-
-      for (const type of types) {
-        const mockComment = {
-          id: 'comment-1',
-          body: `${type} comment`,
-          type,
-          ticketId: 'ticket-1',
-          createdAt: new Date().toISOString(),
-        };
-
-        (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
-
-        const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
-        const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
-
-        await addCmd?.parseAsync([
-          'node',
-          'test',
-          'KODA-42',
-          '--body',
-          `${type} comment`,
-          '--type',
-          type,
-        ]).catch(() => undefined);
-
-        expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
-          expect.objectContaining({ body: expect.objectContaining({ type }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
-        );
-      }
+    it('does not list --type in add help', () => {
+      const addCmd = program.commands.find((cmd) => cmd.name() === 'comment')?.commands.find((cmd) => cmd.name() === 'add');
+      expect(addCmd?.helpInformation()).not.toContain('--type');
     });
 
     it('returns JSON with --json flag', async () => {

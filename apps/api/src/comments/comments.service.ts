@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { CommentType } from '../common/enums';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
@@ -16,6 +17,7 @@ import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { isRecordNotFound } from '../common/utils/prisma-errors';
 
 @Injectable()
 export class CommentsService {
@@ -48,9 +50,22 @@ export class CommentsService {
   }
 
   /** Resolve a comment to its project id for the HTTP approval gate. */
-  async resolveCommentProject(commentId: string, principal: KodaPrincipal): Promise<string> {
-    const { projectId } = await this.assertCommentProjectMembership(commentId, principal);
+  async resolveCommentProject(
+    commentId: string,
+    principal: KodaPrincipal,
+    operation?: 'update',
+  ): Promise<string> {
+    const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    // Reject impossible edits before the REST approval gate checks keys or opens
+    // a request. Membership still comes first to conceal comments from outsiders.
+    if (operation === 'update') this.assertEditable(comment);
     return projectId;
+  }
+
+  private assertEditable(comment: CommentDomain): void {
+    if (comment.type !== CommentType.GENERAL) {
+      throw new ConflictAppException({}, 'comments.workflowImmutable');
+    }
   }
 
   /**
@@ -209,10 +224,20 @@ export class CommentsService {
     // US-005: then the row-level key check — `comment.update` (or `.own` on this
     // author) decides, and a refusal is 403 `permissions`.
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    this.assertEditable(comment);
     await this.assertCommentKey(principal, 'comment.update', projectId, comment);
 
     const updatedComment = await this.audit.audited(
-      () => this.commentRepo.update(commentId, { body: updateCommentDto.body }),
+      async () => {
+        try {
+          return await this.commentRepo.update(commentId, { body: updateCommentDto.body });
+        } catch (error) {
+          // DELETE may commit after the ownership read. The conditional write
+          // must fail without changing the tombstone or recording an edit audit.
+          if (isRecordNotFound(error)) throw new NotFoundAppException({}, 'comments');
+          throw error;
+        }
+      },
       (updated) => ({
         key: 'comment.update', resourceType: 'comment', resourceId: updated.id,
         projectId, summary: 'edited',
@@ -236,7 +261,7 @@ export class CommentsService {
 
     await this.audit.audited(
       async () => {
-        await this.commentRepo.delete(commentId);
+        await this.commentRepo.softDelete(commentId);
         return commentId;
       },
       (id) => ({

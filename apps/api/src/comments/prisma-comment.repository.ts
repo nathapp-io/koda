@@ -38,6 +38,7 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
       type: d.type,
       authorUserId: d.authorUserId ?? null,
       authorAgentId: d.authorAgentId ?? null,
+      deletedAt: null,
     };
   }
 
@@ -53,7 +54,7 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
 
   async findByTicketId(ticketId: string): Promise<CommentDomain[]> {
     const models = await this.prisma.client.comment.findMany({
-      where: { ticketId },
+      where: { ticketId, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
     return models.map((m) => this.toDomain(m as Comment));
@@ -68,7 +69,7 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
    */
   async findRecentByTicketId(ticketId: string, limit: number): Promise<CommentDomain[]> {
     const models = await this.prisma.client.comment.findMany({
-      where: { ticketId },
+      where: { ticketId, deletedAt: null },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
     });
@@ -78,7 +79,23 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
 
   /** US-003 fix F1: how many comments a ticket holds, so an excerpt can say what it left out. */
   async countByTicketId(ticketId: string): Promise<number> {
-    return this.prisma.client.comment.count({ where: { ticketId } });
+    return this.prisma.client.comment.count({ where: { ticketId, deletedAt: null } });
+  }
+
+  /** Keep every update atomic with respect to soft deletion, not just its earlier lookup. */
+  override async update(id: string, patch: Partial<CommentDomain>): Promise<CommentDomain> {
+    const updated = await this.prisma.client.comment.update({
+      where: { id, deletedAt: null },
+      data: this.toPersistenceUpdate(patch),
+    });
+    return this.toDomain(updated);
+  }
+
+  async softDelete(id: string): Promise<void> {
+    await this.prisma.client.comment.updateMany({
+      where: { id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
   }
 
   async findProjectBySlug(slug: string): Promise<{ id: string; key: string; deletedAt: Date | null } | null> {
@@ -138,7 +155,7 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
         },
       },
     });
-    if (!row) return null;
+    if (!row || row.deletedAt) return null;
     const { ticket, ...comment } = row;
     return {
       comment: this.toDomain(comment),

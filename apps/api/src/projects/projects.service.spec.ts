@@ -12,6 +12,9 @@ import {
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { AfterCommitService, AfterCommitTask } from '../permissions/after-commit.service';
+import { PROJECT_SOFT_DELETED } from './project-events';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
@@ -30,6 +33,8 @@ describe('ProjectsService', () => {
   let mockProjectRepo: any;
   let can: Mock;
   let permissions: PermissionService;
+  let afterCommit: { defer: Mock };
+  let events: { emitAsync: Mock };
   const recordedEntries: unknown[] = [];
   const mockAudit = {
     audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
@@ -52,6 +57,7 @@ describe('ProjectsService', () => {
       findAll: vi.fn(),
       createProject: vi.fn(),
       updateBySlug: vi.fn(),
+      softDeleteById: vi.fn(),
       findAllIds: vi.fn(),
       findMembershipRole: vi.fn(),
       isAgentOnRoster: vi.fn(),
@@ -61,6 +67,10 @@ describe('ProjectsService', () => {
       deleteAllBySourceType: vi.fn(),
       clearProjectCaches: vi.fn(),
     } as any;
+
+    // US-001: every delete emits PROJECT_SOFT_DELETED after the commit; no scope is open by default.
+    afterCommit = { defer: vi.fn(() => false) };
+    events = { emitAsync: vi.fn().mockResolvedValue([]) };
 
     // US-001: project access is `project.read`; each case below answers it through this double.
     can = vi.fn(async () => ({ allowed: true, reason: 'granted' }));
@@ -72,6 +82,8 @@ describe('ProjectsService', () => {
       undefined,
       new ProjectAccessService(mockProjectRepo as any, permissions),
       mockAudit as unknown as AuditRecorder,
+      afterCommit as unknown as AfterCommitService,
+      events as unknown as EventEmitter2,
     );
   });
 
@@ -452,6 +464,85 @@ describe('ProjectsService', () => {
         await expect(service.update('alpha', { slug: 'alpha', key: 'ALPH' })).resolves.toBeDefined();
         expect(mockProjectRepo.updateBySlug).toHaveBeenCalled();
       });
+    });
+  });
+
+  // US-001 (review P2 remainder): both delete entry points emit PROJECT_SOFT_DELETED after the
+  // delete committed, so the fleet listener's transaction never joins the delete's transaction.
+  describe('US-001: PROJECT_SOFT_DELETED after the delete commits', () => {
+    const deletedProject = {
+      id: 'p1',
+      slug: 'alpha',
+      name: 'Alpha',
+      key: 'ALPH',
+      description: null,
+      gitRemoteUrl: null,
+      autoIndexOnClose: true,
+      autoAssign: 'OFF',
+      ciWebhookToken: null,
+      graphifyEnabled: false,
+      graphifyLastImportedAt: null,
+      deletedAt: new Date('2026-11-01T00:00:00.000Z'),
+      createdAt: new Date('2026-10-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-11-01T00:00:00.000Z'),
+    };
+
+    it('AC-1: exports PROJECT_SOFT_DELETED as the in-process project-deletion event', () => {
+      expect(PROJECT_SOFT_DELETED).toBe('projects.project.soft-deleted');
+    });
+
+    it('AC-2: softDeleteById emits once when no after-commit scope is open', async () => {
+      mockProjectRepo.softDeleteById.mockResolvedValue(deletedProject);
+
+      await service.softDeleteById('p1');
+
+      expect(afterCommit.defer).toHaveBeenCalledTimes(1);
+      expect(events.emitAsync).toHaveBeenCalledTimes(1);
+      expect(events.emitAsync).toHaveBeenCalledWith(PROJECT_SOFT_DELETED, { projectId: 'p1' });
+    });
+
+    it('AC-3: softDeleteById defers the emit until the deferred task runs', async () => {
+      const deferred: AfterCommitTask[] = [];
+      afterCommit.defer.mockImplementation((task: AfterCommitTask) => {
+        deferred.push(task);
+        return true;
+      });
+      mockProjectRepo.softDeleteById.mockResolvedValue(deletedProject);
+
+      await service.softDeleteById('p1');
+
+      expect(events.emitAsync).not.toHaveBeenCalled();
+      expect(deferred).toHaveLength(1);
+
+      await deferred[0]();
+
+      expect(events.emitAsync).toHaveBeenCalledTimes(1);
+      expect(events.emitAsync).toHaveBeenCalledWith(PROJECT_SOFT_DELETED, { projectId: 'p1' });
+    });
+
+    it('AC-4: softDeleteById throws NotFoundAppException for a project that is not there', async () => {
+      mockProjectRepo.softDeleteById.mockResolvedValue(null);
+
+      await expect(service.softDeleteById('missing')).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it('AC-5: softDeleteById never emits for a project that is not there', async () => {
+      mockProjectRepo.softDeleteById.mockResolvedValue(null);
+
+      await expect(service.softDeleteById('missing')).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(afterCommit.defer).not.toHaveBeenCalled();
+      expect(events.emitAsync).not.toHaveBeenCalled();
+    });
+
+    it('AC-6: softDelete (by slug) emits the deleted project id', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue({ ...deletedProject, deletedAt: null });
+      mockProjectRepo.updateBySlug.mockResolvedValue(deletedProject);
+
+      await service.softDelete('alpha');
+
+      expect(events.emitAsync).toHaveBeenCalledTimes(1);
+      expect(events.emitAsync).toHaveBeenCalledWith(PROJECT_SOFT_DELETED, { projectId: 'p1' });
     });
   });
 

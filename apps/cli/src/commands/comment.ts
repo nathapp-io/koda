@@ -5,7 +5,7 @@ import {
   commentsControllerUpdateFromHttp,
   commentsControllerDeleteFromHttp,
 } from '../generated';
-import { success, error, table } from '../utils/output';
+import { success, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -19,22 +19,15 @@ export function commentCommand(program: Command): void {
     .description('Add a comment to a ticket')
     .option('--project <slug>', 'Project slug')
     .requiredOption('--body <text>', 'Comment body text')
-    .option('--type <type>', 'Comment type (GENERAL|VERIFICATION|FIX_REPORT|REVIEW)', 'GENERAL')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const validTypes = ['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'];
-        if (!validTypes.includes(options.type)) {
-          error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
-          process.exit(3);
-        }
-
         const response = await commentsControllerCreateFromHttp({
   body: {
             body: options.body,
-            type: options.type,
+            type: 'GENERAL',
           },
   path: { slug: ctx.projectSlug, ref }
   });

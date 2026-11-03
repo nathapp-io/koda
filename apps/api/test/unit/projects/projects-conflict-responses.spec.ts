@@ -28,6 +28,8 @@ import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { AfterCommitService } from '../../../src/permissions/after-commit.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RagService } from '../../../src/rag/rag.service';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { AgentsService } from '../../../src/agents/agents.service';
@@ -114,6 +116,10 @@ describe('US-004: project conflict responses', () => {
         },
         ProjectsService,
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
+        // US-001 (review P2 remainder): the delete emits PROJECT_SOFT_DELETED after the commit; these
+        // cases create and update only, so both doubles stay inert.
+        { provide: AfterCommitService, useValue: { defer: vi.fn(() => false), scope: vi.fn() } },
+        { provide: EventEmitter2, useValue: { emitAsync: vi.fn(async () => []) } },
         ProjectAccessService,
         { provide: PrismaProjectRepository, useValue: projectRepo },
         { provide: RagService, useValue: ragService },

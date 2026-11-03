@@ -28,6 +28,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { IRagConfig } from '../config/rag.config';
 import { VectorStore } from './vector-store.service';
+import { LanceTableManager } from './lance-table-manager';
+import type { OptimizeTask } from './strategies/fts-optimize-strategy.interface';
 
 // Per-file unique dir: LanceTableManager mkdirs lancedbPath even with a mocked connect().
 const lancedbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'koda-vector-store-'));
@@ -701,7 +703,7 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
   }
 
   describe('getOrCreateTable — onFirstAccess', () => {
-    it('calls optimizeStrategy.onFirstAccess(projectId, table) when lanceAvailable is true', async () => {
+    it('calls optimizeStrategy.onFirstAccess(projectId, task) when lanceAvailable is true', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
       const onFirstAccessSpy = vi.fn();
       const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() };
@@ -716,7 +718,7 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
       await vectorStore.getOrCreateTable('test-project');
 
-      expect(onFirstAccessSpy).toHaveBeenCalledWith('test-project', mockTable);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('test-project', expect.any(Function));
     });
 
     it('calls optimizeStrategy.onFirstAccess exactly once per projectId even when called multiple times', async () => {
@@ -766,8 +768,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
       await vectorStore.getOrCreateTable('project-a');
 
       expect(onFirstAccessSpy).toHaveBeenCalledTimes(2);
-      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-a', mockTableA);
-      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-b', mockTableB);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-a', expect.any(Function));
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-b', expect.any(Function));
     });
 
     it('does not call optimizeStrategy.onFirstAccess when lanceAvailable is false', async () => {
@@ -847,7 +849,7 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
     dimensions: 3,
   };
 
-  it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
+  it('calls optimizeStrategy.onInsert(projectId, task) after table.add() when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = vi.fn().mockResolvedValue(undefined);
     const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: vi.fn() } as unknown as never;
@@ -867,7 +869,7 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
       metadata: { ref: 'TEST-1' },
     });
 
-    expect(onInsertSpy).toHaveBeenCalledWith('test-project', mockTable);
+    expect(onInsertSpy).toHaveBeenCalledWith('test-project', expect.any(Function));
   });
 
   it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
@@ -1179,5 +1181,96 @@ describe('VectorStore.search — Provenance Envelope (AC-1 through AC-6)', () =>
 
     // Should be within 1 second (1000ms) of the search start
     expect(timeDiff).toBeLessThan(1000);
+  });
+});
+
+describe('VectorStore — lock-aware optimize tasks (US-006)', () => {
+  /** A real manager whose exclusive() is observed instead of run, plus a fake table holding the work. */
+  function makeManagerWithTable(projectId: string) {
+    const manager = new LanceTableManager(makeRagConfig({ inMemoryOnly: true }));
+    const table = {
+      add: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      optimize: vi.fn().mockResolvedValue(undefined),
+    };
+    (manager as any).tableCache.set(`project_${projectId}`, table);
+    (manager as any).lanceAvailable = true;
+    const exclusiveSpy = vi
+      .spyOn(manager, 'exclusive')
+      .mockImplementation((() => Promise.resolve()) as never);
+    return { manager, table, exclusiveSpy };
+  }
+
+  const embedding = {
+    embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    providerName: 'test-provider',
+    modelName: 'test-model',
+    dimensions: 3,
+  };
+
+  it('AC-10: indexDocument passes onInsert a task that optimizes inside exclusive(project_p1)', async () => {
+    const { manager, table, exclusiveSpy } = makeManagerWithTable('p1');
+    const onInsertSpy = vi.fn().mockResolvedValue(undefined);
+    const strategy = { onInsert: onInsertSpy, onFirstAccess: vi.fn() };
+    const vectorStore = new VectorStore(
+      makeRagConfig({ inMemoryOnly: true }),
+      embedding as never,
+      strategy as never,
+      undefined,
+      undefined,
+      manager,
+    );
+
+    await vectorStore.indexDocument('p1', {
+      source: 'doc',
+      sourceId: 'doc-1',
+      content: 'indexed content',
+      metadata: {},
+    });
+
+    expect(onInsertSpy).toHaveBeenCalledTimes(1);
+    expect(onInsertSpy).toHaveBeenCalledWith('p1', expect.any(Function));
+
+    const task = onInsertSpy.mock.calls[0][1] as OptimizeTask;
+    // indexDocument's own table write also went through exclusive; observe only the task from here on.
+    exclusiveSpy.mockClear();
+    await task();
+
+    expect(exclusiveSpy).toHaveBeenCalledTimes(1);
+    expect(exclusiveSpy.mock.calls[0][0]).toBe('project_p1');
+    // Nothing optimizes on its own: the work lives inside the exclusive section only.
+    expect(table.optimize).not.toHaveBeenCalled();
+
+    await exclusiveSpy.mock.calls[0][1]();
+    expect(table.optimize).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-11: the first-access hook passes a task that optimizes inside exclusive(project_p1)', async () => {
+    const { manager, table, exclusiveSpy } = makeManagerWithTable('p1');
+    const onFirstAccessSpy = vi.fn();
+    const strategy = { onInsert: vi.fn(), onFirstAccess: onFirstAccessSpy };
+    const vectorStore = new VectorStore(
+      makeRagConfig({ inMemoryOnly: true }),
+      embedding as never,
+      strategy as never,
+      undefined,
+      undefined,
+      manager,
+    );
+
+    await vectorStore.getOrCreateTable('p1');
+
+    expect(onFirstAccessSpy).toHaveBeenCalledTimes(1);
+    expect(onFirstAccessSpy).toHaveBeenCalledWith('p1', expect.any(Function));
+
+    const task = onFirstAccessSpy.mock.calls[0][1] as OptimizeTask;
+    await task();
+
+    expect(exclusiveSpy).toHaveBeenCalledTimes(1);
+    expect(exclusiveSpy.mock.calls[0][0]).toBe('project_p1');
+    expect(table.optimize).not.toHaveBeenCalled();
+
+    await exclusiveSpy.mock.calls[0][1]();
+    expect(table.optimize).toHaveBeenCalledTimes(1);
   });
 });

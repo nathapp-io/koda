@@ -26,6 +26,8 @@ import { AuditRecorder } from '../audit/audit-recorder.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
 import { PermissionService } from '../permissions/permission.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
@@ -123,6 +125,10 @@ describe('PATCH /api/projects/:slug — the project brief (US-001)', () => {
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         PrismaProjectRepository,
         ProjectAccessService,
+        // US-001 (review P2 remainder): the delete emits PROJECT_SOFT_DELETED after the commit; this
+        // suite calls `update` only, so both doubles stay inert.
+        { provide: AfterCommitService, useValue: { defer: vi.fn(() => false), scope: vi.fn() } },
+        { provide: EventEmitter2, useValue: { emitAsync: vi.fn(async () => []) } },
         { provide: PrismaService, useValue: prisma },
         { provide: RagService, useValue: { deleteAllBySourceType: vi.fn(), clearProjectCaches: vi.fn() } },
         { provide: HybridRetrieverService, useValue: { invalidateGraphifyEnabledCache: vi.fn() } },

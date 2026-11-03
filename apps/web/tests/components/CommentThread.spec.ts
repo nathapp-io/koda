@@ -1,9 +1,59 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
+import { defineComponent, h, ref } from 'vue'
+import { useField } from 'vee-validate'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import { settle } from '../helpers/roles-dom'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const componentPath = join(webDir, 'components', 'CommentThread.vue')
+const threadFile = webFile('components', 'CommentThread.vue')
+
+const MarkdownEditor = defineComponent({
+  props: { modelValue: String },
+  emits: ['update:modelValue'],
+  setup(props, { attrs, emit }) {
+    return () => h('textarea', { ...attrs, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value) })
+  },
+})
+
+function mountThread(comments: unknown[] = []) {
+  const fields: string[] = []
+  const FormField = defineComponent({
+    props: { name: { type: String, required: true } },
+    setup(props, { slots }) {
+      fields.push(props.name)
+      const { value, handleChange, handleBlur } = useField<string>(() => props.name)
+      return () => slots.default?.({ componentField: {
+        modelValue: value.value,
+        'onUpdate:modelValue': handleChange,
+        onBlur: handleBlur,
+      } })
+    },
+  })
+  const api = { get: jest.fn(async () => comments), post: jest.fn(async () => ({})), patch: jest.fn(async () => ({})), delete: jest.fn(async () => ({})) }
+  const toast = { success: jest.fn(), error: jest.fn() }
+  const app = mountSfc(threadFile, {
+    props: { projectSlug: 'proj', ticketRef: 'ABC-1' },
+    globals: {
+      useApi: () => ({ $api: api }),
+      useI18n: () => enI18n(),
+      useAppToast: () => toast,
+      useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => undefined }),
+      useAsyncData: () => ({ data: ref(comments), pending: ref(false), error: ref(null), refresh: async () => undefined }),
+    },
+    components: {
+      ...uiStubs,
+      FormField,
+      MarkdownEditor,
+      Select: defineComponent({ setup: (_, { slots }) => () => h('select', slots.default?.()) }),
+      SelectTrigger: defineComponent({ setup: (_, { slots }) => () => h('button', slots.default?.()) }),
+    },
+  })
+  return { app, api, fields }
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
@@ -162,38 +212,20 @@ describe('US-005-3 AC3: each comment displays a colored type pill', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — add-comment form with required body MarkdownEditor and type Select
+// AC4 — add-comment form with required body MarkdownEditor (no type selector)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor and type Select', () => {
+describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor', () => {
   test('source uses MarkdownEditor component for comment body', () => {
     const source = readFileSync(componentPath, 'utf-8')
     expect(source).toContain('MarkdownEditor')
   })
 
-  test('source uses Select component for comment type', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('Select')
-  })
-
-  test('source includes GENERAL as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('GENERAL')
-  })
-
-  test('source includes VERIFICATION as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('VERIFICATION')
-  })
-
-  test('source includes FIX_REPORT as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('FIX_REPORT')
-  })
-
-  test('source includes REVIEW as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('REVIEW')
+  test('mounted ticket thread renders no comment type select or type field', () => {
+    const { app, fields } = mountThread()
+    expect(app.find('select')).toHaveLength(0)
+    expect(fields).toEqual(['body'])
+    app.unmount()
   })
 
   test('source has a submit button for the form', () => {
@@ -204,6 +236,23 @@ describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor and 
       source.includes('@submit') ||
       source.includes('v-on:submit')
     expect(hasSubmit).toBe(true)
+  })
+})
+
+describe('US-011 AC-2: comment submission always posts GENERAL', () => {
+  test('submitting the form sends the comments endpoint and GENERAL payload', async () => {
+    const { app, api } = mountThread()
+    const body = app.one('textarea')
+    expect(body).toBeDefined()
+    ;(body?.props.onInput as (event: Event) => void)({ target: { value: 'Typed comment' } } as unknown as Event)
+    await settle()
+    const form = app.one('form')
+    expect(form).toBeDefined()
+    await (form?.props.onSubmit as (event: Event) => Promise<void>)({ preventDefault: () => undefined } as unknown as Event)
+    await settle()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).toHaveBeenCalledWith('/projects/proj/tickets/ABC-1/comments', { body: 'Typed comment', type: 'GENERAL' })
+    app.unmount()
   })
 })
 
@@ -328,12 +377,10 @@ describe('US-002 AC2: Valid body field allows API call with body and type', () =
   })
 })
 
-describe('US-002 AC3: Invalid type field shows validation error without calling API', () => {
-  test('commentSchema validates type as z.enum with correct values', () => {
+describe('US-011: comment type is not a form value', () => {
+  test('commentSchema validates only the body field', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasTypeEnum =
-      source.includes("z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'])")
-    expect(hasTypeEnum).toBe(true)
+    expect(source).not.toContain('type: z.enum(')
   })
 })
 
@@ -345,12 +392,11 @@ describe('US-002 AC4: After successful submission, form is reset', () => {
     expect(hasResetForm).toBe(true)
   })
 
-  test('resetForm initialValues set body to empty string and type to GENERAL', () => {
+  test('resetForm initialValues set body to empty string without a type field', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasInitialValues =
-      (source.includes("body: ''") || source.includes('body: ""')) &&
-      source.includes("type: 'GENERAL'")
-    expect(hasInitialValues).toBe(true)
+    expect(source).toContain("body: ''")
+    const values = source.match(/initialValues:\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(values).not.toContain('type')
   })
 })
 

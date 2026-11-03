@@ -1,0 +1,983 @@
+{
+  "project": "koda",
+  "feature": "review-p2-rest",
+  "branchName": "feat/review-p2-rest",
+  "createdAt": "2026-11-03T00:00:00.000Z",
+  "updatedAt": "2026-11-03T05:57:50.804Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Soft-deleting a project cancels its unstarted fleet jobs",
+      "description": "**Goal** — Emit a committed project-deletion event and cancel only the project's unstarted fleet jobs through audited state transitions.\n\n**Motivation** — Its QUEUED jobs are still placed on the next runner sync and spend real LLM budget for a deleted project; users cannot cancel them because every project route 404s.\n\n**Approach** — **US-001: quiesce after commit.** The event is emitted after the commit, so the listener's transaction never joins\nthe delete's transaction, and with `emitAsync` so the delete call resolves only after the listeners settled:\n\n```ts\n// apps/api/src/projects/project-events.ts\nexport const PROJECT_SOFT_DELETED = 'projects.project.soft-deleted';\nexport interface ProjectSoftDeletedEvent { projectId: string }\n\n// ProjectsService.softDeleteById / softDelete, after this.audit.audited(...) returned\nconst task = async () => { await this.events.emitAsync(PROJECT_SOFT_DELETED, { projectId: deleted.id } satisfies ProjectSoftDeletedEvent); };\nif (!this.afterCommit.defer(task)) await task();\n```\n\nThe fleet listener (`ProjectDeletionJobsListener`, `@SystemWriter('system.project.quiesce')`) never rejects:\n\n```ts\n@OnEvent(PROJECT_SOFT_DELETED)\nasync onProjectSoftDeleted(event: ProjectSoftDeletedEvent): Promise<void> {\n  try {\n    const result = await runAsSystemWriter(this, () => this.txManager.run(async () => {\n      const r = await this.jobs.cancelForProjectDelete(event.projectId);\n      await this.audit.record({ key: 'system.project.quiesce', resourceType: 'project', resourceId: event.projectId,\n        projectId: event.projectId, summary: `project deleted: ${r.cancelled.length} unstarted jobs cancelled` });\n      return r;\n    }));\n    this.live.publish(result.live);\n  } catch (error) {\n    this.logger.error(`project ${event.projectId} quiesce failed: ${messageOf(error)}`);\n  }\n}\n```\n\n`FleetJobsService.cancelForProjectDelete(projectId, now = new Date()): Promise<{ cancelled: string[]; live: LiveFleetJobEvent[] }>`\nreads `repo.findProjectUnstartedIds(projectId, PROJECT_QUIESCE_LIMIT)` (ids of the project's QUEUED and ASSIGNED jobs with no `cancelRequestedAt`, oldest first, at most `PROJECT_QUIESCE_LIMIT = 500`; when the limit is reached it logs a `warn` naming the project), locks\neach with `lockById(id)` (which waits for a concurrent holder and re-reads the row), and cancels it when the locked\nrow is QUEUED, or ASSIGNED with a pending ASSIGN command, with reason `PROJECT_DELETED_REASON = 'project_deleted'`. A\nrow that is in any other state once locked (it started, finished or was cancelled meanwhile) is skipped. RUNNING,\nUPLOADING and acked ASSIGNED jobs are left to finish.\n\n**Scope** — In: both ProjectsService deletion entry points; the event; repository contract/query; cancellation service; listener registration in fleet-jobs.module.ts; system.project.quiesce catalog key, inventory row, writer map and role-matrix count/snapshot; affected project constructor/DI doubles and seam tests. Out: US-002's VCS deactivation/budget retention and US-004's placement pagination; no restore or project hard delete. RUNNING, UPLOADING and acked ASSIGNED jobs finish and report as usual; schedules/auto-review already filter deleted projects and are not disabled.\n\n**Interface** — Target ProjectsService constructor: `(projectRepo, ragService, @Optional() hybridRetrieverService, access, audit, afterCommit: AfterCommitService, events: EventEmitter2)`. Add `findProjectUnstartedIds(projectId: string, limit: number): Promise<string[]>` to IFleetJobRepository. `repo.findPendingCommand({ jobId, type: FleetCommandType.ASSIGN, leaseEpoch })` determines unacked ASSIGNED state. Use the existing `transitions.apply({ job, to: CANCELLED, by: 'server', actor: SYSTEM_ACTOR, reason, extra: { cancelReason: reason } })` pattern; never write state directly. Add `'system.project.quiesce': ['system']`, one inventory row for ProjectDeletionJobsListener, a writer-map entry, 225 role-matrix cells instead of 224, and only new-key non-role-key snapshot cells. Update all four named project test fixtures for constructor/DI changes without changing their assertions. Tests include real EventEmitter2 and real listener effects after the service resolves; listener exceptions must not affect the committed delete response.",
+      "acceptanceCriteria": [
+        "[unit] PROJECT_SOFT_DELETED imported from projects/project-events equals 'projects.project.soft-deleted'.",
+        "[unit] ProjectsService.softDeleteById('p1') with an AfterCommitService whose defer answers false calls EventEmitter2.emitAsync once with PROJECT_SOFT_DELETED and { projectId: 'p1' }.",
+        "[unit] With an AfterCommitService whose defer answers true, softDeleteById('p1') does not call emitAsync until the deferred task runs.",
+        "[unit] ProjectsService.softDeleteById('missing') whose repository answers null throws NotFoundAppException.",
+        "[unit] ProjectsService.softDeleteById('missing') whose repository answers null never calls emitAsync.",
+        "[unit] ProjectsService.softDelete('alpha') calls emitAsync once with PROJECT_SOFT_DELETED and the deleted project's id.",
+        "[unit] FleetJobsService.cancelForProjectDelete('p1') over a QUEUED job applies a transition to CANCELLED whose extra.cancelReason is 'project_deleted'.",
+        "[unit] cancelForProjectDelete over an ASSIGNED job whose ASSIGN command is still pending cancels it with extra.cancelReason 'project_deleted'.",
+        "[unit] cancelForProjectDelete applies no transition to a RUNNING job, an UPLOADING job, or an ASSIGNED job with no pending ASSIGN command.",
+        "[unit] cancelForProjectDelete skips a job whose row, once locked, is no longer QUEUED or ASSIGNED.",
+        "[unit] When findProjectUnstartedIds answers PROJECT_QUIESCE_LIMIT ids, cancelForProjectDelete logs one warn naming the project.",
+        "[unit] ProjectDeletionJobsListener.onProjectSoftDeleted({ projectId: 'p1' }) records one audit entry with key system.project.quiesce and resourceId 'p1'.",
+        "[unit] After the transaction resolves, the listener calls FleetJobLivePublisher.publish with the live events cancelForProjectDelete answered.",
+        "[unit] When cancelForProjectDelete rejects, onProjectSoftDeleted resolves without rejecting.",
+        "[unit] When cancelForProjectDelete rejects, onProjectSoftDeleted logs at error level.",
+        "[unit] When cancelForProjectDelete rejects, onProjectSoftDeleted never calls publish.",
+        "[integration] With a project holding one QUEUED job and one RUNNING job, after ProjectsService.softDeleteById resolves using real EventEmitter2 and the real listener, the QUEUED job is CANCELLED with cancelReason project_deleted.",
+        "[integration] In that real-event project deletion run, the RUNNING job is still RUNNING after ProjectsService.softDeleteById resolves.",
+        "[integration] In that run, a QUEUED job of another project stays QUEUED.",
+        "[integration] When the fleet listener's transaction throws after deletion of p1 commits, ProjectsService.softDeleteById('p1') resolves to the deleted project's ProjectResponseDto with id 'p1' and a non-null deletedAt, preserving the soft-delete response despite listener failure.",
+        "[unit] When an ASSIGNED job loses its pending ASSIGN while cancelForProjectDelete waits for the row lock, the re-read job is skipped."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "fleet",
+        "projects",
+        "permissions",
+        "audit"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module after-commit event delivery, locked state transitions and new system-writer permission/audit metadata require strict security-sensitive test isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/permissions/after-commit.service.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/project-events.ts",
+        "apps/api/src/fleet/jobs/project-deletion-jobs.listener.ts",
+        "apps/api/src/fleet/jobs/project-deletion-jobs.listener.spec.ts",
+        "apps/api/test/integration/fleet/project-deletion-quiesce.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the outer approval transaction rolls back, no PROJECT_SOFT_DELETED event is emitted.",
+        "findProjectUnstartedIds('p1', 500) excludes jobs with cancelRequestedAt set and returns at most 500 ids in oldest-first order.",
+        "When a job disappears before lockById re-reads it, cancelForProjectDelete leaves the other candidates eligible for cancellation."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "the suite constructs `new ProjectsService(...)` with five arguments; the constructor gains `afterCommit` and `events`, so the construction passes an `AfterCommitService` whose `defer` answers false and an `EventEmitter2` double whose `emitAsync` resolves; every existing assertion keeps its meaning."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts",
+          "reason": "the suite constructs `new ProjectsService(...)` with five arguments; it passes the same two extra doubles; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/projects-brief.routes.spec.ts",
+          "reason": "the testing module lists `ProjectsService` as a provider; it adds `AfterCommitService` and an `EventEmitter2` provider so DI resolves; assertions unchanged."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-conflict-responses.spec.ts",
+          "reason": "the testing module lists `ProjectsService` as a provider; it adds `AfterCommitService` and an `EventEmitter2` provider so DI resolves; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.module.ts",
+          "reason": "registers `ProjectDeletionJobsListener` as a provider."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "adds `'system.project.quiesce': ['system']`."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "adds one `system` row for the `ProjectDeletionJobsListener` writer class with `proposed_key` `system.project.quiesce` and `catalog_scope` `system`, so the catalog spec re-derives the new key."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-role cell count `toHaveLength(224)` becomes `toHaveLength(225)` for the new catalog key."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated with `bunx vitest run -u` for the new key's `non-role-key` cells; no other cell changes."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer map gains `[ProjectDeletionJobsListener, 'system.project.quiesce']`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "`IFleetJobRepository` gains `findProjectUnstartedIds(projectId: string, limit: number): Promise<string[]>`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "26ff2d46472ae7824ea4f980594d7b4f78760b23"
+    },
+    {
+      "id": "US-002",
+      "title": "Soft-deleting a project stops its VCS polling and keeps its budget pauses",
+      "description": "**Goal** — Consume the project deletion event to deactivate VCS polling and retain soft-deleted projects' budget scopes.\n\n**Motivation** — `PrismaBudgetRepository.scopeExists` treats the deleted project as gone, so `BudgetSweeper` deletes its policies within 60 s and a paused budget stops holding.\n\n**Approach** — **US-002.** `VcsProjectDeletionListener` (`@SystemWriter('system.project.quiesce')`) runs\n`repo.deactivateConnectionsForProject(projectId): Promise<string[]>` (set `isActive: false` on the project's active\nconnections, answer their ids) inside `runAsSystemWriter` + `txManager.run`, records one `system.project.quiesce`\nentry with `resourceType: 'vcs-connection'` per deactivated connection, then calls `unschedulePolling` for each id\nafter the commit. Errors are logged, never rethrown.\n\n`PrismaBudgetRepository.scopeExists`. Baseline: `case 'project'` counts `{ id, deletedAt: null }`. Target: counts\n`{ id }`.\n\n`PrismaVcsRepository.findVcsConnectionById` and `findPollingConnections`. Baseline: no project filter. Target:\n`project: { deletedAt: null }` in `where` (`findVcsConnectionById` becomes a `findFirst`).\n\n**Scope** — In: VCS listener/provider registration, deactivation repository contract/query, polling-read deletion filters, project scope existence and retention tests. Add the VcsProjectDeletionListener writer-map and permission inventory row using the existing system.project.quiesce key. Update the D166 budget-repository expectation to true. Out: US-001's event/cancellation implementation, US-003's issue uniqueness/in-flight guard, and US-004's placement changes. The VCS webhook intake of a deleted project is not changed; findVcsConnectionByProjectSlug already filters deletedAt. No hard-delete/restore path is added and deleted-project policies remain until a hard delete; ordinary budget rollover behavior remains unchanged.\n\n**Interface** — `repo.deactivateConnectionsForProject(projectId): Promise<string[]>`; `VcsPollingService.unschedulePolling(connectionId)` removes the interval and the scheduled id. Consume `PROJECT_SOFT_DELETED` and `ProjectSoftDeletedEvent` produced by US-001; `onProjectSoftDeleted(event: ProjectSoftDeletedEvent): Promise<void>` never rejects. AuditRecorder.record runs within the listener's system-writer transaction. If that transaction fails, log error and do not unschedule from the listener; the next polling tick's deletion-filtered lookup returns null and causes unscheduling. The integration seam must trigger real ProjectsService.softDeleteById and await its real EventEmitter2 listeners, not manually imitate event delivery.",
+      "acceptanceCriteria": [
+        "[unit] VcsProjectDeletionListener.onProjectSoftDeleted({ projectId: 'p1' }) calls VcsPollingService.unschedulePolling once for each id deactivateConnectionsForProject('p1') answered.",
+        "[unit] The listener records one audit entry with key system.project.quiesce and resourceType 'vcs-connection' per deactivated connection.",
+        "[unit] The listener records no audit entry when deactivateConnectionsForProject answers an empty list.",
+        "[unit] When deactivateConnectionsForProject rejects, the listener resolves without rejecting.",
+        "[unit] When deactivateConnectionsForProject rejects, the listener logs at error level.",
+        "[unit] When deactivateConnectionsForProject rejects, the listener never calls unschedulePolling.",
+        "[integration] deactivateConnectionsForProject('p1') sets isActive false on the active connection of project p1.",
+        "[integration] Given one active connection c1 for p1, deactivateConnectionsForProject('p1') returns ['c1'].",
+        "[integration] When deactivateConnectionsForProject('p1') runs, an active connection belonging to another project stays active.",
+        "[integration] findPollingConnections() leaves out an active polling connection whose project is soft-deleted.",
+        "[integration] findVcsConnectionById(id) answers null for a connection whose project is soft-deleted.",
+        "[integration] PrismaBudgetRepository.scopeExists({ scopeType: 'project', scopeId }) answers true for a soft-deleted project.",
+        "[integration] BudgetSweeper.tick() over a paused project policy of a soft-deleted project keeps the policy row with its pausedAt.",
+        "[integration] After ProjectsService.softDeleteById resolves for a project with an active polling connection using real EventEmitter2 and real listeners, that connection is isActive false.",
+        "[integration] When the VCS deletion listener fails, the next polling tick unschedules the deleted project's connection because findVcsConnectionById returns null."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "vcs",
+        "budgets",
+        "projects",
+        "permissions",
+        "audit"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module system-actor writes and audit-scope registration combine with post-commit scheduling and budget retention; system-writer/access-control involvement triggers the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-polling.service.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/fleet/budgets/prisma-budget.repository.ts",
+        "apps/api/src/fleet/budgets/budget-sweeper.ts",
+        "apps/api/src/fleet/jobs/project-deletion-jobs.listener.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/vcs/vcs-project-deletion.listener.ts",
+        "apps/api/src/vcs/vcs-project-deletion.listener.spec.ts",
+        "apps/api/test/integration/vcs/vcs-project-deletion.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the listener transaction is still pending, unschedulePolling has not been called.",
+        "deactivateConnectionsForProject answers an empty list when the project has no active connection.",
+        "When VCS deletion quiesce fails, the committed project deletion response remains successful."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs.module.ts",
+          "reason": "registers `VcsProjectDeletionListener` as a provider."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer map gains `[VcsProjectDeletionListener, 'system.project.quiesce']`."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "adds one `system` row for the `VcsProjectDeletionListener` writer class with `proposed_key` `system.project.quiesce`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-budget-repository.integration.spec.ts",
+          "reason": "the test \"knows which scope rows exist, treating a soft-deleted project as gone (D166)\" soft-deletes a project and expects `false`; it now expects `true` and its title says a soft-deleted project's scope still exists, because a soft-deleted project's budget scope stays in force until a hard delete (ruling 15)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ebc156b634bafabd2013ab224b274ec6dcc1505f"
+    },
+    {
+      "id": "US-003",
+      "title": "A VCS issue imports into at most one ticket per project",
+      "description": "**Goal** — Enforce import uniqueness in PostgreSQL and prevent overlapping polling ticks for one connection.\n\n**Motivation** — A \"Sync now\" during a polling tick, two webhook deliveries, or an overlapping tick each import the same issue twice.\n\n**Approach** — **US-003.** The migration clears `externalVcsId` on every duplicate except the lowest ticket `number` per\n`(projectId, externalVcsId)`, then creates the unique index:\n\n```sql\nUPDATE \"Ticket\" t SET \"externalVcsId\" = NULL\nWHERE t.\"externalVcsId\" IS NOT NULL AND EXISTS (\n  SELECT 1 FROM \"Ticket\" o WHERE o.\"projectId\" = t.\"projectId\" AND o.\"externalVcsId\" = t.\"externalVcsId\" AND o.\"number\" < t.\"number\");\nCREATE UNIQUE INDEX \"Ticket_projectId_externalVcsId_key\" ON \"Ticket\"(\"projectId\", \"externalVcsId\");\n```\n\n`syncIssue` keeps its existing pre-check and maps a null `createTicketFromIssue` result to\n`{ action: 'skipped', reason: 'Ticket with this external VCS ID already exists' }`. Outside a transaction,\n`runWithTicketNumberRetry` has already rolled the attempt back when the violation reaches the repository's catch, so\nanswering null is safe; inside an enclosing transaction (the approval-executed manual sync) the violation propagates\nand that transaction fails as a whole. `VcsPollingService` keeps `private readonly inFlight = new Set<string>()`;\n`pollConnection` returns at once when the id is in the set, adds it before the poll and deletes it in `finally`.\n\n`PrismaVcsRepository.createTicketFromIssue`. Baseline: answers `CreateTicketFromIssueResult` or throws. Target:\nanswers `CreateTicketFromIssueResult | null`; null when the insert hit `isUniqueViolation(error, 'externalVcsId')`\nand `this.txManager.isInTransaction()` was false when the call started; any other error, and that violation inside an\nenclosing transaction, is rethrown.\n\n**Scope** — In: Ticket @@unique([projectId, externalVcsId]) and the specified cleanup/index migration, nullable repository interface/consumer, and pollConnection in-flight lifecycle. Keep @@index([externalVcsId]), pre-check semantics including deleted imports, and the ticket-number retry helper's behavior. Out: US-002 deletion filtering/deactivation, placement and other schema soft deletes. The approval-executed manual sync (prepareSyncAll, isolate:false) is not made to skip an aborted transaction. The webhook issues.opened path and manual sync routes get no in-flight guard of their own.\n\n**Interface** — `createTicketFromIssue(project: { id: string }, issue: VcsIssue, externalVcsId: string, onCreated?: OnTicketCreated): Promise<CreateTicketFromIssueResult | null>`; update IVcsRepository consistently. `isUniqueViolation(error, field)` matches P2002 via the constraint target helper; never inspect error.meta directly. `Ticket_projectId_externalVcsId_key` contains externalVcsId but not number, so isTicketNumberConflict does not match it and runWithTicketNumberRetry rethrows it. Capture ambient transaction state before invoking the retry helper; catch outside its rolled-back attempt. Existing audit onCreated remains inside the ticket insert transaction. Tests must exercise two concurrent syncIssue callers and the enclosing-transaction failure path with a real database, plus independent connection polling and finally cleanup after failure.",
+      "acceptanceCriteria": [
+        "[integration] Inserting a second ticket with the same projectId and externalVcsId fails with Prisma error code P2002.",
+        "[integration] Two tickets with the same externalVcsId in different projects are both stored.",
+        "[integration] Two tickets with a null externalVcsId in one project are both stored.",
+        "[integration] createTicketFromIssue called outside any transaction for an externalVcsId that another ticket of the project already holds answers null.",
+        "[integration] createTicketFromIssue called outside any transaction for an externalVcsId already held by a ticket in the same project creates no additional ticket.",
+        "[integration] createTicketFromIssue for an externalVcsId already held by another ticket in the same project, called inside an open txManager.run, rejects with P2002 instead of answering null.",
+        "[unit] VcsSyncService.syncIssue whose createTicketFromIssue answers null answers { action: 'skipped', reason: 'Ticket with this external VCS ID already exists' }.",
+        "[integration] Two concurrent syncIssue calls for the same issue in one project, outside any transaction, produce exactly one ticket.",
+        "[integration] Of the two concurrent outside-transaction syncIssue results for the same issue, one is skipped.",
+        "[unit] A polling tick for connection c1 fired while c1's previous poll has not settled calls findVcsConnectionById once in total, not twice.",
+        "[unit] After c1's poll rejects, the next tick for c1 polls again.",
+        "[unit] A tick for connection c2 runs while a poll of c1 is still in flight."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "vcs",
+        "database",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Database migration plus concurrent insert recovery, ambient transaction semantics and per-connection polling serialization require cross-layer race tests; no auth or credential policy is changed.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-sync.service.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/vcs/vcs-polling.service.ts",
+        "apps/api/src/vcs/vcs-manual-sync.service.ts",
+        "apps/api/src/common/utils/ticket-number-retry.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261120090000_ticket_external_vcs_unique/migration.sql",
+        "apps/api/test/integration/vcs/vcs-import-unique.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the uniqueness migration runs over duplicate external ids, only the lowest-numbered ticket in each project retains the externalVcsId and no ticket row is deleted.",
+        "When createTicketFromIssue encounters an error unrelated to externalVcsId uniqueness, the original error is rethrown.",
+        "A soft-deleted ticket's externalVcsId still prevents a second import into the same project.",
+        "After c1's successful poll settles, a later tick polls c1 again."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`Ticket` gains `@@unique([projectId, externalVcsId])`; the existing `@@index([externalVcsId])` stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "73f9e5dc8f6b3bab873bda1188b005c765499f20"
+    },
+    {
+      "id": "US-004",
+      "title": "Runner fills scan only jobs the runner can take and page past the first 50",
+      "description": "**Goal** — Filter runner-specific QUEUED candidates in SQL and scan bounded cursor pages in both fill paths.\n\n**Motivation** — 50 jobs that this runner can never take (pinned elsewhere, the other kind, a deleted project) hide every newer job, and nothing moves them out of the window.\n\n**Approach** — **US-004: scan composition.** The order is: SQL filter, then the page loop, then the existing per-job checks.\n\n1. `findQueuedPage` filters in SQL: `state: QUEUED`, `project: { deletedAt: null }`, `command` equal to `'THREAD'`\n   when `threads` is true and not equal to `'THREAD'` otherwise, and `OR: [{ pinnedRunnerId: null }, { pinnedRunnerId: runnerId }]`.\n   It orders by `[{ queuedAt: 'asc' }, { id: 'asc' }]`, takes `limit`, and with `after` adds\n   `OR: [{ queuedAt: { gt: after.queuedAt } }, { queuedAt: after.queuedAt, id: { gt: after.id } }]` (both `OR`s go\n   under one `AND`).\n2. `fillRunner` and `fillRunnerThreads` read pages of `QUEUED_SCAN_LIMIT` (50) rows, starting with `after: null` and\n   continuing from the last row of each page, until the free slots reach 0, a page holds fewer than\n   `QUEUED_SCAN_LIMIT` rows, or `MAX_QUEUED_SCAN_PAGES` (10, exported from `placement-rules.ts`) pages were read. When\n   the page cap ends the scan while slots are still free and the last page was full, the service logs a `warn` naming\n   the runner (`.nax/rules/api-data.md` pagination rule).\n3. Each scanned id goes through the unchanged loop body: `lockById` with `skipLocked`, the state and kind checks, the\n   budget-pause cancel, the misfit check, `assign`.\n\n**Scope** — In: replace findQueuedIds in the domain contract/Prisma implementation, export cursor/filter types and page cap, page both fill loops, update their repository doubles, preserve budgets/CAS/lock/load/live behavior. Out: US-001 project cancellation, US-002 VCS/budgets and all other fixes. Permanent misfits remain QUEUED; labels/profile matching stay per-job; dashboard findQueuedWindow(QUEUED_SCAN_LIMIT) is not paged; placeJob is unchanged; no new FleetJob index is added.\n\n**Interface** — `findQueuedPage(filter: QueuedScanFilter, limit: number, after: QueuedCursor | null): Promise<QueuedCursor[]>` where `QueuedScanFilter = { runnerId: string; threads: boolean }` and `QueuedCursor = { id: string; queuedAt: Date }`. Export both from fleet/jobs/domain/fleet-job.domain.ts, remove findQueuedIds, and export MAX_QUEUED_SCAN_PAGES=10 from placement-rules.ts. Keep QUEUED_SCAN_LIMIT=50. Preserve per-pass addJobToLoad accounting and post-commit publishing/notifying. Existing trust-domain, project-code, project-thread and koda-tools specs supply { id, queuedAt } rows instead of ids; the project-thread expectation must assert { runnerId, threads: true }. Test actual SQL pagination including equal timestamps and both real fill entry points; later jobs after a capped scan wait for a subsequent sync.",
+      "acceptanceCriteria": [
+        "[unit] MAX_QUEUED_SCAN_PAGES imported from fleet/jobs/placement-rules equals 10.",
+        "[integration] findQueuedPage({ runnerId: 'r1', threads: false }, 50, null) leaves out a QUEUED job pinned to runner r2.",
+        "[integration] findQueuedPage({ runnerId: 'r1', threads: false }, 50, null) includes both a non-THREAD QUEUED job pinned to r1 and an unpinned non-THREAD QUEUED job.",
+        "[integration] findQueuedPage({ runnerId: 'r1', threads: false }, 50, null) leaves out a QUEUED THREAD job.",
+        "[integration] findQueuedPage({ runnerId: 'r1', threads: true }, 50, null) answers only THREAD jobs.",
+        "[integration] findQueuedPage leaves out a QUEUED job whose project is soft-deleted.",
+        "[integration] findQueuedPage(filter, 2, after) with after set to the second row of a first page answers the next two rows by queuedAt then id, including a row with the same queuedAt and a greater id.",
+        "[unit] fillRunner('r1', 1) whose first page holds 50 misfitting jobs and whose second page holds one fitting job assigns that job, calling findQueuedPage the second time with the first page's last row as after.",
+        "[unit] fillRunner('r1', 1) stops reading pages once the slot is filled.",
+        "[unit] fillRunner('r1', 1) stops after a page shorter than QUEUED_SCAN_LIMIT.",
+        "[unit] fillRunner('r1', 1) whose every page holds 50 misfitting jobs calls findQueuedPage exactly MAX_QUEUED_SCAN_PAGES times.",
+        "[unit] fillRunner('r1', 1) whose every page holds 50 misfitting jobs assigns nothing.",
+        "[unit] fillRunner('r1', 1) whose every page holds 50 misfitting jobs logs one warn naming runner r1 at the page cap.",
+        "[unit] fillRunner calls findQueuedPage with { runnerId: 'r1', threads: false }.",
+        "[unit] fillRunnerThreads calls findQueuedPage with { runnerId: 'r1', threads: true }.",
+        "[unit] A paged QUEUED job in a paused budget scope is still cancelled by fillRunner with the budget reason."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "fleet",
+        "placement",
+        "pagination"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Composed SQL predicates and bounded cursors change two transactional placement paths while preserving lock, budget and load semantics; this does not change authorization rules.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/placement.service.queued-scan.spec.ts",
+        "apps/api/test/integration/fleet/placement-queued-scan.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "fillRunnerThreads assigns a fitting THREAD job on its second page after 50 first-page misfits.",
+        "fillRunnerThreads logs one warn naming its runner after ten full pages with capacity still available.",
+        "When the tenth full page fills the last free slot, the fill completes without a page-cap warning.",
+        "When lockById with skipLocked returns null for one candidate, the fill can still assign a later fitting candidate."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.trust-domain.spec.ts",
+          "reason": "the repository double provides `findQueuedIds`; it provides `findQueuedPage` answering the same jobs as `{ id, queuedAt }` rows (an empty page after them); assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.project-code.spec.ts",
+          "reason": "the repository double provides `findQueuedIds`; it provides `findQueuedPage` answering the same job as a `{ id, queuedAt }` row; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.project-thread.spec.ts",
+          "reason": "the repository double provides `findQueuedIds` and one test asserts it was called; it provides `findQueuedPage` and asserts `findQueuedPage` was called with `{ runnerId, threads: true }`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.koda-tools.spec.ts",
+          "reason": "the repository double provides `findQueuedIds`; it provides `findQueuedPage` answering the same job as a `{ id, queuedAt }` row; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "`IFleetJobRepository.findQueuedIds` is replaced by `findQueuedPage`, and `QueuedScanFilter` and `QueuedCursor` are exported."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b6296109c9178192dbcde817348892feffa51ece"
+    },
+    {
+      "id": "US-005",
+      "title": "Ticket assignments create owner links in the entity graph",
+      "description": "**Goal** — Make the entity graph consume the assignment payload actually emitted by TicketsService.assign.\n\n**Motivation** — `TicketsService.assign` records `{ assignedTo, assigneeType }`, but `EntityGraphService.onTicketEvent` reads `assignedToUserId` and `assignedToAgentId`, so no real assignment ever creates a `TICKET_TO_OWNER` link.\n\n**Approach** — The entity graph's `assigned` handler reads `assignedTo` and `assigneeType`, the keys `TicketsService.assign` sends, and a DB-backed contract test drives the producer into the consumer.\n\n`InMemoryEntityStore` (`apps/api/src/entity-graph/in-memory-entity-store.ts`) exposes `findLinksBySource`.\n`EntityGraphOutboxSubscriber` registers `ticket_event` on `FanOutPublisher` and maps the payload to\n`EntityGraphService.onTicketEvent`.\n\nFor assigneeType 'user', upsert owner:<assignedTo> with metadata { userId: assignedTo }; for 'agent', use { agentId: assignedTo }. Upsert the ticket node as before even when assignedTo is null; create no owner link for null assignment or a missing/unsupported discriminant. Correct existing unit fixtures using invented assignedToUserId/assignedToAgentId event keys to the producer's real shape without changing their expected graph links. The contract tests must run TicketsService.assign against the DB, take its actual stored ticket_event outbox payload, and hand that payload to the handler the real EntityGraphOutboxSubscriber registers on FanOutPublisher, backed by InMemoryEntityStore.\n\n**Scope** — In: assigned-event consumer, corrected fixtures and producer-to-consumer DB contract for user and agent assignments. Out: other stories' quiesce/import/soft-delete work, rebuild/backfill changes, and assignment removal cleanup. Assignment removal (assignedTo:null) does not delete an existing TICKET_TO_OWNER link.\n\n**Interface** — Preserve `EntityGraphService.onTicketEvent(event: TicketEvent): Promise<void>` and the subscriber's ticket_event mapping. The assignment data contract is `{ assignedTo: 'u1', assigneeType: 'user' }`, `{ assignedTo: 'a1', assigneeType: 'agent' }` or `{ assignedTo: null, assigneeType: null }`. No new public endpoint or payload schema is added.",
+      "acceptanceCriteria": [
+        "[unit] EntityGraphService.onTicketEvent with action assigned and data { assignedTo: 'u1', assigneeType: 'user' } upserts owner node owner:u1 with metadata { userId: 'u1' }.",
+        "[unit] EntityGraphService.onTicketEvent with action assigned and data { assignedTo: 'u1', assigneeType: 'user' } upserts a TICKET_TO_OWNER link from the ticket to owner:u1.",
+        "[unit] onTicketEvent with action assigned and data { assignedTo: 'a1', assigneeType: 'agent' } upserts owner node owner:a1 with metadata { agentId: 'a1' }.",
+        "[unit] EntityGraphService.onTicketEvent with action assigned and data { assignedTo: 'a1', assigneeType: 'agent' } upserts a TICKET_TO_OWNER link from the ticket to owner:a1.",
+        "[unit] onTicketEvent with action assigned and data { assignedTo: null, assigneeType: null } upserts the ticket node.",
+        "[unit] onTicketEvent with action assigned and data { assignedTo: null, assigneeType: null } creates no owner link.",
+        "[unit] onTicketEvent with action assigned and data { assignedTo: 'x1' } with no assigneeType creates no owner link.",
+        "[integration] TicketsService.assign assigning a user to a ticket writes a ticket_event outbox payload that, handed to the ticket_event handler EntityGraphOutboxSubscriber registers on FanOutPublisher backed by InMemoryEntityStore, creates a TICKET_TO_OWNER link from that ticket to owner:<userId>.",
+        "[integration] TicketsService.assign assigning an agent writes a ticket_event outbox payload that, handed to the ticket_event handler registered by EntityGraphOutboxSubscriber on FanOutPublisher backed by InMemoryEntityStore, creates a TICKET_TO_OWNER link from the ticket to owner:<agentId>."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "entity-graph",
+        "tickets",
+        "outbox"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A localized consumer payload correction uses existing graph and outbox patterns; producer-to-consumer integration proves the fix without introducing a new abstraction or changing assignment access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/entity-graph/entity-graph.service.ts",
+        "apps/api/src/entity-graph/entity-graph-outbox.subscriber.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/entity-graph/in-memory-entity-store.ts",
+        "apps/api/test/integration/entity-graph/outbox-fanout-entity-graph.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/entity-graph/assign-owner-link.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When assigneeType is neither user nor agent, an assigned event creates no owner link.",
+        "Replaying the same assigned event leaves one owner link for that ticket/owner pair."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/entity-graph/entity-graph.service.spec.ts",
+          "reason": "the \"AC3: onTicketEvent(assignment) creates owner node and links to ticket\" tests feed `{ assignedToUserId }` / `{ assignedToAgentId }`, a shape no producer emits; they feed `{ assignedTo, assigneeType: 'user' | 'agent' }` and keep their expected owner node and link."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "139ff503edf292269c2dbe4795582b15ee896b7f"
+    },
+    {
+      "id": "US-006",
+      "title": "FTS optimize runs under the table's write lock",
+      "description": "**Goal** — Pass lock-aware optimize tasks to all FTS strategies without deadlocking held KB write sessions.\n\n**Motivation** — `LanceTableManager.exclusive` serialises writes per table, and `VectorStoreService.optimizeTable` honours it, but the counter, cron and first-access optimize paths call `table.optimize()` directly and can race a knowledge `replaceFile`.\n\n**Approach** — **US-006.** `VectorStoreService` builds the task for its table and passes it instead of the raw table:\n\n```ts\nconst optimize: OptimizeTask = () => this.lanceTable.exclusive(`project_${projectId}`, async () => { await table.optimize(); });\n```\n\n`CounterOptimizeStrategy.onInsert` at the threshold starts `optimizeInBackground(optimize, projectId, this.logger)`\nand resolves without waiting for it, because `onInsert` can run inside a held write session of the same table, and\nawaiting `exclusive` there deadlocks; the queued optimize runs once the session releases. `CronOptimizeStrategy` keeps a\n`Map<string, OptimizeTask>` and awaits each task on its tick (never inside a held session).\n`ManualOptimizeStrategy.onFirstAccess` passes the task to `optimizeInBackground`. The first-access hook passes the\nsame kind of task.\n\n`LanceTableManager.exclusive(tableName, fn)` is a non-reentrant promise-chain mutex: awaiting it from inside a\nsection that already holds the same table deadlocks.\n\n**Scope** — In: OptimizeTask interface, counter/cron/manual signatures and call sites, optimizeInBackground task/error handling, VectorStore first-access and insertion closures, all existing strategy/vector-store expectations and held-session integration. Out: the other eleven stories; VectorStoreService.optimizeTable already runs under exclusive and is unchanged.\n\n**Interface** — `type OptimizeTask = () => Promise<void>` exported from fts-optimize-strategy.interface.ts. `onInsert(projectId: string, optimize: OptimizeTask): Promise<void>` and `onFirstAccess(projectId: string, optimize: OptimizeTask): void`; `optimizeInBackground(optimize, projectId, logger)` takes the task. Keep onDestroy/clearProject semantics. Background execution catches both synchronous throws and promise rejections and logs warn as today. Cron clears/executes dirty tasks once per tick unless new inserts occur.",
+      "acceptanceCriteria": [
+        "[unit] CounterOptimizeStrategy.onInsert('p1', optimize) below the threshold never calls optimize.",
+        "[unit] CounterOptimizeStrategy.onInsert at the threshold calls optimize once.",
+        "[unit] CounterOptimizeStrategy.onInsert at the threshold resolves before the promise optimize returned settles.",
+        "[unit] When the optimize started at the threshold rejects, the strategy logs a warning naming the project.",
+        "[unit] When the optimize started at the threshold rejects, no unhandled rejection occurs.",
+        "[unit] CronOptimizeStrategy.onInsert('p1', optimize) does not call optimize.",
+        "[unit] After CronOptimizeStrategy.onInsert('p1', optimize), the next optimizeDirtyTables() calls optimize once.",
+        "[unit] A second optimizeDirtyTables() with no insert in between does not call that task again.",
+        "[unit] ManualOptimizeStrategy.onFirstAccess('p1', optimize) calls optimize once without awaiting it.",
+        "[unit] VectorStoreService.indexDocument for project p1 calls onInsert with 'p1' and a task that, when run, calls LanceTableManager.exclusive with 'project_p1' and only inside it table.optimize.",
+        "[unit] The first-access hook built by VectorStoreService.getOrCreateTable('p1') passes onFirstAccess a task that runs table.optimize inside exclusive('project_p1', ...).",
+        "[integration] With a held KB write session on project p1's table, an indexDocument call inside it that reaches the counter threshold completes, and the optimize runs only after the session ends.",
+        "[integration] In that held-session threshold run, the optimize runs after the session ends."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "rag",
+        "fts",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Shared task abstraction changes three strategies and vector-store hooks, with non-reentrant locking/deadlock risks requiring deferred-promise and real held-session verification; existing system permission keys are unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/rag/strategies/fts-optimize-strategy.interface.ts",
+        "apps/api/src/rag/strategies/counter-optimize.strategy.ts",
+        "apps/api/src/rag/strategies/cron-optimize.strategy.ts",
+        "apps/api/src/rag/vector-store.service.ts",
+        "apps/api/src/rag/lance-table-manager.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/rag/fts-optimize-lock.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an optimize task throws synchronously, optimizeInBackground logs warn without throwing to its caller.",
+        "Optimizing project p1 does not wait for a held write session on project p2.",
+        "When a new insert occurs during a cron optimize, the next tick still runs the new dirty task."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/rag/strategies/counter-optimize.strategy.spec.ts",
+          "reason": "the tests pass a fake table and assert `table.optimize` was called; they pass an `OptimizeTask` mock and assert the task was called; the threshold test no longer expects `onInsert` to wait for the optimize."
+        },
+        {
+          "path": "apps/api/src/rag/strategies/cron-optimize.strategy.spec.ts",
+          "reason": "the tests pass fake tables to `onInsert`; they pass `OptimizeTask` mocks and assert each dirty task runs once per tick."
+        },
+        {
+          "path": "apps/api/src/rag/strategies/manual-optimize.strategy.spec.ts",
+          "reason": "`onFirstAccess` receives an `OptimizeTask` mock instead of a table; assertions keep their meaning."
+        },
+        {
+          "path": "apps/api/src/rag/strategies/optimize-strategies.spec.ts",
+          "reason": "strategies receive `OptimizeTask` mocks instead of tables; assertions keep their meaning."
+        },
+        {
+          "path": "apps/api/src/rag/vector-store.service.spec.ts",
+          "reason": "a test asserting `optimizeStrategy.onInsert` was called with the table now expects a function as the second argument."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0fd4d920ec4a843f02691b7996cd73d16110b6f0"
+    },
+    {
+      "id": "US-007",
+      "title": "Deleting an agent is a soft delete that frees its slug",
+      "description": "**Goal** — Tombstone deleted agents without severing historical foreign keys, while freeing their original slug and disabling their key.\n\n**Motivation** — The optional relations default to `SET NULL`, so the agent's comments become authorless and its tickets lose `createdByAgentId` and `assignedToAgentId`.\n\n**Approach** — **US-007.** `PrismaAgentRepository.softDeleteById(id): Promise<AgentWithCapabilities | null>` runs, inside the\ncaller's transaction, `updateMany({ where: { id, deletedAt: null }, data: { deletedAt: now, status: 'OFFLINE', slug: slug + '~deleted-' + id, apiKeyHash: 'deleted:' + randomBytes(32).toString('hex') } })`\n(the slug read first with `findFirst({ where: { id, deletedAt: null } })`), answers null when no row was found or\nupdated, and otherwise re-reads the row with `findUnique({ where: { id }, include: { capabilities: true } })`\n(`updateManyAndReturn` cannot `include`). Renaming the slug frees it, so a new agent may take the old slug.\n`AgentsService.remove(slug)` and `removeById(id)` call it instead of the hard deletes, throw\n`NotFoundAppException({}, 'agents')` on null, keep removing the bindings in the same transaction, keep the\n`agent.delete` audit entry, and answer the agent as it was before the delete: `softDeleteById` returns the re-read row\nwith `slug` replaced by the slug it pre-read, so the response DTO and the audit summary `deleted <slug>` carry the\noriginal slug. `deleteBySlug` and `deleteById` are removed.\n\n**Scope** — In: Agent.deletedAt DateTime? and @@index([deletedAt]), migration, conditional identity-based soft delete with capabilities/original-slug response, service deletion/bindings/audit/cache behavior and related regression expectations. Out: US-008's finder/auth/principalExists filters and rotation/capability guards; comments/project changes belong to other stories. Other modules that join Agent for display (audit, tickets, assignees, notifications, reviews, schedules) keep reading the row, so a deleted agent's name still shows on its past work. Do not edit the read-only .nax/rules/api-data.md.\n\n**Interface** — `PrismaAgentRepository.softDeleteById(id): Promise<AgentWithCapabilities | null>` replaces deleteBySlug/deleteById. `AgentsService.remove(slug): Promise<AgentResponseDto>` and `removeById(id): Promise<AgentResponseDto>` preserve their public response's original slug; a null write result becomes NotFoundAppException({}, 'agents') including concurrent deletes. Keep immutable id targeting for approval execution, removal of all bindings and the single agent.delete audit entry in the same transaction, and auth invalidation after commit. Tombstoned slug storage is exactly `${slug}~deleted-${id}`; dead-key storage is 'deleted:' plus 32 random bytes as hex. Update agents.service.spec.ts, prisma-agent.repository.spec.ts, agents-audit.spec.ts, gated-admin-delete-routes.integration.spec.ts and audit-core-agents.integration.spec.ts to assert retained tombstones, unchanged bindings/audit semantics and original-slug response. Tests exercise real HTTP repeated DELETE and slug reuse by POST, with Owner and no wait policy seeded.",
+      "acceptanceCriteria": [
+        "[integration] PrismaAgentRepository.softDeleteById(id) sets the row's deletedAt.",
+        "[integration] After softDeleteById(id) the row's status is OFFLINE.",
+        "[integration] After softDeleteById(id) the row's apiKeyHash starts with deleted:.",
+        "[integration] After softDeleteById(id) the row's slug is the old slug followed by ~deleted- and the agent id.",
+        "[integration] softDeleteById(id) answers the agent with its capabilities and its original slug.",
+        "[integration] softDeleteById on an already soft-deleted agent answers null.",
+        "[integration] After AgentsService.removeById(id), the agent's comment keeps authorAgentId.",
+        "[integration] After AgentsService.removeById(id), its created ticket keeps createdByAgentId.",
+        "[integration] After AgentsService.removeById(id), its assigned ticket keeps assignedToAgentId.",
+        "[integration] After AgentsService.remove(slug), the agent's role bindings are gone.",
+        "[integration] After AgentsService.remove(slug), one agent.delete audit entry names the agent's id.",
+        "[unit] AgentsService.removeById(id) whose softDeleteById answers null throws NotFoundAppException with prefix agents.",
+        "[unit] AgentsService.remove(slug) whose softDeleteById answers null on a concurrent delete throws NotFoundAppException with prefix agents.",
+        "[integration] DELETE /api/agents/:slug by the Owner with no wait policy seeded answers 200.",
+        "[integration] After DELETE /api/agents/:slug by the Owner with no wait policy seeded has answered 200, a second DELETE of the same original slug answers 404.",
+        "[integration] DELETE /api/agents/:slug by the Owner with no wait policy seeded returns the original slug in its successful response.",
+        "[integration] After a successful DELETE /api/agents/:slug, its agent.delete audit summary is deleted <original slug>.",
+        "[integration] After successful DELETE /api/agents/:slug by the Owner with no wait policy seeded, POST /api/agents with the old slug answers 201 with a new agent id."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "agents",
+        "soft-delete",
+        "security",
+        "database"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential revocation, binding removal, transactional audit and reusable identity handling are security-critical, with concurrency and migration risks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/agents/agents.controller.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261120100000_agent_soft_delete/migration.sql",
+        "apps/api/test/integration/agents/agent-soft-delete.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Two concurrent softDeleteById calls on one live agent return one agent and one null.",
+        "When removing bindings fails, the agent tombstone update rolls back.",
+        "Historical audit rows still reference the deleted agent's original id.",
+        "softDeleteById on an unknown id returns null."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`Agent` gains `deletedAt DateTime?` and `@@index([deletedAt])`."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "tests of `remove` and `removeById` expect `deleteBySlug` / `deleteById`; they expect `softDeleteById` with the agent id, and a missing agent still answers 404."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.spec.ts",
+          "reason": "tests of `deleteBySlug` and `deleteById` are replaced by tests of `softDeleteById`."
+        },
+        {
+          "path": "apps/api/src/agents/agents-audit.spec.ts",
+          "reason": "the repository double provides `deleteBySlug` and a delete test drives it; it provides `softDeleteById` instead; the expected `agent.delete` entry is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/gated-admin-delete-routes.integration.spec.ts",
+          "reason": "the agent delete tests (AC-3/AC-4 and AC-5) expect `db.agent.findUnique({ where: { id: target.id } })` to be null after the executed delete; they now expect the row with `deletedAt` set; the `slug: target.slug` result and response assertions are unchanged, because the delete answers the original slug."
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-core-agents.integration.spec.ts",
+          "reason": "\"AC-13/14: delete removes agent and bindings with one audit entry\" expects `db.agent.findUnique({ where: { id } })` to be null; it now expects the row with `deletedAt` set; the bindings and audit-entry assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ad32243c2a9a804a6520d14b0276fe4343b0f5d7"
+    },
+    {
+      "id": "US-008",
+      "title": "Agent lookups and agent authentication ignore soft-deleted agents",
+      "description": "**Goal** — Exclude tombstoned agents from live identity lookups, authentication and new binding/key/capability writes.\n\n**Motivation** — Before US-007, `DELETE /agents/:slug` is a hard delete; the new tombstone must keep history without leaving a usable principal.\n\n**Approach** — **US-008.** Every finder in `PrismaAgentRepository` (`findAll`, `findBySlug`, `findById`,\n`findBySlugWithCapabilities`, `findBySlugScalar`, `findByIdScalar`, `findByProjectSlug`) and\n`PrismaAuthRepository.findAgentByKeyHash` and `findAgentById` add `deletedAt: null` to `where` (keeping\n`findUnique` where it is used today; Prisma accepts a non-unique filter next to the unique key).\n`PrismaRoleBindingRepository.principalExists` counts an agent only with `deletedAt: null`, so a soft-deleted agent\ncannot be granted a new binding. `AgentsService.generateApiKey(agentId)` (key rotation) and\n`AgentsService.updateCapabilities` resolve the agent through `findByIdScalar` first and throw\n`NotFoundAppException({}, 'agents')` when it answers null, so an approval executed after the delete cannot revive the key\nor write capabilities.\n\n**Scope** — In: the seven enumerated agent finder filters, two agent auth lookups, principalExists agent counting and service guards; adjust repository/auth where-argument fixtures and rotation/capability mocks. Out: US-007's schema/tombstone write, and other stories. PrismaTicketsRepository's agent lookup for assignment, PrismaScheduleRepository.findOwnerAccess, PrismaAssistantToolCallRepository and PrismaFleetPrReviewRepository agent reads are not filtered by deletedAt; a deleted agent has no bindings (so every permission check refuses it) and is OFFLINE (so assignment refuses it). Historical display joins remain readable.\n\n**Interface** — Keep existing finder signatures and unique lookup methods, adding `deletedAt: null` alongside the unique selector. `PrismaAuthRepository.findAgentByKeyHash` and `findAgentById` return null for a tombstone; `PrismaRoleBindingRepository.principalExists({ type: 'AGENT', id })` returns false. The existing string-id overload of `AgentsService.generateApiKey(agentId)` and `AgentsService.updateCapabilities` must call findByIdScalar first, throw NotFoundAppException({}, 'agents') on null, and perform no key/capability write. The create-agent overload remains unchanged. Existing success tests must seed findByIdScalar with the agent (including agents-audit.spec.ts) rather than weakening the new guard. Verify former-key HTTP rejection after US-007's deletion/invalidation, including the stored dead-key lookup and direct id lookup.",
+      "acceptanceCriteria": [
+        "[integration] PrismaAgentRepository.findBySlug does not answer a soft-deleted agent.",
+        "[integration] PrismaAgentRepository.findById does not answer a soft-deleted agent.",
+        "[integration] PrismaAgentRepository.findAll does not list a soft-deleted agent.",
+        "[integration] PrismaAgentRepository.findByProjectSlug does not list a soft-deleted agent.",
+        "[integration] PrismaAuthRepository.findAgentByKeyHash with a soft-deleted agent's stored apiKeyHash answers null.",
+        "[integration] PrismaAuthRepository.findAgentById with a soft-deleted agent's id answers null.",
+        "[integration] An API request authenticated with a soft-deleted agent's former API key answers 401.",
+        "[integration] PrismaRoleBindingRepository.principalExists({ type: 'AGENT', id }) answers false for a soft-deleted agent.",
+        "[unit] AgentsService.generateApiKey(agentId) whose findByIdScalar answers null throws NotFoundAppException.",
+        "[unit] AgentsService.generateApiKey(agentId) whose findByIdScalar answers null never calls updateApiKeyHash.",
+        "[unit] AgentsService.updateCapabilities for an agent whose findByIdScalar answers null throws NotFoundAppException.",
+        "[unit] AgentsService.updateCapabilities for an agent whose findByIdScalar answers null writes no capability rows.",
+        "[integration] PrismaAgentRepository.findById for an agent with deletedAt null returns that agent with its existing capability rows, preserving capability inclusion as before."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "agents",
+        "authentication",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four existing repositories/services need standard deletion filters and pre-write existence checks, so implementation complexity is medium; authentication, binding eligibility and key rotation still require the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/auth/prisma-auth.repository.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/permissions/prisma-role-binding.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/agents/agent-soft-delete-reads.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "findBySlugWithCapabilities returns null for a tombstone's stored slug.",
+        "findBySlugScalar returns null for a tombstone's stored slug.",
+        "findByIdScalar returns null for a soft-deleted agent id.",
+        "An API request using a previously authenticated agent's old key returns 401 after deletion even when its principal was cached before deletion."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "the `generateApiKey('agent-123')` rotation tests (and any `updateCapabilities` test) use a repository double whose `findByIdScalar` is a bare `vi.fn()` answering undefined; those tests make `findByIdScalar` answer the agent so rotation and capability updates still succeed; their assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/agents/agents-audit.spec.ts",
+          "reason": "the repository double has no `findByIdScalar`; it gains one answering the test agent, so the `updateCapabilities` and key-rotation audit tests still record their entries."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.spec.ts",
+          "reason": "finder tests that pin a `where` argument with `toHaveBeenCalledWith` now expect `deletedAt: null` in it."
+        },
+        {
+          "path": "apps/api/src/auth/prisma-auth.repository.spec.ts",
+          "reason": "\"findAgentById selects the actor fields by id\" expects `findUnique` with `where: { id: 'a1' }`; it now expects `where: { id: 'a1', deletedAt: null }`; the `findAgentByKeyHash` test that pins its `where` expects `deletedAt: null` too."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dad6ef2decff43ff6446ae1ff77a6ae1fffb244d"
+    },
+    {
+      "id": "US-009",
+      "title": "Only GENERAL comments can be created through the comment route and workflow comments cannot be edited",
+      "description": "**Goal** — Restrict HTTP comment creation to GENERAL and reject edits to every workflow comment with a localized 409.\n\n**Motivation** — Any comment author can edit or hard-delete a `FIX_REPORT` or `REVIEW` after the transition that relied on it, and any Viewer can post a workflow-typed comment outside a transition; those comments are indexed into RAG as workflow records.\n\n**Approach** — **US-009.** `CommentsService.update` throws `new ConflictAppException({}, 'comments.workflowImmutable')` (409) when the\ncomment's `type` is not `GENERAL`, after the membership check and before the key check; so a project member without `comment.update` gets 409, not 403, for a workflow comment (accepted: the comment can be edited by nobody). The i18n entries are\n`\"workflowImmutable\": { \"409\": \"Workflow comments cannot be edited\" }` in `en` and\n`\"workflowImmutable\": { \"409\": \"工作流评论不可编辑\" }` in `zh`. `openapi.json` and `apps/cli/src/generated/` are\nregenerated with `bun run generate`.\n\n`CreateCommentDto.type`. Baseline: `@IsIn(['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'])` and\n`@ApiProperty({ enum: CommentType })`. Target: `@IsIn(['GENERAL'])` and `@ApiProperty({ enum: ['GENERAL'] })`, still\noptional, default `GENERAL`.\n\n**Scope** — In: create DTO validation/Swagger, service workflow-update conflict and exact en/zh comments.json strings, DTO/unit/HTTP tests and regenerated root OpenAPI/CLI client. Out: US-010 comment soft deletion, US-011 web form/edit gating and US-012 CLI option removal. Workflow comments written by ticket transitions (PrismaTicketsRepository, PrismaFleetTicketsRepository) and by PrismaVcsRepository are unchanged; CommentsService.create itself does not re-check the type, the DTO does. Deleting a workflow comment remains governed by the existing delete permissions.\n\n**Interface** — `new ConflictAppException({}, 'comments.workflowImmutable')` uses the local conflict exception resolving <prefix>.409. `CreateCommentDto.type` stays optional and GENERAL is the default; OpenAPI's comment-create enum and generated CLI create union become GENERAL only, while existing workflow comment response types remain supported. Regenerate with bun run generate at repository root; never hand-edit generated files. Membership must still conceal outsider access before the immutability check. Unit tests validate GENERAL/omission and rejected workflow values; HTTP tests use real request validation and served Swagger, not only static JSON inspection. This story owns generation even though its workdir is apps/api.",
+      "acceptanceCriteria": [
+        "[unit] Validating CreateCommentDto with type GENERAL passes.",
+        "[unit] Validating CreateCommentDto with no type passes.",
+        "[unit] Validating CreateCommentDto with type FIX_REPORT fails on type.",
+        "[unit] Validating CreateCommentDto with type STATUS_CHANGE fails on type.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/comments with type: 'REVIEW' answers 400.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/comments with type: 'REVIEW' by a caller allowed to create comments stores no comment.",
+        "[unit] When project membership succeeds, CommentsService.update on a comment of type FIX_REPORT throws ConflictAppException with key comments.workflowImmutable.",
+        "[unit] When project membership succeeds, CommentsService.update on a comment of type FIX_REPORT never calls commentRepo.update.",
+        "[unit] When project membership succeeds, CommentsService.update on a comment of type VERIFICATION throws ConflictAppException with key comments.workflowImmutable, matching the FIX_REPORT conflict.",
+        "[unit] CommentsService.update on a GENERAL comment its caller may edit calls commentRepo.update with the new body.",
+        "[integration] PATCH /api/comments/:id of a FIX_REPORT comment by a project member answers 409 with the message Workflow comments cannot be edited.",
+        "[integration] PATCH /api/comments/:id of a FIX_REPORT comment by a project member leaves its body unchanged after the 409 rejection.",
+        "[integration] The OpenAPI document served by the API lists only GENERAL in the comment-create type enum.",
+        "[unit] When project membership succeeds, CommentsService.update on a comment of type REVIEW throws ConflictAppException with key comments.workflowImmutable."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "comments",
+        "workflow",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing DTO decorators, one service guard, two locale entries and the established generation command make this a medium change; membership/key-check ordering requires the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/comments/dto/create-comment.dto.ts",
+        "apps/api/src/i18n/en/fleet.json",
+        "apps/api/src/i18n/en/comments.json",
+        "apps/api/src/common/exceptions/conflict-app.exception.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/comments/dto/create-comment.dto.spec.ts",
+        "apps/api/test/integration/comments/comment-workflow-immutable.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A project member without comment.update receives 409 comments.workflowImmutable when editing a workflow comment.",
+        "A non-member receives 404 when attempting to edit a workflow comment.",
+        "A GENERAL comment update without an allowed update key remains 403.",
+        "A Chinese-localized rejected workflow edit reports 工作流评论不可编辑."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with `bun run generate`: the comment-create `type` enum becomes `GENERAL` only."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated with `bun run generate`: the comment-create `type` union becomes `'GENERAL'`."
+        },
+        {
+          "path": "apps/api/src/i18n/en/comments.json",
+          "reason": "adds `\"workflowImmutable\": { \"409\": \"Workflow comments cannot be edited\" }`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/comments.json",
+          "reason": "adds `\"workflowImmutable\": { \"409\": \"工作流评论不可编辑\" }`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "378f40b63db9d6d000946d5dc0f6a9dc2b93cfd3"
+    },
+    {
+      "id": "US-010",
+      "title": "Deleting a comment is a soft delete",
+      "description": "**Goal** — Retain deleted comment rows while hiding them from ticket comment lists, totals, ticket-comment aggregation and mutation resolution.\n\n**Motivation** — Any comment author can edit or hard-delete a `FIX_REPORT` or `REVIEW` after the transition that relied on it.\n\n**Approach** — **US-010.** `CommentsService.delete` calls `PrismaCommentRepository.softDelete(id)` (sets `deletedAt`).\n`findByTicketId`, `findRecentByTicketId` and `countByTicketId` add `deletedAt: null`; `findOwningProjectAndTicket`\nanswers null for a soft-deleted comment; `PrismaTicketsRepository.findTicketWithComments` includes only\n`comments: { where: { deletedAt: null } }`. `toPersistenceCreate` in `PrismaCommentRepository` is typed over\n`Comment`, so it sets `deletedAt: null` on create; `CommentDomain` gains no field and `toPersistenceUpdate` is unchanged.\n\n**Scope** — In: Comment.deletedAt DateTime? and migration, repository softDelete, audited service delete, live list/recent/count/ownership/ticket-comment filters, regression fixture updates and 404 behavior. Keep @@index([ticketId]). Out: US-009 DTO/immutability/contract generation and US-011/012 client changes; no Agent changes. A soft-deleted comment's RAG document and notification rows are not removed; ticket-notification-reads.repository.ts keeps its lookup. Deleting a workflow comment stays allowed under comment.delete / comment.delete.own; it is now a soft delete. Do not edit .nax/rules/api-data.md.\n\n**Interface** — `PrismaCommentRepository.softDelete(id)` sets deletedAt instead of deleting the row. Preserve existing CommentsService.delete membership/key checks and the single comment.delete audit entry. `findOwningProjectAndTicket` returns null for a tombstone so existing update/delete service resolution produces NotFoundAppException({}, 'comments'). Keep CommentDomain and update persistence mapping unchanged; initialize the generated Comment persistence field on create. Update comments.service.spec.ts to expect softDelete, prisma-comment.repository.spec.ts where predicates to include deletedAt:null, and project-membership-gate.integration.spec.ts to assert the retained row with deletedAt set. Verify real DELETE -> list/count/PATCH/repeated DELETE behavior and filtered ticket-comment aggregation against PostgreSQL.",
+      "acceptanceCriteria": [
+        "[unit] CommentsService.delete calls commentRepo.softDelete with the comment id.",
+        "[unit] CommentsService.delete records the comment.delete audit entry.",
+        "[integration] After DELETE /api/comments/:id, the comment row still exists with deletedAt set.",
+        "[integration] After that delete, GET of the ticket's comments does not list the comment.",
+        "[integration] After that delete, countByTicketId for the ticket is one lower.",
+        "[integration] PATCH /api/comments/:id of a soft-deleted comment answers 404 comments.",
+        "[integration] DELETE /api/comments/:id of a soft-deleted comment answers 404 comments.",
+        "[integration] PrismaTicketsRepository.findTicketWithComments leaves out a soft-deleted comment."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "api",
+        "comments",
+        "soft-delete",
+        "database",
+        "security"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A nullable column, repository tombstone operation and filters in three existing production files follow established soft-delete patterns; ownership resolution and delete-own authorization retain the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/comments/prisma-comment.repository.ts",
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261120110000_comment_soft_delete/migration.sql",
+        "apps/api/test/integration/comments/comment-soft-delete.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "findRecentByTicketId returns no soft-deleted rows while preserving its newest-limit, oldest-first ordering.",
+        "findOwningProjectAndTicket returns null for a soft-deleted comment.",
+        "When an authorized caller deletes a workflow comment, its row is retained with deletedAt set.",
+        "When the delete audit transaction fails, the comment remains live."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`Comment` gains `deletedAt DateTime?`; `@@index([ticketId])` stays."
+        },
+        {
+          "path": "apps/api/src/comments/comments.service.spec.ts",
+          "reason": "tests of `delete` expect `commentRepo.delete`; they expect `commentRepo.softDelete` with the comment id; the audit expectation is unchanged."
+        },
+        {
+          "path": "apps/api/src/comments/prisma-comment.repository.spec.ts",
+          "reason": "the `findByTicketId` and `findRecentByTicketId` tests expect `findMany` with `where: { ticketId: 't1' }`, and the `countByTicketId` test expects `count` with `{ where: { ticketId: 't1' } }`; all three now expect `deletedAt: null` next to `ticketId`."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "after the root comment delete request it expects `prisma.comment.findUnique` to resolve to null; it now expects the row with `deletedAt` set."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "553776ce33ab237b95661559c8807a75a2301e48"
+    },
+    {
+      "id": "US-011",
+      "title": "The web comment form posts only GENERAL and edits only GENERAL comments",
+      "description": "**Goal** — Align CommentThread's add form and edit affordances with the GENERAL-only API contract.\n\n**Motivation** — Any Viewer can post a workflow-typed comment outside a transition; those comments are indexed into RAG as workflow records.\n\n**Approach** — `CommentThread.vue` drops the type field and gates the edit button. The comment form drops its type selector and the edit button shows only on `GENERAL` comments. Existing workflow comments keep their type pill; only the form and the edit button change. Remove the add-form type control and type validation/default state, then post the literal { body, type: 'GENERAL' }. Preserve existing comment rendering, localized pills/toasts, MarkdownEditor/mention support, successful refresh/emission, and edit draft preservation on failure.\n\n**Scope** — In: CommentThread.vue and its existing CommentThread.spec.ts/CommentThread-edit.spec.ts suites. Out: US-009 backend validation/409/generation, US-010 deletion persistence and US-012 CLI changes; no layout/navigation/token redesign, no new client-side permission rules, and no removal of historical type pills.\n\n**Interface** — Keep the component's projectSlug/ticketRef props, comment-added emission and Nuxt useApi/useAsyncData integration. Submission posts `{ body, type: 'GENERAL' }` to the existing comments endpoint; a listed GENERAL comment shows edit while a FIX_REPORT comment does not. This is a UI affordance over US-009's API-owned invariant, not a duplicate authorization engine. Current named tests inspect source rather than mount a component: add mounted behavioral assertions within the existing suites using appropriate Nuxt/composable/UI stubs so DOM absence, request payload and edit gating are actually observed; update any obsolete type-select expectations without degrading unrelated edit behavior.",
+      "acceptanceCriteria": [
+        "[unit] CommentThread mounted for a ticket renders no comment-type select in the add-comment form.",
+        "[unit] Submitting the add-comment form posts { body, type: 'GENERAL' } to the comments endpoint.",
+        "[unit] A listed comment of type GENERAL shows the edit button.",
+        "[unit] A listed comment of type FIX_REPORT shows no edit button and still shows its type pill."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "web",
+        "comments",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A localized Vue form/payload/visibility change uses existing client patterns and tests; backend authorization remains API-owned and no auth logic changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/CommentThread.vue",
+        "apps/web/tests/components/CommentThread.spec.ts",
+        "apps/web/tests/components/CommentThread-edit.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Listed VERIFICATION and REVIEW comments show their existing type pills but no edit buttons.",
+        "After a failed GENERAL comment edit, the draft and editing state remain available to retry."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/CommentThread.spec.ts",
+          "reason": "tests that select a comment type or expect the type field in the form now expect no type field and a `GENERAL` post."
+        },
+        {
+          "path": "apps/web/tests/components/CommentThread-edit.spec.ts",
+          "reason": "fixtures that edit a workflow-typed comment now use a `GENERAL` comment; a workflow-typed comment shows no edit button."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7e6245d52bd73852af7b431f21c24fe61fb9aea9"
+    },
+    {
+      "id": "US-012",
+      "title": "The CLI comment command posts only GENERAL comments",
+      "description": "**Goal** — Remove comment add's --type option and always send GENERAL through the generated API client.\n\n**Motivation** — Any Viewer can post a workflow-typed comment outside a transition; those comments are indexed into RAG as workflow records.\n\n**Approach** — `koda comment add` drops `--type` and always posts `GENERAL`. Remove the Commander --type declaration, local validTypes validation and options.type plumbing; send literal type:'GENERAL' to commentsControllerCreateFromHttp. The `--type` tests (\"posts comment with explicit uppercase type FIX_REPORT\", \"exits with code 3 when --type is lowercase general\", the valid-types loop) are removed; the add command posts `type: 'GENERAL'`. Replace those obsolete expectations with the mandated unknown-option and help outcomes.\n\n**Scope** — In: apps/cli/src/commands/comment.ts and comment.spec.ts. Out: US-009 API/OpenAPI/client generation, US-010 deletion behavior, and US-011 web changes. Keep the CLI thin: no workflow policy reimplementation, handwritten HTTP, or manual generated-file edits. Preserve context resolution, API envelope unwrapping, output/--json and unrelated list/update/delete commands.\n\n**Interface** — `commentsControllerCreateFromHttp` receives body `{ body: 'text', type: 'GENERAL' }` for `koda comment add KODA-42 --body \"text\"`. Commander rejects `--type FIX_REPORT` as an unknown option with exit code 1 before the action can call the API; the prior custom invalid-type exit code 3 is removed with its validation. `koda comment add --help` contains no --type option. Use the regenerated create DTO from US-009 and mock only the generated client boundary in Jest.",
+      "acceptanceCriteria": [
+        "[cli] koda comment add KODA-42 --body \"text\" calls commentsControllerCreateFromHttp with body { body: 'text', type: 'GENERAL' }.",
+        "[cli] koda comment add KODA-42 --body \"text\" --type FIX_REPORT exits with code 1, commander's unknown-option error.",
+        "[cli] koda comment add KODA-42 --body \"text\" --type FIX_REPORT makes no API call because Commander rejects the unknown --type option.",
+        "[cli] koda comment add --help does not list a --type option."
+      ],
+      "tags": [
+        "review-p2-rest",
+        "cli",
+        "comments",
+        "workflow"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A two-file Commander surface/payload change follows existing patterns; behavior is observable via generated-client mocks, parser errors and help output without security policy changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/comment.ts",
+        "apps/cli/src/commands/comment.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/comment.spec.ts",
+          "reason": "the `--type` tests (\"posts comment with explicit uppercase type FIX_REPORT\", \"exits with code 3 when --type is lowercase general\", the valid-types loop) are removed; the add command posts `type: 'GENERAL'`."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f049b2f884dc7a4412a48bd96ec7ca259426f298"
+    }
+  ],
+  "analysis": "Repository discovery and architecture: codebase-memory MCP is unavailable in this session; findings below come from direct reads and targeted searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. This is an enhancement of an existing Bun/Turborepo monorepo, not greenfield work. The supplied automatic framework labels are inaccurate: the API is NestJS 12 with Fastify and Nathapp platform modules, Prisma 7/PostgreSQL, and Vitest; the web app is Nuxt 4/Vue SSR, not Next.js (.nax/mono/apps/api/context.md:25; .nax/mono/apps/web/context.md:22). CLI commands use Commander and a generated OpenAPI client with Jest (.nax/mono/apps/cli/context.md:20). Business rules remain API-owned. No runner changes are needed. Follow the nathapp-nestjs-patterns skill before API implementation. This PRD preserves exactly the twelve binding stories, their workdirs, and their dependencies, including US-001's permission inventory at repository root and US-009's required root spec/downstream CLI generation despite their binding apps/api workdir. These explicitly named cross-root outputs must be allowed by the implementation pipeline rather than changing the binding workdir.\n\nUS-001, project/fleet seam: ProjectsService currently has five constructor collaborators (apps/api/src/projects/projects.service.ts:20), and softDeleteById and softDelete only audit the persistence operation and clear caches (apps/api/src/projects/projects.service.ts:207,225). Add AfterCommitService and EventEmitter2; keep cache invalidation and return DTO semantics. AfterCommitService.scope flushes tasks only after its callback resolves and drops them on rejection, while defer returns false outside a scope (apps/api/src/permissions/after-commit.service.ts:31,44). PermissionsModule is global and exports it (apps/api/src/permissions/permissions.module.ts:41,61). Approval execution already wraps txManager.run in afterCommit.scope (apps/api/src/approvals/approval-execution.service.ts:281); emitting from inside the delete transaction would join it and violate the design. EventEmitterModule.forRoot is registered globally (apps/api/src/app.module.ts:81); KnowledgeIndexQueue demonstrates @OnEvent without introducing module-import cycles (apps/api/src/fleet/knowledge/knowledge-index.queue.ts:59). Publish a projects-owned event constant/type, await emitAsync after commit, and register ProjectDeletionJobsListener in FleetJobsModule (apps/api/src/fleet/jobs/fleet-jobs.module.ts:30). FleetJobsService.cancelForBudget already implements waiting row locks, pending ASSIGN checks fenced by leaseEpoch, transitions, and returned live events (apps/api/src/fleet/jobs/fleet-jobs.service.ts:240); reuse that cancellation pattern but never its running-job CANCEL-command branch. PrismaFleetJobRepository.lockById waits and then re-reads, unless skipLocked is explicitly requested (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:114). Project quiesce uses waiting locks, not placement's SKIP LOCKED. Add findProjectUnstartedIds to the repository contract (apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:251) and implementation. Limit to 500, warn at the limit, preserve running/uploading/acked-assigned jobs, and publish only after the listener transaction commits. Listener failures must be logged and swallowed. Add system.project.quiesce to permissions/catalog.ts, one writer row in docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv, writer-map registration (apps/api/src/permissions/system-writer.decorator.spec.ts:42), and the 224-to-225 role cell expectation (apps/api/src/permissions/role-matrix.spec.ts:224); regenerate only the new non-role-key snapshot cells in permissions/__snapshots__/role-matrix.json with bunx vitest run -u. System actor ids are derived, so action-context.spec.ts needs no edit. Existing manual ProjectsService constructions require two extra doubles in src/projects/projects.service.spec.ts:69 and test/unit/projects/projects-find-all-for-principal.spec.ts; DI fixtures in src/projects/projects-brief.routes.spec.ts and test/unit/projects/projects-conflict-responses.spec.ts need AfterCommitService/EventEmitter2 providers. Keep every existing assertion meaningful. Include unit DI registration checks without a DB and a genuine ProjectsService -> EventEmitter2 -> listener -> persisted transition integration seam.\n\nUS-002, VCS/budget: findVcsConnectionById currently uses findUnique without a project deletion predicate, whereas findVcsConnectionByProjectSlug already filters deleted projects (apps/api/src/vcs/prisma-vcs.repository.ts:107,115). findPollingConnections currently filters only polling mode and active status (same file:123). Change the id lookup to findFirst with project.deletedAt null and filter the startup polling list too. Add deactivateConnectionsForProject to IVcsRepository and PrismaVcsRepository, preserving unaffected projects. Register VcsProjectDeletionListener in apps/api/src/vcs/vcs.module.ts:25, reuse US-001's event and system.project.quiesce key, add its own inventory row and writer-map entry rather than a second catalog key. Unschedule only after deactivation/audit commit. VcsPollingService.unschedulePolling removes both scheduler interval and scheduled id (apps/api/src/vcs/vcs-polling.service.ts:89), and pollConnection already unschedules a missing/inactive connection (same file:119); deletion-filtered reads provide fallback after listener failure. PrismaBudgetRepository.scopeExists currently counts projects with deletedAt null (apps/api/src/fleet/budgets/prisma-budget.repository.ts:92,97), causing BudgetSweeper to delete their policies as orphans (apps/api/src/fleet/budgets/budget-sweeper.ts:62,81). Count project identity only. Preserve normal monthly-window reset/evaluation rules; test pause retention with a non-stale policy, not by disabling the evaluator. Update the existing D166 soft-deleted-project expectation in test/integration/fleet/fleet-budget-repository.integration.spec.ts from false to true. Real-event integration must invoke ProjectsService.softDeleteById rather than directly invoking only the listener.\n\nUS-003, import uniqueness and poll serialization: Ticket has unique(projectId,number) and only a nonunique externalVcsId index (apps/api/prisma/schema.prisma:193,228,232). Add unique(projectId,externalVcsId), keep the existing index, and ship the specified duplicate cleanup before index creation. Dedup includes soft-deleted tickets already (apps/api/src/vcs/prisma-vcs.repository.ts:189); do not exclude them from the uniqueness contract or reuse numbers. createTicketFromIssue wraps ticket creation and the audit callback in runWithTicketNumberRetry (same file:210). That helper retries only isUniqueViolation(error,'number') and refuses retries in an ambient transaction (apps/api/src/common/utils/ticket-number-retry.ts:28,32,40). Capture isInTransaction before starting the call, catch externalVcsId P2002 only outside the completed retry transaction, and return null only then; otherwise rethrow the original error. Update IVcsRepository's currently non-null result (apps/api/src/vcs/domain/vcs.repository.ts:109) and VcsSyncService's dereference (apps/api/src/vcs/vcs-sync.service.ts:59) together. The existing pre-check at vcs-sync.service.ts:47 stays. VcsManualSync.prepareSyncAll uses isolate:false inside approval execution (apps/api/src/vcs/vcs-manual-sync.service.ts:89), so a P2002 must propagate and roll back the whole request, not be swallowed. Polling has a scheduled-id set but no in-flight set (apps/api/src/vcs/vcs-polling.service.ts:29); add per-connection protection around the entire pollConnection lifecycle, including connection lookup, released in finally. Unit mocks and coverage already exist in vcs-sync.service.spec.ts, prisma-vcs.repository.spec.ts, and vcs-polling.service.spec.ts; repository tests must retain transaction/audit callback behavior. DB tests must force concurrent pre-check success before insert to exercise the unique-key losing path, not merely sequential dedup. The migration clears only duplicate externalVcsId values, retaining ticket rows and the smallest ticket number; PostgreSQL nullable unique semantics permit multiple null ids and separate projects.\n\nUS-004, placement pagination: fillRunner and fillRunnerThreads both ask findQueuedIds(50) inside one runner-locked transaction (apps/api/src/fleet/jobs/placement.service.ts:108,122,150,162). Each currently discards wrong-kind/wrong-pin jobs after selection, so an ineligible oldest window starves later work. findQueuedIds returns only ids ordered queuedAt,id and has no project predicate (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:170); IFleetJobRepository declares it at domain/fleet-job.domain.ts:257. Replace it with typed filtered cursor pages selecting id and queuedAt. Both OR predicates must be nested in AND; keep lexical id tiebreaking on equal queuedAt. Existing QUEUED_SCAN_LIMIT is 50 (apps/api/src/fleet/jobs/placement-rules.ts:177); export MAX_QUEUED_SCAN_PAGES=10. Preserve row locking order, SKIP LOCKED, budget cancellation and audit path, kind/state rechecks, CAS assignment, notifier/live publication after commit, and per-pass addJobToLoad accounting (placement.service.ts:124-143,164-187,212). Label/profile/trust-domain checks remain per-job. Replace findQueuedIds doubles in placement.service.trust-domain.spec.ts:59, placement.service.project-code.spec.ts:53, placement.service.project-thread.spec.ts:44,102 and placement.service.koda-tools.spec.ts:50 with cursor rows; stop short mock pages or supply a subsequent empty page to prevent accidental infinite paging. Dashboard uses a different findQueuedWindow contract (apps/api/src/fleet/dashboard/domain/dashboard.domain.ts:20; dashboard.service.ts:26), which is deliberately not changed. Add service page-loop tests and DB query tests. No new FleetJob index.\n\nUS-005, entity graph producer/consumer contract: TicketsService.assign emits assignedTo and assigneeType (apps/api/src/tickets/tickets.service.ts:530,532), but EntityGraphService's assigned branch reads assignedToUserId/assignedToAgentId (apps/api/src/entity-graph/entity-graph.service.ts:225,242). It already creates a missing ticket node; preserve that even for unassignment or missing assigneeType. Interpret only user/agent discriminants and generate the matching owner metadata/link. EntityGraphOutboxSubscriber registers the real ticket_event handler on FanOutPublisher and forwards data unchanged (apps/api/src/entity-graph/entity-graph-outbox.subscriber.ts:16,21). Existing tests feed invented old keys (apps/api/src/entity-graph/entity-graph.service.spec.ts:59,68,86), so correcting only a consumer unit fixture is insufficient: drive real TicketsService.assign, obtain its stored outbox payload, and invoke the handler actually registered by the subscriber using InMemoryEntityStore.findLinksBySource. Mirror test/integration/entity-graph/outbox-fanout-entity-graph.integration.spec.ts. Null assignments create no new owner link and do not remove existing links. No backfill is specified.\n\nUS-006, optimize locking and checkout drift: the strategy interface currently accepts a raw table (apps/api/src/rag/strategies/fts-optimize-strategy.interface.ts:6); CounterOptimizeStrategy awaits table.optimize at threshold (counter-optimize.strategy.ts:21,28), CronOptimizeStrategy stores raw tables and optimizes them on tick (cron-optimize.strategy.ts:20,36,47), and optimizeInBackground calls raw table.optimize while catching both synchronous throws and async rejections (optimize-in-background.ts:7). Replace these parameters with OptimizeTask, including ManualOptimizeStrategy and all first-access paths. The table mutex is a non-reentrant promise chain (apps/api/src/rag/lance-table-manager.ts:509). VectorStoreService installs a first-access hook (apps/api/src/rag/vector-store.service.ts:178,187) and invokes onInsert after writes, including writes inside its AsyncLocalStorage KB session (same file:258-268); the session itself holds exclusive (same file:516). The counter must schedule without awaiting optimize to avoid waiting on its own lock. Cron can await tasks outside sessions; errors retain warn behavior. Important verified baseline discrepancy: this checkout has VectorStoreService.indexDocument at vector-store.service.ts:215, not VectorStoreService.addDocument; a text search finds addDocument only on RagController. Existing indexDocument callers and tests must not be broken by mechanically renaming the method. The spec's addDocument seam ACs are preserved: provide the AC-required addDocument compatibility entry delegating to the same lock-aware indexDocument implementation, and prove the real write path; do not satisfy them with an unrelated stub. Existing vector-store.service.spec.ts:840,850,870 pins onInsert(projectId,table) and must now expect a task. The named web/graph tests also illustrate why source-only checks cannot prove runtime synchronization. Update all four strategy suites and vector-store.service.spec.ts; add test/integration/rag/fts-optimize-lock.integration.spec.ts for a held-session insertion reaching threshold and post-release optimize. Existing explicit optimizeTable already locks (vector-store.service.ts:660) and is unchanged.\n\nUS-007/008, agent soft delete and security: Agent has unique slug and apiKeyHash, no deletedAt, and relations to created/assigned tickets/comments (apps/api/prisma/schema.prisma:44-58); optional ticket/comment agent FKs are visible at schema.prisma:218-220,247-248. PrismaAgentRepository currently hard-deletes by slug/id (apps/api/src/agents/prisma-agent.repository.ts:81,86), while finders do not filter deletion (same file:20-51,154). Add nullable deletedAt plus its index and a schema migration. Atomic updateMany guarded by deletedAt null prevents two successful deletes; pre-read the original slug and return it over the re-read capabilities-inclusive row. Tombstone the stored slug and randomize apiKeyHash with a deleted: prefix while setting OFFLINE, without deleting capabilities/history. AgentsService.remove and removeById already remove bindings and audit in an after-commit-aware transaction (apps/api/src/agents/agents.service.ts:309,328), and auth invalidation helpers already exist (same file:342). Preserve immutable id targeting, original-slug response/audit summary, cache invalidation after commit, and concurrent-null 404. Existing hard-delete tests in agents.service.spec.ts:96,97,794,798, prisma-agent.repository.spec.ts, agents-audit.spec.ts, test/integration/permissions/gated-admin-delete-routes.integration.spec.ts and test/integration/audit/audit-core-agents.integration.spec.ts must assert a retained tombstone rather than a missing row. In US-008 filter all seven enumerated repository finders, plus auth lookups (apps/api/src/auth/prisma-auth.repository.ts:90,110) and principalExists (apps/api/src/permissions/prisma-role-binding.repository.ts:351,355). Keep unique lookups where currently used. Guard rotation and capability replacement with findByIdScalar before writes (apps/api/src/agents/agents.service.ts:87,293), including delayed approval execution after deletion. Fix previously undefined finder mocks in rotation/capability tests and agents-audit.spec.ts. AgentAuthProvider caches principals with AGENT:<id> tags (apps/api/src/auth/agent-auth.provider.ts:14,36,46), so retain delete invalidation and test former-key rejection, not merely tombstone-key lookup. Other display joins stay unfiltered to preserve names on historical work; do not expand US-008 into unrelated permission or assignment redesign. These stories are security-critical and require three-session-tdd.\n\nUS-009/010, comments and API contract: CreateCommentDto accepts five types and exposes the full enum today (apps/api/src/comments/dto/create-comment.dto.ts:19,25). Narrow HTTP validation and Swagger to GENERAL only while preserving optional/default GENERAL and any compatibility re-export. CommentsService.create defaults GENERAL but directly creates workflow types too (apps/api/src/comments/comments.service.ts:133,145); the spec deliberately changes the DTO, not this internal service guard or transition/VCS writers. Existing direct-service type tests at comments.service.spec.ts:395 need not be deleted as though internal creation were forbidden. CommentsService.update resolves membership before checking edit keys (comments.service.ts:201,210); insert non-GENERAL 409 between those steps. Outsiders remain concealed by membership 404; members without edit keys get 409 for workflow comments by explicit ruling. ConflictAppException follows prefix.409 i18n (apps/api/src/common/exceptions/conflict-app.exception.ts:8), so add the exact English/Chinese comments.workflowImmutable entries. Root package.json:22-25 defines the export/generation chain; run bun run generate from root and never manually edit apps/cli/src/generated. This intentionally narrows the create DTO only, not existing comment response types. Comment currently has no deletedAt (apps/api/prisma/schema.prisma:236); US-010 adds it with a migration, leaves ticketId index, and switches CommentsService.delete's audited hard-delete call (comments.service.ts:238) to repository.softDelete. PrismaCommentRepository extends AbstractPrismaRepository, maps generated Comment to CommentDomain, and its create mapper must initialize the new persistence field without expanding the domain (apps/api/src/comments/prisma-comment.repository.ts:9,21,34). Filter list/recent/count reads (same file:54,69,80), owning lookup (same file:121,129), and PrismaTicketsRepository.findTicketWithComments (apps/api/src/tickets/prisma-tickets.repository.ts:341), which feeds ticket close indexing (apps/api/src/tickets/state-machine/ticket-transitions.service.ts:246). Keep body/type update mapping, audit, membership and delete-own permissions unchanged. Soft-deleted comments become 404 for edit/delete via owning lookup. Update repository/service expectations and test/integration/projects/project-membership-gate.integration.spec.ts's retained-row assertion. Do not purge RAG documents or notification records. Mutation authorization/order is security-sensitive, so both comment API stories use three-session-tdd.\n\nUS-011/012, thin clients: CommentThread currently includes type in its Zod schema/defaults, posts values.type, renders an unconditional edit button, and contains an add-form Select (apps/web/components/CommentThread.vue:50,69,152,176). Remove the form type control/state, post GENERAL explicitly, and show edit only for GENERAL; retain existing pills, MarkdownEditor/mentions, localized toasts, refresh, draft-preservation and delete behavior. Both named tests currently read source rather than mount Vue (apps/web/tests/components/CommentThread.spec.ts:1-6; CommentThread-edit.spec.ts:1-9); the spec's description of edit fixtures is not the current checkout. Add genuine mounted behavioral assertions in these existing files with normal Nuxt/composable/UI stubs rather than pretending source checks prove the four ACs. No page layout/navigation/token changes are required, so the redesign architecture is not touched. CLI add has --type/default plus a local validTypes guard (apps/cli/src/commands/comment.ts:21,27), and sends options.type (same file:36); remove all three and send literal GENERAL through commentsControllerCreateFromHttp. Existing tests explicitly bless FIX_REPORT and all uppercase values (apps/cli/src/commands/comment.spec.ts:123,155,164); replace those obsolete cases with unknown-option/help behavior while preserving context resolution, envelope unwrapping and output/exit handling. Commander must reject --type before any API call, with exit 1 rather than the old custom validation exit 3. API regeneration belongs to US-009, not either client story.\n\nMigration and rollout: ship three independent SQL migrations at the exact specified paths: 20261120090000_ticket_external_vcs_unique (clear all but lowest-number duplicate ids then create unique index), 20261120100000_agent_soft_delete (nullable Agent.deletedAt and index), and 20261120110000_comment_soft_delete (nullable Comment.deletedAt). Regenerate the gitignored Prisma client after schema changes. Existing rows remain live with null deletedAt; historical hard-deleted identities cannot be recovered. The external-id cleanup is intentionally destructive only to duplicate externalVcsId fields, not their tickets. Schema-push integration setup does not exercise cleanup migration SQL, so add migration-focused hardening for a pre-index duplicate fixture if feasible. Narrowing HTTP comment creation and removing CLI --type are intentional backward-incompatible contract changes; coordinate regenerated types and client updates after US-009. US-001/004 can land independently but full quiesce needs both listener cancellation and placement filtering; failures/500-row cap are logged best-effort, not a durable replay guarantee. The event/optimizer are process-local mechanisms; no distributed queue/lock is added. Parallel stories share schema.prisma, VCS repository/poller, fleet domain contracts, permission writer map and comment/agent services; coordinate merges and Prisma generation without inventing extra dependency edges.\n\nSecond-pass adversarial audit: enumerated all 112 acceptance bullets from spec.md's Acceptance Criteria section and compared each assertion and qualifying clause with the story arrays. The following ledger uses spec-local ordinal -> PRD-local ordinal(s), so compound original bullets remain traceable after splitting; no original assertion was removed or reassigned. US-001: 1->1, 2->2, 3->3, 4->4/5, 5->6, 6->7, 7->8, 8->9, 9->10, 10->11, 11->12, 12->13, 13->14/15/16, 14->17/18, 15->19. US-002: 1->1, 2->2, 3->3, 4->4/5/6, 5->7/8, 6->9, 7->10, 8->11, 9->12, 10->13, 11->14. US-003: 1->1, 2->2, 3->3, 4->4/5, 5->6, 6->7, 7->8/9, 8->10, 9->11, 10->12. US-004: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11/12/13, 12->14/15, 13->16. US-005: 1->1/2, 2->3/4, 3->5/6, 4->7, 5->8, 6->9. US-006: 1->1, 2->2/3, 3->4/5, 4->6/7, 5->8, 6->9, 7->10, 8->11, 9->12/13. US-007: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7/8, 8->9, 9->10/11, 10->12, 11->13, 12->14/15, 13->16/17, 14->18. US-008: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9/10, 10->11/12. US-009: 1->1, 2->2, 3->3, 4->4, 5->5/6, 6->7/8, 7->9, 8->10, 9->11/12, 10->13. US-010: 1->1/2, 2->3, 3->4, 4->5, 5->6, 6->7, 7->8. US-011: 1->1, 2->2, 3->3, 4->4. US-012: 1->1, 2->2/3, 3->4. Failure-table requirements remain additional ACs at US-001:20/21, US-002:15, US-003:13, US-006:14 and US-009:14, with the other failure rows covered by the original assertions. The refinement's regression requirement adds US-008:13, preserving live-agent capabilities/response shape; it is not represented as an original spec AC. All other optional hardening remains in suggestedCriteria. Regression qualifiers retained include the lock-time re-read, no-pending-ASSIGN exception, real-emitter/real-listener completion seam, other-project isolation, outside-versus-inside transaction distinction, equal-queuedAt id tiebreak, per-page cursor, budget cancellation 'still' with its existing reason, unchanged FIX_REPORT body, original agent slug/audit summary, once-per-dirty-tick optimization and existing workflow pill.\n\nEach story already has a negative-path AC: US-001 listener rejection; US-002 listener rejection; US-003 duplicate/P2002 and poll failure; US-004 excluded candidates/misfit cap; US-005 missing-assigneeType no-link; US-006 optimize rejection; US-007 repeated/concurrent deletion; US-008 401/missing-agent no-write; US-009 invalid type/conflict; US-010 tombstone 404; US-011 workflow edit suppression; US-012 unknown-option/no-call. AC observations are return values, thrown exceptions, database state, collaborator calls, logger calls, rendered DOM or CLI output/exit. Clarified array-valued VCS deactivation results, membership prerequisites for workflow conflicts, and producer-to-consumer data flow without replacing mandated spec semantics. The absent VectorStoreService.addDocument remains a required capability, not grounds to drop its AC: add the compatibility entry to the existing service and keep indexDocument's single write path.\n\nAll spec-recommended context files remain included, including the US-002 listener created by its upstream dependency; no story's own output is a context file. All twelve binding ids/workdirs and dependency edges remain unchanged and resolve to existing story ids. US-008, US-009 and US-010 complexity is reduced to medium because they use standard filters/guards/persistence and existing generation machinery, but their security-sensitive test strategy stays three-session-tdd. All 22 pre-Stories Out of Scope bullets are preserved verbatim at top level, with nearby story boundaries echoed in descriptions; there are no post-AC story-local deferral blocks to hoist. No exclusions were turned into new mandatory behavior. Counts above the advisory 15-AC size limit come from retaining and atomizing the binding spec, not from splitting or adding stories.\n\nVerification and done: every explicit spec criterion is retained under its original story; failure-table cases are enumerated as acceptance criteria too. Additional hardening ideas are separated into suggestedCriteria, never promoted to mandatory spec ACs. Use Vitest unit specs beside API source, with DI tests DB-free; true persistence, transactions, races and producer-to-consumer seams belong in test/integration. Use vi, not jest, in API tests; use generated Prisma imports/createTestPrismaClient and the shared isUniqueViolation helper, not error.meta.target. API DB-mode tests must use canRunDbTests, KODA_DB_TESTS=1 and the shared database provisioning; NAX_SANDBOXED=1 skips are not verification. Run test:scoped outside the sandbox for all new integration specs and do not concurrently force-reset the same test database; a second checkout uses a private test container. CLI/web use Jest for package tests; generated acceptance files remain in each app's .nax/features/review-p2-rest and must not be copied or edited. Run API acceptance via vitest.nax.config.ts, web/CLI acceptance via bun test, filtering AC ids with trailing colons. Quality gates are pipeline validation, not acceptance criteria. No runtime tests or generation commands were executed during this PRD-only session. Done means the twelve runtime fixes, schema migrations, generated contract, required permission metadata, updated regression assertions and real seam tests are implemented while all feature exclusions remain intact.",
+  "outOfScope": [
+    "The deploy and release items of the review (E SEC-3..SEC-8, BUG-4: `change-me` secrets, a non-root API image, unpublished API and Ollama ports, token TTLs, `release.yml` permissions, pins and tag checkout) are done by hand in a separate PR; no story touches `docker-compose*.yml`, `deployments/`, `apps/api/Dockerfile` or `.github/workflows/`.",
+    "There is no project restore path; restoring a soft-deleted project and re-queuing the jobs cancelled by US-001 are not added.",
+    "`.nax/rules/api-data.md` says \"Soft-delete Projects/Tickets only\"; after US-007 and US-010 agents and comments are soft-deleted too. The rule file is read-only to the run; the user updates it after merge.",
+    "US-001 only: RUNNING, UPLOADING and acked ASSIGNED jobs of a deleted project are not cancelled; they finish and report as usual (ruling 15).",
+    "US-001 only: schedules and auto-review need no change: `findDue` and the auto-review query already filter `project: { deletedAt: null }`; schedules are not disabled in the database.",
+    "US-001 only: no hard-delete of a project is added, so budget policies of a soft-deleted project are kept indefinitely.",
+    "US-002 only: the VCS webhook intake of a deleted project is not changed; `findVcsConnectionByProjectSlug` already filters `deletedAt`.",
+    "US-003 only: the approval-executed manual sync (`prepareSyncAll`, `isolate: false`) fails as a whole when it loses the import race; it is not made to skip, because its transaction is already aborted.",
+    "US-003 only: the webhook `issues.opened` path and the manual sync routes get no in-flight guard of their own; the unique index makes their race either `skipped` (no enclosing transaction) or a failed request.",
+    "US-004 only: a QUEUED job whose misfit is permanent is not expired or cancelled; it stays QUEUED and is shown by the dashboard.",
+    "US-004 only: label and profile matching stay in the per-job check; only kind, pin and project deletion move into SQL.",
+    "US-004 only: the dashboard dry-run keeps reading `findQueuedWindow(QUEUED_SCAN_LIMIT)`; its window is not paged.",
+    "US-004 only: no new `FleetJob` index is added; `findQueuedPage` uses the existing `@@index([state])` (QUEUED rows are few), and a `(state, queuedAt)` index is a follow-up if that changes.",
+    "US-004 only: `placeJob` (dispatch and requeue) is unchanged; a deleted project's routes already 404 before dispatch.",
+    "US-005 only: assignment removal (`assignedTo: null`) does not delete an existing `TICKET_TO_OWNER` link.",
+    "US-006 only: `VectorStoreService.optimizeTable` already runs under `exclusive` and is unchanged.",
+    "US-007 only: other modules that join `Agent` for display (audit, tickets, assignees, notifications, reviews, schedules) keep reading the row, so a deleted agent's name still shows on its past work.",
+    "US-008 only: `PrismaTicketsRepository`'s agent lookup for assignment, `PrismaScheduleRepository.findOwnerAccess`, `PrismaAssistantToolCallRepository` and `PrismaFleetPrReviewRepository` agent reads are not filtered by `deletedAt`; a deleted agent has no bindings (so every permission check refuses it) and is `OFFLINE` (so assignment refuses it).",
+    "US-010 only: a soft-deleted comment's RAG document and notification rows are not removed; `ticket-notification-reads.repository.ts` keeps its lookup.",
+    "US-009 only: workflow comments written by ticket transitions (`PrismaTicketsRepository`, `PrismaFleetTicketsRepository`) and by `PrismaVcsRepository` are unchanged; `CommentsService.create` itself does not re-check the type, the DTO does.",
+    "US-010 only: deleting a workflow comment stays allowed under `comment.delete` / `comment.delete.own`; it is now a soft delete.",
+    "US-011 only: existing workflow comments keep their type pill; only the form and the edit button change."
+  ],
+  "routingProfile": "native-codex-ds"
+}

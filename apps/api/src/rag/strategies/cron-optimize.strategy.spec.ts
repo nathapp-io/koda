@@ -1,5 +1,7 @@
+import type { Mock } from 'vitest';
 import { IRagConfig } from '../../config/rag.config';
 import { CronOptimizeStrategy } from './cron-optimize.strategy';
+import type { OptimizeTask } from './fts-optimize-strategy.interface';
 
 function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   return {
@@ -21,10 +23,13 @@ function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   };
 }
 
-function mockTable() {
-  return {
-    optimize: vi.fn().mockResolvedValue(undefined),
+/** A lock-aware optimize task whose work is observable. */
+function trackingTask(): { task: OptimizeTask; optimize: Mock } {
+  const optimize = vi.fn().mockResolvedValue(undefined);
+  const task: OptimizeTask = async () => {
+    await optimize();
   };
+  return { task, optimize };
 }
 
 function mockSchedulerRegistry() {
@@ -42,7 +47,7 @@ describe('CronOptimizeStrategy', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  describe('AC-10: constructor registers interval with SchedulerRegistry', () => {
+  describe('constructor registers the interval', () => {
     it('calls schedulerRegistry.addInterval("fts-optimize", interval) during construction', () => {
       const schedulerRegistry = mockSchedulerRegistry();
       new CronOptimizeStrategy(
@@ -51,9 +56,7 @@ describe('CronOptimizeStrategy', () => {
       );
       expect(schedulerRegistry.addInterval).toHaveBeenCalledWith('fts-optimize', expect.anything());
     });
-  });
 
-  describe('AC-11: reads interval from config', () => {
     it('reads ftsOptimizeIntervalMs from IRagConfig', () => {
       const schedulerRegistry = mockSchedulerRegistry();
       new CronOptimizeStrategy(
@@ -70,55 +73,96 @@ describe('CronOptimizeStrategy', () => {
     });
   });
 
-  describe('AC-8: onInsert() adds table to dirtyTables map', () => {
-    it('marks the table as dirty so optimizeDirtyTables() will process it', async () => {
+  describe('AC-6: onInsert() does not call optimize', () => {
+    it('only marks the project dirty', async () => {
       const strategy = makeStrategy(60_000);
-      const table = mockTable();
-      strategy.onInsert('p1', table);
-      await strategy.optimizeDirtyTables();
-      expect(table.optimize).toHaveBeenCalled();
+      try {
+        const { task, optimize } = trackingTask();
+
+        await strategy.onInsert('p1', task);
+
+        expect(optimize).not.toHaveBeenCalled();
+      } finally {
+        await strategy.onDestroy();
+      }
     });
   });
 
-  describe('AC-9: optimizeDirtyTables() processes and clears dirty tables', () => {
-    it('calls optimize() for each dirty table', async () => {
+  describe('AC-7: the next optimizeDirtyTables() calls optimize once', () => {
+    it('runs the stored task on the tick', async () => {
       const strategy = makeStrategy(60_000);
-      const t1 = mockTable();
-      const t2 = mockTable();
-      strategy.onInsert('p1', t1);
-      strategy.onInsert('p2', t2);
-      await strategy.optimizeDirtyTables();
-      expect(t1.optimize).toHaveBeenCalledTimes(1);
-      expect(t2.optimize).toHaveBeenCalledTimes(1);
+      try {
+        const { task, optimize } = trackingTask();
+        await strategy.onInsert('p1', task);
+
+        await strategy.optimizeDirtyTables();
+
+        expect(optimize).toHaveBeenCalledTimes(1);
+      } finally {
+        await strategy.onDestroy();
+      }
     });
 
-    it('clears the map so subsequent calls do not re-optimize', async () => {
+    it('runs each dirty project task once on the tick', async () => {
       const strategy = makeStrategy(60_000);
-      const table = mockTable();
-      strategy.onInsert('p1', table);
-      await strategy.optimizeDirtyTables();
-      await strategy.optimizeDirtyTables(); // second call — map should be empty
-      expect(table.optimize).toHaveBeenCalledTimes(1);
+      try {
+        const t1 = trackingTask();
+        const t2 = trackingTask();
+        await strategy.onInsert('p1', t1.task);
+        await strategy.onInsert('p2', t2.task);
+
+        await strategy.optimizeDirtyTables();
+
+        expect(t1.optimize).toHaveBeenCalledTimes(1);
+        expect(t2.optimize).toHaveBeenCalledTimes(1);
+      } finally {
+        await strategy.onDestroy();
+      }
     });
   });
 
-  describe('AC-12: onDestroy() flushes remaining dirty tables', () => {
-    it('calls optimizeDirtyTables() to flush on destroy', async () => {
+  describe('AC-8: a second tick with no insert does not call the task again', () => {
+    it('clears the dirty map after the first tick', async () => {
       const strategy = makeStrategy(60_000);
-      const table = mockTable();
-      strategy.onInsert('p1', table);
+      try {
+        const { task, optimize } = trackingTask();
+        await strategy.onInsert('p1', task);
+
+        await strategy.optimizeDirtyTables();
+        expect(optimize).toHaveBeenCalledTimes(1);
+
+        await strategy.optimizeDirtyTables();
+        expect(optimize).toHaveBeenCalledTimes(1);
+      } finally {
+        await strategy.onDestroy();
+      }
+    });
+  });
+
+  describe('onDestroy() flushes remaining dirty tasks', () => {
+    it('runs the pending task on destroy', async () => {
+      const strategy = makeStrategy(60_000);
+      const { task, optimize } = trackingTask();
+      await strategy.onInsert('p1', task);
       await strategy.onDestroy();
-      expect(table.optimize).toHaveBeenCalledTimes(1);
+      expect(optimize).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('AC-13: onFirstAccess() is fire-and-forget', () => {
-    it('calls table.optimize() and returns void synchronously', () => {
-      const strategy = makeStrategy(60_000);
-      const table = mockTable();
-      const result = strategy.onFirstAccess('p1', table);
-      expect(result).toBeUndefined();
-      expect(table.optimize).toHaveBeenCalled();
+  describe('onFirstAccess() is fire-and-forget', () => {
+    it('runs the task and returns void synchronously', async () => {
+      const registry = mockSchedulerRegistry();
+      const strategy = new CronOptimizeStrategy(mockRagConfig(), registry as never);
+      try {
+        const { task, optimize } = trackingTask();
+
+        const result = strategy.onFirstAccess('p1', task);
+
+        expect(result).toBeUndefined();
+        expect(optimize).toHaveBeenCalledTimes(1);
+      } finally {
+        await strategy.onDestroy();
+      }
     });
   });
 });

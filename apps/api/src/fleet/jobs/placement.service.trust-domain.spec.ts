@@ -56,7 +56,7 @@ function fixture(queued: QueuedJob[], held: ActiveJobRef[] = []) {
     findPlacementRunners: vi.fn(async () => runners),
     lockRunners: vi.fn(async () => runners.map((r) => r.id)),
     findActiveLoads: vi.fn(async () => held),
-    findQueuedIds: vi.fn(async () => queued.map((j) => j.id)),
+    findQueuedPage: vi.fn(async () => queued.map((j, i) => ({ id: j.id, queuedAt: new Date(NOW.getTime() + i * 1_000) }))),
     findThreadAssign: vi.fn(async (id: string) => (byId.get(id)?.command === 'THREAD' ? threadAssignOf(byId.get(id) as QueuedJob) : null)),
     findById: vi.fn(async (id: string) => jobRecord(byId.get(id) as QueuedJob)),
     createCommand: vi.fn(async (c: { type: string; payload: unknown }) => c),

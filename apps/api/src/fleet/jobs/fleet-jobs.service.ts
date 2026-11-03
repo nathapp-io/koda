@@ -1,5 +1,5 @@
 import { ReviewDecisionsService } from '../../memory/review-decisions.service';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -56,8 +56,22 @@ export interface BudgetCancelResult {
   wake: string[];
 }
 
+/** US-001: how many of a soft-deleted project's unstarted jobs one quiesce pass ends. */
+export const PROJECT_QUIESCE_LIMIT = 500;
+
+/** US-001: the `cancelReason` (and `stateReason`) of a job a project delete ended. */
+export const PROJECT_DELETED_REASON = 'project_deleted';
+
+/** What a project-delete quiesce did: the ids it ended, and the live events to publish after the commit. */
+export interface ProjectQuiesceResult {
+  cancelled: string[];
+  live: LiveFleetJobEvent[];
+}
+
 @Injectable()
 export class FleetJobsService {
+  private readonly logger = new Logger(FleetJobsService.name);
+
   constructor(
     @Inject(FLEET_JOB_REPOSITORY) private readonly repo: IFleetJobRepository,
     private readonly placement: PlacementService,
@@ -262,6 +276,42 @@ export class FleetJobsService {
       result.requested.push(id);
       result.live.push(this.live.event(updated));
       result.wake.push(job.runnerId);
+    }
+    return result;
+  }
+
+  /**
+   * US-001: ends the unstarted jobs of a soft-deleted project, in the caller's transaction.
+   *
+   * A deleted project's QUEUED jobs would still be placed on the next runner sync and spend real budget
+   * for a project every route 404s on. QUEUED, and ASSIGNED whose ASSIGN the runner never acked, end on
+   * the server through `JobTransitionsService` with `project_deleted` as the reason; each row is re-read
+   * under its own lock, so a job that started, finished or was cancelled in the meantime is skipped.
+   * RUNNING, UPLOADING and an acked ASSIGNED job keep running and report as usual (spec ruling 15).
+   *
+   * Call inside `txManager.run`; publish the returned `live` after that transaction commits.
+   */
+  async cancelForProjectDelete(projectId: string, now = new Date()): Promise<ProjectQuiesceResult> {
+    const ids = await this.repo.findProjectUnstartedIds(projectId, PROJECT_QUIESCE_LIMIT);
+    if (ids.length >= PROJECT_QUIESCE_LIMIT) {
+      this.logger.warn(
+        `project ${projectId} has at least ${PROJECT_QUIESCE_LIMIT} unstarted jobs; only the oldest ${PROJECT_QUIESCE_LIMIT} were cancelled`,
+      );
+    }
+
+    const result: ProjectQuiesceResult = { cancelled: [], live: [] };
+    for (const id of ids) {
+      const job = await this.repo.lockById(id);
+      if (!job || job.cancelRequestedAt) continue;
+      const unacked = job.state === FleetJobState.ASSIGNED &&
+        (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;
+      if (job.state !== FleetJobState.QUEUED && !unacked) continue;
+      const r = await this.transitions.apply({
+        job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR,
+        reason: PROJECT_DELETED_REASON, extra: { cancelReason: PROJECT_DELETED_REASON },
+      });
+      result.cancelled.push(id);
+      result.live.push(r.live);
     }
     return result;
   }

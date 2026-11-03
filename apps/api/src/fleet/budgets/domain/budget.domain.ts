@@ -84,7 +84,11 @@ export interface IBudgetRepository {
   update(id: string, patch: BudgetPolicyPatch): Promise<BudgetPolicyRecord>;
   /** Incidents go with it (FK cascade). */
   delete(id: string): Promise<void>;
-  /** Plan D166: global always; a project that is not soft-deleted; an existing repo or runner row. */
+  /**
+   * Review P2 remainder (US-002): global always; a project row that exists (a soft delete keeps it, so its
+   * policies and any pause survive until a hard delete); an existing repo or runner row. Was plan D166,
+   * which treated a soft-deleted project as gone and let the sweep delete its paused policies.
+   */
   scopeExists(scope: BudgetScope): Promise<boolean>;
   /** The fleet repo's project id, or null when there is no such repo (repo-scope create, S1b §2.4). */
   findRepoProjectId(repoId: string): Promise<string | null>;

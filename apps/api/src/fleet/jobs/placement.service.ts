@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
@@ -14,13 +14,13 @@ import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
 import { withProjectRepos } from './project-repos-assign';
 import type { RunnerCapabilities } from '../common/protocol';
 import { RunnerNotifier } from './runner-notifier';
 import {
-  FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
+  FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow, QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
 
 export interface PlacementOutcome {
@@ -37,6 +37,8 @@ export interface PlacementOutcome {
  */
 @Injectable()
 export class PlacementService {
+  private readonly logger = new Logger(PlacementService.name);
+
   constructor(
     @Inject(FLEET_JOB_REPOSITORY) private readonly repo: IFleetJobRepository,
     private readonly transitions: JobTransitionsService,
@@ -119,28 +121,28 @@ export class PlacementService {
       let slots = Math.min(freeSlots, runner.capacity - load.active);
       const events: LiveFleetJobEvent[] = [];
       let count = 0;
-      for (const id of slots > 0 ? await this.repo.findQueuedIds(QUEUED_SCAN_LIMIT) : []) {
-        if (slots <= 0) break;
+      // US-004: SQL decides which jobs this runner can take, and the scan pages past a full page of per-job misfits.
+      await this.scanQueuedCandidates({ runnerId: runner.id, threads: false }, () => slots <= 0, async (id) => {
         const job = await this.repo.lockById(id, { skipLocked: true });
-        if (!job || job.state !== FleetJobState.QUEUED || isThreadKind(job.command)) continue;
-        if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
+        if (!job || job.state !== FleetJobState.QUEUED || isThreadKind(job.command)) return;
+        if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) return;
         // S1b §2.3: the same pre-assign check as placeJob.
         const paused = jobScopePause(job, (keys) => pauses.match(keys));
         if (paused) {
           events.push(await this.cancelForPause(job, paused.id, now));
-          continue;
+          return;
         }
         const repo = await this.repo.findRepo(job.repoId);
-        if (!repo || firstMisfit(toPlacementJob(job, repo), runner, load, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
+        if (!repo || firstMisfit(toPlacementJob(job, repo), runner, load, now, this.fleetConfig.runnerOfflineSec) !== null) return;
         const done = await this.assign(job, repo, runner, now);
-        if (!done) continue;
+        if (!done) return;
         events.push(done.live);
         count += 1;
         slots -= 1;
         // The next job in this same pass must see the load this assignment created: occupancy covers
         // capacity, the repository and the trust domain (US-004), not only the counter.
         load = addJobToLoad(load, { runnerId: runner.id, repoId: job.repoId, command: job.command, projectId: job.projectId, bashMode: job.bashMode });
-      }
+      });
       return { live: events, assigned: count };
     });
     this.live.publish(live);
@@ -159,33 +161,57 @@ export class PlacementService {
       let slots = (runner.threadCapacity ?? 0) - (load.threads ?? 0);
       const events: LiveFleetJobEvent[] = [];
       let count = 0;
-      for (const id of slots > 0 ? await this.repo.findQueuedIds(QUEUED_SCAN_LIMIT) : []) {
-        if (slots <= 0) break;
+      // US-004: the thread scan pages the same way, filtered to THREAD jobs this runner may host.
+      await this.scanQueuedCandidates({ runnerId: runner.id, threads: true }, () => slots <= 0, async (id) => {
         const job = await this.repo.lockById(id, { skipLocked: true });
-        if (!job || job.state !== FleetJobState.QUEUED || !isThreadKind(job.command)) continue;
-        if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
+        if (!job || job.state !== FleetJobState.QUEUED || !isThreadKind(job.command)) return;
+        if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) return;
         const paused = jobScopePause(job, (keys) => pauses.match(keys));
-        if (paused) { events.push(await this.cancelForPause(job, paused.id, now)); continue; }
+        if (paused) { events.push(await this.cancelForPause(job, paused.id, now)); return; }
         const [repo, thread] = await Promise.all([this.repo.findRepo(job.repoId), this.repo.findThreadAssign(job.id)]);
         // A THREAD job without its turn (or repo) is a broken row, not a reason to fail the whole
         // sync: skip it the way fillRunner skips a missing repo (one failing job in a sync is
         // logged and skipped, never allowed to fail the request).
-        if (!repo || !thread) continue;
+        if (!repo || !thread) return;
         const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled, action: thread.action, kind: thread.kind });
-        if (firstMisfit(placementJob, candidate, load, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
+        if (firstMisfit(placementJob, candidate, load, now, this.fleetConfig.runnerOfflineSec) !== null) return;
         const done = await this.assign(job, repo, runner, now);
-        if (!done) continue;
+        if (!done) return;
         events.push(done.live);
         count += 1;
         slots -= 1;
         // Carry the assigned job into the load the next candidate is judged on, so a later turn of
         // another project's thread (or another slot) sees it (US-004).
         load = addJobToLoad(load, { runnerId: runner.id, repoId: job.repoId, command: job.command, projectId: job.projectId, bashMode: job.bashMode });
-      }
+      });
       return { live: events, assigned: count };
     });
     this.live.publish(live);
     if (assigned > 0) this.notifier.notify(runnerId);
+  }
+
+  /**
+   * US-004: reads the QUEUED candidates this runner can take in keyset pages, visiting each id in order. The scan
+   * stops when `noSlotsLeft()` reports the fill is done, when a page comes back short (the queue is exhausted), or at
+   * MAX_QUEUED_SCAN_PAGES. Only a per-job check can still drop a candidate (a lock SKIP LOCKED lost, a state change, a
+   * misfit), so a full page of drops pages on instead of starving every newer job. Running out of pages with slots
+   * still free means the queue is starving this runner: `.nax/rules/api-data.md` wants that surfaced at warn level.
+   */
+  private async scanQueuedCandidates(filter: QueuedScanFilter, noSlotsLeft: () => boolean, visit: (id: string) => Promise<void>): Promise<void> {
+    let after: QueuedCursor | null = null;
+    for (let page = 0; page < MAX_QUEUED_SCAN_PAGES; page += 1) {
+      if (noSlotsLeft()) return;
+      const rows = await this.repo.findQueuedPage(filter, QUEUED_SCAN_LIMIT, after);
+      for (const row of rows) {
+        after = row;
+        await visit(row.id);
+        if (noSlotsLeft()) return;
+      }
+      if (rows.length < QUEUED_SCAN_LIMIT) return;
+    }
+    if (!noSlotsLeft()) {
+      this.logger.warn(`queued scan for runner ${filter.runnerId} stopped at ${MAX_QUEUED_SCAN_PAGES} pages of ${QUEUED_SCAN_LIMIT}: later candidates wait for the next sync`);
+    }
   }
 
   /** S1b §2.3: cancel a QUEUED job in a paused scope. The transition's activity row names the policy (plan D170). */

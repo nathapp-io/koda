@@ -1026,6 +1026,36 @@ describeIntegration('API Integration Tests', () => {
         .expect(204);
     });
 
+    it('PATCH cannot edit a retained deleted comment', async () => {
+      const retained = await prismaClient().comment.findUniqueOrThrow({ where: { id: commentId } });
+      expect(retained.deletedAt).not.toBeNull();
+      await request(httpServer).patch(`/api/comments/${commentId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ body: 'must not overwrite tombstone' }).expect(404);
+      expect((await prismaClient().comment.findUniqueOrThrow({ where: { id: commentId } })).body).toBe(retained.body);
+    });
+
+    it('PATCH workflow comment under an agent wait policy returns 409 without creating a request', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const ticket = await prismaClient().ticket.findFirstOrThrow({ where: { projectId: project.id } });
+      const workflow = await prismaClient().comment.create({
+        data: { ticketId: ticket.id, body: 'workflow evidence', type: 'FIX_REPORT', authorAgentId: agentId },
+      });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.update.own', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const policy = await seedWaitPolicy(prismaClient(), 'comment.update', project.id);
+      const requestsBefore = await prismaClient().approvalRequest.count();
+      try {
+        await request(httpServer).patch(`/api/comments/${workflow.id}`)
+          .set('Authorization', `Bearer ${agentApiKey}`)
+          .send({ body: 'impossible edit' }).expect(409);
+        expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
+        expect((await prismaClient().comment.findUniqueOrThrow({ where: { id: workflow.id } })).body).toBe('workflow evidence');
+      } finally {
+        await prismaClient().approvalPolicy.delete({ where: { id: policy.id } });
+      }
+    });
+
     it('AC-10 (US-010): an agent deletes its own comment with exactly 202', async () => {
       const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
       await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.delete.own', 'project.read'], project.id);

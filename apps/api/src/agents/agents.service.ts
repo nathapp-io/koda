@@ -72,6 +72,10 @@ export class AgentsService {
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: AgentResponseDto }>;
   async generateApiKey(dto: CreateAgentDto): Promise<{ apiKey: string; agent: AgentResponseDto }>;
   async generateApiKey(agentIdOrDto: string | CreateAgentDto) {
+    if (typeof agentIdOrDto === 'string' && !(await this.agentRepo.findByIdScalar(agentIdOrDto))) {
+      throw new NotFoundAppException({}, 'agents');
+    }
+
     // Generate random 32-byte hex key
     const rawKey = randomBytes(32).toString('hex');
 
@@ -84,7 +88,8 @@ export class AgentsService {
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     if (typeof agentIdOrDto === 'string') {
-      // Update existing agent
+      // Approval execution can arrive after the target was tombstoned; only a live immutable id
+      // reaches this credential write.
       const agent = await this.audit.audited(
         () => this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash),
         (updated) => ({ key: 'agent.key.rotate', resourceType: 'agent', resourceId: updated.id, projectId: null, summary: 'key rotated' }),
@@ -293,46 +298,62 @@ export class AgentsService {
   }
 
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
-    // Filter out duplicates
     const uniqueCapabilities = [...new Set(updateData.capabilities)];
-    await this.audit.audited(
-      () => this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities),
+    const response = await this.audit.audited(
+      async () => {
+        // The row lock conflicts with softDeleteById's UPDATE, and lives until audit commits.
+        // A separate preflight read cannot protect the tombstone's retained capabilities.
+        if (!(await this.agentRepo.findByIdScalar(agentId, { lock: true }))) {
+          throw new NotFoundAppException({}, 'agents');
+        }
+        await this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities);
+        const updated = await this.agentRepo.findById(agentId);
+        if (!updated) throw new NotFoundAppException({}, 'agents');
+        return AgentResponseDto.from(updated);
+      },
       () => ({ key: 'agent.capabilities.update', resourceType: 'agent', resourceId: agentId, projectId: null, summary: `capabilities: ${uniqueCapabilities.length}` }),
     );
-
-    // Return updated agent with capabilities
-    const updated = await this.agentRepo.findById(agentId);
     await this.invalidateAfterCommit(agentId);
-    return AgentResponseDto.from(updated);
+    return response;
   }
 
+  /**
+   * Review P2 remainder (US-007): deleting an agent tombstones it — the row stays so its comments and
+   * tickets keep their author — and drops the bindings it held. Bindings have no principal foreign key,
+   * so they are removed in the same transaction, with the nested membership write's cache invalidation
+   * deferred until the outer commit.
+   *
+   * The response names the agent as it was when it was deleted: `softDeleteById` renames the stored slug
+   * and answers the original one.
+   */
   async remove(slug: string): Promise<AgentResponseDto> {
     const agent = await this.agentRepo.findBySlug(slug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    // Bindings have no principal foreign key. Delete both in one transaction and defer
-    // the nested membership write's cache invalidation until the outer commit.
-    await this.membership.afterCommit(() => this.audit.audited(
+    const deleted = await this.membership.afterCommit(() => this.audit.audited(
       async () => {
-        await this.agentRepo.deleteBySlug(slug);
+        const tombstone = await this.agentRepo.softDeleteById(agent.id);
+        // The row was tombstoned between the slug read and the write (a concurrent delete).
+        if (!tombstone) throw new NotFoundAppException({}, 'agents');
         await this.membership.removeAllBindings({ type: 'AGENT', id: agent.id });
+        return tombstone;
       },
-      () => ({ key: 'agent.delete', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: `deleted ${agent.slug}` }),
+      (tombstone) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: tombstone.id, projectId: null, summary: `deleted ${tombstone.slug}` }),
     ));
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-    return AgentResponseDto.from(agent);
+    return AgentResponseDto.from(deleted);
   }
 
   /** The REST approval path targets the id resolved when the request opened, not a reused slug. */
   async removeById(id: string): Promise<AgentResponseDto> {
     const agent = await this.membership.afterCommit(() => this.audit.audited(
       async () => {
-        const deleted = await this.agentRepo.deleteById(id);
-        if (!deleted) throw new NotFoundAppException({}, 'agents');
+        const tombstone = await this.agentRepo.softDeleteById(id);
+        if (!tombstone) throw new NotFoundAppException({}, 'agents');
         await this.membership.removeAllBindings({ type: 'AGENT', id });
-        return deleted;
+        return tombstone;
       },
-      (deleted) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: deleted.id, projectId: null, summary: `deleted ${deleted.slug}` }),
+      (tombstone) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: tombstone.id, projectId: null, summary: `deleted ${tombstone.slug}` }),
     ));
     await this.invalidateAfterCommit(id);
     return AgentResponseDto.from(agent);

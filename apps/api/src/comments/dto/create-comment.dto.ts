@@ -18,11 +18,11 @@ export class CreateCommentDto {
 
   @ApiProperty({
     description: 'Comment type',
-    enum: CommentType,
+    enum: ['GENERAL'],
     example: 'GENERAL',
   })
   @IsOptional()
-  @IsIn(['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'], {
+  @IsIn(['GENERAL'], {
     message: '$t(common.validation.isEnum)',
   })
   type?: string;

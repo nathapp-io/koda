@@ -28,6 +28,12 @@ function cappedWarning(cursor: Date | null): string {
 export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VcsPollingService.name);
   private readonly scheduledConnectionIds = new Set<string>();
+  /**
+   * Review P2 remainder (US-003): connections whose poll has not settled. A tick that fires while the
+   * previous poll of the same connection still runs returns at once, so an overlapping interval (or a
+   * slow provider) cannot import the same issues twice. Entries leave the map in `finally`.
+   */
+  private readonly inFlight = new Map<string, { cancelled: boolean }>();
 
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
@@ -89,6 +95,10 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   }
 
   unschedulePolling(connectionId: string): void {
+    // Clearing the interval alone leaves an already awaited fetch running. Retire that
+    // poll as well; its token is removed in finally, not kept in a cancellation cache.
+    const active = this.inFlight.get(connectionId);
+    if (active) active.cancelled = true;
     const scheduleName = `vcs-polling-${connectionId}`;
     try {
       this.schedulerRegistry.deleteInterval(scheduleName);
@@ -119,22 +129,30 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async pollConnection(connectionId: string): Promise<void> {
+    // Review P2 remainder (US-003): one poll per connection at a time. A tick that finds the connection
+    // already in flight returns without polling (and without touching its schedule); the entry is removed
+    // in `finally`, so a failed poll never blocks the connection's next tick.
+    if (this.inFlight.has(connectionId)) return;
+    const active = { cancelled: false };
+    this.inFlight.set(connectionId, active);
     try {
       const connection = await this.vcsRepo.findVcsConnectionById(connectionId);
       if (!connection || !connection.isActive || connection.syncMode !== 'polling') {
         this.unschedulePolling(connectionId);
         return;
       }
-      await this.poll(connection);
+      if (!active.cancelled) await this.poll(connection, active);
     } catch (error) {
       this.logger.error(`Polling tick failed for connection ${connectionId}: ${messageOf(error)}`);
+    } finally {
+      this.inFlight.delete(connectionId);
     }
   }
 
   /**
    * Poll a single connection for new issues
    */
-  private async poll(connection: VcsConnectionWithProjectDomain): Promise<void> {
+  private async poll(connection: VcsConnectionWithProjectDomain, active: { cancelled: boolean }): Promise<void> {
     const startTime = new Date();
 
     try {
@@ -152,6 +170,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
 
       // Fetch issues since last sync
       const { issues, cursor, capped } = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
+      if (active.cancelled) return;
 
       // Filter by allowed authors
       const filteredIssues = this.syncService.filterByAllowedAuthors(
@@ -164,6 +183,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       let issuesSkipped = 0;
 
       for (const issue of filteredIssues) {
+        if (active.cancelled) return;
         const result = await this.syncService.syncIssue(connection.project, issue, 'polling', connection, 'system.vcs.poll-issues');
         if (result.action === 'created') {
           issuesSynced++;
@@ -172,12 +192,15 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      if (active.cancelled) return;
+
       // M10: resume from the newest issue update seen, not from "now", so a capped
       // poll picks up where it stopped. Nothing seen keeps the old cursor.
       if (cursor) {
         await bookkeeping('vcs.poll-log', () => this.vcsRepo.updateVcsConnectionLastSynced(connection.id, cursor));
       }
 
+      if (active.cancelled) return;
       // Write sync log
       await bookkeeping('vcs.poll-log', () => this.vcsRepo.createVcsSyncLog({
         vcsConnectionId: connection.id,
@@ -193,6 +216,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         `Polling complete for connection ${connection.id}: synced=${issuesSynced}, skipped=${issuesSkipped}`,
       );
 
+      if (active.cancelled) return;
       // Sync PR statuses after issue sync completes
       const prResult = await this.prSyncService.syncPrStatus(
         connection.project,
@@ -204,6 +228,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,
       );
     } catch (error) {
+      if (active.cancelled) return;
       const errorMessage = messageOf(error);
       this.logger.error(`Polling failed for connection ${connection.id}: ${errorMessage}`);
       // VCS LOW: the error-path log write is guarded too; an interval callback

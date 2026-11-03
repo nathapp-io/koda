@@ -13,6 +13,8 @@ import { ScheduleTicker } from '../fleet/schedules/schedule-ticker';
 import { ReviewEventMinter } from '../fleet/reviews/review-event.minter';
 import { FleetPrReviewPass } from '../fleet/reviews/fleet-pr-review.pass';
 import { FixFollowUpSubscriber } from '../fleet/reviews/fix-follow-up.subscriber';
+import { ProjectDeletionJobsListener } from '../fleet/jobs/project-deletion-jobs.listener';
+import { VcsProjectDeletionListener } from '../vcs/vcs-project-deletion.listener';
 import { FleetSweeper } from '../fleet/sync/fleet-sweeper';
 import { FleetPrStateRefresher } from '../fleet/tickets/fleet-pr-state.refresher';
 import { FleetHealthDetector } from '../notifications/fleet/fleet-health.detector';
@@ -52,6 +54,10 @@ const writers = new Map<Function, string>([
   [ScheduleTicker, 'system.schedule.dispatch'],
   [FleetPrReviewPass, 'system.pr-review.dispatch'],
   [FixFollowUpSubscriber, 'system.pr-fix.follow-up'],
+  // Review P2 US-001: a soft-deleted project's unstarted fleet jobs end under this writer.
+  [ProjectDeletionJobsListener, 'system.project.quiesce'],
+  // Review P2 US-002: the same key also deactivates the project's active VCS connections.
+  [VcsProjectDeletionListener, 'system.project.quiesce'],
   [ReviewEventMinter, 'system.review.decision'],
   [FleetSweeper, 'system.job.crash-silent-runner'],
   [FleetPrStateRefresher, 'system.ticket-link.pr-refresh'],
@@ -102,7 +108,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(37);
+    expect(writers).toHaveLength(39);
     expect(actual).toEqual(expected);
   });
 

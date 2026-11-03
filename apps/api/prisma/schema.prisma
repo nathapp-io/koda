@@ -50,11 +50,16 @@ model Agent {
   maxConcurrentTickets Int      @default(3)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+  // Review P2 remainder (US-007): a deleted agent is a tombstone. The row stays so its comments and
+  // tickets keep their author, while the slug is renamed and the key hash replaced.
+  deletedAt            DateTime?
 
   capabilities    AgentCapabilityEntry[]
   createdTickets  Ticket[]               @relation("TicketCreatedByAgent")
   assignedTickets Ticket[]               @relation("TicketAssignedToAgent")
   comments        Comment[]              @relation("CommentByAgent")
+
+  @@index([deletedAt])
 }
 
 /// Skill catalog: a GitHub directory of skills pinned to a resolved commit (admin Update re-resolves).
@@ -226,6 +231,8 @@ model Ticket {
   watchers        TicketWatcher[]
 
   @@unique([projectId, number])
+  // Review P2 remainder (US-003): one ticket per imported issue per project; the import race is decided here.
+  @@unique([projectId, externalVcsId])
   @@index([projectId, status])
   @@index([projectId, assignedToUserId])
   @@index([projectId, assignedToAgentId])
@@ -240,6 +247,7 @@ model Comment {
   type          String   @default("GENERAL") // GENERAL | VERIFICATION | FIX_REPORT | REVIEW
   authorUserId  String?
   authorAgentId String?
+  deletedAt     DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

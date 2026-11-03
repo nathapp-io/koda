@@ -21,6 +21,7 @@ import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { FLEET_JOB_REPOSITORY } from './domain/fleet-job.domain';
 import { PlacementService } from './placement.service';
 import { RunnerNotifier } from './runner-notifier';
+import { ProjectDeletionJobsListener } from './project-deletion-jobs.listener';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
@@ -37,6 +38,8 @@ import { ThreadJobEffects } from '../threads/thread-job-effects';
     RunnerNotifier,
     PlacementService,
     FleetJobsService,
+    // Review P2 US-001: quiesces a soft-deleted project's unstarted jobs on PROJECT_SOFT_DELETED.
+    ProjectDeletionJobsListener,
     ThreadJobEffects,
   ],
   exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, FleetJobOutcomeRecorder, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService, ThreadJobEffects],

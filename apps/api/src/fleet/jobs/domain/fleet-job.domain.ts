@@ -234,6 +234,21 @@ export interface ActiveJobRef {
 
 export type PlacementRunnerRow = PlacementRunner & { bootId: string };
 
+/**
+ * US-004: the QUEUED candidates one fill may take. The kind and the pin are SQL predicates, so a page is filled with
+ * jobs this runner can hold instead of jobs it can never take (pinned elsewhere, the other kind, a deleted project).
+ */
+export interface QueuedScanFilter {
+  runnerId: string;
+  threads: boolean;
+}
+
+/** US-004: one row of the QUEUED scan — the lock target, and the keyset cursor `(queuedAt, id)`. */
+export interface QueuedCursor {
+  id: string;
+  queuedAt: Date;
+}
+
 export interface IFleetJobRepository {
   findRepo(repoId: string): Promise<FleetRepoRef | null>;
   /**
@@ -253,8 +268,18 @@ export interface IFleetJobRepository {
   /** Spec §6.1. New leaseEpoch, or null when the job was no longer QUEUED. Resets ackedRunnerSeq. */
   casAssign(jobId: string, runnerId: string, runnerBootId: string, now: Date): Promise<number | null>;
   update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord>;
-  /** Oldest first. */
-  findQueuedIds(limit: number): Promise<string[]>;
+  /**
+   * US-004: one keyset page of QUEUED jobs this runner can take — its own non-thread work, or its thread turns —
+   * oldest first (`queuedAt`, then `id`). A soft-deleted project's jobs are never candidates. `after` continues from
+   * the last row of the previous page.
+   */
+  findQueuedPage(filter: QueuedScanFilter, limit: number, after: QueuedCursor | null): Promise<QueuedCursor[]>;
+  /**
+   * Review P2 (US-001): ids of the project's unstarted jobs — QUEUED and ASSIGNED, with no cancel
+   * requested — oldest first (`queuedAt`, then `id`), at most `limit`. A soft-deleted project never
+   * starts them, so they are the ones a project delete ends on the server.
+   */
+  findProjectUnstartedIds(projectId: string, limit: number): Promise<string[]>;
   findRunnerHeld(runnerId: string): Promise<FleetJobRecord[]>;
   /** Jobs held by a runner whose lastSeenAt is before the cutoff. */
   findSilentHeldIds(runnerSeenBefore: Date): Promise<string[]>;

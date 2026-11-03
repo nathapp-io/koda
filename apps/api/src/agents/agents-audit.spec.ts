@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
@@ -26,8 +27,8 @@ describe('AgentsService audit boundaries', () => {
     } finally { inAudit = false; }
   });
   const repo = {
-    findById: vi.fn(), findBySlug: vi.fn(), findBySlugScalar: vi.fn(),
-    replaceCapabilities: vi.fn(), deleteBySlug: vi.fn(), create: vi.fn(),
+    findById: vi.fn(), findByIdScalar: vi.fn(), findBySlug: vi.fn(), findBySlugScalar: vi.fn(),
+    replaceCapabilities: vi.fn(), softDeleteById: vi.fn(), create: vi.fn(),
     createCapabilities: vi.fn(), update: vi.fn(), updateApiKeyHash: vi.fn(),
   };
   const membership = {
@@ -43,6 +44,7 @@ describe('AgentsService audit boundaries', () => {
     inMembership = false;
     record.mockReset().mockResolvedValue(undefined);
     for (const mock of Object.values(repo)) mock.mockReset().mockResolvedValue(agent);
+    repo.findByIdScalar.mockResolvedValue(agent);
     membership.removeAllBindings.mockReset().mockResolvedValue(undefined);
     module = await Test.createTestingModule({ providers: [
       AgentsService,
@@ -66,10 +68,42 @@ describe('AgentsService audit boundaries', () => {
     expect(record).toHaveBeenCalledWith({ key: 'agent.capabilities.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: 'capabilities: 3' });
   });
 
-  it('AC-15/16: deletes before cleaning bindings inside audited inside afterCommit', async () => {
+  it('locks and verifies liveness inside the capability transaction, before replacing retained rows', async () => {
+    repo.findByIdScalar.mockImplementation(async (_id, options) => {
+      expect(inAudit).toBe(true);
+      expect(options).toEqual({ lock: true });
+      return agent;
+    });
+    repo.findById.mockImplementation(async () => {
+      expect(inAudit).toBe(true);
+      return agent;
+    });
+
+    await service.updateCapabilities(agent.id, { capabilities: ['nax'] });
+
+    expect(repo.findByIdScalar.mock.invocationCallOrder[0]).toBeLessThan(repo.replaceCapabilities.mock.invocationCallOrder[0]);
+    expect(repo.findById.mock.invocationCallOrder[0]).toBeLessThan(record.mock.invocationCallOrder[0]);
+  });
+
+  it('does not replace capabilities or audit success when deletion wins the locked read', async () => {
+    repo.findByIdScalar.mockImplementation(async () => {
+      expect(inAudit).toBe(true);
+      return null;
+    });
+
+    const error = await service.updateCapabilities(agent.id, { capabilities: ['overwritten'] }).catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(NotFoundAppException);
+    expect(repo.replaceCapabilities).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('AC-15/16: tombstones before cleaning bindings inside audited inside afterCommit', async () => {
     const order: string[] = [];
-    repo.deleteBySlug.mockImplementation(async () => {
+    repo.softDeleteById.mockImplementation(async (id: string) => {
       expect(inAudit && inMembership).toBe(true); order.push('delete');
+      // The repository answers the row with its original slug; the summary names that, not the tombstone.
+      return { ...agent, id, slug: agent.slug };
     });
     membership.removeAllBindings.mockImplementation(async () => {
       expect(inAudit && inMembership).toBe(true); order.push('bindings');
@@ -77,6 +111,7 @@ describe('AgentsService audit boundaries', () => {
     await service.remove(agent.slug);
     expect(membership.afterCommit).toHaveBeenCalledTimes(1);
     expect(audited).toHaveBeenCalledTimes(1);
+    expect(repo.softDeleteById).toHaveBeenCalledExactlyOnceWith(agent.id);
     expect(order).toEqual(['delete', 'bindings']);
     expect(record).toHaveBeenCalledWith({ key: 'agent.delete', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: `deleted ${agent.slug}` });
   });

@@ -1,6 +1,7 @@
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
@@ -192,6 +193,7 @@ describe('CommentsService', () => {
       countByTicketId: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      softDelete: vi.fn(),
       findProjectBySlug: vi.fn(),
       findTicketScoped: vi.fn(),
     } as Record<string, Mock>,
@@ -780,22 +782,29 @@ describe('CommentsService', () => {
       ).rejects.toThrow();
     });
 
-    it('should preserve comment type when updating body', async () => {
-      const updateDto: UpdateCommentDto = {
-        body: 'Updated body only',
-      };
+    it.each(['FIX_REPORT', 'VERIFICATION', 'REVIEW'])(
+      'AC workflow immutable: refuses %s after membership and before permission check',
+      async (type) => {
+        givenComment({ ...mockComment, type });
 
-      const verificationComment = { ...mockComment, type: 'VERIFICATION' };
-      givenComment(verificationComment);
-      mockCommentRepo.update.mockResolvedValue({
-        ...verificationComment,
-        body: 'Updated body only',
-      });
+        const error = await service.update('comment-123', { body: 'attempted change' }, mockUserPrincipal).catch((caught: unknown) => caught);
 
-      const result = await service.update('comment-123', updateDto, mockUserPrincipal);
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error).toMatchObject({ response: { prefix: 'comments.workflowImmutable' } });
+        expect(mockAccessService.resolveMembership).toHaveBeenCalledWith('proj-123', mockUserPrincipal);
+        expect(mockPermissions.can).not.toHaveBeenCalled();
+        expect(mockCommentRepo.update).not.toHaveBeenCalled();
+      },
+    );
 
-      expect(result.type).toBe('VERIFICATION');
+    it('updates a GENERAL comment with the new body', async () => {
+      givenComment(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'Updated body only' });
+
+      const result = await service.update('comment-123', { body: 'Updated body only' }, mockUserPrincipal);
+
       expect(result.body).toBe('Updated body only');
+      expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'Updated body only' });
     });
 
     it('should update updatedAt timestamp when editing', async () => {
@@ -830,21 +839,28 @@ describe('CommentsService', () => {
   describe('delete', () => {
     it('should allow author (user) to delete own comment', async () => {
       givenComment(mockComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockUserPrincipal);
 
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('comment-123');
+      expect(mockCommentRepo.delete).not.toHaveBeenCalled();
+      expect(mockAudit.audited).toHaveBeenCalledTimes(1);
+      const entriesOf = mockAudit.audited.mock.calls[0]?.[1];
+      expect(entriesOf?.('comment-123')).toEqual({
+        key: 'comment.delete', resourceType: 'comment', resourceId: 'comment-123',
+        projectId: 'proj-123', summary: 'deleted',
+      });
     });
 
     it('should allow author (agent) to delete own comment', async () => {
       const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
       givenComment(agentComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAgentPrincipal);
 
-      expect(mockCommentRepo.delete).toHaveBeenCalled();
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('comment-123');
     });
 
     it('should return 403 when non-author user tries to delete comment', async () => {
@@ -868,11 +884,11 @@ describe('CommentsService', () => {
     it('should allow ADMIN user to delete any comment', async () => {
       holdKeys(ADMIN_COMMENT_KEYS);
       givenComment(mockComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAdminPrincipal);
 
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('comment-123');
     });
 
     it('should return 404 if comment not found', async () => {
@@ -988,7 +1004,7 @@ describe('CommentsService', () => {
 
     it('AC2: throws NotFoundAppException for a comment in a project the user is not a member of', async () => {
       givenComment(mockComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await expect(service.delete('comment-123', outsiderPrincipal)).rejects.toBeInstanceOf(
         NotFoundAppException
@@ -999,11 +1015,11 @@ describe('CommentsService', () => {
 
     it('AC2 boundary: a member user deletes through the repository', async () => {
       givenComment(mockComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockUserPrincipal);
 
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('comment-123');
     });
 
     it('AC3: an agent principal is decided by the key check without a membership lookup', async () => {
@@ -1026,11 +1042,11 @@ describe('CommentsService', () => {
     it('AC5 boundary: a global ADMIN who is not a member deletes without a membership row', async () => {
       holdKeys(ADMIN_COMMENT_KEYS);
       givenComment(mockComment);
-      mockCommentRepo.delete.mockResolvedValue(undefined);
+      mockCommentRepo.softDelete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAdminPrincipal);
 
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('comment-123');
     });
   });
 
@@ -1068,13 +1084,13 @@ describe('CommentsService', () => {
         projectId: 'p1',
         resource: { createdBy: { type: 'USER', id: 'someone-else' } },
       });
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('c1');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('c1');
     });
 
     it("a caller holding the any-row key may delete another user's comment", async () => {
       holdKeys(ADMIN_COMMENT_KEYS);
       await expect(service.delete('c1', mockUserPrincipal)).resolves.toBeUndefined();
-      expect(mockCommentRepo.delete).toHaveBeenCalledWith('c1');
+      expect(mockCommentRepo.softDelete).toHaveBeenCalledWith('c1');
     });
 
     it("a caller holding only comment.delete.own may not delete another user's comment", async () => {

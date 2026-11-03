@@ -1,13 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '../generated/prisma/client';
+import { randomBytes } from 'crypto';
+import { Agent, AgentCapabilityEntry, PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
-import { isRecordNotFound } from '../common/utils/prisma-errors';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
 import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships } from '../permissions/membership.queries';
 import { MAX_OPEN_TICKET_REFS } from '../permissions/open-agent-tickets.queries';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
+
+/** An agent row with its capability rows: what a delete answers after re-reading the tombstone. */
+export type AgentWithCapabilities = Agent & { capabilities: AgentCapabilityEntry[] };
 
 @Injectable()
 export class PrismaAgentRepository {
@@ -19,37 +22,48 @@ export class PrismaAgentRepository {
 
   async findAll() {
     return this.db.agent.findMany({
+      where: { deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlug(slug: string) {
     return this.db.agent.findUnique({
-      where: { slug },
+      where: { slug, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findById(id: string) {
     return this.db.agent.findUnique({
-      where: { id },
+      where: { id, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlugWithCapabilities(slug: string) {
     return this.db.agent.findUnique({
-      where: { slug },
+      where: { slug, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlugScalar(slug: string) {
-    return this.db.agent.findUnique({ where: { slug } });
+    return this.db.agent.findUnique({ where: { slug, deletedAt: null } });
   }
 
-  async findByIdScalar(id: string) {
-    return this.db.agent.findUnique({ where: { id } });
+  /** `lock` is used inside the caller's transaction to fence capability writes against soft delete. */
+  async findByIdScalar(id: string, options?: { lock: boolean }) {
+    if (options?.lock) {
+      // softDeleteById's UPDATE takes the same row lock. If deletion wins, READ COMMITTED
+      // rechecks deletedAt after waiting and answers no live row; otherwise deletion waits
+      // until replacement, response loading and audit have all committed.
+      const live = await this.db.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Agent" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE
+      `;
+      if (live.length === 0) return null;
+    }
+    return this.db.agent.findUnique({ where: { id, deletedAt: null } });
   }
 
   async create(data: {
@@ -81,18 +95,36 @@ export class PrismaAgentRepository {
     });
   }
 
-  async deleteBySlug(slug: string) {
-    return this.db.agent.delete({ where: { slug } });
-  }
+  /**
+   * Review P2 remainder (US-007): tombstone the agent instead of deleting the row, so its comments
+   * and tickets keep their author. Runs on the caller's transaction (`txManager.run`).
+   *
+   * The slug is read first and the write is conditional on `deletedAt: null`, so two concurrent
+   * deletes cannot both win: the loser's `updateMany` matches no row and answers null. The write
+   * renames the slug (`<slug>~deleted-<id>`, which frees the original one) and replaces the key hash
+   * with a dead `deleted:` value — no key can hash to it, because lookup is a deterministic HMAC.
+   *
+   * `updateManyAndReturn` cannot `include` a relation, so the row is re-read for its capabilities.
+   * The re-read row carries the renamed slug; the answer restores the slug read before the write, so
+   * the caller (response DTO, audit summary) still names the agent as it was when it was deleted.
+   */
+  async softDeleteById(id: string): Promise<AgentWithCapabilities | null> {
+    const existing = await this.db.agent.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) return null;
 
-  /** Delete and return the target by identity; never resolve its reusable slug at execution. */
-  async deleteById(id: string) {
-    try {
-      return await this.db.agent.delete({ where: { id }, include: { capabilities: true } });
-    } catch (error) {
-      if (isRecordNotFound(error)) return null;
-      throw error;
-    }
+    const written = await this.db.agent.updateMany({
+      where: { id, deletedAt: null },
+      data: {
+        deletedAt: new Date(),
+        status: 'OFFLINE',
+        slug: `${existing.slug}~deleted-${id}`,
+        apiKeyHash: `deleted:${randomBytes(32).toString('hex')}`,
+      },
+    });
+    if (written.count === 0) return null;
+
+    const tombstone = await this.db.agent.findUnique({ where: { id }, include: { capabilities: true } });
+    return tombstone ? { ...tombstone, slug: existing.slug } : null;
   }
 
   /**
@@ -160,6 +192,7 @@ export class PrismaAgentRepository {
 
     const agents = await this.db.agent.findMany({
       where: {
+        deletedAt: null,
         assignedTickets: {
           some: {
             projectId: project.id,

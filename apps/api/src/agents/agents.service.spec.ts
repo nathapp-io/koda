@@ -93,8 +93,7 @@ describe('AgentsService', () => {
     create: vi.fn(),
     updateApiKeyHash: vi.fn(),
     update: vi.fn(),
-    deleteBySlug: vi.fn(),
-    deleteById: vi.fn(),
+    softDeleteById: vi.fn(),
     createCapabilities: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
@@ -169,6 +168,7 @@ describe('AgentsService', () => {
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
 
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
+    mockAgentRepo.findByIdScalar.mockResolvedValue(mockAgent);
     // S4c US-001: GET /agents/me always carries the roster projects, and a
     // rostered target agent is the default for the pickup tests.
     mockAgentRepo.findRosterProjects.mockResolvedValue([]);
@@ -364,6 +364,17 @@ describe('AgentsService', () => {
     });
 
     describe('for rotating existing agent key', () => {
+      it('US-008 AC-9/10: rejects a deleted target before rotating its key', async () => {
+        agentRepo.findByIdScalar.mockResolvedValue(null);
+
+        const error = await service.generateApiKey('deleted-agent').catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(NotFoundAppException);
+        expect((error as NotFoundAppException).prefix).toBe('agents');
+        expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent');
+        expect(agentRepo.updateApiKeyHash).not.toHaveBeenCalled();
+      });
+
       it('should generate new random API key', async () => {
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
@@ -636,7 +647,7 @@ describe('AgentsService', () => {
       expect(authProvider.invalidateByTag).toHaveBeenCalledExactlyOnceWith('AGENT:agent-123');
     });
     it('AC-12: removeById defers auth eviction until scope callback returns', async () => {
-      mockAgentRepo.deleteById.mockResolvedValue(mockAgent);
+      mockAgentRepo.softDeleteById.mockResolvedValue(mockAgent);
       await afterCommit.scope(async () => {
         await service.removeById(mockAgent.id);
         expect(authProvider.invalidateByTag).not.toHaveBeenCalled();
@@ -670,6 +681,18 @@ describe('AgentsService', () => {
   });
 
   describe('updateCapabilities', () => {
+    it('US-008 AC-11/12: rejects a deleted agent without writing capability rows', async () => {
+      agentRepo.findByIdScalar.mockResolvedValue(null);
+
+      const error = await service.updateCapabilities('deleted-agent', { capabilities: ['revived'] })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect((error as NotFoundAppException).prefix).toBe('agents');
+      expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent', { lock: true });
+      expect(agentRepo.replaceCapabilities).not.toHaveBeenCalled();
+    });
+
     it('should delete all existing capabilities and insert new ones', async () => {
       const updateData = { capabilities: ['typescript', 'react', 'nodejs'] };
       const updatedAgent = {
@@ -789,13 +812,15 @@ describe('AgentsService', () => {
   });
 
   describe('remove', () => {
-    it('drops the agent and every binding it held (US-004)', async () => {
+    it('tombstones the agent by identity and drops every binding it held (US-004/US-007)', async () => {
+      const tombstone = { ...mockAgent, status: 'OFFLINE', capabilities: [] };
       mockAgentRepo.findBySlug.mockResolvedValue(mockAgent);
-      mockAgentRepo.deleteBySlug.mockResolvedValue(undefined);
+      mockAgentRepo.softDeleteById.mockResolvedValue(tombstone);
 
       const removed = await service.remove('test-agent');
 
-      expect(agentRepo.deleteBySlug).toHaveBeenCalledWith('test-agent');
+      // The slug read at the top only resolves the target; the write is conditional on the immutable id.
+      expect(agentRepo.softDeleteById).toHaveBeenCalledExactlyOnceWith(mockAgent.id);
       // `RoleBinding.principalId` has no foreign key, so the rows outlive the agent row.
       expect(mockMembership.removeAllBindings).toHaveBeenCalledWith({ type: 'AGENT', id: mockAgent.id });
       expect(removed.slug).toBe(mockAgent.slug);
@@ -806,7 +831,31 @@ describe('AgentsService', () => {
 
       await expect(service.remove('nonexistent')).rejects.toBeInstanceOf(NotFoundAppException);
 
-      expect(agentRepo.deleteBySlug).not.toHaveBeenCalled();
+      expect(agentRepo.softDeleteById).not.toHaveBeenCalled();
+      expect(mockMembership.removeAllBindings).not.toHaveBeenCalled();
+    });
+
+    it('AC-12 (US-007): removeById(id) whose softDeleteById answers null throws NotFoundAppException(agents)', async () => {
+      mockAgentRepo.softDeleteById.mockResolvedValue(null);
+
+      const error = await service.removeById(mockAgent.id).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect((error as NotFoundAppException).prefix).toBe('agents');
+      expect(agentRepo.softDeleteById).toHaveBeenCalledExactlyOnceWith(mockAgent.id);
+      expect(mockMembership.removeAllBindings).not.toHaveBeenCalled();
+    });
+
+    it('AC-13 (US-007): remove(slug) whose softDeleteById answers null on a concurrent delete throws NotFoundAppException(agents)', async () => {
+      mockAgentRepo.findBySlug.mockResolvedValue(mockAgent);
+      // The row was tombstoned between the slug read and the write.
+      mockAgentRepo.softDeleteById.mockResolvedValue(null);
+
+      const error = await service.remove('test-agent').catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect((error as NotFoundAppException).prefix).toBe('agents');
+      expect(agentRepo.softDeleteById).toHaveBeenCalledExactlyOnceWith(mockAgent.id);
       expect(mockMembership.removeAllBindings).not.toHaveBeenCalled();
     });
   });

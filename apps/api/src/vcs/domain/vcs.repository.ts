@@ -106,12 +106,18 @@ export interface PrStateWriteOutcome {
 export interface IVcsRepository {
   // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
+  /**
+   * Review P2 remainder (US-003): the import insert. Null means another import of the same
+   * (projectId, externalVcsId) won the race while this call ran outside any transaction — the caller
+   * reports `skipped`. Inside an enclosing transaction the violation is rethrown, because that
+   * transaction is already aborted.
+   */
   createTicketFromIssue(
     project: { id: string },
     issue: { number: number; title: string; body: string | null },
     externalVcsId: string,
     onCreated?: OnTicketCreated,
-  ): Promise<CreateTicketFromIssueResult>;
+  ): Promise<CreateTicketFromIssueResult | null>;
 
   // TicketLink operations
   /** C9 §3.6: active PR links of the project that belong to the connection's repo (D458). */
@@ -140,9 +146,11 @@ export interface IVcsRepository {
   findProjectById(projectId: string): Promise<{ id: string } | null>;
   /** lock requires an active caller-owned transaction and holds the row through its commit. */
   findVcsConnectionByProjectId(projectId: string, options?: { lock: boolean }): Promise<VcsConnectionDomain | null>;
+  /** The connection by id while its project lives; null for a deleted project's connection (US-002). */
   findVcsConnectionById(connectionId: string): Promise<VcsConnectionWithProjectDomain | null>;
   /** The connection of a live (not soft-deleted) project by slug; null for any miss. */
   findVcsConnectionByProjectSlug(slug: string): Promise<VcsConnectionWithProjectDomain | null>;
+  /** Active polling connections of live projects — exactly the ones boot resumes (US-002). */
   findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
   createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;
@@ -158,6 +166,12 @@ export interface IVcsRepository {
   ): Promise<VcsConnectionDomain | null>;
   updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void>;
   deleteVcsConnection(projectId: string): Promise<void>;
+  /**
+   * Review P2 remainder (US-002): the project was soft-deleted, so its active connections stop polling.
+   * Answers the ids it deactivated (empty when it had none), so the caller removes exactly those
+   * schedules once the calling transaction committed.
+   */
+  deactivateConnectionsForProject(projectId: string): Promise<string[]>;
 
   // VcsSyncLog operations
   createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLogDomain>;
