@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T14:51:25.513Z",
+  "updatedAt": "2026-11-03T15:02:30.741Z",
   "userStories": [
     {
       "id": "US-001",
@@ -919,14 +919,17 @@
         "US-004",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Thin Commander options and formatting over generated operations; bounded changes with explicit error-code regression tests and no local authorization decisions."
+        "reasoning": "Thin Commander options and formatting over generated operations; bounded changes with explicit error-code regression tests and no local authorization decisions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/memory.ts",
@@ -960,7 +963,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e05a39aaee5bc283f55270e05f12f9fc4c99480f"
     },
     {
       "id": "US-011",
