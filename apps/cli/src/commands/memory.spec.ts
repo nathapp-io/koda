@@ -17,6 +17,7 @@ jest.mock('../generated', () => ({
   timelineControllerGetTimeline: jest.fn(),
   memoryControllerRecordDecision: jest.fn(),
   memoryControllerCreateMemory: jest.fn(),
+  memoryReadControllerGetMemory: jest.fn(),
   memoryControllerRetireDecision: jest.fn(),
   projectsControllerFindBySlug: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
@@ -28,13 +29,14 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { memoryCommand } from './memory';
-import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
+import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryReadControllerGetMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
 import { resolveContext } from '../config';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockGetTimeline = timelineControllerGetTimeline as jest.Mock;
 const mockRecordDecision = memoryControllerRecordDecision as jest.Mock;
 const mockCreateMemory = memoryControllerCreateMemory as jest.Mock;
+const mockGetMemory = memoryReadControllerGetMemory as jest.Mock;
 const mockRetireDecision = memoryControllerRetireDecision as jest.Mock;
 const mockFindBySlug = projectsControllerFindBySlug as jest.Mock;
 
@@ -235,6 +237,8 @@ describe('memoryCommand', () => {
         body: {
           projectId: 'proj-cuid-1',
           kind: 'FACT',
+          scope: undefined,
+          description: undefined,
           subject: 'ticket-1',
           predicate: 'blocked-by',
           object: 'ticket-2',
@@ -271,6 +275,44 @@ describe('memoryCommand', () => {
       ]);
 
       expect(mockCreateMemory).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+  });
+
+  describe('list and search', () => {
+    const page = { total: 1, current: 1, size: 20, hasNext: false, hasPrev: false, records: [
+      { id: 'n1', kind: 'NOTE', scope: 'user', description: 'replay budget', subject: 'replay-budget' },
+      { id: 'f1', kind: 'FACT', scope: 'project', subject: 'runner', predicate: 'deploys' },
+    ] };
+
+    it('lists a JSON page with filters and selected page', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--project', 'alpha', '--kind', 'NOTE', '--scope', 'user', '--page', '2', '--json']);
+      expect(mockGetMemory).toHaveBeenCalledWith({ path: { slug: 'alpha' }, query: { kind: 'NOTE', scope: 'user', current: 2 } });
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(page, null, 2));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('prints concise human records', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--project', 'alpha']);
+      expect(logSpy.mock.calls.flat().join('\\n')).toContain('n1 NOTE user replay budget');
+      expect(logSpy.mock.calls.flat().join('\\n')).toContain('f1 FACT project runner deploys');
+    });
+
+    it('searches by text', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--project', 'alpha']);
+      expect(mockGetMemory).toHaveBeenCalledWith({ path: { slug: 'alpha' }, query: { text: 'deployed runner' } });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('rejects invalid page before context resolution', async () => {
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--page', '0']);
+      expect(mockGetMemory).not.toHaveBeenCalled();
+      expect(mockResolveContext).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(3);
     });
   });
