@@ -307,6 +307,25 @@ export class MemoryWriteService {
   }
 
   /**
+   * The `memory.create` half of the note retire route's declaration, enforced where the write happens.
+   *
+   * The route declares `memory.create` and `memory.update` as service-enforced, and this is not a key the row's
+   * owner decides: a caller that may replace a row (`memory.update`, the replace check below) but may not create
+   * one in the project must not be able to retire it. The gate answers the same key when the caller asks; this
+   * answers it when the write runs, which is what covers a deferred execution — an approved request executes
+   * later, as the original requester, so a grant revoked after the proposal cannot execute the retirement.
+   *
+   * Membership is not re-read here: `resolveNoteRetireTarget`, which ran immediately before, already asked it and
+   * answered a refusal as `memory.notFound` (the route's step 4). Routing it through `assertMayWrite` would ask
+   * again and answer a membership lost since the ask as a `projects` 403 — telling the caller the row exists.
+   */
+  private async assertMayCreate(principal: KodaPrincipal, projectId: string): Promise<void> {
+    if (!(await this.permissions.can(principal, 'memory.create', { projectId })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+  }
+
+  /**
    * memory-notes US-011: retire a NOTE through `PrismaMemoryItemRepository.retire`, whose transaction locks the
    * row, re-runs the same resolution and audits the retirement before it commits.
    *
@@ -325,6 +344,10 @@ export class MemoryWriteService {
   async retireNote(principal: KodaPrincipal, id: string, projectId?: string, reason?: string) {
     return this.repository.retire(id, async (target) => {
       const { item, projectId: gateProject } = await this.resolveNoteRetireTarget(principal, target, projectId);
+      // Both declared keys, in the project the resolution just proved the caller is a member of: `memory.create`
+      // for the write, `memory.update` for replacing someone else's row. A bad target still answers first, so a
+      // 422/409/404 never becomes a permission refusal.
+      await this.assertMayCreate(principal, gateProject);
       if (item.scope !== MemoryScope.USER && !(await this.writeGuard.mayReplace(principal, gateProject, item))) {
         throw new ForbiddenAppException({}, 'permissions');
       }

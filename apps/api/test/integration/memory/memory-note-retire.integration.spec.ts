@@ -26,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { ModulesContainer } from '@nestjs/core';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { MemoryKind } from '../../../src/common/enums';
 import { MemoryWriteGuard } from '../../../src/memory/memory-write.guard';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
@@ -96,6 +97,11 @@ describeIntegration('memory note retirement: POST /memory/notes/:id/retire (memo
   let world: FleetHttpWorld;
   let alice: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
   let bob: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  /**
+   * An agent that holds the replace authority (`memory.update`) and project access in P but no `memory.create`:
+   * the grant AC-7's fix-round case uses to prove the route enforces both declared keys.
+   */
+  let replaceOnly: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
   let serial = 0;
 
   const server = () => app.getHttpServer();
@@ -173,10 +179,13 @@ describeIntegration('memory note retirement: POST /memory/notes/:id/retire (memo
     world = await seedFleetHttpWorld(server(), db);
     alice = await seedFleetHttpAgent(server(), world.tokens.root);
     bob = await seedFleetHttpAgent(server(), world.tokens.root);
+    replaceOnly = await seedFleetHttpAgent(server(), world.tokens.root);
     // Both agents are rostered in P only: the developer role gives each `memory.create` and `memory.update.own`,
     // which is what lets A retire its own rows and refuses B another principal's (AC-7, AC-16).
     await rosterFleetAgent(db, alice.id, world.projectId);
     await rosterFleetAgent(db, bob.id, world.projectId);
+    // The third agent gets exactly the two keys its case needs, and not `memory.create`.
+    await grantKeys(db, { type: 'AGENT', id: replaceOnly.id }, ['project.read', 'memory.update'], world.projectId);
     await app.get(PermissionCache).invalidate();
   }, 120_000);
 
@@ -337,6 +346,19 @@ describeIntegration('memory note retirement: POST /memory/notes/:id/retire (memo
     expect(response.body.ret).toBe(40003);
     expect(await row(id)).toMatchObject({ status: 'active', activeKey: `NOTE:${SLUG}` });
     expect(await db.auditEntry.count({ where: { resourceId: id, key: 'memory.create' } })).toBe(1);
+  });
+
+  it('AC-7: a caller holding the any-row replace grant but not memory.create is refused, row active', async () => {
+    const created = await postNote(alice.apiKey);
+    const id = itemId(created);
+
+    // The replace authority alone: `memory.update` is exactly what `mayReplace` asks, and `memory.create` — the
+    // key this route declares next to it — is deliberately absent.
+    const response = await retireNote(replaceOnly.apiKey, id).expect(403);
+
+    expect(response.body).toMatchObject({ ret: 40003 });
+    expect(await row(id)).toMatchObject({ status: 'active', activeKey: `NOTE:${SLUG}` });
+    expect(await pendingCount()).toBe(0);
   });
 
   it("AC-16: the refusal of another principal's note is MemoryWriteGuard.mayReplace answering 403 permissions", async () => {
