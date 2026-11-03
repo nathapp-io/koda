@@ -17,6 +17,7 @@ import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
   FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
+  QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
 
 const toJob = (r: JobRow): FleetJobRecord => ({
@@ -167,11 +168,28 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     }
   }
 
-  async findQueuedIds(limit: number): Promise<string[]> {
+  /**
+   * US-004: the SQL filter is the composition this story is about — state, live project, kind and pin are decided
+   * once in the database, so a page never fills with jobs the runner could not take. Paging is a keyset on
+   * `(queuedAt, id)`: `queuedAt` alone is not unique (a schedule tick queues several jobs at once), so the tie is
+   * broken by `id` and the cursor compares the pair.
+   */
+  async findQueuedPage(filter: QueuedScanFilter, limit: number, after: QueuedCursor | null): Promise<QueuedCursor[]> {
     const rows = await this.db.fleetJob.findMany({
-      where: { state: FleetJobState.QUEUED }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: limit, select: { id: true },
+      where: {
+        state: FleetJobState.QUEUED,
+        project: { deletedAt: null },
+        command: filter.threads ? FleetJobKind.THREAD : { not: FleetJobKind.THREAD },
+        OR: [{ pinnedRunnerId: null }, { pinnedRunnerId: filter.runnerId }],
+        ...(after
+          ? { AND: [{ OR: [{ queuedAt: { gt: after.queuedAt } }, { queuedAt: after.queuedAt, id: { gt: after.id } }] }] }
+          : {}),
+      },
+      orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: { id: true, queuedAt: true },
     });
-    return rows.map((r) => r.id);
+    return rows.map((row) => ({ id: row.id, queuedAt: row.queuedAt }));
   }
 
   /** US-001: the project's unstarted jobs, oldest first. ASSIGNED rides along because an unacked ASSIGN is still unstarted. */

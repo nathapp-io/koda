@@ -176,6 +176,13 @@ export function orderCandidates<T extends { runner: PlacementRunner; load: Runne
 /** Oldest-first scan window per fill (moved from placement.service.ts, D413). The dashboard dry-run reads the same window (S2b (c) §2.3). */
 export const QUEUED_SCAN_LIMIT = 50;
 
+/**
+ * US-004: how many pages one fill may read before it gives up. A page holds `QUEUED_SCAN_LIMIT` candidates, so a scan
+ * that needs more than 500 rows means the queue is starving this runner; the fill logs a warn and leaves the rest for
+ * the next sync instead of holding the placement transaction open.
+ */
+export const MAX_QUEUED_SCAN_PAGES = 10;
+
 /** Runner-held job refs -> per-runner load (moved from placement.service.ts, D413). */
 export function addJobToLoad(load: RunnerLoad, ref: { runnerId: string; repoId: string; command?: string; projectId: string; bashMode: string }): RunnerLoad {
   const isThread = isThreadKind(ref.command ?? '');

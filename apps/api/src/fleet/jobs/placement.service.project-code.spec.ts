@@ -50,7 +50,7 @@ function fixture(kind: 'REPO' | 'PROJECT' | 'WORKSPACE', runners: PlacementRunne
     findPlacementRunners: vi.fn(async () => runners),
     lockRunners: vi.fn(async () => runners.map((r) => r.id)),
     findActiveLoads: vi.fn(async () => []),
-    findQueuedIds: vi.fn(async () => ['j1']),
+    findQueuedPage: vi.fn(async () => [{ id: 'j1', queuedAt: NOW }]),
     findThreadAssign: vi.fn(async () => threadAssign(kind)),
     findProjectRepos: vi.fn(async () => repos),
     createCommand: vi.fn(async () => ({})),

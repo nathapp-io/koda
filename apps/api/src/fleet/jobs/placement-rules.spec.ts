@@ -1,7 +1,7 @@
 import type { ProfileNeeds, RunnerCapabilities } from '../common/protocol';
 import { MISFIT_REASONS } from '../dashboard/dashboard.types';
 import {
-  EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
+  EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob,
 } from './placement-rules';
 
@@ -315,6 +315,10 @@ describe('placement helpers moved from PlacementService (D413)', () => {
 
   it('keeps the placement scan window at 50', () => {
     expect(QUEUED_SCAN_LIMIT).toBe(50);
+  });
+
+  it('AC-1 (US-004): bounds a fill scan at 10 pages', () => {
+    expect(MAX_QUEUED_SCAN_PAGES).toBe(10);
   });
 });
 

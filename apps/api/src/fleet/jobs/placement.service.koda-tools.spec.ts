@@ -47,7 +47,7 @@ function fixture(action: 'SESSION' | 'PUBLISH' | 'DISCARD', runners: PlacementRu
     findPlacementRunners: vi.fn(async () => runners),
     lockRunners: vi.fn(async () => runners.map((r) => r.id)),
     findActiveLoads: vi.fn(async () => []),
-    findQueuedIds: vi.fn(async () => ['j1']),
+    findQueuedPage: vi.fn(async () => [{ id: 'j1', queuedAt: NOW }]),
     findThreadAssign: vi.fn(async () => threadAssign(action)),
     createCommand: vi.fn(async () => {
       expect(currentBookkeepingReason()).toBe('fleet.placement');

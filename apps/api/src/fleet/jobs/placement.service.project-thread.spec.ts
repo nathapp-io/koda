@@ -1,5 +1,6 @@
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import type { PlacementRunnerRow } from './domain/fleet-job.domain';
+import { QUEUED_SCAN_LIMIT } from './placement-rules';
 import { PlacementService } from './placement.service';
 
 /**
@@ -41,7 +42,7 @@ function fixture(kind: 'REPO' | 'PROJECT') {
     findPlacementRunners: vi.fn(async () => runners),
     lockRunners: vi.fn(async () => runners.map((r) => r.id)),
     findActiveLoads: vi.fn(async () => []),
-    findQueuedIds: vi.fn(async () => ['j1']),
+    findQueuedPage: vi.fn(async () => [{ id: 'j1', queuedAt: NOW }]),
     findThreadAssign: vi.fn(async () => threadAssign),
     createCommand: vi.fn(async (c: { type: FleetCommandType; payload: unknown }) => c),
     casAssign: vi.fn(async () => 1),
@@ -99,7 +100,7 @@ describe('US-005: fillRunnerThreads (a runner sync) carries the thread kind into
   it('AC-7: queues no ASSIGN for a PROJECT THREAD job on a runner without projectThreads', async () => {
     const { service, repo } = fixture('PROJECT');
     await service.fillRunnerThreads('r1', NOW);
-    expect(repo.findQueuedIds).toHaveBeenCalled();
+    expect(repo.findQueuedPage).toHaveBeenCalledWith({ runnerId: 'r1', threads: true }, QUEUED_SCAN_LIMIT, null);
     expect(repo.casAssign).not.toHaveBeenCalled();
     expect(repo.createCommand).not.toHaveBeenCalled();
   });
