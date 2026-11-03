@@ -6,6 +6,7 @@ import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
 const createMockRepository = () => ({
   findByProject: vi.fn(),
   findByProjectMemory: vi.fn(),
+  findById: vi.fn(),
   findActiveAfterId: vi.fn(),
   findDuplicateActiveKeys: vi.fn(),
   findActiveByKey: vi.fn(),
@@ -47,6 +48,50 @@ describe('MemoryGovernanceService', () => {
       await expect(service.getProjectMemory(query, page)).resolves.toEqual(answer);
 
       expect(mockRepository.findByProjectMemory).toHaveBeenCalledWith(query, page);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-002 — one item by id, project- and deletion-scoped
+  // -------------------------------------------------------------------------
+
+  describe('getMemoryItem (memory-notes US-002)', () => {
+    const now = new Date('2026-11-03T00:00:00.000Z');
+    const note = (over: Partial<MemoryItem> = {}): MemoryItem => ({
+      id: 'note-1', projectId: 'project-123', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
+      object: 'Budget stays 2,048 MiB.', description: 'replay budget', status: 'active', confidence: 0.8,
+      createdAt: now, updatedAt: now, ...over,
+    });
+
+    it('AC-16: answers a note of the project, read by its id through the repository', async () => {
+      mockRepository.findById.mockResolvedValue(note());
+
+      await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toEqual(note());
+      expect(mockRepository.findById).toHaveBeenCalledExactlyOnceWith('note-1');
+    });
+
+    it('AC-16: answers null for a soft-deleted row of the project', async () => {
+      mockRepository.findById.mockResolvedValue(note({ deletedAt: now }));
+
+      await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toBeNull();
+    });
+
+    it('AC-16: answers null for a row of another project, whatever its id', async () => {
+      mockRepository.findById.mockResolvedValue(note({ projectId: 'project-other' }));
+
+      await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toBeNull();
+    });
+
+    it('AC-16: answers null for an id the repository does not hold', async () => {
+      mockRepository.findById.mockResolvedValue(null);
+
+      await expect(service.getMemoryItem('project-123', 'missing-1')).resolves.toBeNull();
+    });
+
+    it('answers an inactive item of the project: a superseded note is still readable, a deleted one is not', async () => {
+      mockRepository.findById.mockResolvedValue(note({ status: 'superseded', activeKey: undefined }));
+
+      await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toMatchObject({ status: 'superseded' });
     });
   });
 

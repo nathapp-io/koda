@@ -27,6 +27,19 @@ export class MemoryGovernanceService {
     return this.repository.findByProjectMemory(query, page);
   }
 
+  /**
+   * memory-notes US-002: one memory item of `projectId` by id, or null.
+   *
+   * The row is read through the repository and answered only when it is not soft-deleted and is a row of
+   * `projectId`. Every other case — an id of another project, a deleted row, an id that names nothing — is the same
+   * null, so a caller cannot tell a foreign id from a missing one. This is what `koda_get_memory` reads.
+   */
+  async getMemoryItem(projectId: string, id: string): Promise<MemoryItem | null> {
+    const item = await this.repository.findById(id);
+    if (!item || item.deletedAt !== undefined || item.projectId !== projectId) return null;
+    return item;
+  }
+
   async runCleanup(projectId: string): Promise<GovernanceResult> {
     const start = Date.now();
 
