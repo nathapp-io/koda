@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MemoryKind } from '../../common/enums';
+import { MEMORY_NOTE_DESCRIPTION_MAX_CHARS } from '../memory-note';
 
 const MEMORY_KINDS = Object.values(MemoryKind);
 
@@ -29,6 +30,16 @@ export class CreateMemoryDto {
   @IsOptional()
   @IsString()
   object?: string;
+
+  @ApiProperty({
+    required: false,
+    maxLength: MEMORY_NOTE_DESCRIPTION_MAX_CHARS,
+    description: 'Index line of a NOTE memory item (required for kind NOTE, rejected for every other kind)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MEMORY_NOTE_DESCRIPTION_MAX_CHARS)
+  description?: string;
 
   @ApiProperty({ required: false, description: 'Where this memory item came from (defaults to "manual")' })
   @IsOptional()

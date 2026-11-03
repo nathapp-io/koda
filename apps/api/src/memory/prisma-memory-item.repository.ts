@@ -4,6 +4,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryItem as MemoryItemModel, PrismaClient } from '../generated/prisma/client';
+import { MemoryKind } from '../common/enums';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
@@ -14,8 +15,15 @@ import {
 import type { MemoryWritten } from './memory-audit';
 import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
 
+/**
+ * The one key an active row of a project is unique on.
+ *
+ * Every triple keeps `KIND:subject:predicate`. A note (US-001) keys on its slug alone — `NOTE:<slug>` — so
+ * re-saving a slug with a new type, body or index line replaces the note the project already has instead of
+ * leaving a second note of a different type behind.
+ */
 export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
-  return `${kind}:${subject}:${predicate}`;
+  return kind === MemoryKind.NOTE ? `${MemoryKind.NOTE}:${subject}` : `${kind}:${subject}:${predicate}`;
 }
 
 export interface MemoryDedupKey {
@@ -70,6 +78,7 @@ export class PrismaMemoryItemRepository
       subject: m.subject,
       predicate: m.predicate,
       object: m.object ?? undefined,
+      description: m.description ?? undefined,
       activeKey: m.activeKey ?? undefined,
       ownerId: m.ownerId ?? undefined,
       ownerType: ownerTypeOf(m),
@@ -92,6 +101,7 @@ export class PrismaMemoryItemRepository
       subject: domain.subject,
       predicate: domain.predicate,
       object: domain.object ?? null,
+      description: domain.description ?? null,
       activeKey: domain.activeKey ?? null,
       ownerId: domain.ownerId ?? null,
       ownerType: domain.ownerType ?? null,
@@ -112,6 +122,7 @@ export class PrismaMemoryItemRepository
     if (patch.subject !== undefined) data.subject = patch.subject;
     if (patch.predicate !== undefined) data.predicate = patch.predicate;
     if (patch.object !== undefined) data.object = patch.object ?? null;
+    if (patch.description !== undefined) data.description = patch.description ?? null;
     if (patch.activeKey !== undefined) data.activeKey = patch.activeKey ?? null;
     if (patch.ownerId !== undefined) data.ownerId = patch.ownerId ?? null;
     if (patch.ownerType !== undefined) data.ownerType = patch.ownerType ?? null;
@@ -207,22 +218,25 @@ export class PrismaMemoryItemRepository
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
+        // US-001: the active row is found by its key, never by the triple, so a note (whose key is the slug
+        // alone) is replaced when the same slug comes back with another type.
         const existingActive = await db.memoryItem.findFirst({
           where: {
             projectId: item.projectId,
-            kind: item.kind,
-            subject: item.subject,
-            predicate: item.predicate,
-            activeKey: { not: null },
+            activeKey,
             deletedAt: null,
           },
         });
 
         // Outbox replays re-run this handler: restating the same fact from the
-        // same source is a no-op instead of superseding an identical row.
+        // same source is a no-op instead of superseding an identical row. A note
+        // compares its type and index line too (US-001), so a restatement of the
+        // whole note is the no-op while a changed type or description supersedes.
         if (
           existingActive &&
           existingActive.object === (item.object ?? null) &&
+          existingActive.predicate === item.predicate &&
+          existingActive.description === (item.description ?? null) &&
           existingActive.sourceType === item.sourceType &&
           existingActive.sourceId === item.sourceId
         ) {
@@ -248,6 +262,7 @@ export class PrismaMemoryItemRepository
             subject: item.subject,
             predicate: item.predicate,
             object: item.object,
+            description: item.description ?? null,
             activeKey,
             ownerId: item.ownerId,
             ownerType: item.ownerType ?? null,
@@ -292,7 +307,12 @@ export class PrismaMemoryItemRepository
     predicate: string,
   ): Promise<MemoryItem | null> {
     const m = await this.prisma.client.memoryItem.findFirst({
-      where: { projectId, kind, subject, predicate, activeKey: { not: null }, status: 'active', deletedAt: null },
+      where: {
+        projectId,
+        activeKey: buildActiveKey(projectId, kind, subject, predicate),
+        status: 'active',
+        deletedAt: null,
+      },
     });
     return m ? this.toDomain(m) : null;
   }

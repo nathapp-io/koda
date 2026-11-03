@@ -30,6 +30,8 @@ export interface MemoryItemInput {
   subject: string;
   predicate: string;
   object?: string;
+  /** US-001: the index line of a `NOTE`; a triple kind carries none. */
+  description?: string;
   activeKey?: string | null;
   ownerId?: string;
   /**
@@ -53,6 +55,8 @@ export interface MemoryItem {
   subject: string;
   predicate: string;
   object?: string;
+  /** US-001: the index line of a `NOTE`; absent on every triple kind. */
+  description?: string;
   activeKey?: string;
   ownerId?: string;
   /** Permissions P1 US-008: which table `ownerId` names; null for a system item or an unknown owner. */

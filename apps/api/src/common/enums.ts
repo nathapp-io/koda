@@ -96,6 +96,11 @@ export const MemoryKind = {
   PREFERENCE: 'PREFERENCE',
   CONSTRAINT: 'CONSTRAINT',
   INCIDENT_PATTERN: 'INCIDENT_PATTERN',
+  /**
+   * US-001: a Markdown note, not a fact: `subject` is the slug, `predicate` the note type, `object` the body
+   * and `description` the index line (see `src/memory/memory-note.ts`).
+   */
+  NOTE: 'NOTE',
 } as const;
 export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
 

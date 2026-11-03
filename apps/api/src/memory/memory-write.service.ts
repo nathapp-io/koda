@@ -11,6 +11,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { MemoryReplaceRefusedError, MemoryWriteGuard, ownerTypeFor } from './memory-write.guard';
 import { memoryAuditHook, type MemoryAuditKey } from './memory-audit';
+import { noteFieldError } from './memory-note';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { CreateMemoryDto } from './dto/create-memory.dto';
@@ -235,11 +236,20 @@ export class MemoryWriteService {
     // go through recordDecision, which forces non-admin callers to record as
     // themselves. The generic route can no longer be used to forge them.
     if (input.kind === MemoryKind.DECISION) {
-      throw new ValidationAppException(
-        { kind: 'DECISION memory items must be recorded via POST /memory/decisions' },
-        'memory',
-      );
+      throw new ValidationAppException({ field: 'kind' }, 'memory');
     }
+
+    // US-001: a NOTE is validated by the same pure check the assistant tool calls, before anything is read
+    // or written, and the refusal names the field (`memory.-2` renders it). Every other kind is refused when
+    // it carries a description, which only a note has.
+    const noteField = noteFieldError({
+      kind: input.kind,
+      subject: input.subject,
+      predicate: input.predicate,
+      object: input.object,
+      description: input.description,
+    });
+    if (noteField) throw new ValidationAppException({ field: noteField }, 'memory');
 
     // H12: only a global-grant holder may attribute a memory item to an arbitrary owner; every other caller
     // always owns what they write, so a compromised agent/user cannot plant memories under someone else's
@@ -256,6 +266,7 @@ export class MemoryWriteService {
       subject: input.subject,
       predicate: input.predicate,
       object: input.object,
+      description: input.description,
       sourceType: input.sourceType ?? 'manual',
       sourceId: input.sourceId,
       confidence: input.confidence ?? 0.8,

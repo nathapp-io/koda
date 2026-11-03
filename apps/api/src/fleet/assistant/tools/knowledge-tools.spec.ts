@@ -133,7 +133,8 @@ describe('knowledge tools (US-004)', () => {
       ['an empty text', { text: '' }, 'text'],
       ['a whitespace-only text', { text: '   ' }, 'text'],
       ['a 101-character text', { text: 'x'.repeat(101) }, 'text'],
-      ['an unknown kind', { kind: 'NOTE' }, 'kind'],
+      // MemoryKind.NOTE is a real kind since US-001 (memory notes); MEMO is not a kind at all.
+      ['an unknown kind', { kind: 'MEMO' }, 'kind'],
       ['an unknown status', { status: 'deleted' }, 'status'],
       ['page 0', { page: 0 }, 'page'],
       ['a fractional page', { page: 1.5 }, 'page'],

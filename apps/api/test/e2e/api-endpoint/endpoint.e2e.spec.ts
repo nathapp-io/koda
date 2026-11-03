@@ -3832,6 +3832,47 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // US-001 Memory notes: POST /api/memory with kind NOTE
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-001 memory notes', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-replay-budget-${++serial}`;
+
+    const postNote = (body: Record<string, unknown>) =>
+      request(httpServer).post('/api/memory').set('Authorization', `Bearer ${userAccessToken}`).send(body);
+
+    it('AC-12: POST /api/memory — 201 stores a NOTE with its index line', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const slug = uniqueSlug();
+
+      const res = await postNote({
+        projectId: project.id, kind: 'NOTE', subject: slug, predicate: 'project',
+        object: 'Budget stays 2,048 MiB.', description: 'replay budget',
+      }).expect(201);
+
+      expect(body<{ id: string; description?: string }>(res)).toMatchObject({ description: 'replay budget' });
+      expect(await db.memoryItem.findFirstOrThrow({ where: { projectId: project.id, subject: slug } })).toMatchObject({
+        kind: 'NOTE', predicate: 'project', description: 'replay budget', activeKey: `NOTE:${slug}`, status: 'active',
+      });
+    });
+
+    it('AC-17: POST /api/memory — 400 when a triple write carries a description', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const slug = uniqueSlug();
+
+      const res = await postNote({
+        projectId: project.id, kind: 'FACT', subject: slug, predicate: 'stays', object: '2048 MiB', description: 'not a note',
+      }).expect(400);
+
+      refusal(res, 'memory.-2', { field: 'description' });
+      expect(await db.memoryItem.count({ where: { projectId: project.id, subject: slug } })).toBe(0);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // US-003 Thread create, list, get and messages routes
   // ─────────────────────────────────────────────────────────────────
 

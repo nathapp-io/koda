@@ -648,10 +648,11 @@ model Symbol {
 model MemoryItem {
   id           String    @id @default(cuid())
   projectId    String
-  kind         String // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN
-  subject      String // e.g. 'ticket:123'
-  predicate    String // e.g. 'status', 'assigned_to'
-  object       String? // e.g. 'IN_PROGRESS', 'user:456'
+  kind         String // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN | NOTE
+  subject      String // e.g. 'ticket:123', or the slug of a NOTE
+  predicate    String // e.g. 'status', 'assigned_to', or the type of a NOTE
+  object       String? // e.g. 'IN_PROGRESS', 'user:456', or the Markdown body of a NOTE
+  description  String? // NOTE index line (US-001); null for every triple kind
   confidence   Float     @default(0.8) // 0.0 - 1.0
   ttlAt        DateTime? // null = never expires
   ownerId      String? // agent or user who created it

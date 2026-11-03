@@ -11,6 +11,8 @@ const makeModelRow = (overrides: Record<string, unknown> = {}) => ({
   subject: 'ticket:1',
   predicate: 'status',
   object: 'active',
+  // US-001: a triple row stores no index line, exactly as `db push` leaves the column for every old row.
+  description: null,
   activeKey: 'FACT:ticket:1:status',
   ownerId: 'user-1',
   sourceType: 'ticket_event',
@@ -165,15 +167,29 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
       expect(result).not.toBeNull();
       expect(result?.id).toBe('mem-1');
+      // US-001: the lookup is the active key, so a note (whose key is its slug alone) is found the same way.
       expect(mockMemoryItem.findFirst).toHaveBeenCalledWith({
-        where: expect.objectContaining({
+        where: {
           projectId: 'project-123',
-          kind: 'FACT',
-          subject: 'ticket:1',
-          predicate: 'status',
+          activeKey: 'FACT:ticket:1:status',
           status: 'active',
           deletedAt: null,
-        }),
+        },
+      });
+    });
+
+    it('looks a NOTE up by its slug key alone', async () => {
+      mockMemoryItem.findFirst.mockResolvedValue(makeModelRow({ kind: 'NOTE', activeKey: 'NOTE:replay-budget' }));
+
+      await repository.findActive('project-123', 'NOTE', 'replay-budget', 'project');
+
+      expect(mockMemoryItem.findFirst).toHaveBeenCalledWith({
+        where: {
+          projectId: 'project-123',
+          activeKey: 'NOTE:replay-budget',
+          status: 'active',
+          deletedAt: null,
+        },
       });
     });
   });

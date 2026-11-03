@@ -1702,7 +1702,8 @@
                 "DECISION",
                 "PREFERENCE",
                 "CONSTRAINT",
-                "INCIDENT_PATTERN"
+                "INCIDENT_PATTERN",
+                "NOTE"
               ]
             }
           },
@@ -15621,7 +15622,8 @@
               "DECISION",
               "PREFERENCE",
               "CONSTRAINT",
-              "INCIDENT_PATTERN"
+              "INCIDENT_PATTERN",
+              "NOTE"
             ],
             "type": "string",
             "description": "Kind of memory item"
@@ -15639,6 +15641,11 @@
           "object": {
             "type": "string",
             "description": "Object — the value/target of the predicate"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Index line of a NOTE memory item (required for kind NOTE, rejected for every other kind)"
           },
           "sourceType": {
             "type": "string",
