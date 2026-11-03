@@ -1,6 +1,7 @@
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { CommentsService } from '../../../src/comments/comments.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
@@ -68,6 +69,46 @@ describeIntegration('comment soft delete', () => {
     expect(result?.comments.map(({ body }) => body)).not.toContain('deleted');
     expect(result?.comments.map(({ body }) => body)).not.toContain(tombstone.body);
     expect(await db.comment.findUniqueOrThrow({ where: { id: live.id } })).toBeDefined();
+  });
+
+  it('PATCH racing a committed DELETE returns comments 404 without changing the tombstone body', async () => {
+    const created = data<{ id: string }>(await request(server()).post(commentsPath())
+      .set(rootAuth()).send({ body: 'retain original body' }).expect(201));
+    const permissions = app.get(PermissionService);
+    const can = permissions.can.bind(permissions);
+    let reached!: () => void;
+    let resume!: () => void;
+    const authorizing = new Promise<void>((resolve) => { reached = resolve; });
+    const released = new Promise<void>((resolve) => { resume = resolve; });
+    const spy = vi.spyOn(permissions, 'can').mockImplementation(async (...args) => {
+      const decision = await can(...args);
+      if (args[1] === 'comment.update' && args[2]?.resource) {
+        reached();
+        await released;
+      }
+      return decision;
+    });
+    // Start PATCH and stop after its ownership read, before its write. No sleeps:
+    // DELETE must commit before the suspended authorization can finish.
+    const patch = request(server()).patch(`/api/comments/${created.id}`).set(rootAuth())
+      .send({ body: 'must not persist' }).then((response) => response);
+    try {
+      await Promise.race([
+        authorizing,
+        patch.then(() => { throw new Error('PATCH ended before reaching the authorization barrier'); }),
+      ]);
+      await request(server()).delete(`/api/comments/${created.id}`).set(rootAuth()).expect(204);
+    } finally {
+      resume();
+      spy.mockRestore();
+    }
+    const response = await patch;
+    expect(response.status).toBe(404);
+    expect(String(response.body.message).toLowerCase()).toContain('comment');
+    const retained = await db.comment.findUniqueOrThrow({ where: { id: created.id } });
+    expect(retained.deletedAt).toBeInstanceOf(Date);
+    expect(retained.body).toBe('retain original body');
+    expect(await db.auditEntry.count({ where: { resourceId: created.id, key: 'comment.update' } })).toBe(0);
   });
 
   it('AC-6/7: PATCH and repeated DELETE of a deleted comment both answer 404', async () => {

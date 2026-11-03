@@ -82,6 +82,15 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
     return this.prisma.client.comment.count({ where: { ticketId, deletedAt: null } });
   }
 
+  /** Keep every update atomic with respect to soft deletion, not just its earlier lookup. */
+  override async update(id: string, patch: Partial<CommentDomain>): Promise<CommentDomain> {
+    const updated = await this.prisma.client.comment.update({
+      where: { id, deletedAt: null },
+      data: this.toPersistenceUpdate(patch),
+    });
+    return this.toDomain(updated);
+  }
+
   async softDelete(id: string): Promise<void> {
     await this.prisma.client.comment.updateMany({
       where: { id, deletedAt: null },

@@ -171,7 +171,7 @@ describe('CommentsController', () => {
     mockCommentsService.resolveCommentProject.mockResolvedValue('project-p');
     mockRouteGate.run.mockResolvedValue({ status: 'executed', result: mockComment });
     await controller.updateFromHttp('c1', patch, mockAgent);
-    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockAgent);
+    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockAgent, 'update');
     expect(mockRouteGate.run).toHaveBeenCalledExactlyOnceWith({
       key: 'comment.update', variant: 'rest:comments.update', projectId: 'project-p', input: { id: 'c1', patch },
     });

@@ -43,6 +43,7 @@ describeIntegration('gated comment write routes', () => {
     outsider = await seedFleetHttpAgent(server(), world.tokens.root);
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'comment.create', 'comment.update.own'], project.id);
     await grantKeys(db, { type: 'AGENT', id: keyless.id }, ['project.read'], project.id);
+    await grantKeys(db, { type: 'USER', id: world.ids.viewer }, ['project.read'], project.id);
     await app.get(PermissionCache).invalidate();
   }, 60000);
   beforeEach(async () => {
@@ -130,6 +131,20 @@ describeIntegration('gated comment write routes', () => {
   it('AC-13: served Swagger documents only GENERAL as the comment-create type', async () => {
     const response = await request(server()).get('/swagger-ui.html-json').expect(200);
     expect(response.body.components.schemas.CreateCommentDto.properties.type.enum).toEqual(['GENERAL']);
+  });
+
+  it.each(['keyless member', 'wait-policy agent'] as const)('workflow edit by a %s returns 409 without opening an approval request', async (scenario) => {
+    const created = await createComment('immutable workflow');
+    await db.comment.update({ where: { id: created.id }, data: { type: 'FIX_REPORT' } });
+    await seedWaitPolicy(db, 'comment.update', project.id);
+    const token = scenario === 'keyless member' ? world.tokens.viewer : agent.apiKey;
+
+    const response = await request(server()).patch(`/api/comments/${created.id}`)
+      .set(auth(token)).send({ body: 'changed' }).expect(409);
+
+    expect(response.body.message).toContain('Workflow comments cannot be edited');
+    expect(await db.approvalRequest.count()).toBe(0);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: created.id } })).body).toBe('immutable workflow');
   });
 
   it('AC-11/12: member cannot edit FIX_REPORT; returns localized 409 and preserves body', async () => {
