@@ -165,13 +165,40 @@ describeIntegration('memory user scope: POST /memory with scope user (memory-not
 
   // -------------------------------------------------------------------------
   // AC-4 — membership of the named project is still what authorises the write
+  //
+  // A lone "a non-member is refused" case cannot tell a user-scope request that reached the
+  // membership gate from a request whose `scope` the route ignored: the membership refusal comes
+  // first either way. The case is therefore paired — the SAME agent credential that a project grant
+  // makes a member is accepted, and the same body from the same agent before that grant is refused —
+  // so the control below only holds when the scope was accepted as a user note, and the refusal only
+  // holds when the write is what the project grant authorises.
   // -------------------------------------------------------------------------
 
-  it('AC-4: an agent that is not a member of the named project is refused and writes nothing', async () => {
-    const response = await post(stranger.apiKey, userNote()).expect(403);
+  it('AC-4: a user-scope write is refused for a non-member although the same body stores for a member', async () => {
+    // Control: the identical body from an agent that IS a member of the named project is accepted, and it
+    // stores the user row the scope asks for — no project, the caller as owner. If `scope` were ignored or
+    // stripped, this row would carry the project and this assertion would fail.
+    const stored = await post(alice.apiKey, userNote()).expect(201);
+    const storedId = itemId(stored);
+    expect(await db.memoryItem.findUniqueOrThrow({ where: { id: storedId } })).toMatchObject({
+      projectId: null,
+      scope: 'user',
+      ownerKey: `AGENT:${alice.id}`,
+      status: 'active',
+    });
 
-    expect(response.body.ret).toBe(40003);
-    expect(await db.memoryItem.count()).toBe(0);
+    // The refusal: the stranger is a live agent holding no grant in the named project. It sends the same
+    // body, so nothing but membership can distinguish the two requests.
+    const refused = await post(stranger.apiKey, userNote({ object: 'Prefers no tests at all.' })).expect(403);
+
+    // The permission refusal, not the memory validation envelope (`ret: -2`) a refused scope answers.
+    expect(refused.body.ret).toBe(40003);
+    // Nothing was written for the stranger — and the member's note was not superseded by the attempt.
+    expect(await db.memoryItem.count()).toBe(1);
+    expect(await db.memoryItem.findUniqueOrThrow({ where: { id: storedId } })).toMatchObject({
+      status: 'active',
+      object: 'Prefers small commits with a test each.',
+    });
   });
 
   // -------------------------------------------------------------------------
