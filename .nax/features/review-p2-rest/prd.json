@@ -3,7 +3,7 @@
   "feature": "review-p2-rest",
   "branchName": "feat/review-p2-rest",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T03:54:52.965Z",
+  "updatedAt": "2026-11-03T04:07:48.410Z",
   "userStories": [
     {
       "id": "US-001",
@@ -309,14 +309,17 @@
         "pagination"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Composed SQL predicates and bounded cursors change two transactional placement paths while preserving lock, budget and load semantics; this does not change authorization rules."
+        "reasoning": "Composed SQL predicates and bounded cursors change two transactional placement paths while preserving lock, budget and load semantics; this does not change authorization rules.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/placement.service.ts",
@@ -360,7 +363,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b6296109c9178192dbcde817348892feffa51ece"
     },
     {
       "id": "US-005",
