@@ -200,6 +200,8 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     await createUserWithBinding('padmin', 'project-admin');
     // AC-13: a custom role that holds ticket.read and nothing memory-shaped.
     await createUserWithBinding('reader', TICKET_READER_ROLE);
+    // A baseline-only caller has no project binding and is used to verify guarded reads refuse non-members.
+    await createUser('outsider');
     // AC-3, AC-14: an agent whose only permission source in p1 is a developer binding.
     await createAgent('p1-mem-agent', 'developer');
 
@@ -236,6 +238,7 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
       { type: 'USER', id: ids.viewer },
       { type: 'USER', id: ids.padmin },
       { type: 'USER', id: ids.reader },
+      { type: 'USER', id: ids.outsider },
       { type: 'AGENT', id: ids['p1-mem-agent'] },
     ]);
   });
@@ -405,5 +408,52 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     expect(textOf(answer)).toBe('forbidden: koda_add_memory needs memory.update on p1');
     expect(answer.isError).toBe(true);
     expect(await activeRow('ac14:tool', 'uses')).toEqual(owned);
+  }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // Memory notes US-007 — the reported gate mode over the real guarded HTTP routes
+  // -------------------------------------------------------------------------
+
+  it('US-007 AC-8: an agent member without a memory.create policy reads direct mode and no agent policy', async () => {
+    const response = await as('p1-mem-agent', 'get', `/api/projects/${P1_SLUG}/memory/write-mode`).expect(200);
+    expect(data<{ mode: string; policyId: string | null; source: string; agentPolicy: unknown }>(response)).toMatchObject({
+      mode: 'direct', policyId: null, source: 'default', agentPolicy: null,
+    });
+  }, TIMEOUT);
+
+  it('US-007 AC-7: wildcard all policy reports proposal and the agent POST is held by the same gate', async () => {
+    const policy = await prisma.approvalPolicy.create({ data: {
+      selector: `${p1Id}|memory.*|all`, projectId: p1Id, permissionPattern: 'memory.*',
+      principalType: null, principalId: null, roleId: null, mode: 'human',
+      updatedByType: 'USER', updatedById: ids.root,
+    } });
+    try {
+      const response = await as('p1-mem-agent', 'get', `/api/projects/${P1_SLUG}/memory/write-mode`).expect(200);
+      expect(data<{ mode: string; policyId: string | null; source: string; agentPolicy: unknown }>(response)).toMatchObject({
+        mode: 'proposal', policyId: policy.id, source: 'policy', agentPolicy: null,
+      });
+      await postMemory('p1-mem-agent', { subject: 'us007:held', predicate: 'mode', object: 'proposal' }).expect(202);
+      expect(await rows('us007:held', 'mode')).toEqual([]);
+    } finally {
+      await prisma.approvalPolicy.delete({ where: { id: policy.id } });
+    }
+  }, TIMEOUT);
+
+  it('US-007 AC-9: unknown projects are 404 and non-members are refused', async () => {
+    await as('p1-mem-agent', 'get', '/api/projects/no-such-project/memory/write-mode').expect(404);
+    expect((await as('outsider', 'get', `/api/projects/${P1_SLUG}/memory/write-mode`)).status).toBe(403);
+  }, TIMEOUT);
+
+  it('US-007 AC-10: a member without memory.read is refused the write-mode route', async () => {
+    expectPermissionsRefusal(await as('reader', 'get', `/api/projects/${P1_SLUG}/memory/write-mode`));
+  }, TIMEOUT);
+
+  it('US-007 AC-11: soft-deleted project slugs are not readable', async () => {
+    await prisma.project.update({ where: { id: p1Id }, data: { deletedAt: new Date() } });
+    try {
+      await as('p1-mem-agent', 'get', `/api/projects/${P1_SLUG}/memory/write-mode`).expect(404);
+    } finally {
+      await prisma.project.update({ where: { id: p1Id }, data: { deletedAt: null } });
+    }
   }, TIMEOUT);
 });

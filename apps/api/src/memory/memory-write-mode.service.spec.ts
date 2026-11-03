@@ -17,13 +17,14 @@ const policy = (values: Record<string, unknown> = {}) => ({
 
 describe('MemoryWriteModeService', () => {
   const resolver = { resolve: vi.fn() };
-  const policies = { list: vi.fn() };
+  const policies = { list: vi.fn(), getProjectAgentMemoryCreatePolicy: vi.fn() };
   let service: MemoryWriteModeService;
 
   beforeEach(() => {
     vi.resetAllMocks();
     resolver.resolve.mockResolvedValue(resolved('none', null, 'default'));
     policies.list.mockResolvedValue([]);
+    policies.getProjectAgentMemoryCreatePolicy.mockResolvedValue(null);
     service = new MemoryWriteModeService(resolver as unknown as ApprovalPolicyResolver, policies as unknown as ApprovalPolicyService);
   });
 
@@ -47,16 +48,14 @@ describe('MemoryWriteModeService', () => {
   });
 
   it('AC-5 selects the exact project-wide AGENT type policy, even when disabled', async () => {
-    policies.list.mockResolvedValue([policy()]);
+    policies.getProjectAgentMemoryCreatePolicy.mockResolvedValue(policy());
     expect(await service.resolve('p1', agent)).toMatchObject({ agentPolicy: { id: 'policy-a', mode: 'none' } });
-    expect(policies.list).toHaveBeenCalledWith({ projectId: 'p1', permissionPattern: 'memory.create' }, { current: 1, size: expect.any(Number) });
+    expect(policies.getProjectAgentMemoryCreatePolicy).toHaveBeenCalledWith('p1');
   });
 
-  it.each([
-    policy({ roleId: 'role-a', principalType: null }),
-    policy({ principalId: 'agent-a' }),
-  ])('AC-6 does not expose a role- or principal-specific policy as agentPolicy', async (row) => {
-    policies.list.mockResolvedValue([row]);
+  it('AC-6 does not expose a role- or principal-specific policy as agentPolicy', async () => {
+    policies.getProjectAgentMemoryCreatePolicy.mockResolvedValue(null);
     expect(await service.resolve('p1', agent)).toMatchObject({ agentPolicy: null });
+    expect(policies.getProjectAgentMemoryCreatePolicy).toHaveBeenCalledWith('p1');
   });
 });
