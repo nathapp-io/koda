@@ -48,6 +48,7 @@ async function choose(mode: 'direct' | 'proposal'): Promise<void> {
     <h2 class="text-lg font-semibold">{{ t('memory.settings.title') }}</h2>
     <p class="text-sm text-muted-foreground">{{ t('memory.settings.description') }}</p>
     <LoadingState v-if="loading" />
+    <ErrorState v-else-if="!state" @retry="refresh" />
     <div v-else class="flex flex-wrap gap-3">
       <Button
         type="button"

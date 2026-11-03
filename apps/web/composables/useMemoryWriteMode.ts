@@ -23,6 +23,7 @@ export function useMemoryWriteMode(slug: string) {
   const loading = ref(true)
 
   async function load(): Promise<MemoryWriteMode> {
+    loading.value = true
     try {
       const result = await $api.get(apiPath`/projects/${slug}/memory/write-mode`) as MemoryWriteMode
       state.value = result

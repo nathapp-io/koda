@@ -61,6 +61,16 @@ describe('US-009 SettingsMemoryCard', () => {
     app.unmount()
   })
 
+  test('a failed write-mode load shows the retry state and never offers unsafe writes', async () => {
+    get.mockRejectedValueOnce(new apiModule.ApiError(500, 'Load refused'))
+    const app = await mountCard()
+    expect(app.text()).toContain('Load refused')
+    expect(app.find('[data-stub="error-state"]')).toHaveLength(1)
+    expect(byId(app, 'memory-mode-direct')).toBeUndefined()
+    expect(byId(app, 'memory-mode-proposal')).toBeUndefined()
+    app.unmount()
+  })
+
   test('AC-2: creates the exact AGENT policy and reloads write mode', async () => {
     const app = await mountCard()
     await click(app, 'memory-mode-proposal')
