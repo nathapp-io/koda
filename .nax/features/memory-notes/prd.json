@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T12:20:44.083Z",
+  "updatedAt": "2026-11-03T12:34:38.450Z",
   "userStories": [
     {
       "id": "US-001",
@@ -147,14 +147,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module tool/catalog integration includes project isolation, permissioned fetches and guarded replacement of untrusted memory."
+        "reasoning": "Cross-module tool/catalog integration includes project isolation, permissioned fetches and guarded replacement of untrusted memory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
@@ -220,7 +223,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3b8b8d55c4a05184c0ec8122ebf2a1c004d479a0"
     },
     {
       "id": "US-003",
