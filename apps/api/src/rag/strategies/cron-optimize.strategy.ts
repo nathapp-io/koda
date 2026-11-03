@@ -1,11 +1,8 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { IRagConfig, RAG_CFG } from '../../config/rag.config';
-import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
+import type { FtsOptimizeStrategy, OptimizeTask } from './fts-optimize-strategy.interface';
 import { optimizeInBackground } from './optimize-in-background';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceTable = any;
 
 /** Minimal interface for SchedulerRegistry — full type added when @nestjs/schedule is installed (US-002) */
 interface SchedulerRegistryLike {
@@ -17,7 +14,7 @@ interface SchedulerRegistryLike {
 @SystemWriter('system.rag.optimize')
 export class CronOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(CronOptimizeStrategy.name);
-  private readonly dirtyTables = new Map<string, LanceTable>();
+  private readonly dirtyTables = new Map<string, OptimizeTask>();
   private readonly intervalMs: number;
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -33,18 +30,19 @@ export class CronOptimizeStrategy implements FtsOptimizeStrategy {
     this.schedulerRegistry.addInterval('fts-optimize', this.intervalId);
   }
 
-  onInsert(projectId: string, table: LanceTable): Promise<void> {
-    this.dirtyTables.set(projectId, table);
+  onInsert(projectId: string, optimize: OptimizeTask): Promise<void> {
+    this.dirtyTables.set(projectId, optimize);
     return Promise.resolve();
   }
 
+  /** The tick: runs each dirty project's task, which takes the table's write mutex itself. Never inside a session. */
   async optimizeDirtyTables(): Promise<void> {
     const entries = Array.from(this.dirtyTables.entries());
     this.dirtyTables.clear();
     await Promise.all(
-      entries.map(async ([projectId, table]) => {
+      entries.map(async ([projectId, optimize]) => {
         try {
-          await table.optimize();
+          await optimize();
         } catch (err) {
           this.logger.warn(`FTS optimize failed for project ${projectId}: ${(err as Error).message}`);
         }
@@ -52,9 +50,9 @@ export class CronOptimizeStrategy implements FtsOptimizeStrategy {
     );
   }
 
-  onFirstAccess(projectId: string, table: LanceTable): void {
+  onFirstAccess(projectId: string, optimize: OptimizeTask): void {
     this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
-    optimizeInBackground(table, projectId, this.logger);
+    optimizeInBackground(optimize, projectId, this.logger);
   }
 
   async onDestroy(): Promise<void> {

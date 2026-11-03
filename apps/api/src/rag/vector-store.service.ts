@@ -6,6 +6,7 @@ import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-c
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
+import type { OptimizeTask } from './strategies/fts-optimize-strategy.interface';
 import { EntityStore } from './entity-store';
 import {
   LanceTableManager,
@@ -132,6 +133,19 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Builds the lock-aware optimize for one project table (US-006).
+   *
+   * The task takes the per-table write mutex the same way every other write does, so an optimize can never race a
+   * knowledge `replaceFile` (or a held write session) on that table. Callers that may already hold the mutex must not
+   * await it — `exclusive` is non-reentrant.
+   */
+  private optimizeTaskFor(projectId: string, table: LanceTable): OptimizeTask {
+    return () => this.lanceTable.exclusive(`project_${projectId}`, async () => {
+      await table.optimize();
+    });
+  }
+
+  /**
    * Validates project ID format and existence.
    *
    * Public because RagService.importGraphify also needs to validate a
@@ -187,7 +201,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       onFirstAccess: optimizeStrategy
         ? (table) => {
             if (!this.lanceTable.available) return Promise.resolve();
-            return optimizeStrategy.onFirstAccess(projectId, table);
+            return optimizeStrategy.onFirstAccess(projectId, this.optimizeTaskFor(projectId, table));
           }
         : undefined,
       // Stable per-process hook identity: there is exactly one
@@ -265,7 +279,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     }
 
     if (this.lanceTable.available && this.optimizeStrategy) {
-      await this.optimizeStrategy.onInsert(projectId, table);
+      await this.optimizeStrategy.onInsert(projectId, this.optimizeTaskFor(projectId, table));
     }
 
     return id;

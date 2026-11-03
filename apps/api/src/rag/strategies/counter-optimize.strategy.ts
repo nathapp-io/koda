@@ -1,11 +1,8 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { IRagConfig, RAG_CFG } from '../../config/rag.config';
-import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
+import type { FtsOptimizeStrategy, OptimizeTask } from './fts-optimize-strategy.interface';
 import { optimizeInBackground } from './optimize-in-background';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceTable = any;
 
 @Injectable()
 @SystemWriter('system.rag.optimize')
@@ -18,23 +15,21 @@ export class CounterOptimizeStrategy implements FtsOptimizeStrategy {
     this.threshold = ragConfig.ftsOptimizeThreshold;
   }
 
-  async onInsert(projectId: string, table: LanceTable): Promise<void> {
+  async onInsert(projectId: string, optimize: OptimizeTask): Promise<void> {
     const count = (this.counters.get(projectId) ?? 0) + 1;
     this.counters.set(projectId, count);
 
     if (count >= this.threshold) {
       this.counters.set(projectId, 0);
-      try {
-        await table.optimize();
-      } catch (err) {
-        this.logger.warn(`FTS optimize failed for project ${projectId}: ${(err as Error).message}`);
-      }
+      // Never awaited: onInsert can run inside a held write session of the same table, and awaiting the task's
+      // `exclusive` there deadlocks the non-reentrant mutex. The queued optimize runs when the session releases.
+      optimizeInBackground(optimize, projectId, this.logger);
     }
   }
 
-  onFirstAccess(projectId: string, table: LanceTable): void {
+  onFirstAccess(projectId: string, optimize: OptimizeTask): void {
     this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
-    optimizeInBackground(table, projectId, this.logger);
+    optimizeInBackground(optimize, projectId, this.logger);
   }
 
   clearProject(projectId: string): void {
