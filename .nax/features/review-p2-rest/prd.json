@@ -3,7 +3,7 @@
   "feature": "review-p2-rest",
   "branchName": "feat/review-p2-rest",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T05:01:29.010Z",
+  "updatedAt": "2026-11-03T05:14:10.971Z",
   "userStories": [
     {
       "id": "US-001",
@@ -716,14 +716,17 @@
         "openapi"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing DTO decorators, one service guard, two locale entries and the established generation command make this a medium change; membership/key-check ordering requires the strict security strategy."
+        "reasoning": "Existing DTO decorators, one service guard, two locale entries and the established generation command make this a medium change; membership/key-check ordering requires the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/comments/comments.service.ts",
@@ -764,7 +767,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "378f40b63db9d6d000946d5dc0f6a9dc2b93cfd3"
     },
     {
       "id": "US-010",
