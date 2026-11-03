@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { Principal } from '@nathapp/nestjs-auth';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { MemoryGovernanceService } from './memory-governance.service';
 import type { MemoryItem } from './memory-item-repository';
@@ -10,14 +11,17 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
+import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ownerTypeFor } from './memory-write.guard';
 
 /**
  * The project memory listing (permissions P1 US-008).
  *
  * `ProjectMembershipGuard, RequiresGuard` in one `@UseGuards` resolves `request.projectContext` — and refuses a
- * non-member — before `memory.read` is checked, so the handler no longer asserts membership itself and needs no
- * principal of its own. The handler still resolves the slug, which is what answers 404 for an unknown or
- * soft-deleted project.
+ * non-member — before `memory.read` is checked. The handler still resolves the slug, which is what answers 404 for an
+ * unknown or soft-deleted project, and reads the caller (memory-notes US-005) so the page can include the caller's
+ * own user-scoped notes next to the project's rows. The owner is built from `@Principal()` here and nowhere else, so
+ * a query parameter can never name who is read.
  */
 @ApiTags('memory')
 @ApiBearerAuth()
@@ -39,11 +43,13 @@ export class MemoryReadController {
   async getMemory(
     @Param('slug') slug: string,
     @Query() rawQuery: ListMemoryQuery,
+    @Principal() principal: KodaPrincipal,
   ): Promise<JsonResponse<IPageResult<MemoryItem>>> {
     const projectId = await this.projectAccess.findProjectIdBySlug(slug);
 
     const { current, size, ...filters } = parseQuery(ListMemoryQuery, rawQuery);
-    const page = await this.governance.getProjectMemory({ projectId, ...filters }, { current, size });
+    const owner = { ownerType: ownerTypeFor(principal), ownerId: principal.id };
+    const page = await this.governance.getProjectMemory({ projectId, ...filters, owner }, { current, size });
     return JsonResponse.Ok(toPageResult(page)) as JsonResponse<IPageResult<MemoryItem>>;
   }
 }

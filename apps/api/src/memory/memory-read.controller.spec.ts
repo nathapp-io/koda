@@ -1,6 +1,7 @@
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Page } from '@nathapp/nestjs-common';
 import { MemoryKind } from '../common/enums';
+import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryItem } from './memory-item-repository';
 import { MemoryReadController } from './memory-read.controller';
@@ -20,6 +21,10 @@ const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   updatedAt: new Date('2025-01-01'),
   ...overrides,
 });
+
+/** The caller the route reads with `@Principal()`; the handler builds the read's owner from it (US-005). */
+const agent = (id = 'agent-1') => ({ actorType: 'agent', id } as unknown as KodaPrincipal);
+const user = (id = 'user-1') => ({ actorType: 'user', id } as unknown as KodaPrincipal);
 
 describe('MemoryReadController', () => {
   let controller: MemoryReadController;
@@ -47,7 +52,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 2, items));
 
-        const result = await controller.getMemory('my-project', {} as never);
+        const result = await controller.getMemory('my-project', {} as never, agent());
 
         expect(result).toBeInstanceOf(JsonResponse);
         expect(result.data.records).toEqual(items);
@@ -58,7 +63,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 42, items));
 
-        const result = await controller.getMemory('my-project', {} as never);
+        const result = await controller.getMemory('my-project', {} as never, agent());
 
         expect(result).toBeInstanceOf(JsonResponse);
         expect(result.data.total).toBe(42);
@@ -68,7 +73,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', {} as never);
+        await controller.getMemory('my-project', {} as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ projectId: 'project-resolved-id' }),
@@ -83,7 +88,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, items));
 
-        await controller.getMemory('my-project', { kind: 'DECISION' } as never);
+        await controller.getMemory('my-project', { kind: 'DECISION' } as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ kind: 'DECISION' }),
@@ -95,7 +100,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', {} as never);
+        await controller.getMemory('my-project', {} as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -108,7 +113,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', {} as never);
+        await controller.getMemory('my-project', {} as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -122,7 +127,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, items));
 
-        await controller.getMemory('my-project', { status: 'superseded' } as never);
+        await controller.getMemory('my-project', { status: 'superseded' } as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ status: 'superseded' }),
@@ -134,7 +139,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', {} as never);
+        await controller.getMemory('my-project', {} as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -147,7 +152,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 2, size: 5 }, 0, []));
 
-        await controller.getMemory('my-project', { current: '2', size: '5', kind: 'FACT' } as never);
+        await controller.getMemory('my-project', { current: '2', size: '5', kind: 'FACT' } as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ projectId: 'project-123', kind: 'FACT' }),
@@ -159,7 +164,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, [{ id: 'm1' }]));
 
-        const res = await controller.getMemory('my-project', {} as never);
+        const res = await controller.getMemory('my-project', {} as never, agent());
 
         expect(Object.keys(res.data).sort()).toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
         expect(res.data.records).toEqual([{ id: 'm1' }]);
@@ -172,7 +177,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('unknown-slug', {} as never)).rejects.toThrow(
+        await expect(controller.getMemory('unknown-slug', {} as never, agent())).rejects.toThrow(
           NotFoundAppException,
         );
       });
@@ -182,7 +187,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('deleted-project', {} as never)).rejects.toThrow(
+        await expect(controller.getMemory('deleted-project', {} as never, agent())).rejects.toThrow(
           NotFoundAppException,
         );
       });
@@ -192,7 +197,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('unknown-slug', {} as never)).rejects.toThrow();
+        await expect(controller.getMemory('unknown-slug', {} as never, agent())).rejects.toThrow();
 
         expect(mockGovernanceService.getProjectMemory).not.toHaveBeenCalled();
       });
@@ -206,7 +211,7 @@ describe('MemoryReadController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', {} as never);
+        await controller.getMemory('my-project', {} as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
       });
@@ -226,12 +231,66 @@ describe('MemoryReadController', () => {
       });
     });
 
+    // US-005: the caller whose user-scoped notes the page includes. The handler is the only place the owner is
+    // built, so a request can never name one.
+    describe('US-005: the caller is the owner of the user rows a read includes', () => {
+      it('AC-8: passes an agent caller as owner { ownerType: AGENT, ownerId: <id> }', async () => {
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+        await controller.getMemory('my-project', {} as never, agent('agent-A'));
+
+        expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
+          expect.objectContaining({ owner: { ownerType: 'AGENT', ownerId: 'agent-A' } }),
+          expect.anything(),
+        );
+      });
+
+      it('passes a human caller as owner { ownerType: USER, ownerId: <id> }', async () => {
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+        await controller.getMemory('my-project', {} as never, user('user-A'));
+
+        expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
+          expect.objectContaining({ owner: { ownerType: 'USER', ownerId: 'user-A' } }),
+          expect.anything(),
+        );
+      });
+
+      it('ignores an owner supplied in the query and passes the principal role instead', async () => {
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+        await controller.getMemory(
+          'my-project',
+          { owner: { ownerType: 'AGENT', ownerId: 'someone-else' }, ownerId: 'someone-else' } as never,
+          agent('agent-A'),
+        );
+
+        const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
+        expect(calledWith.owner).toEqual({ ownerType: 'AGENT', ownerId: 'agent-A' });
+      });
+
+      it('forwards the requested scope to the service', async () => {
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+        await controller.getMemory('my-project', { scope: 'user' } as never, agent());
+
+        expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
+          expect.objectContaining({ scope: 'user' }),
+          expect.anything(),
+        );
+      });
+    });
+
     describe('security: query params cannot override the membership-resolved projectId', () => {
       it('ignores a projectId query param and uses the slug-resolved projectId', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', { projectId: 'evil', kind: 'FACT' } as never);
+        await controller.getMemory('my-project', { projectId: 'evil', kind: 'FACT' } as never, agent());
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];

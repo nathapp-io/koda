@@ -388,4 +388,111 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       expect(mockPrismaClient.$queryRaw).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-005 — whose rows a project read answers
+  // -------------------------------------------------------------------------
+
+  describe('owner union and scope (US-005)', () => {
+    const owner = { ownerType: 'AGENT', ownerId: 'agent-a' } as const;
+    const OWNER_KEY = 'AGENT:agent-a';
+
+    /** The `where` the `contains` path handed Prisma on its last call. */
+    const whereOfLastFind = (): Record<string, unknown> => {
+      const calls = mockPrismaClient.memoryItem.findMany.mock.calls;
+      const last = calls[calls.length - 1] as [{ where: Record<string, unknown> }];
+      return last[0].where;
+    };
+
+    /** The ids query the ranked path issued (the probe is call 0, the page of ids call 1). */
+    const rankedIdsQuery = (): { sql: string; values: unknown[] } =>
+      mockPrismaClient.$queryRaw.mock.calls[1][0] as { sql: string; values: unknown[] };
+
+    /** The probe found a lexeme and the ranked page answered one row. */
+    const rankedOne = (): void => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ id: 'mem-1' }])
+        .mockResolvedValueOnce([{ total: 1 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([
+        { id: 'mem-1', projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    };
+
+    beforeEach(() => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+    });
+
+    it('AC-7: with no owner the read stays project-only, even when scope user is asked', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'user' }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBe('project-123');
+      // Nothing of the scope survives: no owner means no user row can be named at all.
+      expect(JSON.stringify(where)).not.toContain('ownerKey');
+      expect(where.AND).toBeUndefined();
+    });
+
+    it('scope user answers the owner-keyed rows only', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'user', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.ownerKey).toBe(OWNER_KEY);
+      expect(where.projectId).toBeUndefined();
+    });
+
+    it('scope project keeps the owner out of the page', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'project', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBe('project-123');
+      expect(JSON.stringify(where)).not.toContain('ownerKey');
+    });
+
+    it('AC-1: an owner with no scope is answered the authorized union of project and owner rows', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBeUndefined();
+      // The union is its own AND term, so the TTL `OR` and the text term keep their meaning beside it.
+      expect(where.AND).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('scope all is the same union as the default', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'all', owner }, { current: 1, size: 10 });
+
+      expect(whereOfLastFind().AND).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('AC-1: the union keeps the text term as a separate AND, never beside the TTL OR', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'all', owner, text: 'working' }, { current: 1, size: 10 });
+
+      const and = whereOfLastFind().AND as unknown[];
+      expect(and).toHaveLength(2);
+      expect(and).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('AC-5: the ranked path filters the union by ownerKey as a bound value', async () => {
+      rankedOne();
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'working', owner }, { current: 1, size: 10 });
+
+      const query = rankedIdsQuery();
+      expect(query.sql).toContain('m."projectId" = ?');
+      expect(query.sql).toContain('m."ownerKey" = ?');
+      expect(query.values).toEqual(expect.arrayContaining(['project-123', OWNER_KEY]));
+    });
+
+    it('AC-3: the ranked path answers the owner rows only when scope user is asked', async () => {
+      rankedOne();
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'working', scope: 'user', owner }, { current: 1, size: 10 });
+
+      const query = rankedIdsQuery();
+      expect(query.sql).not.toContain('m."projectId" = ?');
+      expect(query.sql).toContain('m."ownerKey" = ?');
+      expect(query.values).toContain(OWNER_KEY);
+    });
+  });
 });

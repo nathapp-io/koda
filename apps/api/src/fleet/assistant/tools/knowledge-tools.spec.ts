@@ -6,6 +6,7 @@ import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
 import { KnowledgeSearchService } from '../../knowledge/knowledge-search.service';
 import { MemoryGovernanceService } from '../../../memory/memory-governance.service';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
 import { encodeTimelineCursor } from '../../../memory/timeline-cursor';
 import type { TimelineEvent, TimelineResponse } from '../../../memory/timeline.service';
 import { TimelineService } from '../../../memory/timeline.service';
@@ -41,12 +42,16 @@ const FENCE_CLOSE = '<<end-koda-data-0000000000000000>>';
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1' },
+  // A full principal, because memory-notes US-005 builds the read's owner from it (`ownerTypeFor`).
+  actor: { id: 'dev-1', actorType: 'agent' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-15T00:00:00.000Z'),
   data: (text: string) => `${FENCE_OPEN}\n${text}\n${FENCE_CLOSE}`,
 } as unknown as ToolContext;
+
+/** memory-notes US-005: the owner every memory read in this file asks for, built from `ctx.actor`. */
+const CTX_OWNER = { ownerType: 'AGENT', ownerId: 'dev-1' };
 
 const item = (over: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
@@ -180,7 +185,9 @@ describe('koda_memory_search execute (US-004)', () => {
     await tool.execute(ctx, tool.parse({ text: 'deploy', kind: 'FACT', status: 'active', page: 3 }));
 
     const query = getProjectMemory.mock.calls[0][0] as Record<string, unknown>;
-    expect(query).toEqual({ projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active' });
+    expect(query).toEqual({
+      projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active', owner: CTX_OWNER,
+    });
     expect('orderBy' in query).toBe(false);
     expect(getProjectMemory.mock.calls[0][1]).toEqual({ current: 3, size: 20 });
   });
@@ -191,9 +198,33 @@ describe('koda_memory_search execute (US-004)', () => {
     await tool.execute(ctx, tool.parse({ kind: 'FACT', page: 2 }));
 
     expect(getProjectMemory).toHaveBeenCalledWith(
-      { projectId: 'project-1', text: undefined, kind: 'FACT', status: undefined, orderBy: 'updatedAt' },
+      { projectId: 'project-1', text: undefined, kind: 'FACT', status: undefined, orderBy: 'updatedAt', owner: CTX_OWNER },
       { current: 2, size: 20 },
     );
+  });
+
+  // memory-notes US-005: the tool reads the caller's own user notes beside the project's, and says which is which.
+  it('AC-9: passes the owner the context actor makes, never one the input names', async () => {
+    const { getProjectMemory, tool } = toolWith(page([]));
+
+    await tool.execute(ctx, tool.parse({ text: 'deploy', owner: { ownerType: 'AGENT', ownerId: 'someone-else' } }));
+
+    expect(getProjectMemory.mock.calls[0][0]).toMatchObject({ owner: CTX_OWNER });
+    expect(JSON.stringify(getProjectMemory.mock.calls[0][0])).not.toContain('someone-else');
+  });
+
+  it('AC-9: every header line ends with the scope of its own item', async () => {
+    const { tool } = toolWith(page([
+      item({ id: 'mem-project', projectId: 'project-1', scope: 'project' }),
+      item({ id: 'mem-user', projectId: null, scope: 'user', kind: 'NOTE', subject: 'working-style', predicate: 'user', object: 'body', description: 'index line' }),
+    ]));
+
+    const content = await tool.execute(ctx, tool.parse({}));
+
+    const headers = content.split('\n').filter((line) => line.startsWith('memory:'));
+    expect(headers).toHaveLength(2);
+    expect(headers[0].endsWith('scope project')).toBe(true);
+    expect(headers[1].endsWith('scope user')).toBe(true);
   });
 
   it('AC-7: each item is a header line and one fence holding subject, predicate and object', async () => {
@@ -204,7 +235,7 @@ describe('koda_memory_search execute (US-004)', () => {
 
     expect(content).toBe(
       [
-        'memory:mem-1 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z',
+        'memory:mem-1 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
         FENCE_OPEN,
         'Deploy pipeline status green',
         FENCE_CLOSE,
@@ -257,7 +288,7 @@ describe('koda_memory_search notes (memory-notes US-002)', () => {
     expect(content).toContain(`${FENCE_OPEN}\nreplay-budget project replay budget\n${FENCE_CLOSE}`);
     expect(content).not.toContain('SECRET-BODY');
     expect(content.split('\n')).toEqual([
-      'memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z',
+      'memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
       FENCE_OPEN,
       'replay-budget project replay budget',
       FENCE_CLOSE,
@@ -319,7 +350,7 @@ describe('koda_get_memory (memory-notes US-002)', () => {
 
     await tool.execute(ctx, tool.parse({ id: 'note-1' }));
 
-    expect(getMemoryItem).toHaveBeenCalledExactlyOnceWith('project-1', 'note-1');
+    expect(getMemoryItem).toHaveBeenCalledExactlyOnceWith('project-1', 'note-1', CTX_OWNER);
   });
 
   it('AC-13: an active note answers its header, the fenced index line and the fenced body', async () => {
@@ -328,7 +359,7 @@ describe('koda_get_memory (memory-notes US-002)', () => {
     const content = await tool.execute(ctx, tool.parse({ id: 'note-1' }));
 
     const [header, ...rest] = content.split('\n');
-    expect(header).toBe('memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z');
+    expect(header).toBe('memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project');
     expect(header?.startsWith('memory:note-1 NOTE active')).toBe(true);
     expect(rest).toEqual([
       FENCE_OPEN, 'replay budget', FENCE_CLOSE,
@@ -343,7 +374,7 @@ describe('koda_get_memory (memory-notes US-002)', () => {
 
     // The header names the triple, so the fenced value is the item's body alone.
     expect(content.split('\n')).toEqual([
-      'memory:mem-2 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z',
+      'memory:mem-2 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
       FENCE_OPEN, 'green', FENCE_CLOSE,
     ]);
   });
@@ -354,8 +385,46 @@ describe('koda_get_memory (memory-notes US-002)', () => {
       const { getMemoryItem, tool } = getToolWith(null);
 
       expect(await tool.execute(ctx, tool.parse({ id }))).toBe('memory item not found');
-      expect(getMemoryItem).toHaveBeenCalledWith('project-1', id);
+      expect(getMemoryItem).toHaveBeenCalledWith('project-1', id, CTX_OWNER);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// memory-notes US-005 — a user-scoped note is read by its owner alone
+// ---------------------------------------------------------------------------
+
+/** A user-scoped note: no project of its own, keyed on `<ownerType>:<ownerId>`. */
+const userNoteItem = (over: Partial<MemoryItem> = {}): MemoryItem =>
+  noteItem({
+    projectId: null, scope: 'user', ownerType: 'AGENT', ownerId: 'dev-1', ownerKey: 'AGENT:dev-1',
+    object: 'Prefers small commits with a test each.', description: 'working agreements', ...over,
+  });
+
+/** The real governance service, with the row the repository answers — the tool→service→repository path. */
+const governanceWith = (row: MemoryItem | null): MemoryGovernanceService =>
+  new MemoryGovernanceService({ findById: vi.fn(async () => row) } as unknown as PrismaMemoryItemRepository);
+
+describe('koda_get_memory user scope (memory-notes US-005)', () => {
+  it('AC-10: a note of the caller answers its header tagged scope user and its fenced body', async () => {
+    const tool = getMemoryTool(governanceWith(userNoteItem()));
+
+    const content = await tool.execute(ctx, tool.parse({ id: 'note-1' }));
+
+    const [header, ...rest] = content.split('\n');
+    expect(header.endsWith('scope user')).toBe(true);
+    expect(header.startsWith('memory:note-1 NOTE active')).toBe(true);
+    expect(rest).toEqual([
+      FENCE_OPEN, 'working agreements', FENCE_CLOSE,
+      FENCE_OPEN, 'Prefers small commits with a test each.', FENCE_CLOSE,
+    ]);
+  });
+
+  it('AC-11: another principal\'s user note is memory item not found, and reads nothing of it', async () => {
+    // Same id, same shape: only the ownerKey separates the two callers.
+    const tool = getMemoryTool(governanceWith(userNoteItem({ ownerId: 'other-agent', ownerKey: 'AGENT:other-agent' })));
+
+    expect(await tool.execute(ctx, tool.parse({ id: 'note-1' }))).toBe('memory item not found');
   });
 });
 

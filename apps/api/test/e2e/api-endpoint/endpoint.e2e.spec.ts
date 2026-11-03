@@ -3914,6 +3914,60 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-005 User scope reads: GET /api/projects/:slug/memory?scope=
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-005 user scope reads', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-scope-note-${++serial}`;
+
+    /** A user-scoped note written by the current human caller, answering its id. */
+    const writeUserNote = async (subject: string, over: Record<string, unknown> = {}): Promise<string> => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const res = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          projectId: project.id, scope: 'user', kind: 'NOTE', subject, predicate: 'user',
+          object: 'Prefers small commits with a test each.', description: 'small commits', ...over,
+        })
+        .expect(201);
+      return body<{ id: string }>(res).id;
+    };
+
+    const list = () => request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .set('Authorization', `Bearer ${userAccessToken}`);
+
+    it('AC-1 (US-005): the default list answers the caller\'s user note with scope user', async () => {
+      const subject = uniqueSlug();
+      const id = await writeUserNote(subject);
+
+      const res = await list().expect(200);
+
+      const page = body<{ records: Array<{ id: string; scope: string; projectId: string | null; ownerKey?: string }> }>(res);
+      expect(page.records.find((record) => record.id === id)).toMatchObject({ scope: 'user', projectId: null });
+      expect(page.records.every((record) => record.scope === 'project' || record.scope === 'user')).toBe(true);
+    });
+
+    it('AC-3 (US-005): ?scope=user answers only user rows, and ?scope=project none of them', async () => {
+      const id = await writeUserNote(uniqueSlug());
+
+      const userPage = body<{ records: Array<{ id: string; scope: string }> }>(await list().query({ scope: 'user' }).expect(200));
+      expect(userPage.records.map((record) => record.id)).toContain(id);
+      expect(userPage.records.every((record) => record.scope === 'user')).toBe(true);
+
+      const projectPage = body<{ records: Array<{ id: string; scope: string }> }>(await list().query({ scope: 'project' }).expect(200));
+      expect(projectPage.records.map((record) => record.id)).not.toContain(id);
+      expect(projectPage.records.every((record) => record.scope === 'project')).toBe(true);
+    });
+
+    it('AC-4 (US-005): GET /api/projects/:slug/memory — 400 for an unknown scope', async () => {
+      await list().query({ scope: 'org' }).expect(400);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // US-003 Thread create, list, get and messages routes
   // ─────────────────────────────────────────────────────────────────
 

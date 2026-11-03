@@ -1754,6 +1754,20 @@
                 "createdAt"
               ]
             }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "project, user (the caller's own notes) or all (default)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "user",
+                "all"
+              ]
+            }
           }
         ],
         "responses": {

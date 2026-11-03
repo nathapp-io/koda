@@ -93,6 +93,50 @@ describe('MemoryGovernanceService', () => {
 
       await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toMatchObject({ status: 'superseded' });
     });
+
+    // memory-notes US-005: a user-scoped row is readable through the owner, and only through it.
+    const userNote = (over: Partial<MemoryItem> = {}): MemoryItem =>
+      note({
+        projectId: null, scope: 'user', ownerType: 'AGENT', ownerId: 'agent-a', ownerKey: 'AGENT:agent-a', ...over,
+      });
+    const owner = (ownerId = 'agent-a') => ({ ownerType: 'AGENT' as const, ownerId });
+
+    it('AC-10: answers the caller\'s own user note though it has no project', async () => {
+      mockRepository.findById.mockResolvedValue(userNote());
+
+      await expect(service.getMemoryItem('project-123', 'note-1', owner())).resolves.toEqual(userNote());
+    });
+
+    it('AC-11: answers null for another principal\'s user note of the same shape', async () => {
+      mockRepository.findById.mockResolvedValue(userNote({ ownerId: 'agent-b', ownerKey: 'AGENT:agent-b' }));
+
+      await expect(service.getMemoryItem('project-123', 'note-1', owner('agent-a'))).resolves.toBeNull();
+    });
+
+    it('answers null for a user note when the read names no owner', async () => {
+      mockRepository.findById.mockResolvedValue(userNote());
+
+      await expect(service.getMemoryItem('project-123', 'note-1')).resolves.toBeNull();
+    });
+
+    it('still answers a project row of the project when an owner is passed', async () => {
+      mockRepository.findById.mockResolvedValue(note());
+
+      await expect(service.getMemoryItem('project-123', 'note-1', owner())).resolves.toEqual(note());
+    });
+
+    it('answers null for a soft-deleted user note of the caller', async () => {
+      mockRepository.findById.mockResolvedValue(userNote({ deletedAt: now }));
+
+      await expect(service.getMemoryItem('project-123', 'note-1', owner())).resolves.toBeNull();
+    });
+
+    it('answers null for a user note of the owner in another project\'s read only when it is not the owner\'s', async () => {
+      // The read's project never decides a user row: the owner does. A row of that owner is answered from any project.
+      mockRepository.findById.mockResolvedValue(userNote({ ownerId: 'agent-a', ownerKey: 'AGENT:agent-a' }));
+
+      await expect(service.getMemoryItem('some-other-project', 'note-1', owner())).resolves.toMatchObject({ scope: 'user' });
+    });
   });
 
   describe('AC-2: runCleanup() executes all four sub-jobs', () => {

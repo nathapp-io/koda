@@ -3,6 +3,32 @@ import { MemoryKind, MemoryScope } from '../common/enums';
 /** Permissions P1 US-008: the two tables `MemoryItem.ownerId` may name. */
 export type MemoryOwnerType = 'USER' | 'AGENT';
 
+/**
+ * US-005: the principal whose user-scoped notes a read includes, next to the project's own rows.
+ *
+ * The caller's identity, never a request field: the REST route builds it from `@Principal()` and the
+ * assistant tools from `ctx.actor`. Without it a read answers project rows only.
+ */
+export interface MemoryItemOwner {
+  ownerType: MemoryOwnerType;
+  ownerId: string;
+}
+
+/**
+ * US-005: which rows a project memory read answers.
+ *
+ * `all` (the default when an owner is passed) is the authorized union — the project's rows plus the owner's
+ * user notes; `project` and `user` narrow it to one side. A read with no owner has no union to offer and is
+ * answered `project` whatever is asked, so a user row is never reachable without an owner.
+ */
+export const MEMORY_READ_SCOPES = ['project', 'user', 'all'] as const;
+export type MemoryReadScope = (typeof MEMORY_READ_SCOPES)[number];
+
+/** US-005: the `ownerKey` a principal's user-scoped rows are stored with (`<ownerType>:<ownerId>`). */
+export function memoryOwnerKey(owner: MemoryItemOwner): string {
+  return `${owner.ownerType}:${owner.ownerId}`;
+}
+
 export interface MemoryQuery {
   projectId: string;
   kind?: MemoryKind;
@@ -22,6 +48,13 @@ export interface ProjectMemoryQuery {
   text?: string;
   status?: string;
   orderBy?: 'confidence' | 'updatedAt' | 'createdAt';
+  /**
+   * US-005: the caller whose user-scoped notes the page includes. Absent keeps the read project-only, whatever
+   * `scope` asks, so no user row is ever reachable without a caller to own it.
+   */
+  owner?: MemoryItemOwner;
+  /** US-005: which rows to answer. Defaults to `all`, the authorized union, whenever an owner is passed. */
+  scope?: MemoryReadScope;
 }
 
 export interface MemoryItemInput {

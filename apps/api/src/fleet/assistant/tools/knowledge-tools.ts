@@ -2,7 +2,8 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { MemoryKind } from '../../../common/enums';
 import { MEMORY_STATUSES } from '../../../memory/dto/list-memory.query';
 import { MemoryGovernanceService } from '../../../memory/memory-governance.service';
-import type { MemoryItem } from '../../../memory/memory-item-repository';
+import type { MemoryItem, MemoryItemOwner } from '../../../memory/memory-item-repository';
+import { ownerTypeFor } from '../../../memory/memory-write.guard';
 import { decodeTimelineCursor } from '../../../memory/timeline-cursor';
 import { TimelineService, type TimelineEvent } from '../../../memory/timeline.service';
 import { TicketsService } from '../../../tickets/tickets.service';
@@ -135,9 +136,22 @@ const memoryText = (item: { kind: string; subject: string; predicate: string; ob
     ? partLine(item.subject, item.predicate, item.description)
     : partLine(item.subject, item.predicate, item.object);
 
-/** An item's header line: what it is, in what state, and when it last changed. */
+/**
+ * An item's header line: what it is, in what state, when it last changed, and whose memory it is. The trailing
+ * `scope project` / `scope user` tag (memory-notes US-005) is how the model tells a project row from the caller's
+ * own note now that both appear in one page.
+ */
 const memoryHeader = (item: MemoryItem): string =>
-  `memory:${item.id} ${item.kind} ${item.status} confidence ${item.confidence.toFixed(2)} updated ${item.updatedAt.toISOString()}`;
+  `memory:${item.id} ${item.kind} ${item.status} confidence ${item.confidence.toFixed(2)} updated ${item.updatedAt.toISOString()} scope ${item.scope}`;
+
+/**
+ * The owner a tool read includes next to the project's rows (memory-notes US-005): always the context's actor,
+ * never a field of the tool's input, so a model cannot name whose notes it reads.
+ */
+const ownerOf = (ctx: ToolContext): MemoryItemOwner => ({
+  ownerType: ownerTypeFor(ctx.actor),
+  ownerId: ctx.actor.id,
+});
 
 /** The one answer `koda_get_memory` gives for an id it may not read; US-002 keeps it a result, not an error. */
 const MEMORY_NOT_FOUND = 'memory item not found';
@@ -175,6 +189,9 @@ export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool
           text: input.text,
           kind: input.kind,
           status: input.status,
+          // memory-notes US-005: the caller's own user notes are read beside the project's, so a working
+          // agreement written once is recallable in every project the actor is a member of.
+          owner: ownerOf(ctx),
           // memory-notes US-003: a text is answered in rank order, so the tool sends no orderBy with one;
           // without a text the list stays newest-updatedAt first.
           ...(input.text === undefined ? { orderBy: 'updatedAt' as const } : {}),
@@ -213,7 +230,9 @@ export function getMemoryTool(memory: MemoryGovernanceService): AssistantTool<Ge
       return { id };
     },
     async execute(ctx: ToolContext, input: GetMemoryInput): Promise<string> {
-      const item = await memory.getMemoryItem(ctx.projectId, input.id);
+      // US-005: the caller's own user note is readable from any project; another principal's is the same null
+      // as an id of no item at all, so the tool never leaks that it exists.
+      const item = await memory.getMemoryItem(ctx.projectId, input.id, ownerOf(ctx));
       if (!item) return MEMORY_NOT_FOUND;
       const lines = [memoryHeader(item)];
       // A note's index line is fenced on its own, as the list fences it; the body is the note's value.

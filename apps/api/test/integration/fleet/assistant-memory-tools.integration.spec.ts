@@ -26,8 +26,8 @@ vi.setConfig({ testTimeout: 20_000 });
 
 /** A `ctx.data(...)` opening line. */
 const FENCE_OPEN = /^<<koda-data-[0-9a-f]{16}>>$/;
-/** An item's first line: `memory:<id> <kind> <status> confidence <two decimals> updated <ISO time>`. */
-const MEMORY_LINE = /^memory:(\S+) (\S+) (\S+) confidence (\d+\.\d{2}) updated (\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/;
+/** An item's first line: `memory:<id> <kind> <status> confidence <two decimals> updated <ISO time> scope <scope>`. */
+const MEMORY_LINE = /^memory:(\S+) (\S+) (\S+) confidence (\d+\.\d{2}) updated (\d{4}-\d{2}-\d{2}T[\d:.]+Z) scope (project|user)$/;
 
 /** The payloads of every `ctx.data(...)` fence in a result, in order. */
 const fencedLines = (content: string): string[] => {
@@ -276,15 +276,16 @@ describeIntegration('fleet assistant memory tool (PG, US-004)', () => {
 
     const lines = result.content.split('\n');
     expect(memoryIds(result.content)).toEqual([seed.orderingNewest.id, seed.orderingMiddle.id, seed.orderingOldest.id]);
-    // Two lines per item: the header, then its fence; so the headers sit at 0, 4 and 8.
+    // Two lines per item: the header, then its fence; so the headers sit at 0, 4 and 8. Every row of a page
+    // written by a project member is a project row, so each header ends `scope project` (memory-notes US-005).
     expect(lines[0]).toBe(
-      `memory:${seed.orderingNewest.id} FACT active confidence 0.75 updated ${at(3).toISOString()}`,
+      `memory:${seed.orderingNewest.id} FACT active confidence 0.75 updated ${at(3).toISOString()} scope project`,
     );
     expect(lines[4]).toBe(
-      `memory:${seed.orderingMiddle.id} FACT active confidence 0.75 updated ${at(2).toISOString()}`,
+      `memory:${seed.orderingMiddle.id} FACT active confidence 0.75 updated ${at(2).toISOString()} scope project`,
     );
     expect(lines[8]).toBe(
-      `memory:${seed.orderingOldest.id} FACT active confidence 0.75 updated ${at(1).toISOString()}`,
+      `memory:${seed.orderingOldest.id} FACT active confidence 0.75 updated ${at(1).toISOString()} scope project`,
     );
     for (const line of lines) {
       if (line.startsWith('memory:')) expect(line).toMatch(MEMORY_LINE);

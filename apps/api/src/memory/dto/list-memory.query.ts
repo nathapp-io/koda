@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { KodaPageQuery } from '../../common/dto/koda-page.query';
 import { MemoryKind } from '../../common/enums';
+import { MEMORY_READ_SCOPES, type MemoryReadScope } from '../memory-item-repository';
 
 export const MEMORY_STATUSES = ['active', 'superseded', 'rejected'] as const;
 export const MEMORY_ORDER_BY = ['confidence', 'updatedAt', 'createdAt'] as const;
@@ -39,4 +40,13 @@ export class ListMemoryQuery extends KodaPageQuery {
   @IsOptional()
   @IsIn(MEMORY_ORDER_BY)
   orderBy?: (typeof MEMORY_ORDER_BY)[number];
+
+  /**
+   * memory-notes US-005: whose rows the page answers. `all` (the default) is the caller's authorized union —
+   * the project's rows plus the caller's own user-scoped notes; `project` and `user` narrow it to one side.
+   */
+  @ApiPropertyOptional({ enum: MEMORY_READ_SCOPES, description: 'project, user (the caller\'s own notes) or all (default)' })
+  @IsOptional()
+  @IsIn(MEMORY_READ_SCOPES)
+  scope?: MemoryReadScope;
 }

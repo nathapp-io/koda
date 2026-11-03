@@ -29,4 +29,12 @@ describe('ListMemoryQuery', () => {
   it('AC-15: rejects an empty text on text, which is no search at all', async () => {
     expect(await errorProps({ text: '' })).toContain('text');
   });
+
+  // memory-notes US-005: the read scope chooses whose rows the list answers.
+  it('AC-4: accepts scope project, user and all, and rejects org on scope', async () => {
+    for (const scope of ['project', 'user', 'all']) {
+      expect(await errorProps({ scope }), scope).toEqual([]);
+    }
+    expect(await errorProps({ scope: 'org' })).toContain('scope');
+  });
 });

@@ -11,6 +11,8 @@ import {
   MemoryItemInput,
   MemoryItem,
   MemoryOwnerType,
+  MemoryReadScope,
+  memoryOwnerKey,
 } from './memory-item-repository';
 import type { MemoryWritten } from './memory-audit';
 import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
@@ -73,7 +75,7 @@ function userOwnerKey(item: MemoryItemInput): string {
   if (!item.ownerType || !item.ownerId) {
     throw new Error('memory: a user-scoped item needs an ownerType and an ownerId');
   }
-  return `${item.ownerType}:${item.ownerId}`;
+  return memoryOwnerKey({ ownerType: item.ownerType, ownerId: item.ownerId });
 }
 
 /**
@@ -112,6 +114,31 @@ function orderBySql(orderBy: ProjectMemoryQuery['orderBy']): Prisma.Sql {
     return Prisma.sql`m."createdAt" DESC, m."confidence" DESC, m."updatedAt" DESC, m."id" DESC`;
   }
   return Prisma.sql`m."confidence" DESC, m."updatedAt" DESC, m."createdAt" DESC, m."id" DESC`;
+}
+
+/**
+ * memory-notes US-005: whose rows a project read answers.
+ *
+ * An owner is what makes a user row reachable at all: without one the answer is the project's own rows,
+ * whatever `scope` asked, because nothing names an owner to key the user rows on. With one, `scope`
+ * defaults to `all` — the authorized union of the project's rows and the caller's own user notes.
+ */
+function readScope(query: ProjectMemoryQuery): { scope: MemoryReadScope; ownerKey: string | undefined } {
+  if (query.owner === undefined) return { scope: MemoryScope.PROJECT, ownerKey: undefined };
+  return { scope: query.scope ?? 'all', ownerKey: memoryOwnerKey(query.owner) };
+}
+
+/**
+ * memory-notes US-005: the scope as the SQL a ranked page filters on — the project's rows, the owner's user
+ * rows, or the union of the two. The owner key is always a bound value, so it is the caller's own and never a
+ * text the query named.
+ */
+function scopeWhereSql(projectId: string, scope: MemoryReadScope, ownerKey: string | undefined): Prisma.Sql {
+  if (scope === 'user' && ownerKey !== undefined) return Prisma.sql`m."ownerKey" = ${ownerKey}`;
+  if (scope === 'all' && ownerKey !== undefined) {
+    return Prisma.sql`(m."projectId" = ${projectId} OR m."ownerKey" = ${ownerKey})`;
+  }
+  return Prisma.sql`m."projectId" = ${projectId}`;
 }
 
 @Injectable()
@@ -499,8 +526,9 @@ export class PrismaMemoryItemRepository
     text: string,
     page: IPageOption,
   ): Promise<IPageResult<MemoryItem>> {
+    const { scope, ownerKey } = readScope(query);
     const conditions = [
-      Prisma.sql`m."projectId" = ${query.projectId}`,
+      scopeWhereSql(query.projectId, scope, ownerKey),
       Prisma.sql`m."deletedAt" IS NULL`,
     ];
     if (query.status) {
@@ -556,7 +584,18 @@ export class PrismaMemoryItemRepository
    * fallback for a ranked query that matched nothing (memory-notes US-003).
    */
   private async findByContains(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
-    const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
+    const where: Record<string, unknown> = { deletedAt: null };
+    // memory-notes US-005: the scope is its own AND term whenever it is a union, so the TTL `OR` below and the
+    // text term keep their meaning beside it. A single-sided scope is a plain column filter.
+    const and: Record<string, unknown>[] = [];
+    const { scope, ownerKey } = readScope(query);
+    if (scope === 'user' && ownerKey !== undefined) {
+      where.ownerKey = ownerKey;
+    } else if (scope === 'all' && ownerKey !== undefined) {
+      and.push({ OR: [{ projectId: query.projectId }, { ownerKey }] });
+    } else {
+      where.projectId = query.projectId;
+    }
 
     if (query.status) {
       where.status = query.status;
@@ -574,16 +613,15 @@ export class PrismaMemoryItemRepository
     // S5b US-004: the text match is its own AND term. It must never join the TTL `OR` above: an `OR` of a
     // text match and a TTL bound would return expired rows that match the text.
     if (query.text && query.text.trim().length > 0) {
-      where.AND = [
-        {
-          OR: [
-            { subject: { contains: query.text, mode: 'insensitive' } },
-            { predicate: { contains: query.text, mode: 'insensitive' } },
-            { object: { contains: query.text, mode: 'insensitive' } },
-          ],
-        },
-      ];
+      and.push({
+        OR: [
+          { subject: { contains: query.text, mode: 'insensitive' } },
+          { predicate: { contains: query.text, mode: 'insensitive' } },
+          { object: { contains: query.text, mode: 'insensitive' } },
+        ],
+      });
     }
+    if (and.length > 0) where.AND = and;
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];

@@ -3,8 +3,8 @@ import { PageOption } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
-import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
-import { MemoryKind } from '../common/enums';
+import { MemoryItem, ProjectMemoryQuery, MemoryItemOwner, memoryOwnerKey } from './memory-item-repository';
+import { MemoryKind, MemoryScope } from '../common/enums';
 
 export interface GovernanceResult {
   expiredCount: number;
@@ -28,16 +28,22 @@ export class MemoryGovernanceService {
   }
 
   /**
-   * memory-notes US-002: one memory item of `projectId` by id, or null.
+   * memory-notes US-002/US-005: one memory item by id, or null.
    *
-   * The row is read through the repository and answered only when it is not soft-deleted and is a row of
-   * `projectId`. Every other case — an id of another project, a deleted row, an id that names nothing — is the same
-   * null, so a caller cannot tell a foreign id from a missing one. This is what `koda_get_memory` reads.
+   * The row is read through the repository and answered only when it is not soft-deleted and is either a row of
+   * `projectId` or — US-005 — a user-scoped row whose `ownerKey` is the owner's. Every other case — an id of
+   * another project, another principal's user note, a deleted row, an id that names nothing — is the same null,
+   * so a caller cannot tell a foreign id from a missing one. This is what `koda_get_memory` reads, and the owner
+   * is the caller the tool built from its context, never an id the model named.
    */
-  async getMemoryItem(projectId: string, id: string): Promise<MemoryItem | null> {
+  async getMemoryItem(projectId: string, id: string, owner?: MemoryItemOwner): Promise<MemoryItem | null> {
     const item = await this.repository.findById(id);
-    if (!item || item.deletedAt !== undefined || item.projectId !== projectId) return null;
-    return item;
+    if (!item || item.deletedAt !== undefined) return null;
+    if (item.projectId === projectId) return item;
+    if (owner !== undefined && item.scope === MemoryScope.USER && item.ownerKey === memoryOwnerKey(owner)) {
+      return item;
+    }
+    return null;
   }
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
