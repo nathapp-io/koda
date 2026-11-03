@@ -481,8 +481,14 @@
     "empty": "No memory items yet.",
     "error": "Failed to load memory items.",
     "loadMore": "Load more",
+    "searchPlaceholder": "Search memory...",
+    "expand": "Show note body",
+    "scope": {
+      "user": "User"
+    },
     "filter": {
       "kind": "Kind",
+      "search": "Search",
       "status": "Status",
       "all": "All"
     },

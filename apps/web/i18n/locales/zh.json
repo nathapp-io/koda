@@ -481,8 +481,14 @@
     "empty": "暂无记忆项。",
     "error": "加载记忆项失败。",
     "loadMore": "加载更多",
+    "searchPlaceholder": "搜索记忆...",
+    "expand": "显示笔记正文",
+    "scope": {
+      "user": "用户"
+    },
     "filter": {
       "kind": "类型",
+      "search": "搜索",
       "status": "状态",
       "all": "全部"
     },

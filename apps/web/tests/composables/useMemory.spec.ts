@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useMemory.ts')
@@ -358,6 +358,55 @@ describe('AC5 page contract: error propagates so page-level catch can feed extra
     try { await mem.loadMemory() } catch { /* page wrapper catches */ }
 
     expect(mem.isLoading.value).toBe(false)
+  })
+})
+
+describe('US-008 memory notes and search', () => {
+  beforeEach(resetGlobals)
+
+  test('search triggers once only after 300ms without typing and a clear is debounced too', async () => {
+    jest.useFakeTimers()
+    const { watchDebouncedMemorySearch } = await import(composablePath)
+    const search = ref('')
+    const onSearch = jest.fn()
+    const scope = effectScope()
+    scope.run(() => watchDebouncedMemorySearch(search, onSearch))
+    search.value = 'deploy'
+    await Promise.resolve()
+    jest.advanceTimersByTime(299)
+    expect(onSearch).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    search.value = ''
+    await Promise.resolve()
+    jest.advanceTimersByTime(299)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(1)
+    expect(onSearch).toHaveBeenCalledTimes(2)
+    scope.stop()
+    jest.useRealTimers()
+  })
+
+  test('loadMemory sends non-empty text in query and maps note description and scope', async () => {
+    const fetched = [{ id: 'n1', subject: 'deploy', predicate: 'user', object: '**body**', kind: 'NOTE', confidence: 1, status: 'active', description: 'Deployment preference', scope: 'user' }]
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: fetched, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+    mem.textFilter.value = 'deploy'
+    await mem.loadMemory()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query.text).toBe('deploy')
+    expect(mem.items.value[0]).toMatchObject({ description: 'Deployment preference', scope: 'user' })
+  })
+
+  test('cleared text is omitted from the query', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+    mem.textFilter.value = ''
+    await mem.loadMemory()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).not.toHaveProperty('text')
   })
 })
 

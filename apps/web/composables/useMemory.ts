@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
 export interface MemoryItem {
@@ -9,11 +9,14 @@ export interface MemoryItem {
   kind: string
   confidence: number
   status: string
+  description?: string
+  scope: string
 }
 
 export interface MemoryQuery {
   kind?: string
   status?: string
+  text?: string
   page?: number
 }
 
@@ -32,8 +35,24 @@ export function buildMemoryQuery(
   const query: Record<string, string> = {}
   if (filters.kind) query.kind = filters.kind
   if (filters.status) query.status = filters.status
+  if (filters.text) query.text = filters.text
   if (filters.page && filters.page > 1) query.current = String(filters.page)
   return query
+}
+
+export function watchDebouncedMemorySearch(search: Ref<string>, onSearch: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stop = watch(search, () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = undefined
+      onSearch()
+    }, 300)
+  })
+  onScopeDispose(() => {
+    stop()
+    if (timer) clearTimeout(timer)
+  })
 }
 
 export function useMemory(slug: string) {
@@ -49,6 +68,7 @@ export function useMemory(slug: string) {
 
   const kindFilter = ref<string>('')
   const statusFilter = ref<string>('')
+  const textFilter = ref<string>('')
 
   const hasMore = computed(() => hasNext.value)
 
@@ -60,6 +80,7 @@ export function useMemory(slug: string) {
       const query = buildMemoryQuery({
         kind: kindFilter.value || undefined,
         status: statusFilter.value || undefined,
+        text: textFilter.value.trim() || undefined,
         page: page.value || undefined,
       })
       const res = await $api.get<MemoryResponse>(
@@ -121,6 +142,7 @@ export function useMemory(slug: string) {
     hasMore,
     kindFilter,
     statusFilter,
+    textFilter,
     loadMemory,
     applyFilters,
     loadMore,

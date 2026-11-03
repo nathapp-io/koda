@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { reactive } from 'vue'
 import { Brain } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
+import { watchDebouncedMemorySearch } from '~/composables/useMemory'
 
 definePageMeta({ layout: 'default' })
 
@@ -16,12 +18,13 @@ const {
   hasMore,
   kindFilter,
   statusFilter,
+  textFilter,
   loadMemory,
   applyFilters,
   loadMore,
 } = useMemory(slug)
 
-const KIND_OPTIONS = ['', 'FACT', 'INCIDENT_PATTERN', 'DECISION']
+const KIND_OPTIONS = ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE']
 const STATUS_OPTIONS = ['', 'active', 'superseded', 'rejected']
 
 async function withToastError(action: () => Promise<unknown>) {
@@ -36,6 +39,15 @@ async function withToastError(action: () => Promise<unknown>) {
 const loadAndToast = () => withToastError(loadMemory)
 const applyAndToast = () => withToastError(applyFilters)
 const loadMoreAndToast = () => withToastError(loadMore)
+const expandedNotes = reactive(new Set<string>())
+watchDebouncedMemorySearch(textFilter, () => {
+  void withToastError(applyFilters)
+})
+
+function toggleNote(itemId: string) {
+  if (expandedNotes.has(itemId)) expandedNotes.delete(itemId)
+  else expandedNotes.add(itemId)
+}
 
 onMounted(() => {
   loadAndToast()
@@ -72,6 +84,10 @@ function formatConfidence(value: number) {
           </option>
         </select>
       </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.search') }}</label>
+        <input v-model="textFilter" type="search" :placeholder="t('memory.searchPlaceholder')" class="rounded-md border border-border bg-background px-2 py-1 text-sm">
+      </div>
     </FilterBar>
 
     <LoadingState v-if="isLoading" />
@@ -104,9 +120,19 @@ function formatConfidence(value: number) {
         </thead>
         <tbody class="divide-y divide-border">
           <tr v-for="item in items" :key="item.id" class="hover:bg-muted/30">
-            <td class="px-4 py-3 font-mono text-xs">{{ item.subject }}</td>
+            <td class="px-4 py-3 font-mono text-xs">
+              {{ item.subject }}
+              <span v-if="item.scope === 'user'" class="ml-2 rounded border border-border px-1.5 py-0.5 text-xs font-sans">{{ t('memory.scope.user') }}</span>
+            </td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ item.predicate }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ item.object }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-muted-foreground">
+              <template v-if="item.kind === 'NOTE'">
+                <p>{{ item.description }}</p>
+                <button type="button" class="mt-1 text-primary underline" :aria-expanded="expandedNotes.has(item.id)" @click="toggleNote(item.id)">{{ t('memory.expand') }}</button>
+                <p v-if="expandedNotes.has(item.id)" class="mt-2 whitespace-pre-wrap">{{ item.object }}</p>
+              </template>
+              <template v-else>{{ item.object }}</template>
+            </td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.kind }}</span></td>
             <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ formatConfidence(item.confidence) }}</td>
             <td class="px-4 py-3"><span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ item.status }}</span></td>
