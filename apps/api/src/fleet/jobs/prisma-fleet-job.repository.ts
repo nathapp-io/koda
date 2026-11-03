@@ -174,6 +174,17 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => r.id);
   }
 
+  /** US-001: the project's unstarted jobs, oldest first. ASSIGNED rides along because an unacked ASSIGN is still unstarted. */
+  async findProjectUnstartedIds(projectId: string, limit: number): Promise<string[]> {
+    const rows = await this.db.fleetJob.findMany({
+      where: { projectId, state: { in: [FleetJobState.QUEUED, FleetJobState.ASSIGNED] }, cancelRequestedAt: null },
+      orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
   async findRunnerHeld(runnerId: string): Promise<FleetJobRecord[]> {
     const rows = await this.db.fleetJob.findMany({ where: { runnerId, state: { in: [...RUNNER_HELD_STATES] } }, orderBy: { id: 'asc' } });
     return rows.map(toJob);

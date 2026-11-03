@@ -255,6 +255,12 @@ export interface IFleetJobRepository {
   update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord>;
   /** Oldest first. */
   findQueuedIds(limit: number): Promise<string[]>;
+  /**
+   * Review P2 (US-001): ids of the project's unstarted jobs — QUEUED and ASSIGNED, with no cancel
+   * requested — oldest first (`queuedAt`, then `id`), at most `limit`. A soft-deleted project never
+   * starts them, so they are the ones a project delete ends on the server.
+   */
+  findProjectUnstartedIds(projectId: string, limit: number): Promise<string[]>;
   findRunnerHeld(runnerId: string): Promise<FleetJobRecord[]>;
   /** Jobs held by a runner whose lastSeenAt is before the cutoff. */
   findSilentHeldIds(runnerSeenBefore: Date): Promise<string[]>;

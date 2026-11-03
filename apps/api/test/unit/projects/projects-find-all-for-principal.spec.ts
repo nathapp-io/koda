@@ -24,6 +24,8 @@ import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import type { PermissionService } from '../../../src/permissions/permission.service';
+import type { AfterCommitService } from '../../../src/permissions/after-commit.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { RagService } from '../../../src/rag/rag.service';
 import type { ProjectDomain } from '../../../src/projects/domain/project.domain';
 import type {
@@ -218,6 +220,9 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
       undefined,
       new ProjectAccessService(repo as unknown as PrismaProjectRepository, permissions),
       { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } as never,
+      // US-001 of the review P2 remainder: the delete emits PROJECT_SOFT_DELETED after the commit.
+      { defer: vi.fn(() => false) } as unknown as AfterCommitService,
+      { emitAsync: vi.fn(async () => []) } as unknown as EventEmitter2,
     );
   });
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -12,6 +13,8 @@ import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { fieldsSummary } from '../audit/audit-summary';
+import { AfterCommitService } from '../permissions/after-commit.service';
+import { PROJECT_SOFT_DELETED, type ProjectSoftDeletedEvent } from './project-events';
 
 @Injectable()
 export class ProjectsService {
@@ -24,6 +27,8 @@ export class ProjectsService {
     private hybridRetrieverService: HybridRetrieverService | undefined,
     private access: ProjectAccessService,
     private readonly audit: AuditRecorder,
+    private readonly afterCommit: AfterCommitService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async create(createProjectDto: CreateProjectDto) {
@@ -219,6 +224,7 @@ export class ProjectsService {
       },
       (deleted) => ({ key: 'project.delete', resourceType: 'project', resourceId: deleted.id, projectId: deleted.id, summary: `deleted ${deleted.key}` }),
     );
+    await this.announceDeleted(deletedProject.id);
     this.ragService.clearProjectCaches(deletedProject.id);
     this.hybridRetrieverService?.invalidateGraphifyEnabledCache(deletedProject.id);
     return ProjectResponseDto.from(deletedProject);
@@ -238,9 +244,26 @@ export class ProjectsService {
       (deleted) => ({ key: 'project.delete', resourceType: 'project', resourceId: deleted.id, projectId: deleted.id, summary: `deleted ${deleted.key}` }),
     );
 
+    await this.announceDeleted(deletedProject.id);
     this.ragService.clearProjectCaches(deletedProject.id);
     this.hybridRetrieverService?.invalidateGraphifyEnabledCache(deletedProject.id);
 
     return ProjectResponseDto.from(deletedProject);
+  }
+
+  /**
+   * US-001: tells the listeners the project is gone, once its delete committed.
+   *
+   * `audited` has already closed the transaction, so a listener's own transaction is a new one and its
+   * failure cannot roll the delete back; `emitAsync` additionally makes the delete resolve only after the
+   * listeners settled, so a follow-up request never races the quiesce. A delete executed inside an
+   * approval's after-commit scope defers the emit to that scope's flush, which is after the commit too —
+   * the same `if (!defer(task)) await task()` shape `AgentsService.invalidateAfterCommit` uses.
+   */
+  private async announceDeleted(projectId: string): Promise<void> {
+    const task = async () => {
+      await this.events.emitAsync(PROJECT_SOFT_DELETED, { projectId } satisfies ProjectSoftDeletedEvent);
+    };
+    if (!this.afterCommit.defer(task)) await task();
   }
 }
