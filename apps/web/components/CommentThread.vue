@@ -50,7 +50,6 @@ const typePillClass: Record<Comment['type'], string> = {
 const commentSchema = toTypedSchema(
   z.object({
     body: z.string().min(1, t('comments.validation.bodyRequired')),
-    type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']),
   })
 )
 
@@ -58,7 +57,6 @@ const { handleSubmit, resetForm } = useForm({
   validationSchema: commentSchema,
   initialValues: {
     body: '',
-    type: 'GENERAL',
   },
 })
 
@@ -66,7 +64,7 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(commentsEndpoint, {
       body: values.body,
-      type: values.type,
+      type: 'GENERAL',
     })
     await refreshComments()
     resetForm()
@@ -152,7 +150,7 @@ async function deleteComment(comment: Comment) {
         </div>
         <template v-else>
           <p class="text-sm whitespace-pre-wrap"><template v-for="(part, index) in splitMentions(comment.body)" :key="index"><span v-if="'userId' in part" class="mention-chip">@{{ memberNames.nameOf(part.userId) ?? part.label }}</span><template v-else>{{ part.text }}</template></template></p>
-          <Button size="sm" variant="ghost" @click="startEdit(comment)">
+          <Button v-if="comment.type === 'GENERAL'" size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
           </Button>
           <Button size="sm" variant="ghost" class="text-status-rejected" @click="deleteComment(comment)">
@@ -171,26 +169,6 @@ async function deleteComment(comment: Comment) {
           <FormControl>
             <MarkdownEditor v-bind="componentField" :mention-slug="projectSlug" :aria-label="t('comments.label')" />
           </FormControl>
-          <FormMessage />
-        </FormItem>
-      </FormField>
-
-      <FormField name="type" v-slot="{ componentField }">
-        <FormItem>
-          <FormLabel>{{ t('comments.type') }}</FormLabel>
-          <Select v-bind="componentField">
-            <FormControl>
-              <SelectTrigger :aria-label="t('comments.type')">
-                <SelectValue :placeholder="t('comments.type')" />
-              </SelectTrigger>
-            </FormControl>
-            <SelectContent>
-              <SelectItem value="GENERAL">{{ t('comments.types.GENERAL') }}</SelectItem>
-              <SelectItem value="VERIFICATION">{{ t('comments.types.VERIFICATION') }}</SelectItem>
-              <SelectItem value="FIX_REPORT">{{ t('comments.types.FIX_REPORT') }}</SelectItem>
-              <SelectItem value="REVIEW">{{ t('comments.types.REVIEW') }}</SelectItem>
-            </SelectContent>
-          </Select>
           <FormMessage />
         </FormItem>
       </FormField>

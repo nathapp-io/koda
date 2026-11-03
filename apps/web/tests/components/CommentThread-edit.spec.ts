@@ -202,6 +202,15 @@ describe('US-004 AC4: failed edit preserves inline draft', () => {
   })
 })
 
+describe('US-011 AC-3/AC-4: editing is restricted to GENERAL comments', () => {
+  test('edit button is conditional on GENERAL type and historical workflow pill remains', () => {
+    const source = getSource()
+    expect(source).toMatch(/v-if="comment\.type === 'GENERAL'"[^>]*>[\s\S]*?t\('common\.edit'\)/)
+    expect(source).toContain('typePillClass[comment.type]')
+    expect(source).toContain('comments.types.${comment.type}')
+  })
+})
+
 // ──────────────────────────────────────────────────────────────────────────────
 // AC5 — Given comment edit save fails, localized error toast is shown
 // ──────────────────────────────────────────────────────────────────────────────

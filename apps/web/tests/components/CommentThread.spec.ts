@@ -162,38 +162,20 @@ describe('US-005-3 AC3: each comment displays a colored type pill', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — add-comment form with required body MarkdownEditor and type Select
+// AC4 — add-comment form with required body MarkdownEditor (no type selector)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor and type Select', () => {
+describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor', () => {
   test('source uses MarkdownEditor component for comment body', () => {
     const source = readFileSync(componentPath, 'utf-8')
     expect(source).toContain('MarkdownEditor')
   })
 
-  test('source uses Select component for comment type', () => {
+  test('source does not include a type selector in the add form', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('Select')
-  })
-
-  test('source includes GENERAL as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('GENERAL')
-  })
-
-  test('source includes VERIFICATION as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('VERIFICATION')
-  })
-
-  test('source includes FIX_REPORT as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('FIX_REPORT')
-  })
-
-  test('source includes REVIEW as a Select option', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('REVIEW')
+    const form = source.match(/<!-- Add comment form -->[\s\S]*?<\/form>/)?.[0] ?? ''
+    expect(form).not.toContain('<Select')
+    expect(form).not.toContain('name="type"')
   })
 
   test('source has a submit button for the form', () => {
@@ -204,6 +186,13 @@ describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor and 
       source.includes('@submit') ||
       source.includes('v-on:submit')
     expect(hasSubmit).toBe(true)
+  })
+})
+
+describe('US-011 AC-2: comment submission always posts GENERAL', () => {
+  test('submission payload uses the literal GENERAL type, not form input', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toMatch(/\$api\.post\(commentsEndpoint,\s*\{\s*body:\s*values\.body,\s*type:\s*'GENERAL'/)
   })
 })
 
@@ -328,12 +317,10 @@ describe('US-002 AC2: Valid body field allows API call with body and type', () =
   })
 })
 
-describe('US-002 AC3: Invalid type field shows validation error without calling API', () => {
-  test('commentSchema validates type as z.enum with correct values', () => {
+describe('US-011: comment type is not a form value', () => {
+  test('commentSchema validates only the body field', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasTypeEnum =
-      source.includes("z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'])")
-    expect(hasTypeEnum).toBe(true)
+    expect(source).not.toContain('type: z.enum(')
   })
 })
 
@@ -345,12 +332,11 @@ describe('US-002 AC4: After successful submission, form is reset', () => {
     expect(hasResetForm).toBe(true)
   })
 
-  test('resetForm initialValues set body to empty string and type to GENERAL', () => {
+  test('resetForm initialValues set body to empty string without a type field', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasInitialValues =
-      (source.includes("body: ''") || source.includes('body: ""')) &&
-      source.includes("type: 'GENERAL'")
-    expect(hasInitialValues).toBe(true)
+    expect(source).toContain("body: ''")
+    const values = source.match(/initialValues:\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(values).not.toContain('type')
   })
 })
 
