@@ -3,7 +3,7 @@
   "feature": "review-p2-rest",
   "branchName": "feat/review-p2-rest",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T05:14:10.971Z",
+  "updatedAt": "2026-11-03T05:25:13.563Z",
   "userStories": [
     {
       "id": "US-001",
@@ -795,14 +795,17 @@
       "dependencies": [
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A nullable column, repository tombstone operation and filters in three existing production files follow established soft-delete patterns; ownership resolution and delete-own authorization retain the strict security strategy."
+        "reasoning": "A nullable column, repository tombstone operation and filters in three existing production files follow established soft-delete patterns; ownership resolution and delete-own authorization retain the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/comments/comments.service.ts",
@@ -842,7 +845,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "553776ce33ab237b95661559c8807a75a2301e48"
     },
     {
       "id": "US-011",
