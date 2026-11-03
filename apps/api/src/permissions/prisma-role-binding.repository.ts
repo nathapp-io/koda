@@ -352,7 +352,7 @@ export class PrismaRoleBindingRepository
     if (principal.type === 'USER') {
       return (await this.db.user.count({ where: { id: principal.id } })) > 0;
     }
-    return (await this.db.agent.count({ where: { id: principal.id } })) > 0;
+    return (await this.db.agent.count({ where: { id: principal.id, deletedAt: null } })) > 0;
   }
 
   async projectExists(projectId: string): Promise<boolean> {

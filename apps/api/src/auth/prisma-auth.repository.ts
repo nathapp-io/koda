@@ -89,7 +89,7 @@ export class PrismaAuthRepository {
 
   async findAgentById(id: string): Promise<AgentDomain | null> {
     const agent = await this.db.agent.findUnique({
-      where: { id },
+      where: { id, deletedAt: null },
       select: { id: true, slug: true, status: true, apiKeyHash: true },
     });
     return agent;
@@ -108,7 +108,7 @@ export class PrismaAuthRepository {
   }
 
   async findAgentByKeyHash(keyHash: string): Promise<AgentDomain | null> {
-    const m = await this.db.agent.findFirst({ where: { apiKeyHash: keyHash } });
+    const m = await this.db.agent.findFirst({ where: { apiKeyHash: keyHash, deletedAt: null } });
     if (!m) return null;
     return { id: m.id, slug: m.slug, status: m.status, apiKeyHash: m.apiKeyHash };
   }

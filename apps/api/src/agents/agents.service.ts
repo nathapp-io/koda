@@ -84,7 +84,12 @@ export class AgentsService {
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     if (typeof agentIdOrDto === 'string') {
-      // Update existing agent
+      // Approval execution can arrive after the target was tombstoned; resolve the immutable id
+      // through the live-agent finder before allowing a credential write.
+      if (!(await this.agentRepo.findByIdScalar(agentIdOrDto))) {
+        throw new NotFoundAppException({}, 'agents');
+      }
+
       const agent = await this.audit.audited(
         () => this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash),
         (updated) => ({ key: 'agent.key.rotate', resourceType: 'agent', resourceId: updated.id, projectId: null, summary: 'key rotated' }),
@@ -293,6 +298,10 @@ export class AgentsService {
   }
 
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
+    if (!(await this.agentRepo.findByIdScalar(agentId))) {
+      throw new NotFoundAppException({}, 'agents');
+    }
+
     // Filter out duplicates
     const uniqueCapabilities = [...new Set(updateData.capabilities)];
     await this.audit.audited(

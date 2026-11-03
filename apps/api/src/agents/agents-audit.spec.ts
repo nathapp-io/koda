@@ -26,7 +26,7 @@ describe('AgentsService audit boundaries', () => {
     } finally { inAudit = false; }
   });
   const repo = {
-    findById: vi.fn(), findBySlug: vi.fn(), findBySlugScalar: vi.fn(),
+    findById: vi.fn(), findByIdScalar: vi.fn(), findBySlug: vi.fn(), findBySlugScalar: vi.fn(),
     replaceCapabilities: vi.fn(), softDeleteById: vi.fn(), create: vi.fn(),
     createCapabilities: vi.fn(), update: vi.fn(), updateApiKeyHash: vi.fn(),
   };
@@ -43,6 +43,7 @@ describe('AgentsService audit boundaries', () => {
     inMembership = false;
     record.mockReset().mockResolvedValue(undefined);
     for (const mock of Object.values(repo)) mock.mockReset().mockResolvedValue(agent);
+    repo.findByIdScalar.mockResolvedValue(agent);
     membership.removeAllBindings.mockReset().mockResolvedValue(undefined);
     module = await Test.createTestingModule({ providers: [
       AgentsService,

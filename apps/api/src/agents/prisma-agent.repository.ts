@@ -22,37 +22,38 @@ export class PrismaAgentRepository {
 
   async findAll() {
     return this.db.agent.findMany({
+      where: { deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlug(slug: string) {
     return this.db.agent.findUnique({
-      where: { slug },
+      where: { slug, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findById(id: string) {
     return this.db.agent.findUnique({
-      where: { id },
+      where: { id, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlugWithCapabilities(slug: string) {
     return this.db.agent.findUnique({
-      where: { slug },
+      where: { slug, deletedAt: null },
       include: { capabilities: true },
     });
   }
 
   async findBySlugScalar(slug: string) {
-    return this.db.agent.findUnique({ where: { slug } });
+    return this.db.agent.findUnique({ where: { slug, deletedAt: null } });
   }
 
   async findByIdScalar(id: string) {
-    return this.db.agent.findUnique({ where: { id } });
+    return this.db.agent.findUnique({ where: { id, deletedAt: null } });
   }
 
   async create(data: {
@@ -181,6 +182,7 @@ export class PrismaAgentRepository {
 
     const agents = await this.db.agent.findMany({
       where: {
+        deletedAt: null,
         assignedTickets: {
           some: {
             projectId: project.id,

@@ -168,6 +168,7 @@ describe('AgentsService', () => {
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
 
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
+    mockAgentRepo.findByIdScalar.mockResolvedValue(mockAgent);
     // S4c US-001: GET /agents/me always carries the roster projects, and a
     // rostered target agent is the default for the pickup tests.
     mockAgentRepo.findRosterProjects.mockResolvedValue([]);
@@ -363,6 +364,17 @@ describe('AgentsService', () => {
     });
 
     describe('for rotating existing agent key', () => {
+      it('US-008 AC-9/10: rejects a deleted target before rotating its key', async () => {
+        agentRepo.findByIdScalar.mockResolvedValue(null);
+
+        const error = await service.generateApiKey('deleted-agent').catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(NotFoundAppException);
+        expect((error as NotFoundAppException).prefix).toBe('agents');
+        expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent');
+        expect(agentRepo.updateApiKeyHash).not.toHaveBeenCalled();
+      });
+
       it('should generate new random API key', async () => {
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
@@ -669,6 +681,18 @@ describe('AgentsService', () => {
   });
 
   describe('updateCapabilities', () => {
+    it('US-008 AC-11/12: rejects a deleted agent without writing capability rows', async () => {
+      agentRepo.findByIdScalar.mockResolvedValue(null);
+
+      const error = await service.updateCapabilities('deleted-agent', { capabilities: ['revived'] })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect((error as NotFoundAppException).prefix).toBe('agents');
+      expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent');
+      expect(agentRepo.replaceCapabilities).not.toHaveBeenCalled();
+    });
+
     it('should delete all existing capabilities and insert new ones', async () => {
       const updateData = { capabilities: ['typescript', 'react', 'nodejs'] };
       const updatedAgent = {

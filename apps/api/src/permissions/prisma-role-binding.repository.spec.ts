@@ -2,6 +2,19 @@ import { Logger } from '@nestjs/common';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import { MEMBERSHIP_READ_CAP } from './membership.queries';
 
+describe('PrismaRoleBindingRepository.principalExists', () => {
+  it('counts only live agents', async () => {
+    const count = vi.fn().mockResolvedValue(0);
+    const repository = new PrismaRoleBindingRepository(
+      {} as never,
+      { client: { agent: { count } } } as never,
+    );
+
+    await expect(repository.principalExists({ type: 'AGENT', id: 'deleted-agent' })).resolves.toBe(false);
+    expect(count).toHaveBeenCalledExactlyOnceWith({ where: { id: 'deleted-agent', deletedAt: null } });
+  });
+});
+
 describe('PrismaRoleBindingRepository.findCandidatePrincipalIds', () => {
   const setup = (rows: { principalId: string }[]) => {
     const findMany = vi.fn().mockResolvedValue(rows);
