@@ -148,7 +148,7 @@ export function memoryCommand(program: Command): void {
       }
       const page = options.page;
       const current = page === undefined ? undefined : Number(page);
-      if (page !== undefined && (!/^[0-9]+$/.test(page) || !Number.isSafeInteger(current) || current < 1)) {
+      if (page !== undefined && (current === undefined || !/^[0-9]+$/.test(page) || !Number.isSafeInteger(current) || current < 1)) {
         handleApiError(new Error(`Invalid --page value: ${page}`), { validationError: true });
         return;
       }
