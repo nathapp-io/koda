@@ -11,17 +11,6 @@ const webDir = join(__dirname, '../..')
 const componentPath = join(webDir, 'components', 'CommentThread.vue')
 const threadFile = webFile('components', 'CommentThread.vue')
 
-const FormField = defineComponent({
-  props: { name: { type: String, required: true } },
-  setup(props, { slots }) {
-    const { value, handleChange, handleBlur } = useField<string>(() => props.name)
-    return () => slots.default?.({ componentField: {
-      modelValue: value.value,
-      'onUpdate:modelValue': handleChange,
-      onBlur: handleBlur,
-    } })
-  },
-})
 const MarkdownEditor = defineComponent({
   props: { modelValue: String },
   emits: ['update:modelValue'],
@@ -31,6 +20,19 @@ const MarkdownEditor = defineComponent({
 })
 
 function mountThread(comments: unknown[] = []) {
+  const fields: string[] = []
+  const FormField = defineComponent({
+    props: { name: { type: String, required: true } },
+    setup(props, { slots }) {
+      fields.push(props.name)
+      const { value, handleChange, handleBlur } = useField<string>(() => props.name)
+      return () => slots.default?.({ componentField: {
+        modelValue: value.value,
+        'onUpdate:modelValue': handleChange,
+        onBlur: handleBlur,
+      } })
+    },
+  })
   const api = { get: jest.fn(async () => comments), post: jest.fn(async () => ({})), patch: jest.fn(async () => ({})), delete: jest.fn(async () => ({})) }
   const toast = { success: jest.fn(), error: jest.fn() }
   const app = mountSfc(threadFile, {
@@ -42,9 +44,15 @@ function mountThread(comments: unknown[] = []) {
       useProjectMemberNames: () => ({ load: async () => undefined, nameOf: () => undefined }),
       useAsyncData: () => ({ data: ref(comments), pending: ref(false), error: ref(null), refresh: async () => undefined }),
     },
-    components: { ...uiStubs, FormField, MarkdownEditor },
+    components: {
+      ...uiStubs,
+      FormField,
+      MarkdownEditor,
+      Select: defineComponent({ setup: (_, { slots }) => () => h('select', slots.default?.()) }),
+      SelectTrigger: defineComponent({ setup: (_, { slots }) => () => h('button', slots.default?.()) }),
+    },
   })
-  return { app, api }
+  return { app, api, fields }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -214,10 +222,9 @@ describe('US-005-3 AC4: add-comment form has a required body MarkdownEditor', ()
   })
 
   test('mounted ticket thread renders no comment type select or type field', () => {
-    const { app } = mountThread()
-    expect(app.find('[data-stub="select"]')).toHaveLength(0)
-    expect(app.find('[data-stub="select-trigger"]')).toHaveLength(0)
-    expect(app.find('[data-stub="form-field"]').some((field) => field.props.name === 'type')).toBe(false)
+    const { app, fields } = mountThread()
+    expect(app.find('select')).toHaveLength(0)
+    expect(fields).toEqual(['body'])
     app.unmount()
   })
 
