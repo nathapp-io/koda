@@ -31,6 +31,7 @@ describe('MemoryReadController', () => {
 
   const mockGovernanceService = {
     getProjectMemory: vi.fn(),
+    exportProjectMemory: vi.fn(),
   };
 
   const mockProjectAccessService = {
@@ -297,6 +298,77 @@ describe('MemoryReadController', () => {
         expect(calledWith.projectId).toBe('project-123');
         expect(calledWith.projectId).not.toBe('evil');
       });
+    });
+  });
+
+  // memory-notes US-006: the incremental export feed. The membership decision and the `memory.read` key are the
+  // guard's, exactly as on the list; the handler resolves the slug, builds the owner from the caller and hands
+  // the cursor and the page size to the service. The 400s, 403s and 404s themselves are covered over real HTTP
+  // by test/integration/memory/memory-export.integration.spec.ts.
+  describe('exportMemory (memory-notes US-006)', () => {
+    const emptyPage = { items: [], nextCursor: null, hasMore: false };
+
+    beforeEach(() => {
+      mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
+      mockGovernanceService.exportProjectMemory.mockResolvedValue(emptyPage);
+    });
+
+    it('declares ProjectMembershipGuard, RequiresGuard and the memory.read key on the route', () => {
+      const guards = Reflect.getMetadata('__guards__', MemoryReadController.prototype.exportMemory) as unknown[];
+      const requires = Reflect.getMetadata('koda:requires', MemoryReadController.prototype.exportMemory) as {
+        keys: string[];
+        enforcedBy: string;
+      };
+
+      expect(guards?.map((guard) => (guard as { name: string }).name)).toEqual([
+        'ProjectMembershipGuard',
+        'RequiresGuard',
+      ]);
+      expect(requires).toMatchObject({ keys: ['memory.read'], enforcedBy: 'guard' });
+    });
+
+    it('resolves the slug and reads the feed for the caller, never for an owner in the query', async () => {
+      await controller.exportMemory(
+        'my-project',
+        { since: 'abc', take: '250', ownerId: 'someone-else' } as never,
+        agent('agent-A'),
+      );
+
+      expect(mockGovernanceService.exportProjectMemory).toHaveBeenCalledWith(
+        'project-resolved-id',
+        { ownerType: 'AGENT', ownerId: 'agent-A' },
+        'abc',
+        250,
+      );
+    });
+
+    it('answers the page the service composed, in the JSON envelope', async () => {
+      const page = { items: [{ id: 'mem-1' }], nextCursor: 'cursor-1', hasMore: true };
+      mockGovernanceService.exportProjectMemory.mockResolvedValue(page);
+
+      const result = await controller.exportMemory('my-project', {} as never, user('user-A'));
+
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(page);
+    });
+
+    it('defaults take to 100 and passes no since when the query carries neither', async () => {
+      await controller.exportMemory('my-project', {} as never, agent());
+
+      expect(mockGovernanceService.exportProjectMemory).toHaveBeenCalledWith(
+        'project-resolved-id',
+        { ownerType: 'AGENT', ownerId: 'agent-1' },
+        undefined,
+        100,
+      );
+    });
+
+    it('answers 404 for an unknown or soft-deleted project and never reads the feed', async () => {
+      mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+
+      await expect(controller.exportMemory('unknown-slug', {} as never, agent())).rejects.toThrow(NotFoundAppException);
+
+      expect(mockGovernanceService.exportProjectMemory).not.toHaveBeenCalled();
     });
   });
 });

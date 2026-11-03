@@ -1656,6 +1656,65 @@
         ]
       }
     },
+    "/api/projects/{slug}/memory/export": {
+      "get": {
+        "operationId": "MemoryReadController_exportMemory",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "required": false,
+            "in": "query",
+            "description": "Cursor of the last row already held",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "required": false,
+            "in": "query",
+            "description": "Rows to answer (1..500, default 100)",
+            "schema": {
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of changed rows: { items, nextCursor, hasMore }, every status and soft-deleted row included"
+          },
+          "400": {
+            "description": "An unreadable since cursor, or a take outside 1..500"
+          },
+          "403": {
+            "description": "memory.read is missing, or the caller is not a member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export memory changed after a cursor (memory.read)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/projects/{slug}/memory": {
       "get": {
         "operationId": "MemoryReadController_getMemory",

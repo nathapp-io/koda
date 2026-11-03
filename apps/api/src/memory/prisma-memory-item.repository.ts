@@ -10,10 +10,12 @@ import {
   ProjectMemoryQuery,
   MemoryItemInput,
   MemoryItem,
+  MemoryExportScope,
   MemoryOwnerType,
   MemoryReadScope,
   memoryOwnerKey,
 } from './memory-item-repository';
+import type { MemoryExportKey } from './memory-export-cursor';
 import type { MemoryWritten } from './memory-audit';
 import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
 
@@ -225,6 +227,48 @@ export class PrismaMemoryItemRepository
     if (patch.supersededBy !== undefined) data.supersededBy = patch.supersededBy ?? null;
     if (patch.deletedAt !== undefined) data.deletedAt = patch.deletedAt ?? null;
     return data;
+  }
+
+  /**
+   * memory-notes US-006: the incremental export's page — every row of the project plus the caller's user
+   * rows whose `(updatedAt, id)` is strictly after `after`, ordered by that same pair, up to `take`.
+   *
+   * No eligibility filter at all: a superseded, retired, expired or soft-deleted row is in the answer with
+   * its `status` and `deletedAt` as stored, because a row that stopped being eligible is a change a mirror
+   * has to replay. `until` is what keeps the feed from skipping a late commit: only rows strictly older than
+   * the settle window are answered, so the cursor a caller stores can never pass a timestamp that an
+   * uncommitted transaction may still be writing at.
+   *
+   * The keyset condition is the pair, not the timestamp alone: rows written in the same millisecond (a
+   * supersede and its replacement) share an `updatedAt`, so the id tiebreaker is what makes a page boundary
+   * neither repeat nor skip one of them.
+   */
+  async findChangedAfter(
+    scope: MemoryExportScope,
+    after: MemoryExportKey | null,
+    until: Date,
+    take: number,
+  ): Promise<MemoryItem[]> {
+    const where: Record<string, unknown> = {
+      OR: [{ projectId: scope.projectId }, { ownerKey: scope.ownerKey }],
+      updatedAt: { lt: until },
+    };
+    if (after) {
+      where.AND = [
+        {
+          OR: [
+            { updatedAt: { gt: after.updatedAt } },
+            { updatedAt: after.updatedAt, id: { gt: after.id } },
+          ],
+        },
+      ];
+    }
+    const models = await this.prisma.client.memoryItem.findMany({
+      where,
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+      take,
+    });
+    return models.map((m) => this.toDomain(m));
   }
 
   async findByProject(query: MemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {

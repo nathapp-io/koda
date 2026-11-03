@@ -689,6 +689,11 @@ model MemoryItem {
   @@index([projectId, sourceType, sourceId])
   @@index([sourceType, sourceId])
   @@index([searchVector], type: Gin)
+  // memory-notes US-006: the export feed's keyset read. The feed answers the project's rows plus the caller's
+  // user rows as one page ordered and continued by `(updatedAt, id)`, so each side is indexed on the pair it
+  // pages by — a supersede, retire or soft delete rewrites `updatedAt`, and the feed finds the row by it.
+  @@index([projectId, updatedAt, id])
+  @@index([ownerKey, updatedAt, id])
 }
 
 // ---------------------------------------------------------------------------

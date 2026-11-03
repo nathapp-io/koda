@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PageOption } from '@nathapp/nestjs-common';
+import { PageOption, ValidationAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItem, ProjectMemoryQuery, MemoryItemOwner, memoryOwnerKey } from './memory-item-repository';
+import { decodeMemoryExportCursor, encodeMemoryExportCursor } from './memory-export-cursor';
 import { MemoryKind, MemoryScope } from '../common/enums';
 
 export interface GovernanceResult {
@@ -12,6 +13,34 @@ export interface GovernanceResult {
   deduplicatedCount: number;
   supersessionCount: number;
   durationMs: number;
+}
+
+/**
+ * memory-notes US-006: how far behind the server clock a row's `updatedAt` must be before the export
+ * hands it out.
+ *
+ * `updatedAt` is stamped by the writing transaction's clock, and a row's commit can become visible after a
+ * read that already ran with a later position. A mirror that stored the cursor of the last row it saw would
+ * then never ask for that row again — it would silently miss the change. Holding back everything inside
+ * this window means the row is answered by the next call, when the caller's cursor is still behind it, and it
+ * is why the read bounds `updatedAt` strictly (`<`): the cursor a caller stores never lands on a timestamp an
+ * uncommitted transaction may still be writing at.
+ */
+export const MEMORY_EXPORT_SETTLE_MS = 5000;
+
+/**
+ * memory-notes US-006: one export page — the changed rows, the cursor that continues after the last of them,
+ * and whether this page was full.
+ *
+ * `nextCursor` is the last row's own cursor, or the `since` the caller gave when the page is empty (null when
+ * it gave none), so storing it unconditionally is safe. `hasMore` is `items.length === take`: a full page is
+ * worth another call. The rows are exactly as stored — every status, kind and soft-deleted row, with its
+ * `deletedAt` — because fencing belongs to the LLM prompt the MCP tools build, not to the feed.
+ */
+export interface MemoryExportPage {
+  items: MemoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 const PAGE_SIZE = 100;
@@ -25,6 +54,45 @@ export class MemoryGovernanceService {
 
   async getProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     return this.repository.findByProjectMemory(query, page);
+  }
+
+  /**
+   * memory-notes US-006: one page of the incremental memory feed a mirror replays.
+   *
+   * The method composes the three inputs of the read: the cursor (`since`, decoded here so an unreadable one is
+   * a 400 naming `since` before anything is read), the settle window, which ends `MEMORY_EXPORT_SETTLE_MS`
+   * before the clock, and the page — the caller's authorized union, the project's rows plus the caller's own
+   * user rows, every status, kind and soft-deleted row included. A blank `since` is no cursor at all: a client
+   * that sends an empty value is asking for the feed from its beginning.
+   */
+  async exportProjectMemory(
+    projectId: string,
+    owner: MemoryItemOwner,
+    since: string | undefined,
+    take: number,
+  ): Promise<MemoryExportPage> {
+    const given = since !== undefined && since.trim().length > 0 ? since : undefined;
+    const after = given === undefined ? null : decodeMemoryExportCursor(given);
+    if (given !== undefined && after === null) {
+      throw new ValidationAppException({ field: 'since' }, 'memory.export');
+    }
+
+    const until = new Date(Date.now() - MEMORY_EXPORT_SETTLE_MS);
+    const items = await this.repository.findChangedAfter(
+      { projectId, ownerKey: memoryOwnerKey(owner) },
+      after,
+      until,
+      take,
+    );
+
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor: last
+        ? encodeMemoryExportCursor({ updatedAt: last.updatedAt, id: last.id })
+        : given ?? null,
+      hasMore: items.length === take,
+    };
   }
 
   /**

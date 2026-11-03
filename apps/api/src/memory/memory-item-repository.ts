@@ -29,6 +29,19 @@ export function memoryOwnerKey(owner: MemoryItemOwner): string {
   return `${owner.ownerType}:${owner.ownerId}`;
 }
 
+/**
+ * memory-notes US-006: whose rows the incremental export answers.
+ *
+ * The authorized union the list route reads: every row of `projectId` plus the user rows keyed on the
+ * caller's `ownerKey`. Every status, kind, TTL and soft-deleted row is included — the export exists so a
+ * mirror can see a row leave, and a row that stopped being eligible is exactly the change a mirror must
+ * replay.
+ */
+export interface MemoryExportScope {
+  projectId: string;
+  ownerKey: string;
+}
+
 export interface MemoryQuery {
   projectId: string;
   kind?: MemoryKind;
