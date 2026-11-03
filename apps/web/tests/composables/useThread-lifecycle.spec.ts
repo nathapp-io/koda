@@ -67,7 +67,7 @@ describe('useThread mount lifecycle (US-003)', () => {
     })
     g.EventSource = StubEventSource
     g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
-    g.useAuth = () => ({ refresh: jest.fn(async () => true) })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
 
     const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
       globals: { useApi: g.useApi, useAuth: g.useAuth },
@@ -87,7 +87,7 @@ describe('useThread mount lifecycle (US-003)', () => {
     }))
     g.EventSource = StubEventSource
     g.useApi = () => ({ $api: { get, post: jest.fn(), patch: jest.fn() } })
-    g.useAuth = () => ({ refresh: jest.fn(async () => true) })
+    g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok') })
 
     const app = mountSfc(webFile('tests', 'fixtures', 'thread-client-probe.vue'), {
       globals: { useApi: g.useApi, useAuth: g.useAuth },

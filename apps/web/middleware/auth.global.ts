@@ -1,3 +1,5 @@
+import { safeRedirectPath } from '~/lib/safe-redirect'
+
 export default defineNuxtRouteMiddleware(async (to, _from) => {
   const auth = useAuth()
 
@@ -18,11 +20,13 @@ export default defineNuxtRouteMiddleware(async (to, _from) => {
 
   // If unauthenticated and trying to access a protected route (not /login or /register)
   if (!auth.isAuthenticated.value && !guestOnlyRoutes.includes(to.path)) {
-    return navigateTo('/login')
+    return navigateTo(to.fullPath === '/'
+      ? { path: '/login' }
+      : { path: '/login', query: { redirect: to.fullPath } })
   }
 
   // If authenticated and trying to access a guest-only route
   if (auth.isAuthenticated.value && guestOnlyRoutes.includes(to.path)) {
-    return navigateTo('/')
+    return navigateTo(safeRedirectPath(to.query.redirect))
   }
 })

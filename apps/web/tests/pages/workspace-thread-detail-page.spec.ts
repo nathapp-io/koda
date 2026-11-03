@@ -257,7 +257,7 @@ function mountPage(over: {
 
   g.EventSource = StubEventSource
   g.useApi = () => ({ $api: { get, post, patch } })
-  g.useAuth = () => ({ refresh: jest.fn(async () => true), user: ref({ id: 'u1', email: 'owner@k.t' }) })
+  g.useAuth = () => ({ refresh: jest.fn(async () => true), refreshSession: jest.fn(async () => 'ok'), user: ref({ id: 'u1', email: 'owner@k.t' }) })
 
   const useWorkspaceThread = jest.fn((id: string) => createWorkspaceThread(id))
   const useProjectRunnerSummaries = jest.fn(() => createProjectRunnerSummaries())

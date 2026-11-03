@@ -40,6 +40,17 @@ describe('M22: forwardToApi cookie selection', () => {
     expect(REFRESH_COOKIE).toBe('koda_refresh')
   })
 
+  test('bearer override takes precedence over the ACCESS cookie', async () => {
+    g.getCookie = (_event: unknown, name: string) =>
+      name === 'koda_token' ? 'cookie-token' : undefined
+    g.getRequestHeader = () => undefined
+
+    await forwardToApi(makeEvent(), '/auth/logout', { bearer: 'tok-1' })
+
+    const [, opts] = rawMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(opts.headers['Authorization']).toBe('Bearer tok-1')
+  })
+
   test('default (no cookieName) forwards the ACCESS cookie as Bearer', async () => {
     g.getCookie = (_event: unknown, name: string) =>
       name === 'koda_token' ? 'access-token-value' : 'refresh-token-value'

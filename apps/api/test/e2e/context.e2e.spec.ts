@@ -30,7 +30,7 @@ import { expectGuardActive, fixtureDb } from '../helpers/action-context';
 
 interface ContextApiResponse {
   projectId?: string;
-  canonicalState?: { recentEvents?: unknown[] };
+  canonicalState?: { recentEvents?: unknown[]; activeDecisions?: Array<{ id: string }> };
   retrievedContext?: {
     semanticMemory?: unknown[];
     documents?: { results: unknown[] };
@@ -137,6 +137,38 @@ describeIntegration('Context API E2E', () => {
         select: { id: true },
       });
       expect(adminBinding).not.toBeNull();
+    });
+
+    it('AC-6: returns manual active decisions and excludes review-minted decisions', async () => {
+      const prisma = fixtureDb(app);
+      const manual = await prisma.memoryItem.create({ data: {
+        projectId,
+        kind: 'DECISION',
+        subject: 'context-manual',
+        predicate: 'manual choice',
+        object: 'keep',
+        sourceType: 'manual',
+        status: 'active',
+      } });
+      const review = await prisma.memoryItem.create({ data: {
+        projectId,
+        kind: 'DECISION',
+        subject: 'context-review',
+        predicate: 'review choice',
+        object: 'ignore',
+        sourceType: 'review_event',
+        status: 'active',
+      } });
+
+      const res = await request(httpServer)
+        .get(`/api/context/${projectSlug}`)
+        .query({ intent: 'answer' })
+        .set('Authorization', `Bearer ${adminAccessToken}`)
+        .expect(200);
+
+      const response = body<ContextApiResponse>(res);
+      expect(response.canonicalState?.activeDecisions?.map(({ id }) => id)).toContain(manual.id);
+      expect(response.canonicalState?.activeDecisions?.map(({ id }) => id)).not.toContain(review.id);
     });
 
     it('AC-1: returns all four top-level blocks', async () => {

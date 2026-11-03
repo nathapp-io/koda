@@ -46,13 +46,40 @@ describe('invite accept Nitro route (US-007)', () => {
     expect(setAuthCookies.mock.calls[0]).toEqual([event, { accessToken: 'at-1', refreshToken: 'rt-1' }])
   })
 
+  test('US-008 AC-3: encodes a traversal-like router token before forwarding', async () => {
+    const event = makeEvent('../x')
+    const { default: handler } = await import(routePath) as { default: Handler }
+
+    await handler(event)
+
+    expect((g.forwardToApi as jest.Mock).mock.calls[0]?.[1]).toBe('/invites/..%2Fx/accept')
+  })
+
+  test('US-008 AC-4: forwards a normal router token unchanged', async () => {
+    const event = makeEvent('tok123')
+    const { default: handler } = await import(routePath) as { default: Handler }
+
+    await handler(event)
+
+    expect((g.forwardToApi as jest.Mock).mock.calls[0]?.[1]).toBe('/invites/tok123/accept')
+  })
+
+  test('US-008 AC-6: rejects an empty router token without forwarding upstream', async () => {
+    const event = makeEvent('')
+    const { default: handler } = await import(routePath) as { default: Handler }
+
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 400 })
+    expect(g.forwardToApi as jest.Mock).not.toHaveBeenCalled()
+  })
+
   test('AC13 boundary: an upstream error status sets no cookies and rethrows', async () => {
     g.forwardToApi = jest.fn(async () => ({ status: 409, body: { message: 'Email already registered' } }))
-    const event = makeEvent('tok123')
+    const event = makeEvent('a/b')
     const { default: handler } = await import(routePath) as { default: Handler }
 
     await expect(handler(event)).rejects.toBeTruthy()
 
+    expect((g.forwardToApi as jest.Mock).mock.calls[0]?.[1]).toBe('/invites/a%2Fb/accept')
     expect(g.setAuthCookies as jest.Mock).not.toHaveBeenCalled()
   })
 })

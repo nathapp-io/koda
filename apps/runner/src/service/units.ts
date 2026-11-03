@@ -5,6 +5,12 @@ export const SYSTEMD_UNIT = 'koda-runner.service';
 export const SYSTEMD_UNIT_PATH = '/etc/systemd/system/koda-runner.service';
 export const LAUNCHD_LABEL = 'dev.koda.runner';
 export const LAUNCHD_PLIST_PATH = '/Library/LaunchDaemons/dev.koda.runner.plist';
+/**
+ * OPS-1: launchd's KeepAlive dict restarts the runner on a failed exit only, so under launchd a server refusal
+ * (which no restart can fix) must exit 0. The plist names the supervisor; `runCommand` reads the same names.
+ */
+export const SUPERVISOR_ENV = 'KODA_RUNNER_SUPERVISOR';
+export const LAUNCHD_SUPERVISOR = 'launchd';
 
 export interface ServiceSpec {
   readonly user: string;
@@ -105,11 +111,16 @@ ${args}
     <string>${spec.userHome}</string>
     <key>PATH</key>
     <string>${spec.path}</string>
+    <key>${SUPERVISOR_ENV}</key>
+    <string>${LAUNCHD_SUPERVISOR}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>AbandonProcessGroup</key>

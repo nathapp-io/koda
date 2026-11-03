@@ -15,8 +15,13 @@ describe('useProjectEvents', () => {
   })
 
   test('refreshes auth through useAuth, resolved during setup, read at call time by the shared hub', () => {
-    expect(source).toContain('const { refresh } = useAuth()')
+    expect(source).toContain('const { refreshSession } = useAuth()')
     expect(source).toContain('refreshAuth: () => latestRefresh()')
+    expect(source).toContain('latestRefresh = refreshSession')
+  })
+
+  test('US-007: the recovery default fails closed, so a stream with no mounted owner stops', () => {
+    expect(source).toContain("let latestRefresh: () => Promise<RefreshOutcome> = async () => 'unauthorized'")
   })
 
   test('guards environments without EventSource', () => {

@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, FleetCommandOut, SyncRequest } from '@nathapp/fleet-protocol';
@@ -79,11 +80,11 @@ function fakeServer(): FakeServer {
   return server;
 }
 
-async function setup(server: FakeServer) {
+async function setup(server: FakeServer, over: { socketDir?: string } = {}) {
   const base = await tmp.make('daemon');
   const home = resolveHome({}, join(base, 'home'));
   const config = parseRunnerConfig({
-    serverUrl: server.url, workspaceRoot: join(base, 'ws'), naxHome: join(base, 'naxhome'), jobRetentionDays: 1, socketDir: join(base, 's'),
+    serverUrl: server.url, workspaceRoot: join(base, 'ws'), naxHome: join(base, 'naxhome'), jobRetentionDays: 1, socketDir: over.socketDir ?? join(base, 's'),
     capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true }, tools: { git: true, gh: true, glab: false }, executors: ['host'] },
   }, {});
   const identity = { runnerId: 'r1', apiKey: 'kr_test', serverUrl: server.url, name: 'box', enrolledAt: '2026-10-01T00:00:00.000Z' };
@@ -454,6 +455,82 @@ describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
     const daemon = await p.start({ tuning: { ...tuning, capabilityProbeMs: 30 } });
     try {
       await waitFor(() => nax.calls.filter((c) => c.args[0] === '--version').length >= 3);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+});
+
+/**
+ * OPS-1: launchd appends every line to runner.log and never rotates it, so the daemon bounds it itself — once at
+ * start and then every `runnerLogCheckMs`.
+ */
+describe('startDaemon, runner.log rotation (OPS-1)', () => {
+  const LOG = 'runner.log';
+  /**
+   * A unix socket path is at most 100 bytes and the socket name is 21 of them, so a socket dir nested inside a temp
+   * home has ~78 bytes. The rotation assertions never touch a socket, so they point the socket dir one level up
+   * from the temp home and stay runnable wherever $TMPDIR is deep. The pid keeps two concurrent runs of this file
+   * (a dev's `bun test` beside a CI run) out of each other's sockets while staying inside that budget.
+   */
+  const SOCKET_DIR = join(tmpdir(), `s-${process.pid}`);
+
+  test('AC-13: an oversized runner.log is rotated by the time startDaemon resolves', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: SOCKET_DIR });
+    await mkdir(s.home.dir, { recursive: true });
+    await writeFile(join(s.home.dir, LOG), 'x'.repeat(25));
+    const daemon = await startDaemon({
+      fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity,
+      tuning: { ...tuning, runnerLogMaxBytes: 10 }, log: createMemoryLogger(), executorFactory: () => s.ex,
+    });
+    try {
+      expect(await readFile(join(s.home.dir, `${LOG}.1`), 'utf8')).toBe('x'.repeat(25));
+      expect(await readFile(join(s.home.dir, LOG), 'utf8')).toBe('');
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('AC-14: the periodic check rotates a log that grew after the daemon started', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: SOCKET_DIR });
+    await mkdir(s.home.dir, { recursive: true });
+    const daemon = await startDaemon({
+      fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity,
+      tuning: { ...tuning, runnerLogMaxBytes: 10, runnerLogCheckMs: 20 }, log: createMemoryLogger(), executorFactory: () => s.ex,
+    });
+    try {
+      await expect(stat(join(s.home.dir, LOG))).rejects.toThrow();          // a missing log at start rotates nothing
+      await writeFile(join(s.home.dir, LOG), 'y'.repeat(25));
+      await waitFor(async () => {
+        try {
+          return (await readFile(join(s.home.dir, `${LOG}.1`), 'utf8')).length === 25;
+        } catch {
+          return false;
+        }
+      }, { timeoutMs: 1_000, intervalMs: 10 });
+      expect(await readFile(join(s.home.dir, `${LOG}.1`), 'utf8')).toBe('y'.repeat(25));
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('AC-15: a runner.log that is a directory only warns; the daemon starts and keeps running', async () => {
+    const server = fakeServer();
+    const s = await setup(server, { socketDir: SOCKET_DIR });
+    await mkdir(join(s.home.dir, LOG), { recursive: true });
+    const log = createMemoryLogger();
+    const daemon = await startDaemon({
+      fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity,
+      tuning, log, executorFactory: () => s.ex,
+    });
+    try {
+      expect(log.lines.some((l) => l.level === 'warn' && l.message.includes('could not rotate runner.log'))).toBe(true);
+      await waitFor(() => server.syncs.length >= 1);
     } finally {
       await daemon.stop();
       server.stop();

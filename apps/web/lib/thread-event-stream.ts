@@ -4,6 +4,8 @@
  * Mirrors createProjectEventStream: the browser EventSource reconnects after transient drops and
  * the next open fires onResync; terminal failures (readyState CLOSED — 401 after the cookie
  * expired, 403, 429) refresh auth then reopen with backoff, giving up after MAX_TERMINAL_FAILURES.
+ * US-007: the refresh is tri-state, so only an 'unauthorized' answer stops the stream — an API
+ * outage ('unavailable') keeps retrying, capped at BACKOFF_CAP_MS per wait.
  * The stream lives only once a `ready` frame arrives; any stream error (transient or terminal)
  * marks it not live (the US-003 controller contract), and a reconnect after an error resyncs once.
  * Malformed SSE event data is ignored.
@@ -68,7 +70,10 @@ export function createThreadEventStream(
   let timer: unknown = null
   let stopped = false
   let hadError = false
+  /** Drives the delay; grows on every error and only an onopen resets it. */
   let failures = 0
+  /** US-007: consecutive recoveries that a live session allowed; the cap applies to these only. */
+  let authedFailures = 0
   // seen intentionally persists across reconnects: once resync refetches the gap, a redelivered
   // pre-gap event is still dropped by this window.
   let seen: readonly string[] = []
@@ -80,18 +85,29 @@ export function createThreadEventStream(
   }
 
   const recover = async (): Promise<void> => {
-    if (failures >= MAX_TERMINAL_FAILURES) {
+    if (authedFailures >= MAX_TERMINAL_FAILURES) {
       stopped = true
       return
     }
     const delay = backoffMs(failures)
     failures += 1
-    const ok = await deps.refreshAuth()
+    const outcome = await deps.refreshAuth()
     if (stopped) return
-    if (!ok) {
+    if (outcome === 'unauthorized') {
+      // The session is gone (or the refresh said nothing this build understands): stop, no reopen.
       stopped = true
       return
     }
+    if (outcome === 'ok') {
+      authedFailures += 1
+    }
+    else if (outcome !== 'unavailable') {
+      // Fail closed on any other value: only an explicit outage may keep the stream retrying.
+      stopped = true
+      return
+    }
+    // 'ok' and 'unavailable' both reopen after the same backoff; an outage is not counted against
+    // MAX_TERMINAL_FAILURES, so a deploy can never end the stream, and backoffMs caps the wait.
     timer = deps.setTimer(() => {
       timer = null
       open()
@@ -104,6 +120,7 @@ export function createThreadEventStream(
     source = es
     es.onopen = () => {
       failures = 0
+      authedFailures = 0
       if (hadError) {
         hadError = false
         handlers.onResync()

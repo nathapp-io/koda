@@ -3,13 +3,15 @@ import { useVisiblePolling } from '~/composables/useVisiblePolling'
 import { createProjectEventHub } from '~/lib/project-event-hub'
 import type { ProjectEventHub } from '~/lib/project-event-hub'
 import type { EventSourceLike } from '~/lib/project-event-stream'
+import type { RefreshOutcome } from '~/composables/useAuth'
 
 export const USER_EVENTS_URL = '/api/me/events'
 /** S4a §5: backstop poll; the stream is refused past the per-user stream cap (D509) or when the API is down. */
 export const USER_EVENTS_POLL_MS = 60_000
 
 let hub: ProjectEventHub | null = null
-let latestRefresh: () => Promise<boolean> = async () => false
+/** US-007: tri-state, so an outage keeps the stream retrying and a dead session stops it. */
+let latestRefresh: () => Promise<RefreshOutcome> = async () => 'unauthorized'
 
 /** Created on first client mount only, so it never exists during SSR. */
 function sharedHub(): ProjectEventHub {
@@ -28,14 +30,14 @@ function sharedHub(): ProjectEventHub {
  * Client-only: subscribes on mount and unsubscribes on unmount.
  */
 export function useUserEvents(onEvent: () => void): void {
-  const { refresh } = useAuth()
+  const { refreshSession } = useAuth()
   const polling = useVisiblePolling(async () => { onEvent() }, USER_EVENTS_POLL_MS)
   let unsubscribe: (() => void) | null = null
 
   onMounted(() => {
     polling.start()
     if (typeof EventSource === 'undefined') return
-    latestRefresh = refresh
+    latestRefresh = refreshSession
     unsubscribe = sharedHub().subscribe(USER_EVENTS_URL, {
       onNotification: () => onEvent(),
       onResync: () => onEvent(),

@@ -86,6 +86,27 @@ describe('buildFixArgv', () => {
   });
 });
 
+describe('isProcessAlive injected kill', () => {
+  test('AC-1: treats EPERM as dead', () => {
+    const kill = () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); };
+    expect(isProcessAlive(4242, kill)).toBe(false);
+  });
+  test('AC-2: treats ESRCH as dead', () => {
+    const kill = () => { throw Object.assign(new Error('missing'), { code: 'ESRCH' }); };
+    expect(isProcessAlive(4242, kill)).toBe(false);
+  });
+  test('AC-3: reports live when kill succeeds and checks signal zero', () => {
+    const calls: Array<[number, number]> = [];
+    expect(isProcessAlive(4242, (pid, signal) => { calls.push([pid, signal]); })).toBe(true);
+    expect(calls).toEqual([[4242, 0]]);
+  });
+  test('AC-4: rejects pid zero without calling kill', () => {
+    let called = false;
+    expect(isProcessAlive(0, () => { called = true; })).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
 describe('spawnNax and signalGroup', () => {
   test('spawns detached with its own process group, output going to files, and survives the caller not awaiting it', async () => {
     const dir = await tmp.make('proc');

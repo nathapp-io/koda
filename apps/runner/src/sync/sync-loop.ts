@@ -133,7 +133,7 @@ export class SyncLoop {
       const response = await this.deps.client.sync(request, controller.signal);
       return await this.apply(request, response, report);
     } catch (error) {
-      return this.classify(error, request, controller, report);
+      return await this.classify(error, request, controller, report);
     } finally {
       this.inflight = null;
     }
@@ -169,17 +169,17 @@ export class SyncLoop {
     return { kind: 'ok' };
   }
 
-  private classify(error: unknown, request: SyncRequest, controller: AbortController, report: CapabilityReport | null): SyncOutcome {
+  private async classify(error: unknown, request: SyncRequest, controller: AbortController, report: CapabilityReport | null): Promise<SyncOutcome> {
     if (controller.signal.aborted) return { kind: 'woken' };
     if (error instanceof ServerError) {
       if (error.status === 426) return { kind: 'stop', reason: { kind: 'protocol', message: error.message } };
       if (error.status === 401) return { kind: 'stop', reason: { kind: 'auth', message: error.message } };
-      if (error.status === 400 || error.status === 413) return this.badBatch(request, report, error);
+      if (error.status === 400 || error.status === 413) return await this.badBatch(request, controller, report, error);
     }
     return this.retry(error);
   }
 
-  private badBatch(request: SyncRequest, report: CapabilityReport | null, error: ServerError): SyncOutcome {
+  private async badBatch(request: SyncRequest, controller: AbortController, report: CapabilityReport | null, error: ServerError): Promise<SyncOutcome> {
     if (report && request.capabilities && error.status === 400) {
       this.capsRejected = report.hash;
       this.deps.log.error('server rejected the capabilities report; fix runner.json capabilities', { status: error.status });
@@ -199,11 +199,30 @@ export class SyncLoop {
     const job = request.jobs[0];
     const event = job?.events[0];
     if (!job || !event) return this.retry(error);
+    const probe: SyncRequest = { ...request, jobs: [] };
+    let response: SyncResponse;
+    try {
+      response = await this.deps.client.sync(probe, controller.signal);
+    } catch (probeError) {
+      if (controller.signal.aborted) return { kind: 'woken' };
+      if (probeError instanceof ServerError && (probeError.status === 401 || probeError.status === 426)) {
+        return this.classify(probeError, probe, controller, report);
+      }
+      return this.retry(probeError);
+    }
+    if (controller.signal.aborted) return { kind: 'woken' };
+    try {
+      await this.apply(probe, response, report);
+    } catch (applyError) {
+      if (controller.signal.aborted) return { kind: 'woken' };
+      return this.retry(applyError);
+    }
+    if (controller.signal.aborted) return { kind: 'woken' };
     const message = `event ${event.seq} (${event.type}) dropped: the server rejected it (${error.status})`;
     this.deps.journal.replaceEvent(job.jobId, job.leaseEpoch, event.seq, 'lifecycle', { level: 'error', message });
-    this.deps.log.error(message, { jobId: job.jobId });
+    this.deps.log.error(message, { jobId: job.jobId, seq: event.seq, type: event.type });
     this.scale = FULL_SCALE;
-    return { kind: 'again' };
+    return this.retry(error);
   }
 
   /** The acks-free retry worked, so the acks were the problem: resend them without their free-text detail (D58). */

@@ -120,7 +120,7 @@ const VUE_HELPERS = ['ref', 'computed', 'reactive', 'watch', 'onMounted', 'onBef
 
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
-  'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta',
+  'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta', 'useRegistrationStatus',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectMembers',
   // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).

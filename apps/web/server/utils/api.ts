@@ -43,7 +43,7 @@ export function setAuthCookies(
   if (data.accessToken) {
     setCookie(event, ACCESS_COOKIE, data.accessToken, {
       httpOnly: true,
-      sameSite: 'strict',
+      sameSite: 'lax',
       secure: true,
       path: '/',
       maxAge: 60 * 15, // 15-minute access-token window
@@ -77,22 +77,22 @@ export function clearAuthCookies(event: AuthEvent): void {
 export function forwardToApi<T = unknown>(
   event: AuthEvent,
   path: string,
-  init: { method?: string; body?: unknown; cookieName?: 'access' | 'refresh' } = {},
+  init: { method?: string; body?: unknown; cookieName?: 'access' | 'refresh'; bearer?: string } = {},
 ): Promise<{ status: number; body: T }> {
   const config = useRuntimeConfig(event)
   const internal = String(config.apiInternalUrl ?? '').replace(/\/+$/, '')
   const baseUrl = internal.endsWith('/api') ? internal : `${internal}/api`
   const url = `${baseUrl}${path}`
 
-  const cookieValue = getCookie(
-    event,
-    init.cookieName === 'refresh' ? REFRESH_COOKIE : ACCESS_COOKIE,
-  )
+  const cookieValue = init.bearer === undefined
+    ? getCookie(event, init.cookieName === 'refresh' ? REFRESH_COOKIE : ACCESS_COOKIE)
+    : undefined
+  const bearer = init.bearer ?? cookieValue
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...clientIpHeaders(event.context.clientIp),
   }
-  if (cookieValue) headers['Authorization'] = `Bearer ${cookieValue}`
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`
 
   const contentType = getRequestHeader(event, 'content-type')
   if (contentType && typeof init.body !== 'undefined') {

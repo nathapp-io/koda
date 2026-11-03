@@ -108,6 +108,14 @@ describe('/invite/[token] (US-007)', () => {
     p.app.unmount()
   })
 
+  test('US-008 AC-1: encodes a route token as one API path segment', async () => {
+    const p = mountPage({ token: '../projects/demo/labels?' })
+    await settle()
+
+    expect(p.get).toHaveBeenCalledWith('/invites/..%2Fprojects%2Fdemo%2Flabels%3F')
+    p.app.unmount()
+  })
+
   test('AC8 boundary: the token used is taken from the route param', async () => {
     const p = mountPage({ token: 'tokXYZ' })
     await settle()

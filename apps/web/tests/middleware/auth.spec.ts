@@ -12,8 +12,8 @@ const middlewarePath = join(webDir, 'middleware', 'auth.global.ts')
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-function makeRoute(path: string) {
-  return { path, fullPath: path, query: {}, hash: '', params: {}, meta: {}, name: path }
+function makeRoute(path: string, query: Record<string, unknown> = {}, fullPath = path) {
+  return { path, fullPath, query, hash: '', params: {}, meta: {}, name: path }
 }
 
 function makeAuthEnv(token: string | null = null, user: object | null = null) {
@@ -81,8 +81,8 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
     const from = makeRoute('/login')
     const result = await middleware(to, from)
 
-    expect(navigateToMock).toHaveBeenCalledWith('/login')
-    expect(result).toMatchObject({ redirect: '/login' })
+    expect(navigateToMock).toHaveBeenCalledWith({ path: '/login' })
+    expect(result).toMatchObject({ redirect: { path: '/login' } })
   })
 
   test('navigateTo("/login") is returned when token is null and route is /projects', async () => {
@@ -99,12 +99,12 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
     const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
-    const to = makeRoute('/projects')
+    const to = makeRoute('/demo/tickets/KODA-12', {}, '/demo/tickets/KODA-12')
     const from = makeRoute('/')
     const result = await middleware(to, from)
 
-    expect(navigateToMock).toHaveBeenCalledWith('/login')
-    expect(result).toMatchObject({ redirect: '/login' })
+    expect(navigateToMock).toHaveBeenCalledWith({ path: '/login', query: { redirect: '/demo/tickets/KODA-12' } })
+    expect(result).toMatchObject({ redirect: { path: '/login', query: { redirect: '/demo/tickets/KODA-12' } } })
   })
 
   test('no redirect when token is null and route is /login itself', async () => {
@@ -125,11 +125,7 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
     const from = makeRoute('/')
     await middleware(to, from)
 
-    // navigateTo('/login') should NOT be called (already on /login)
-    const loginRedirectCalls = navigateToMock.mock.calls.filter(
-      ([path]: [string]) => path === '/login'
-    )
-    expect(loginRedirectCalls).toHaveLength(0)
+    expect(navigateToMock).not.toHaveBeenCalled()
   })
 })
 
@@ -152,9 +148,23 @@ describe('AC4: authenticated request to /login redirects to /', () => {
     const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
-    const to = makeRoute('/login')
+    const to = makeRoute('/login', { redirect: '/demo/fleet' })
     const from = makeRoute('/')
     const result = await middleware(to, from)
+
+    expect(navigateToMock).toHaveBeenCalledWith('/demo/fleet')
+    expect(result).toMatchObject({ redirect: '/demo/fleet' })
+  })
+
+  test('rejects an external redirect query for an authenticated guest route', async () => {
+    const { tokenRef, userRef, isAuthenticated } = makeAuthEnv('valid-jwt', { id: '1' })
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
+    ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, user: userRef, isAuthenticated, fetchUser: jest.fn(async () => true) })
+    ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
+
+    const mod = await import(`${middlewarePath}`)
+    const result = await mod.default(makeRoute('/login', { redirect: '//evil.example' }), makeRoute('/'))
 
     expect(navigateToMock).toHaveBeenCalledWith('/')
     expect(result).toMatchObject({ redirect: '/' })
@@ -237,8 +247,8 @@ describe('AC5: stale token triggers fetchUser and redirects on failure', () => {
     const result = await middleware(to, from)
 
     expect(fetchUserMock).toHaveBeenCalled()
-    expect(navigateToMock).toHaveBeenCalledWith('/login')
-    expect(result).toMatchObject({ redirect: '/login' })
+    expect(navigateToMock).toHaveBeenCalledWith({ path: '/login', query: { redirect: '/projects' } })
+    expect(result).toMatchObject({ redirect: { path: '/login', query: { redirect: '/projects' } } })
   })
 })
 

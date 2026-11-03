@@ -69,6 +69,7 @@ export interface JobExecutor {
   /** US-009: starts FIX's second nax process with its own output files and current brokered token. */
   spawnFixStep(job: JobRow): Promise<SpawnHandle>;
   isAlive(pid: number): boolean;
+  processIdentity(job: JobRow): Promise<'ours' | 'other' | 'unknown'>;
   matchesProcess(job: JobRow): Promise<boolean>;
   /** True when the signal reached the group (mirrors `signalGroup`'s contract). */
   kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { RUNNER_LOG_MAX_BYTES } from '../service/log-rotate';
 import { TUNING } from './tuning';
 
 describe('TUNING (D42, slice 3 design)', () => {
@@ -15,7 +16,14 @@ describe('TUNING (D42, slice 3 design)', () => {
       threadSkillFetchTimeoutMs: 120_000, threadCloseTimeoutMs: 10_000,
       projectCodeFetchTimeoutMs: 120_000, projectCodeMirrorTtlMs: 1_209_600_000,
       threadRunningAckPollMs: 250, threadRunningAckWaitMs: 30_000,
+      runnerLogMaxBytes: 10_485_760, runnerLogCheckMs: 300_000,
     });
     expect(Object.isFrozen(TUNING)).toBe(true);
+  });
+  // OPS-1: the rotation ceiling is the log helper's own constant, and the check runs every 5 minutes — a daily
+  // check (pruneIntervalMs) would let a chatty runner.log grow to gigabytes.
+  test('AC-12: the log rotation follows the helper constant and checks every 5 minutes', () => {
+    expect(TUNING.runnerLogMaxBytes).toBe(RUNNER_LOG_MAX_BYTES);
+    expect(TUNING.runnerLogCheckMs).toBe(300_000);
   });
 });

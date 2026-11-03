@@ -213,8 +213,9 @@ export const useApi = () => {
       // M22: one silent refresh + retry on 401 before surfacing the error.
       // The 15-minute access token expires mid-session; refresh() renews the
       // httpOnly cookies via the server proxy and the original request is
-      // replayed exactly once (useAuth clears the stale user when refresh
-      // fails, so repeated 401s fall through to the auth middleware).
+      // replayed exactly once. Only "did it work" matters here, so the boolean
+      // wrapper is the right call — refreshSession() is what the live streams use
+      // to tell a dead session from an outage (US-007).
       if (
         shouldRetryAfter401(
           extractErrorStatus(err),

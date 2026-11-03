@@ -9,7 +9,7 @@
  *   AC-5: fetchUser() reads from /api/auth/me and sets user.value when a user is returned
  *   AC-6: fetchUser() returns false and clears user.value when no user is returned
  *   AC-7: refresh() POSTs to /api/auth/refresh and returns true on success
- *   AC-8: refresh() clears user.value when the server rejects the refresh token
+ *   AC-8: refresh() clears user.value when the server rejects the refresh token (401)
  *
  * The token material never enters JS — these tests intentionally do not assert
  * that any "token" cookie or Authorization header is set on the client. The
@@ -121,6 +121,23 @@ describe('AC-2: register() proxies to /api/auth/register and stores user.value',
   })
 })
 
+// ── US-008 AC-2: invite tokens remain one encoded path segment ────────────────
+
+describe('US-008 AC-2: acceptInvite encodes its token as one path segment', () => {
+  test('acceptInvite posts to the encoded invite acceptance path', async () => {
+    const env = makeFakeEnv()
+    applyNuxtGlobals(env)
+    const mod = loadAuth()
+
+    await mod.useAuth().acceptInvite('a/b', { name: 'N', password: 'p' })
+
+    expect(env.fetchMock).toHaveBeenCalledWith(
+      '/api/invites/a%2Fb/accept',
+      expect.objectContaining({ method: 'POST', body: { name: 'N', password: 'p' } }),
+    )
+  })
+})
+
 // ── AC-3: logout POSTs to /api/auth/logout, clears state, and navigates ─────
 
 describe('AC-3: logout() proxies to /api/auth/logout, clears user.value, and navigates to /login', () => {
@@ -202,15 +219,27 @@ describe('AC-7: refresh() POSTs to /api/auth/refresh and returns true on success
 // ── AC-8: refresh failure clears user.value ─────────────────────────────────
 
 describe('AC-8: refresh() clears user.value when the refresh token is rejected', () => {
-  test('refresh returns false and clears user.value on server rejection', async () => {
+  test('refresh returns false and clears user.value on a 401 rejection', async () => {
     const env = makeFakeEnv()
     env.userRef.value = { id: '1', email: 'a@b.com' }
-    env.fetchMock.mockRejectedValueOnce(new Error('Refresh expired'))
+    // US-007: only the API refusing the token (401/403) clears the user; a plain outage keeps it.
+    env.fetchMock.mockRejectedValueOnce(Object.assign(new Error('Refresh expired'), { statusCode: 401 }))
     applyNuxtGlobals(env)
     const mod = loadAuth()
     const result = await mod.useAuth().refresh()
     expect(result).toBe(false)
     expect(env.userRef.value).toBeNull()
+  })
+
+  test('refresh keeps user.value when the rejection is an outage, not a refusal', async () => {
+    const env = makeFakeEnv()
+    env.userRef.value = { id: '1', email: 'a@b.com' }
+    env.fetchMock.mockRejectedValueOnce(new Error('Refresh unavailable'))
+    applyNuxtGlobals(env)
+    const mod = loadAuth()
+    const result = await mod.useAuth().refresh()
+    expect(result).toBe(false)
+    expect(env.userRef.value).toMatchObject({ id: '1', email: 'a@b.com' })
   })
 })
 

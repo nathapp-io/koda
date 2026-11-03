@@ -438,7 +438,9 @@ export class JobRun {
       await this.tick(watcher, false);
       if (this.halted) return;
       const row = this.mustRow();
-      if (row.pid === null || !this.deps.executor.isAlive(row.pid)) {
+      const alive = row.pid !== null && this.deps.executor.isAlive(row.pid);
+      const identity = alive && !spawnedHere ? await this.deps.executor.processIdentity(row) : 'ours';
+      if (!alive || identity === 'other') {
         const chained = await this.chainFixStep(row, spawnedHere);
         if (this.halted) return;
         if (chained) continue;

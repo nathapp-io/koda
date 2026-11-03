@@ -4,10 +4,18 @@
  * Transient drops: the browser EventSource reconnects by itself; the next
  * open fires onResync so pages refetch what they may have missed.
  * Terminal failures (readyState CLOSED, e.g. 401 after the access cookie
- * expired, 403, 429): refresh auth, then reopen with backoff. Give up after
- * MAX_TERMINAL_FAILURES in a row or when the refresh fails; the page keeps
- * working as a static page.
+ * expired, 403, 429): refresh auth, then reopen with backoff. The page keeps
+ * working as a static page once the stream stops.
+ *
+ * US-007 (E/BUG-3): the refresh answers three states, not a boolean. Only an
+ * `'unauthorized'` refresh means the session is gone (stop); an `'unavailable'`
+ * refresh is an API outage, so the reopen is still scheduled and the outage can
+ * never stop the stream. Authorized ('ok') recoveries are capped at
+ * MAX_TERMINAL_FAILURES in a row; an outage is not counted against that cap and
+ * waits at most BACKOFF_CAP_MS between attempts.
  */
+import type { RefreshOutcome } from '~/composables/useAuth'
+
 export const LIVE_ACTIONS = ['created', 'updated', 'transitioned', 'assigned', 'commented', 'deleted'] as const
 export type LiveAction = typeof LIVE_ACTIONS[number]
 
@@ -95,12 +103,14 @@ export interface EventSourceLike {
 
 export interface ProjectEventStreamDeps {
   createEventSource: (url: string) => EventSourceLike
-  refreshAuth: () => Promise<boolean>
+  /** US-007: tri-state, so an outage ('unavailable') is not mistaken for a dead session. */
+  refreshAuth: () => Promise<RefreshOutcome>
   setTimer: (fn: () => void, ms: number) => unknown
   clearTimer: (handle: unknown) => void
 }
 
 export const EVENT_SOURCE_CLOSED = 2
+/** Consecutive *authorized* recoveries before the stream gives up (an outage is not counted). */
 export const MAX_TERMINAL_FAILURES = 5
 export const BACKOFF_CAP_MS = 30_000
 const DEDUPE_WINDOW = 200
@@ -188,7 +198,10 @@ export function createProjectEventStream(
   let timer: unknown = null
   let stopped = false
   let hadError = false
+  /** Drives the delay; grows on every error and only an onopen resets it. */
   let failures = 0
+  /** US-007: consecutive recoveries that a live session allowed; the cap applies to these only. */
+  let authedFailures = 0
   // seen intentionally persists across reconnects: once resync refetches the
   // gap, a redelivered pre-gap event is still dropped by this window.
   let seen: readonly string[] = []
@@ -200,18 +213,29 @@ export function createProjectEventStream(
   }
 
   const recover = async (): Promise<void> => {
-    if (failures >= MAX_TERMINAL_FAILURES) {
+    if (authedFailures >= MAX_TERMINAL_FAILURES) {
       stopped = true
       return
     }
     const delay = backoffMs(failures)
     failures += 1
-    const ok = await deps.refreshAuth()
+    const outcome = await deps.refreshAuth()
     if (stopped) return
-    if (!ok) {
+    if (outcome === 'unauthorized') {
+      // The session is gone (or the refresh said nothing this build understands): stop, no reopen.
       stopped = true
       return
     }
+    if (outcome === 'ok') {
+      authedFailures += 1
+    }
+    else if (outcome !== 'unavailable') {
+      // Fail closed on any other value: only an explicit outage may keep the stream retrying.
+      stopped = true
+      return
+    }
+    // 'ok' and 'unavailable' both reopen after the same backoff; an outage is not counted against
+    // MAX_TERMINAL_FAILURES, so a deploy can never end the stream, and backoffMs caps the wait.
     timer = deps.setTimer(() => {
       timer = null
       open()
@@ -224,6 +248,7 @@ export function createProjectEventStream(
     source = es
     es.onopen = () => {
       failures = 0
+      authedFailures = 0
       if (hadError) {
         hadError = false
         handlers.onResync()

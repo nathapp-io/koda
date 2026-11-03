@@ -194,7 +194,7 @@ describe('bad batches', () => {
     };
     const loop = makeLoop();
     for (let i = 0; i < 60 && journal.jobsWithPending().length > 0; i += 1) {
-      script.push(server);
+      script.push(server, server);
       await loop.syncOnce();
     }
     expect(received).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -249,7 +249,7 @@ describe('bad batches', () => {
     };
     const loop = makeLoop();
     for (let i = 0; i < 20 && journal.jobsWithPending().length > 0; i += 1) {
-      script.push(server);
+      script.push(server, server);
       await loop.syncOnce();
     }
     expect(calls.some((c) => c.jobs.some((job) => job.events.some((e) => e.type === 'lifecycle')))).toBe(true);
@@ -274,6 +274,151 @@ describe('bad batches', () => {
     await loop.syncOnce();
     expect(calls[3].capabilities?.nax.version).toBe('h2');
     expect(sentHashes).toEqual(['h2']);
+  });
+});
+
+describe('bad-batch probes (US-002)', () => {
+  const prepareSmallState = (): void => {
+    add('j1');
+    for (let seq = 1; seq <= 4; seq += 1) journal.appendEvent('j1', 1, 'log', { stream: 'run', text: String(seq) });
+    journal.appendEvent('j1', 1, 'state', {});
+    journal.ackThrough('j1', 1, 4);
+  };
+
+  test('AC-1..3: rejected event probe keeps the state event and retries', async () => {
+    prepareSmallState();
+    const tokenRequests = [{ jobId: 'j1', leaseEpoch: 1 }];
+    const loop = makeLoop({ tokenRequests: () => tokenRequests });
+    for (let i = 0; i < 8; i += 1) script.push(async () => { throw new ServerError(400, 'bad batch', null); });
+    for (let i = 0; i < 8; i += 1) await loop.syncOnce();
+    script.push(async () => { throw new ServerError(400, 'bad batch', null); }, async () => { throw new ServerError(400, 'still bad', null); });
+    const replace = journal.replaceEvent.bind(journal);
+    let replacements = 0;
+    journal.replaceEvent = ((...args: Parameters<typeof journal.replaceEvent>) => { replacements += 1; return replace(...args); }) as typeof journal.replaceEvent;
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(calls.at(-1)?.jobs).toEqual([]);
+    expect(calls.at(-1)?.tokenRequests).toEqual(calls.at(-2)?.tokenRequests);
+    expect(calls.at(-1)?.bootId).toBe(calls.at(-2)?.bootId);
+    expect(calls.at(-2)?.jobs[0].events[0]).toMatchObject({ seq: 5, type: 'state' });
+    expect(replacements).toBe(0);
+    expect(journal.pendingEvents('j1', 1, 10)).toMatchObject([{ seq: 5, type: 'state' }]);
+  });
+
+  test('AC-4..5: a successful probe applies then replaces and backs off with structured error log', async () => {
+    prepareSmallState();
+    const memoryLog = createMemoryLogger();
+    const loop = makeLoop({ log: memoryLog });
+    for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, ok());
+    const replace = journal.replaceEvent.bind(journal);
+    const replacementArgs: Parameters<typeof journal.replaceEvent>[] = [];
+    journal.replaceEvent = ((...args: Parameters<typeof journal.replaceEvent>) => { replacementArgs.push(args); return replace(...args); }) as typeof journal.replaceEvent;
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(replacementArgs).toHaveLength(1);
+    expect(replacementArgs[0].slice(0, 4)).toEqual(['j1', 1, 5, 'lifecycle']);
+    expect(memoryLog.lines).toContainEqual(expect.objectContaining({ level: 'error', message: expect.stringContaining('event 5 (state) dropped'), fields: { jobId: 'j1', seq: 5, type: 'state' } }));
+  });
+
+  test('AC-6: probe response commands are handled', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+    const loop = makeLoop();
+    for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, ok({ commands: [assignCmd] }));
+    await loop.syncOnce();
+    expect(handled).toEqual([[assignCmd]]);
+  });
+
+  test('AC-7,14: probe auth and protocol failures stop without replacing', async () => {
+    for (const [status, kind] of [[401, 'auth'], [426, 'protocol']] as const) {
+      journal = Journal.open(':memory:'); calls = []; script = []; add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+      const loop = makeLoop();
+      for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+      script.push(async () => { throw new ServerError(400, 'bad', null); }, async () => { throw new ServerError(status, 'stop', null); });
+      expect(await loop.syncOnce()).toMatchObject({ kind: 'stop', reason: { kind } });
+      expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+    }
+  });
+
+  test('AC-8: a network probe error backs off without replacing', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+    const loop = makeLoop();
+    for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, async () => { throw new NetworkError('offline'); });
+    expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: 500 });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
+  test('AC-9..10: persistent 400 batches make two calls and back off increasingly', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+    const loop = makeLoop();
+    for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+    for (const delay of [500, 1000, 2000]) {
+      const before = calls.length;
+      script.push(async () => { throw new ServerError(400, 'bad', null); }, async () => { throw new ServerError(400, 'bad', null); });
+      expect(await loop.syncOnce()).toEqual({ kind: 'retry', delayMs: delay });
+      expect(calls.length - before).toBe(2);
+    }
+  });
+
+  test('AC-11: stop aborts a pending probe and retains the event', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+    const loop = makeLoop();
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, async (_req, signal) => {
+      loop.stop();
+      throw signal?.reason;
+    });
+    const pending = loop.syncOnce();
+    expect(await pending).toEqual({ kind: 'woken' });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
+  test('F1: a rejecting probe command handler returns retry and keeps the event', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {});
+    const loop = makeLoop({ handleCommands: async () => { throw new Error('handler failed'); } });
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, ok({ commands: [assignCmd] }));
+    expect(await loop.syncOnce()).toMatchObject({ kind: 'retry' });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
+  test('F2: a probe that resolves after stop returns woken without replacing the event', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {});
+    const loop = makeLoop();
+    Object.assign(loop, { scale: { jobs: 1, events: 1 } });
+    let startedProbe: () => void = () => undefined;
+    let resolveProbe: (response: SyncResponse) => void = () => undefined;
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, (_req) => new Promise<SyncResponse>((resolve) => {
+      resolveProbe = resolve;
+      startedProbe();
+    }));
+    const probeStarted = new Promise<void>((resolve) => { startedProbe = resolve; });
+    const pending = loop.syncOnce();
+    await probeStarted;
+    loop.stop();
+    resolveProbe(empty);
+    expect(await pending).toEqual({ kind: 'woken' });
+    expect(journal.pendingEvents('j1', 1, 5)).toMatchObject([{ type: 'state' }]);
+  });
+
+  test('AC-12: a smallest-scale 413 also probes jobs: []', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {}); journal.ackThrough('j1', 1, 0);
+    const loop = makeLoop();
+    for (let i = 0; i < 8; i += 1) { script.push(async () => { throw new ServerError(400, 'bad', null); }); await loop.syncOnce(); }
+    script.push(async () => { throw new ServerError(413, 'large', null); }, ok());
+    await loop.syncOnce(); expect(calls.at(-1)?.jobs).toEqual([]);
+  });
+
+  test('AC-13: run sleeps with backoff before the third persistent bad-batch request', async () => {
+    add('j1'); journal.appendEvent('j1', 1, 'state', {});
+    let sleptBeforeThird = false;
+    const loop = makeLoop({ sleep: async (ms) => { sleeps.push(ms); if (calls.length === 10 && ms > 0) sleptBeforeThird = true; } });
+    script.push(...Array.from({ length: 8 }, () => async () => { throw new ServerError(400, 'bad', null); }));
+    script.push(async () => { throw new ServerError(400, 'bad', null); }, async () => { throw new ServerError(400, 'probe', null); });
+    script.push(async () => { throw new ServerError(426, 'stop', null); });
+    await loop.run();
+    expect(sleptBeforeThird).toBe(true);
+    expect(calls).toHaveLength(11);
   });
 });
 

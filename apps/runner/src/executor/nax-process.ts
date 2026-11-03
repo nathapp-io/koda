@@ -64,13 +64,13 @@ export function spawnNax(argv: readonly string[], options: SpawnNaxOptions): { p
   return { pid: proc.pid, pgid: proc.pid };
 }
 
-export function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number, kill: (pid: number, signal: 0) => void = process.kill): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    process.kill(pid, 0);
+    kill(pid, 0);
     return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  } catch {
+    return false;
   }
 }
 

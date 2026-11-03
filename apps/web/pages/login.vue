@@ -55,6 +55,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { safeRedirectPath } from '~/lib/safe-redirect'
 
 definePageMeta({ layout: 'auth' })
 
@@ -77,6 +78,7 @@ const { handleSubmit } = useForm({
 })
 
 const auth = useAuth()
+const route = useRoute()
 const toast = useAppToast()
 
 const { open: registrationOpen, load: loadRegistrationStatus } = useRegistrationStatus()
@@ -86,7 +88,7 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await auth.login(values)
     toast.success(t('toast.loggedIn'))
-    navigateTo('/')
+    navigateTo(safeRedirectPath(route.query.redirect))
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   }
