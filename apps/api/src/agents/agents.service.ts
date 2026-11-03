@@ -72,6 +72,10 @@ export class AgentsService {
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: AgentResponseDto }>;
   async generateApiKey(dto: CreateAgentDto): Promise<{ apiKey: string; agent: AgentResponseDto }>;
   async generateApiKey(agentIdOrDto: string | CreateAgentDto) {
+    if (typeof agentIdOrDto === 'string' && !(await this.agentRepo.findByIdScalar(agentIdOrDto))) {
+      throw new NotFoundAppException({}, 'agents');
+    }
+
     // Generate random 32-byte hex key
     const rawKey = randomBytes(32).toString('hex');
 
@@ -84,12 +88,8 @@ export class AgentsService {
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     if (typeof agentIdOrDto === 'string') {
-      // Approval execution can arrive after the target was tombstoned; resolve the immutable id
-      // through the live-agent finder before allowing a credential write.
-      if (!(await this.agentRepo.findByIdScalar(agentIdOrDto))) {
-        throw new NotFoundAppException({}, 'agents');
-      }
-
+      // Approval execution can arrive after the target was tombstoned; only a live immutable id
+      // reaches this credential write.
       const agent = await this.audit.audited(
         () => this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash),
         (updated) => ({ key: 'agent.key.rotate', resourceType: 'agent', resourceId: updated.id, projectId: null, summary: 'key rotated' }),
