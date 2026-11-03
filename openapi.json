@@ -15356,6 +15356,7 @@
           "sourceId": {
             "type": "string",
             "minLength": 1,
+            "pattern": "^(?!repo:|outcome:)",
             "description": "Source record ID of the document being indexed"
           },
           "content": {
@@ -17105,11 +17106,7 @@
           "type": {
             "type": "string",
             "enum": [
-              "GENERAL",
-              "VERIFICATION",
-              "FIX_REPORT",
-              "REVIEW",
-              "STATUS_CHANGE"
+              "GENERAL"
             ],
             "description": "Comment type",
             "example": "GENERAL"

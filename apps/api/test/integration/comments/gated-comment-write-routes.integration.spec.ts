@@ -120,4 +120,19 @@ describeIntegration('gated comment write routes', () => {
     await request(server()).post(commentPath()).set(rootAuth()).send({ body: 'root direct' }).expect(201);
     expect(await db.approvalRequest.count()).toBe(0);
   });
+
+  it('AC-5/6: REVIEW creation is rejected by request validation and persists no comment', async () => {
+    const before = await db.comment.count({ where: { ticketId: ticket.id } });
+    await request(server()).post(commentPath()).set(agentAuth()).send({ body: 'workflow', type: 'REVIEW' }).expect(400);
+    expect(await db.comment.count({ where: { ticketId: ticket.id } })).toBe(before);
+  });
+
+  it('AC-11/12: member cannot edit FIX_REPORT; returns localized 409 and preserves body', async () => {
+    const created = await createComment(`immutable ${++counter}`);
+    const original = `workflow body ${counter}`;
+    await db.comment.update({ where: { id: created.id }, data: { type: 'FIX_REPORT', body: original } });
+    const response = await request(server()).patch(`/api/comments/${created.id}`).set(rootAuth()).send({ body: 'changed' }).expect(409);
+    expect(response.body.message).toContain('Workflow comments cannot be edited');
+    expect((await db.comment.findUniqueOrThrow({ where: { id: created.id } })).body).toBe(original);
+  });
 });

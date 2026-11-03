@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { CommentType } from '../common/enums';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
@@ -209,6 +210,9 @@ export class CommentsService {
     // US-005: then the row-level key check — `comment.update` (or `.own` on this
     // author) decides, and a refusal is 403 `permissions`.
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    if (comment.type !== CommentType.GENERAL) {
+      throw new ConflictAppException({}, 'comments.workflowImmutable');
+    }
     await this.assertCommentKey(principal, 'comment.update', projectId, comment);
 
     const updatedComment = await this.audit.audited(

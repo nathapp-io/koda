@@ -1,6 +1,7 @@
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
@@ -780,22 +781,29 @@ describe('CommentsService', () => {
       ).rejects.toThrow();
     });
 
-    it('should preserve comment type when updating body', async () => {
-      const updateDto: UpdateCommentDto = {
-        body: 'Updated body only',
-      };
+    it.each(['FIX_REPORT', 'VERIFICATION', 'REVIEW'])(
+      'AC workflow immutable: refuses %s after membership and before permission check',
+      async (type) => {
+        givenComment({ ...mockComment, type });
 
-      const verificationComment = { ...mockComment, type: 'VERIFICATION' };
-      givenComment(verificationComment);
-      mockCommentRepo.update.mockResolvedValue({
-        ...verificationComment,
-        body: 'Updated body only',
-      });
+        const error = await service.update('comment-123', { body: 'attempted change' }, mockUserPrincipal).catch((caught: unknown) => caught);
 
-      const result = await service.update('comment-123', updateDto, mockUserPrincipal);
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error).toMatchObject({ response: { prefix: 'comments.workflowImmutable' } });
+        expect(mockAccessService.resolveMembership).toHaveBeenCalledWith('proj-123', mockUserPrincipal);
+        expect(mockPermissions.can).not.toHaveBeenCalled();
+        expect(mockCommentRepo.update).not.toHaveBeenCalled();
+      },
+    );
 
-      expect(result.type).toBe('VERIFICATION');
+    it('updates a GENERAL comment with the new body', async () => {
+      givenComment(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'Updated body only' });
+
+      const result = await service.update('comment-123', { body: 'Updated body only' }, mockUserPrincipal);
+
       expect(result.body).toBe('Updated body only');
+      expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'Updated body only' });
     });
 
     it('should update updatedAt timestamp when editing', async () => {
