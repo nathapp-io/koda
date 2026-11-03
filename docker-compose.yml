@@ -12,23 +12,27 @@ services:
   api:
     image: koda-api
     build: *api-build
+    # Loopback only (review E/SEC-5): browsers reach the API through web, and a published API port lets
+    # clients skip the BFF and spoof x-client-ip from a private-range peer. Put a reverse proxy in front for
+    # remote runners, the CLI or MCP.
     ports:
-      - "${API_PORT:-3100}:3100"
+      - "127.0.0.1:${API_PORT:-3100}:3100"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-koda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-koda}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
       MCP_ENABLED: ${MCP_ENABLED:-false}
-      API_KEY_SECRET: ${API_KEY_SECRET}
+      API_KEY_SECRET: ${API_KEY_SECRET:?set API_KEY_SECRET}
       API_PORT: 3100
       API_PREFIX: api
-      # When --profile rag is active, point at the bundled Ollama container;
-      # otherwise falls back to host.docker.internal for BYO Ollama installs.
+      # With --profile rag, set OLLAMA_BASE_URL=http://ollama:11434 to use the bundled container;
+      # the default host.docker.internal is for a BYO Ollama on the host.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LANCEDB_PATH: /data/lancedb
+      FLEET_ARTIFACT_DIR: /data/fleet-artifacts
     volumes:
       - koda_data:/data
     depends_on:
@@ -99,10 +103,12 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    # Pinned (review E/SEC-6): Ollama has no auth, so it is published on loopback only. The api reaches it as
+    # http://ollama:11434 on the compose network.
+    image: ollama/ollama:0.35.1
     profiles: ["rag"]
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:

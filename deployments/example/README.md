@@ -24,11 +24,22 @@ Benefits:
 
 ```bash
 KODA_VERSION=v0.4.0
-POSTGRES_PASSWORD=replace-this   # required — compose fails closed without it
-JWT_SECRET=replace-this
-JWT_REFRESH_SECRET=replace-this
-API_KEY_SECRET=replace-this
+POSTGRES_PASSWORD=replace-this   # required: compose fails closed without it
+JWT_SECRET=replace-this          # required: openssl rand -hex 32
+JWT_REFRESH_SECRET=replace-this  # required, must differ from JWT_SECRET
+API_KEY_SECRET=replace-this      # required
 ```
+
+The three secrets have no defaults: compose refuses to start without them, and the production image refuses a
+value starting with `change-me` (the placeholders in `.env.example`). Tokens default to a 15-minute access JWT
+and a 7-day refresh JWT (`JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`); the web refreshes the session on its own.
+
+### Network exposure
+
+- `web` (`WEB_PORT`, default 3101) is the public entry point. Browsers reach the API through it.
+- `api` (`API_PORT`, default 3100) is published on `127.0.0.1` only. Remote runners, the CLI and MCP clients on
+  other hosts need a TLS reverse proxy on this host that forwards to it; do not publish it on all interfaces, since
+  that lets clients skip the web tier and pick their own rate-limit bucket through `x-client-ip`.
 
 2. Deploy:
 
@@ -42,9 +53,11 @@ This runs:
 1) pre-deploy safety checks
 2) backup the database volume (default)
 3) `docker compose pull`
-4) `docker compose run --rm api bunx --package prisma@7.10.0 prisma migrate deploy`
-5) `docker compose up -d api web`
-6) post-deploy health checks
+4) `chown -R 1001:1001 /data` on the data volume (the api image runs as uid 1001; volumes written by older root
+   images need this once, later runs are no-ops)
+5) `docker compose run --rm api bunx --package prisma@7.10.0 prisma migrate deploy`
+6) `docker compose up -d --wait api web` (returns when the healthchecks pass)
+7) post-deploy health checks
 
 To skip backup explicitly:
 

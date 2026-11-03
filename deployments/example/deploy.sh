@@ -62,12 +62,19 @@ fi
 echo "==> Pull latest images"
 docker compose "${COMPOSE_ARGS[@]}" pull
 
+# The api image runs as uid 1001 since review E/SEC-4. A koda_data volume written by an older root image
+# keeps root-owned files the api can no longer write; this is a no-op once ownership is right.
+echo "==> Fix data volume ownership (api runs as uid 1001)"
+docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps --user root --entrypoint chown \
+  api -R 1001:1001 /data
+
 echo "==> Run DB migrations (via api image)"
 docker compose "${COMPOSE_ARGS[@]}" run --rm \
   api bunx --package prisma@7.10.0 prisma migrate deploy
 
 echo "==> Start services"
-docker compose "${COMPOSE_ARGS[@]}" up -d api web
+# --wait returns once the healthchecks pass (review E/BUG-6: the curls below raced a starting container).
+docker compose "${COMPOSE_ARGS[@]}" up -d --wait api web
 
 echo "==> Post-deploy health checks"
 set -a

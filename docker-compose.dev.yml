@@ -10,9 +10,9 @@ services:
     environment:
       DATABASE_URL: postgresql://koda:${POSTGRES_PASSWORD:-koda}@postgres:5432/koda
       JWT_SECRET: ${JWT_SECRET:-change-me-dev}
-      JWT_EXPIRES_IN: 7d
+      JWT_EXPIRES_IN: 15m
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-dev-refresh}
-      JWT_REFRESH_EXPIRES_IN: 30d
+      JWT_REFRESH_EXPIRES_IN: 7d
       API_KEY_SECRET: ${API_KEY_SECRET:-dev-api-key-secret-min-32-chars}
       API_PORT: 3101
       API_PREFIX: api
