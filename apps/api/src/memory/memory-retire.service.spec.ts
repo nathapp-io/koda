@@ -11,7 +11,7 @@ import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 const principal = { actorType: 'user', id: 'u1' } as KodaPrincipal;
 function setup() {
-  const item: MemoryItem = { id: 'm1', projectId: 'p1', kind: 'DECISION', status: 'active', subject: 's', predicate: 'p', confidence: 1, createdAt: new Date(), updatedAt: new Date() };
+  const item: MemoryItem = { id: 'm1', projectId: 'p1', scope: 'project', kind: 'DECISION', status: 'active', subject: 's', predicate: 'p', confidence: 1, createdAt: new Date(), updatedAt: new Date() };
   const repository = {
     findById: vi.fn().mockResolvedValue(item),
     retire: vi.fn(async (_id: string, check: (target: MemoryItem | null) => Promise<void>, onRetired: (target: MemoryItem) => Promise<void>) => {

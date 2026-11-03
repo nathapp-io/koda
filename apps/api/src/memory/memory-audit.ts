@@ -30,17 +30,22 @@ export function memoryWriteSummary(written: MemoryWritten): string {
  * The repository awaits the answer before its transaction commits, so a refused `record` rolls the write
  * back: the new item never exists and the item it superseded stays active. Each entry point passes the key
  * it writes under, so a replacement is an entry of the route that made it, not a key of its own.
+ *
+ * `projectId` is the project the entry point was authorised in (US-004): a user-scoped item has no project
+ * of its own, and its entry still belongs to the project the caller named, so the fallback is what keeps a
+ * user note's entry findable by project. A project row always names its own project and ignores it.
  */
 export function memoryAuditHook(
   audit: AuditRecorder,
   key: MemoryAuditKey,
+  projectId?: string,
 ): (written: MemoryWritten) => Promise<void> {
   return async (written: MemoryWritten): Promise<void> => {
     await audit.record({
       key,
       resourceType: RESOURCE_TYPE,
       resourceId: written.item.id,
-      projectId: written.item.projectId,
+      projectId: written.item.projectId ?? projectId ?? null,
       summary: memoryWriteSummary(written),
     });
   };

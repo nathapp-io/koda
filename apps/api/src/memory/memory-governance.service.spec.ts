@@ -58,7 +58,7 @@ describe('MemoryGovernanceService', () => {
   describe('getMemoryItem (memory-notes US-002)', () => {
     const now = new Date('2026-11-03T00:00:00.000Z');
     const note = (over: Partial<MemoryItem> = {}): MemoryItem => ({
-      id: 'note-1', projectId: 'project-123', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
+      id: 'note-1', projectId: 'project-123', scope: 'project', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
       object: 'Budget stays 2,048 MiB.', description: 'replay budget', status: 'active', confidence: 0.8,
       createdAt: now, updatedAt: now, ...over,
     });
@@ -139,8 +139,8 @@ describe('MemoryGovernanceService', () => {
       const pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
       const expiredItems: MemoryItem[] = [
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, activeKey: 'FACT:ticket:1:status', createdAt: now, updatedAt: now },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, activeKey: 'FACT:ticket:2:status', createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, activeKey: 'FACT:ticket:1:status', createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, activeKey: 'FACT:ticket:2:status', createdAt: now, updatedAt: now },
       ];
 
       mockRepository.findActiveAfterId
@@ -163,7 +163,7 @@ describe('MemoryGovernanceService', () => {
       const futureDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
       mockRepository.findActiveAfterId.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: futureDate, createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: futureDate, createdAt: now, updatedAt: now },
       ]);
 
       const result = await service.expireMemories(projectId);
@@ -188,7 +188,7 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
 
       mockRepository.findActiveAfterId.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: undefined as unknown as null, createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: undefined as unknown as null, createdAt: now, updatedAt: now },
       ]);
 
       const result = await service.expireMemories(projectId);
@@ -205,8 +205,8 @@ describe('MemoryGovernanceService', () => {
       const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
       const staleItems: MemoryItem[] = [
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: oldDate, updatedAt: oldDate },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.15, createdAt: oldDate, updatedAt: oldDate },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: oldDate, updatedAt: oldDate },
+        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.15, createdAt: oldDate, updatedAt: oldDate },
       ];
 
       mockRepository.findByProject
@@ -228,7 +228,7 @@ describe('MemoryGovernanceService', () => {
       const recentDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: recentDate, updatedAt: recentDate }],
+        records: [{ id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.2, createdAt: recentDate, updatedAt: recentDate }],
         total: 1,
         current: 1,
         size: 100,
@@ -248,7 +248,7 @@ describe('MemoryGovernanceService', () => {
       const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
       mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.5, createdAt: oldDate, updatedAt: oldDate }],
+        records: [{ id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.5, createdAt: oldDate, updatedAt: oldDate }],
         total: 1,
         current: 1,
         size: 100,
@@ -269,9 +269,9 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
 
       const items: MemoryItem[] = [
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status', confidence: 0.9, createdAt: now, updatedAt: now },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status-2', confidence: 0.7, createdAt: now, updatedAt: now },
-        { id: 'mem-3', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status-3', confidence: 0.5, createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status', confidence: 0.9, createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status-2', confidence: 0.7, createdAt: now, updatedAt: now },
+        { id: 'mem-3', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status-3', confidence: 0.5, createdAt: now, updatedAt: now },
       ];
 
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
@@ -304,8 +304,8 @@ describe('MemoryGovernanceService', () => {
 
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
       mockRepository.findActiveByKey.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key1', confidence: 0.9, createdAt: now, updatedAt: now },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.7, createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key1', confidence: 0.9, createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.7, createdAt: now, updatedAt: now },
       ]);
 
       const result = await service.deduplicate(projectId);
@@ -321,9 +321,9 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
 
       const decisions: MemoryItem[] = [
-        { id: 'dec-1', projectId, kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution', confidence: 0.9, createdAt: new Date(now.getTime() - 2000), updatedAt: now },
-        { id: 'dec-2', projectId, kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution-2', confidence: 0.8, createdAt: new Date(now.getTime() - 1000), updatedAt: now },
-        { id: 'dec-3', projectId, kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution-3', confidence: 0.7, createdAt: now, updatedAt: now },
+        { id: 'dec-1', projectId, scope: 'project', kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution', confidence: 0.9, createdAt: new Date(now.getTime() - 2000), updatedAt: now },
+        { id: 'dec-2', projectId, scope: 'project', kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution-2', confidence: 0.8, createdAt: new Date(now.getTime() - 1000), updatedAt: now },
+        { id: 'dec-3', projectId, scope: 'project', kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution-3', confidence: 0.7, createdAt: now, updatedAt: now },
       ];
 
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'DECISION', subject: 'topic:a', predicate: 'resolution' }]);
@@ -369,8 +369,8 @@ describe('MemoryGovernanceService', () => {
 
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
       mockRepository.findActiveByKey.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', supersededBy: 'mem-2', activeKey: null, confidence: 0.7, createdAt: now, updatedAt: now },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key2', confidence: 0.9, createdAt: now, updatedAt: now },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', supersededBy: 'mem-2', activeKey: null, confidence: 0.7, createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key2', confidence: 0.9, createdAt: now, updatedAt: now },
       ]);
 
       const result = await service.deduplicate(projectId);
@@ -390,7 +390,7 @@ describe('MemoryGovernanceService', () => {
       // downrank job is out of scope here (covered by AC-4) and is stubbed so
       // the whole pipeline runs.
       mockRepository.findActiveAfterId.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
       ]);
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
       vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
@@ -407,7 +407,7 @@ describe('MemoryGovernanceService', () => {
       const pastDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
       mockRepository.findActiveAfterId.mockResolvedValue([
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
+        { id: 'mem-1', projectId, scope: 'project', kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
       ]);
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
       vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });

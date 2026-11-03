@@ -1,15 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { MemoryKind } from '../../common/enums';
+import { MemoryKind, MemoryScope } from '../../common/enums';
 import { MEMORY_NOTE_DESCRIPTION_MAX_CHARS } from '../memory-note';
 
 const MEMORY_KINDS = Object.values(MemoryKind);
+const MEMORY_SCOPES = Object.values(MemoryScope);
 
 export class CreateMemoryDto {
   @ApiProperty({ description: 'Project ID the memory item belongs to' })
   @IsString()
   @MinLength(1)
   projectId!: string;
+
+  @ApiProperty({ enum: MEMORY_SCOPES, required: false, description: 'Whose memory the item is: "project" (default) stores it in the named project, "user" stores it once for the caller, which only a NOTE may be' })
+  @IsOptional()
+  @IsIn(MEMORY_SCOPES)
+  scope?: MemoryScope;
 
   @ApiProperty({ enum: MEMORY_KINDS, description: 'Kind of memory item' })
   @IsString()

@@ -51,6 +51,7 @@ const ctx = {
 const item = (over: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-1',
+  scope: 'project',
   kind: 'FACT',
   subject: 'Deploy pipeline',
   predicate: 'status',

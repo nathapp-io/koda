@@ -9,6 +9,7 @@ import { ProjectAccessService } from '../projects/project-access.service';
 const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-123',
+  scope: 'project',
   kind: MemoryKind.FACT,
   subject: 'arch:api',
   predicate: 'uses',

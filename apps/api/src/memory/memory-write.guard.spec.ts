@@ -27,6 +27,7 @@ const principal: UserPrincipal = {
 const makeItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-1',
+  scope: 'project',
   kind: MemoryKind.FACT,
   subject: 'ticket:1',
   predicate: 'status',

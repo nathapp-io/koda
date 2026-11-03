@@ -5,7 +5,7 @@ import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput, type MemoryItem } from './memory-item-repository';
 import { MemoryRetireException } from './memory-retire.exception';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
-import { MemoryKind } from '../common/enums';
+import { MemoryKind, MemoryScope } from '../common/enums';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
@@ -76,6 +76,8 @@ export class MemoryWriteService {
    *
    * `key` is the entry point's own permission key: a replacement is an entry of the route that made it
    * (`memory.create`, `memory.extract`), never a key of its own, and the summary names the superseded item.
+   * `projectId` is the project the write was authorised in, which is the audit entry's project for a user
+   * note — a user row has no project of its own (US-004).
    */
   private async write(
     principal: KodaPrincipal,
@@ -89,7 +91,7 @@ export class MemoryWriteService {
         { ...rest, ownerId: data.ownerId, ownerType: data.ownerType },
         {
           beforeSupersede: this.writeGuard.replaceCheck(principal, projectId),
-          onWritten: memoryAuditHook(this.audit, key),
+          onWritten: memoryAuditHook(this.audit, key, projectId),
         },
       );
     } catch (error) {
@@ -195,8 +197,23 @@ export class MemoryWriteService {
     }
   }
 
-  private async assertRetireTarget(principal: KodaPrincipal, item: MemoryItem | null): Promise<MemoryItem> {
+  /**
+   * The row a decision retire names, once every check that needs no row lock has passed.
+   *
+   * US-004: a user-scoped row is never a decision retire's target — the decision route is not the note retire
+   * route (memory-notes US-011), and a user row has no project to authorise its retirement in. It is answered
+   * as a row that does not exist, before membership is even asked, so the refusal tells a caller nothing
+   * about a note it does not own. The returned row is narrowed to a project row, which is what the callers
+   * need for the project they then authorise in.
+   */
+  private async assertRetireTarget(
+    principal: KodaPrincipal,
+    item: MemoryItem | null,
+  ): Promise<MemoryItem & { projectId: string }> {
     if (!item || item.deletedAt) throw new NotFoundAppException({}, 'memory.notFound');
+    if (item.scope === MemoryScope.USER || item.projectId === null) {
+      throw new NotFoundAppException({}, 'memory.notFound');
+    }
     try {
       await this.projectAccess.assertProjectMembership(item.projectId, principal);
     } catch (error) {
@@ -206,7 +223,7 @@ export class MemoryWriteService {
     }
     if (item.kind !== MemoryKind.DECISION) throw new MemoryRetireException(item.kind);
     if (item.status !== 'active') throw new ConflictAppException({}, 'memory.retireNotActive');
-    return item;
+    return item as MemoryItem & { projectId: string };
   }
 
   async retireTarget(principal: KodaPrincipal, id: string): Promise<{ projectId: string }> {
@@ -232,6 +249,18 @@ export class MemoryWriteService {
   async create(principal: KodaPrincipal, input: CreateMemoryDto) {
     await this.assertMayWrite(principal, 'memory.create', input.projectId);
 
+    // US-004: a user-scoped item is a principal's own note — it is stored once, with no project of its own,
+    // and read in every project that passes the owner. A triple always belongs to a project (its subject can
+    // name a ticket), so the combination is refused here, before anything is read or written. The request's
+    // project still authorised the write above: membership, `memory.create` and the approval policy were all
+    // checked against it, exactly as for a project write. The refusal names `scope`, not `kind`, because it is
+    // the scope that is wrong for that kind of item (US-004 AC-13).
+    const scope = input.scope ?? MemoryScope.PROJECT;
+    if (scope === MemoryScope.USER && input.kind !== MemoryKind.NOTE) {
+      throw new ValidationAppException({ field: 'scope' }, 'memory');
+    }
+    const userScoped = scope === MemoryScope.USER;
+
     // H12: DECISION items carry agent attribution in their subject; they must
     // go through recordDecision, which forces non-admin callers to record as
     // themselves. The generic route can no longer be used to forge them.
@@ -255,18 +284,22 @@ export class MemoryWriteService {
     // always owns what they write, so a compromised agent/user cannot plant memories under someone else's
     // identity. An item attributed to someone else records no owner type: which table that id names is
     // unknown, so it stays an any-row holder's to replace.
-    const ownerId = (await this.mayAttribute(principal)) && input.ownerId ? input.ownerId : principal.id;
+    //
+    // US-004: a user-scoped item is owned by the principal that wrote it, always — an `ownerId` in the body
+    // is ignored there even for a global admin, because a user note is the caller's own working agreement.
+    const ownerId = !userScoped && (await this.mayAttribute(principal)) && input.ownerId ? input.ownerId : principal.id;
 
     return this.write(principal, 'memory.create', input.projectId, {
       ownerId,
       ownerType: ownerId === principal.id ? ownerTypeFor(principal) : null,
     }, {
-      projectId: input.projectId,
+      projectId: userScoped ? null : input.projectId,
       kind: input.kind,
       subject: input.subject,
       predicate: input.predicate,
       object: input.object,
       description: input.description,
+      scope,
       sourceType: input.sourceType ?? 'manual',
       sourceId: input.sourceId,
       confidence: input.confidence ?? 0.8,

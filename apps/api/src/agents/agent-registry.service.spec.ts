@@ -72,6 +72,7 @@ const makeContext = (
       {
         id: 'mem-1',
         projectId: 'proj-1',
+        scope: 'project',
         kind: 'FACT',
         subject: 'Auth module',
         predicate: 'uses',

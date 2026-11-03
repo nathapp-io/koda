@@ -7,6 +7,7 @@ import { MemoryItem } from './memory-item-repository';
 const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-123',
+  scope: 'project',
   kind: MemoryKind.DECISION,
   subject: 'agent:actor-1',
   predicate: 'topic',

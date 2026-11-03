@@ -4,7 +4,7 @@ import { Page, resolvePageOption, type IPageOption } from '@nathapp/nestjs-commo
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryItem as MemoryItemModel, Prisma, PrismaClient } from '../generated/prisma/client';
-import { MemoryKind } from '../common/enums';
+import { MemoryKind, MemoryScope } from '../common/enums';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
@@ -22,7 +22,7 @@ import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
  * re-saving a slug with a new type, body or index line replaces the note the project already has instead of
  * leaving a second note of a different type behind.
  */
-export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
+export function buildActiveKey(_projectId: string | null, kind: string, subject: string, predicate: string): string {
   return kind === MemoryKind.NOTE ? `${MemoryKind.NOTE}:${subject}` : `${kind}:${subject}:${predicate}`;
 }
 
@@ -54,6 +54,26 @@ export interface MemoryUpsertOptions {
 /** The stored owner kind, read back as the union the domain uses; anything else is a system item. */
 function ownerTypeOf(model: MemoryItemModel): MemoryOwnerType | null {
   return model.ownerType === 'USER' || model.ownerType === 'AGENT' ? model.ownerType : null;
+}
+
+/** The stored scope, read back as the union the domain uses; anything but `user` is a project row (US-004). */
+function scopeOf(model: MemoryItemModel): MemoryScope {
+  return model.scope === MemoryScope.USER ? MemoryScope.USER : MemoryScope.PROJECT;
+}
+
+/**
+ * US-004: the active-key partner of a user-scoped row — `<ownerType>:<ownerId>`, the same string the domain
+ * carries as `ownerKey`, so `@@unique([ownerKey, activeKey])` is what makes one principal's note unique.
+ *
+ * Both halves are required: a user row whose owner is unknown could not be keyed (and would collide with
+ * every other unowned user row), so an item that asks for user scope without them is a programming error
+ * rather than a row. Only `MemoryWriteService.create` writes user scope, and it always sets both.
+ */
+function userOwnerKey(item: MemoryItemInput): string {
+  if (!item.ownerType || !item.ownerId) {
+    throw new Error('memory: a user-scoped item needs an ownerType and an ownerId');
+  }
+  return `${item.ownerType}:${item.ownerId}`;
 }
 
 /**
@@ -120,6 +140,8 @@ export class PrismaMemoryItemRepository
       activeKey: m.activeKey ?? undefined,
       ownerId: m.ownerId ?? undefined,
       ownerType: ownerTypeOf(m),
+      scope: scopeOf(m),
+      ownerKey: m.ownerKey ?? undefined,
       sourceType: m.sourceType ?? undefined,
       sourceId: m.sourceId ?? undefined,
       status: m.status,
@@ -143,6 +165,8 @@ export class PrismaMemoryItemRepository
       activeKey: domain.activeKey ?? null,
       ownerId: domain.ownerId ?? null,
       ownerType: domain.ownerType ?? null,
+      scope: domain.scope,
+      ownerKey: domain.ownerKey ?? null,
       sourceType: domain.sourceType ?? null,
       sourceId: domain.sourceId ?? null,
       status: domain.status,
@@ -164,6 +188,8 @@ export class PrismaMemoryItemRepository
     if (patch.activeKey !== undefined) data.activeKey = patch.activeKey ?? null;
     if (patch.ownerId !== undefined) data.ownerId = patch.ownerId ?? null;
     if (patch.ownerType !== undefined) data.ownerType = patch.ownerType ?? null;
+    if (patch.scope !== undefined) data.scope = patch.scope;
+    if (patch.ownerKey !== undefined) data.ownerKey = patch.ownerKey ?? null;
     if (patch.sourceType !== undefined) data.sourceType = patch.sourceType ?? null;
     if (patch.sourceId !== undefined) data.sourceId = patch.sourceId ?? null;
     if (patch.status !== undefined) data.status = patch.status;
@@ -256,11 +282,17 @@ export class PrismaMemoryItemRepository
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
+        // US-004: a user-scoped row is keyed on its owner, not on a project — the row has no project at all.
+        const scope = item.scope ?? MemoryScope.PROJECT;
+        const ownerKey = scope === MemoryScope.USER ? userOwnerKey(item) : null;
+
         // US-001: the active row is found by its key, never by the triple, so a note (whose key is the slug
-        // alone) is replaced when the same slug comes back with another type.
+        // alone) is replaced when the same slug comes back with another type. US-004: a user row is found by
+        // `(ownerKey, activeKey)`, so the same slug written by two principals, or from two projects, is two
+        // keys of a different kind — one principal's note never supersedes another's or a project's.
         const existingActive = await db.memoryItem.findFirst({
           where: {
-            projectId: item.projectId,
+            ...(scope === MemoryScope.USER ? { ownerKey } : { projectId: item.projectId }),
             activeKey,
             deletedAt: null,
           },
@@ -295,7 +327,7 @@ export class PrismaMemoryItemRepository
 
         const created = await db.memoryItem.create({
           data: {
-            projectId: item.projectId,
+            projectId: scope === MemoryScope.USER ? null : item.projectId,
             kind: item.kind,
             subject: item.subject,
             predicate: item.predicate,
@@ -304,6 +336,8 @@ export class PrismaMemoryItemRepository
             activeKey,
             ownerId: item.ownerId,
             ownerType: item.ownerType ?? null,
+            scope,
+            ownerKey,
             sourceType: item.sourceType,
             sourceId: item.sourceId,
             status: item.status ?? 'active',
