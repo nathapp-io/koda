@@ -3,7 +3,7 @@
   "feature": "review-p2-rest",
   "branchName": "feat/review-p2-rest",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T04:31:11.347Z",
+  "updatedAt": "2026-11-03T04:53:37.230Z",
   "userStories": [
     {
       "id": "US-001",
@@ -544,14 +544,17 @@
         "database"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Credential revocation, binding removal, transactional audit and reusable identity handling are security-critical, with concurrency and migration risks."
+        "reasoning": "Credential revocation, binding removal, transactional audit and reusable identity handling are security-critical, with concurrency and migration risks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/agents/agents.service.ts",
@@ -599,7 +602,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ad32243c2a9a804a6520d14b0276fe4343b0f5d7"
     },
     {
       "id": "US-008",
