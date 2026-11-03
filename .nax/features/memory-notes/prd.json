@@ -3,7 +3,7 @@
   "feature": "memory-notes",
   "branchName": "feat/memory-notes",
   "createdAt": "2026-11-03T00:00:00.000Z",
-  "updatedAt": "2026-11-03T14:45:34.174Z",
+  "updatedAt": "2026-11-03T14:51:25.513Z",
   "userStories": [
     {
       "id": "US-001",
@@ -848,14 +848,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing client patterns make the implementation bounded, but editing approval policy and permission-gated controls triggers strict access-control test isolation."
+        "reasoning": "Existing client patterns make the implementation bounded, but editing approval policy and permission-gated controls triggers strict access-control test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/settings.vue",
@@ -887,7 +890,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "deaacaefc13a13f954ecd1177ada39e362b3dd85"
     },
     {
       "id": "US-010",
