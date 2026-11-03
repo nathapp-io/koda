@@ -19,6 +19,10 @@ import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { IVcsRepository, VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
+import { GitHubProvider } from '../../../src/vcs/providers/github.provider';
+import { encryptToken } from '../../../src/common/utils/encryption.util';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -62,7 +66,13 @@ describeIntegration('project soft-delete deactivates VCS polling (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    app = await bootHttpApp({ registrationEnabled: false });
+    const previousKey = process.env.VCS_ENCRYPTION_KEY;
+    process.env.VCS_ENCRYPTION_KEY = 'ab'.repeat(32);
+    try { app = await bootHttpApp({ registrationEnabled: false }); }
+    finally {
+      if (previousKey === undefined) delete process.env.VCS_ENCRYPTION_KEY;
+      else process.env.VCS_ENCRYPTION_KEY = previousKey;
+    }
     prisma = fixtureDb(app);
     repo = app.get<IVcsRepository>(VCS_REPOSITORY);
     polling = app.get(VcsPollingService);
@@ -140,6 +150,48 @@ describeIntegration('project soft-delete deactivates VCS polling (PG)', () => {
     expect((await reload(connection.id)).isActive).toBe(false);
     const entries = await prisma.auditEntry.findMany({ where: { key: 'system.project.quiesce', resourceType: 'vcs-connection' } });
     expect(entries.map((entry) => entry.resourceId)).toContain(connection.id);
+  });
+
+  it('does not import a fetched issue after deletion has quiesced an in-flight poll', async () => {
+    const projectId = await insertProject();
+    const connection = await makeConnection(projectId, { encryptedToken: encryptToken('token', 'ab'.repeat(32)) });
+    const scheduled = await repo.findVcsConnectionById(connection.id);
+    if (!scheduled) throw new Error('missing live connection');
+    const issue = { number: 1, title: 'late fetch', body: null, authorLogin: 'octo',
+      url: 'https://github.com/acme/widgets/issues/1', labels: [], createdAt: new Date() };
+    let release!: () => void;
+    const fetch = vi.spyOn(GitHubProvider.prototype, 'fetchIssues').mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ issues: [issue], cursor: new Date(), capped: false });
+    }));
+    const sync = vi.spyOn(app.get(VcsSyncService), 'syncIssue');
+    polling.schedulePolling(scheduled);
+    const pending = polling['tick'](connection.id);
+    try {
+      await waitUntil(() => fetch.mock.calls.length === 1);
+      await softDelete(projectId);
+      expect((await reload(connection.id)).isActive).toBe(false);
+      expect(registry.getIntervals()).not.toContain(`vcs-polling-${connection.id}`);
+    } finally {
+      release?.();
+      await pending;
+    }
+    expect(sync).not.toHaveBeenCalled();
+    expect(await prisma.ticket.count({ where: { projectId } })).toBe(0);
+    expect(await prisma.auditEntry.count({ where: { projectId, key: 'system.vcs.poll-issues' } })).toBe(0);
+  });
+
+  it.each(['polling', 'webhook', 'manual'] as const)('fences a stale %s import even without the deletion listener', async (mode) => {
+    const projectId = await insertProject();
+    await markDeleted(projectId);
+    const sync = app.get(VcsSyncService);
+    const issue = { number: 2, title: 'stale import', body: null, authorLogin: 'octo',
+      url: 'https://github.com/acme/widgets/issues/2', labels: [], createdAt: new Date() };
+    const attempt = withTestActor({ type: 'USER', id: base.adminId }, () => sync.syncIssue(
+      { id: projectId }, issue, mode, { repoOwner: 'acme', repoName: 'widgets' }, 'vcs.sync.all',
+    ));
+    await expect(attempt).rejects.toThrow(NotFoundAppException);
+    expect(await prisma.ticket.count({ where: { projectId } })).toBe(0);
+    expect(await prisma.auditEntry.count({ where: { projectId, key: 'vcs.sync.all' } })).toBe(0);
   });
 
   it('AC-15: when the listener fails, the next polling tick unschedules the deleted connection', async () => {

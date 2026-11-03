@@ -298,21 +298,23 @@ export class AgentsService {
   }
 
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
-    if (!(await this.agentRepo.findByIdScalar(agentId))) {
-      throw new NotFoundAppException({}, 'agents');
-    }
-
-    // Filter out duplicates
     const uniqueCapabilities = [...new Set(updateData.capabilities)];
-    await this.audit.audited(
-      () => this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities),
+    const response = await this.audit.audited(
+      async () => {
+        // The row lock conflicts with softDeleteById's UPDATE, and lives until audit commits.
+        // A separate preflight read cannot protect the tombstone's retained capabilities.
+        if (!(await this.agentRepo.findByIdScalar(agentId, { lock: true }))) {
+          throw new NotFoundAppException({}, 'agents');
+        }
+        await this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities);
+        const updated = await this.agentRepo.findById(agentId);
+        if (!updated) throw new NotFoundAppException({}, 'agents');
+        return AgentResponseDto.from(updated);
+      },
       () => ({ key: 'agent.capabilities.update', resourceType: 'agent', resourceId: agentId, projectId: null, summary: `capabilities: ${uniqueCapabilities.length}` }),
     );
-
-    // Return updated agent with capabilities
-    const updated = await this.agentRepo.findById(agentId);
     await this.invalidateAfterCommit(agentId);
-    return AgentResponseDto.from(updated);
+    return response;
   }
 
   /**

@@ -52,7 +52,17 @@ export class PrismaAgentRepository {
     return this.db.agent.findUnique({ where: { slug, deletedAt: null } });
   }
 
-  async findByIdScalar(id: string) {
+  /** `lock` is used inside the caller's transaction to fence capability writes against soft delete. */
+  async findByIdScalar(id: string, options?: { lock: boolean }) {
+    if (options?.lock) {
+      // softDeleteById's UPDATE takes the same row lock. If deletion wins, READ COMMITTED
+      // rechecks deletedAt after waiting and answers no live row; otherwise deletion waits
+      // until replacement, response loading and audit have all committed.
+      const live = await this.db.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Agent" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE
+      `;
+      if (live.length === 0) return null;
+    }
     return this.db.agent.findUnique({ where: { id, deletedAt: null } });
   }
 

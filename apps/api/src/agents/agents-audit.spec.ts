@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
@@ -65,6 +66,36 @@ describe('AgentsService audit boundaries', () => {
     expect(audited).toHaveBeenCalledTimes(1);
     expect(repo.replaceCapabilities).toHaveBeenCalledWith(agent.id, ['a', 'b', 'c']);
     expect(record).toHaveBeenCalledWith({ key: 'agent.capabilities.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: 'capabilities: 3' });
+  });
+
+  it('locks and verifies liveness inside the capability transaction, before replacing retained rows', async () => {
+    repo.findByIdScalar.mockImplementation(async (_id, options) => {
+      expect(inAudit).toBe(true);
+      expect(options).toEqual({ lock: true });
+      return agent;
+    });
+    repo.findById.mockImplementation(async () => {
+      expect(inAudit).toBe(true);
+      return agent;
+    });
+
+    await service.updateCapabilities(agent.id, { capabilities: ['nax'] });
+
+    expect(repo.findByIdScalar.mock.invocationCallOrder[0]).toBeLessThan(repo.replaceCapabilities.mock.invocationCallOrder[0]);
+    expect(repo.findById.mock.invocationCallOrder[0]).toBeLessThan(record.mock.invocationCallOrder[0]);
+  });
+
+  it('does not replace capabilities or audit success when deletion wins the locked read', async () => {
+    repo.findByIdScalar.mockImplementation(async () => {
+      expect(inAudit).toBe(true);
+      return null;
+    });
+
+    const error = await service.updateCapabilities(agent.id, { capabilities: ['overwritten'] }).catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(NotFoundAppException);
+    expect(repo.replaceCapabilities).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
   });
 
   it('AC-15/16: tombstones before cleaning bindings inside audited inside afterCommit', async () => {

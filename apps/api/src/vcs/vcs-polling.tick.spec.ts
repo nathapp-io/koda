@@ -164,6 +164,38 @@ describe('VcsPollingService tick (M10)', () => {
     });
   });
 
+  it('stops an in-flight fetch when project quiesce unschedules its connection', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    let release!: (value: unknown) => void;
+    fetchIssues.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    service.schedulePolling(connection());
+    await tick();
+    expect(fetchIssues).toHaveBeenCalledTimes(1);
+
+    service.unschedulePolling('conn-1');
+    release({ issues: [issue(1)], cursor: new Date(), capped: false });
+    await settle();
+
+    expect(sync.syncIssue).not.toHaveBeenCalled();
+    expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+    expect(prSync.syncPrStatus).not.toHaveBeenCalled();
+  });
+
+  it('stops the remaining batch if quiesce runs while an import is settling', async () => {
+    repo.findVcsConnectionById.mockResolvedValue(connection());
+    fetchIssues.mockResolvedValue({ issues: [issue(1), issue(2)], cursor: new Date(), capped: false });
+    sync.syncIssue.mockImplementationOnce(async () => {
+      service.unschedulePolling('conn-1');
+      return { action: 'created' };
+    });
+    service.schedulePolling(connection());
+    await tick();
+
+    expect(sync.syncIssue).toHaveBeenCalledTimes(1);
+    expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+    expect(prSync.syncPrStatus).not.toHaveBeenCalled();
+  });
+
   it('polls with the connection as it is now, not as it was scheduled', async () => {
     const cursor = new Date('2026-09-20T00:00:00Z');
     repo.findVcsConnectionById.mockResolvedValue(connection({ lastSyncedAt: cursor }));

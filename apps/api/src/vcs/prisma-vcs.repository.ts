@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { bookkeeping } from '../action-context/audit-coverage';
 import { isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -242,6 +243,14 @@ export class PrismaVcsRepository implements IVcsRepository {
     const inTransaction = this.txManager.isInTransaction();
     try {
       return await runWithTicketNumberRetry(this.txManager, async () => {
+        // Fence every import entry point against project deletion. The delete's UPDATE takes
+        // this same row lock, so either the import (including audit) commits first, or a
+        // stale fetch observes the tombstone after waiting and cannot allocate/insert.
+        const live = await this.db.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "Project" WHERE "id" = ${project.id} AND "deletedAt" IS NULL FOR UPDATE
+        `;
+        if (live.length === 0) throw new NotFoundAppException({}, 'projects');
+
         const lastTicket = await this.db.ticket.findFirst({
           where: { projectId: project.id },
           orderBy: { number: 'desc' },

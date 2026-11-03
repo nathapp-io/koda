@@ -1,4 +1,5 @@
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
@@ -43,6 +44,7 @@ describe('PrismaVcsRepository', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueryRaw.mockReset().mockResolvedValue([{ id: 'p1' }]);
     mockUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     mockTxManager.isInTransaction.mockReturnValue(false);
     repo = new PrismaVcsRepository(mockTxManager as never, mockPrisma as never);
@@ -61,6 +63,21 @@ describe('PrismaVcsRepository', () => {
     expect(sql.join('?')).toContain('SELECT * FROM "VcsConnection" WHERE "projectId" = ? FOR UPDATE');
     expect(projectId).toBe('p1');
     expect(mockRun).not.toHaveBeenCalled();
+  });
+
+  it('refuses a stale import after the project was deleted, before allocation or audit', async () => {
+    mockQueryRaw.mockResolvedValue([]);
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 'late', number: 1, title: 'late issue' });
+    const onCreated = vi.fn();
+    await expect(repo.createTicketFromIssue(
+      { id: 'p1' }, { number: 99, title: 'late issue', body: null, url: 'http://gh/99' } as never,
+      'acme/widgets#99', onCreated,
+    )).rejects.toThrow(NotFoundAppException);
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it('createTicketFromIssue allocates next number in txManager.run', async () => {
@@ -85,6 +102,11 @@ describe('PrismaVcsRepository', () => {
       }),
     );
     expect(result).toEqual({ id: 't1', number: 8, title: 'Issue title' });
+    const [sql, projectId] = mockQueryRaw.mock.calls[0];
+    expect(sql.join('?')).toContain('FROM "Project" WHERE "id" = ? AND "deletedAt" IS NULL FOR UPDATE');
+    expect(projectId).toBe('p1');
+    expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeGreaterThan(mockRun.mock.invocationCallOrder[0]);
+    expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockFindFirst.mock.invocationCallOrder[0]);
   });
 
   it('createTicketFromIssue awaits onCreated after the insert, inside the attempt', async () => {

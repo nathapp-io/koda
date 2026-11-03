@@ -689,7 +689,7 @@ describe('AgentsService', () => {
 
       expect(error).toBeInstanceOf(NotFoundAppException);
       expect((error as NotFoundAppException).prefix).toBe('agents');
-      expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent');
+      expect(agentRepo.findByIdScalar).toHaveBeenCalledExactlyOnceWith('deleted-agent', { lock: true });
       expect(agentRepo.replaceCapabilities).not.toHaveBeenCalled();
     });
 

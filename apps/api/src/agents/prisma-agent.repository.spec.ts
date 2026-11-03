@@ -107,6 +107,25 @@ describe('PrismaAgentRepository.createCapabilities (US-005)', () => {
     await expect(repository.softDeleteById('original')).rejects.toBe(failure);
   });
 
+  it('locks the live agent row before reading it for capability replacement', async () => {
+    const query = vi.fn().mockResolvedValue([{ id: 'a1' }]);
+    const findUnique = vi.fn().mockResolvedValue({ id: 'a1' });
+    prisma.client.$queryRaw = query;
+    prisma.client.agent = { findUnique };
+
+    expect(await repository.findByIdScalar('a1', { lock: true })).toEqual({ id: 'a1' });
+
+    const [sql, id] = query.mock.calls[0];
+    expect(sql.join('?')).toContain('FROM "Agent" WHERE "id" = ? AND "deletedAt" IS NULL FOR UPDATE');
+    expect(id).toBe('a1');
+    expect(query.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
+
+    query.mockResolvedValue([]);
+    findUnique.mockClear();
+    expect(await repository.findByIdScalar('a1', { lock: true })).toBeNull();
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
   it('AC-10: issues one agentCapabilityEntry.createMany on the ambient client and no role write', async () => {
     await repository.createCapabilities('agent-1', ['nax', 'typescript']);
 

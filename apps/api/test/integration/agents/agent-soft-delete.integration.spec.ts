@@ -22,6 +22,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AgentsService } from '../../../src/agents/agents.service';
 import { PrismaAgentRepository } from '../../../src/agents/prisma-agent.repository';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { asTestActor, fixtureDb } from '../../helpers/action-context';
@@ -162,6 +164,66 @@ describeIntegration('agent soft delete (PG)', () => {
     ).agent;
     const remove = (slug: string) =>
       request(server).delete(`/api/agents/${slug}`).auth(ownerToken, { type: 'bearer' });
+
+    it('a concurrent delete wins without replacing retained capabilities or recording a failed PATCH as success', async () => {
+      const agent = await createAgent('concurrent-capabilities');
+      await raw.agentCapabilityEntry.create({ data: { agentId: agent.id, capability: 'original' } });
+      const original = await raw.agentCapabilityEntry.findMany({ where: { agentId: agent.id } });
+      const service = viaOwner(app.get(AgentsService));
+      const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+      let release!: () => void;
+      let deleted!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const ready = new Promise<void>((resolve) => { deleted = resolve; });
+      const deletion = tx.run(async () => {
+        await service.removeById(agent.id);
+        deleted();
+        await held;
+      });
+      let pending: Promise<unknown> | undefined;
+      let readFinished = false;
+      let pid: number | undefined;
+      const liveRepo = app.get(PrismaAgentRepository);
+      const read = liveRepo.findByIdScalar.bind(liveRepo);
+      const spy = vi.spyOn(liveRepo, 'findByIdScalar').mockImplementation(async (id, options) => {
+        const [backend] = await app.get<PrismaService<PrismaClient>>(PrismaService).client
+          .$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        pid = backend.pid;
+        try { return await read(id, options); }
+        finally { readFinished = true; }
+      });
+      try {
+        await ready;
+        pending = service.updateCapabilities(agent.id, { capabilities: ['overwrite'] }).catch((error: unknown) => error);
+        // Wait for database evidence, not a sleep-based guess: deletion holds the parent row,
+        // and the capability writer must wait on it *before* deciding the agent is live.
+        const deadline = Date.now() + 2_000;
+        let blocked = false;
+        while (!readFinished && !blocked && Date.now() < deadline) {
+          if (pid !== undefined) {
+            const [state] = await raw.$queryRaw<{ blocked: boolean }[]>`
+              SELECT cardinality(pg_blocking_pids(${pid}::int)) > 0 AS blocked
+            `;
+            blocked = state.blocked;
+          }
+          if (!blocked && !readFinished) await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        expect(readFinished).toBe(false);
+      } finally {
+        release();
+        await deletion;
+        // Drain the writer before restoring its repository spy, even if an assertion fails.
+        if (pending) await pending;
+        spy.mockRestore();
+      }
+      const result = await pending;
+      expect(result).toBeInstanceOf(NotFoundAppException);
+      expect((result as NotFoundAppException).prefix).toBe('agents');
+      expect(await raw.agentCapabilityEntry.findMany({ where: { agentId: agent.id } })).toEqual(original);
+      expect(await db.auditEntry.count({ where: { key: 'agent.capabilities.update', resourceId: agent.id } })).toBe(0);
+      expect((await db.agent.findUniqueOrThrow({ where: { id: agent.id } })).deletedAt).toBeInstanceOf(Date);
+    });
 
     it('AC-14/16: answers 200 with the original slug', async () => {
       await createAgent('http-delete-bot');
