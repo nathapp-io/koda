@@ -56,23 +56,47 @@ describe('EntityGraphService', () => {
       expect(node).toBeNull();
     });
 
-    it('AC3: onTicketEvent(assignment) creates owner node and links to ticket', async () => {
-      await entityStore.upsertNode('project-123', 'ticket-1', EntityNodeType.TICKET, 'Ticket 1', {});
+    it('AC-1/2: assigned user creates an owner node with metadata and links it to the ticket', async () => {
       await service.onTicketEvent({
-        type: 'ticket_event',
-        id: 'event-1',
-        ticketId: 'ticket-1',
-        projectId: 'project-123',
-        actorId: 'user-1',
-        action: 'assigned',
-        data: { assignedToUserId: 'user-abc', assignedToAgentId: null },
-        timestamp: new Date(),
+        type: 'ticket_event', id: 'event-user', ticketId: 'ticket-user', projectId: 'project-123',
+        actorId: 'user-1', action: 'assigned', data: { assignedTo: 'u1', assigneeType: 'user' }, timestamp: new Date(),
       });
-      const ownerNode = await entityStore.findNodeByEntityId('project-123', 'owner:user-abc');
-      const links = await entityStore.findLinksBySource('project-123', 'ticket-1');
-      const ticketToOwnerLink = links.find((l) => l.relation === EntityLinkRelation.TICKET_TO_OWNER);
-      expect(ownerNode).not.toBeNull();
-      expect(ticketToOwnerLink).not.toBeUndefined();
+      expect(await entityStore.findNodeByEntityId('project-123', 'owner:u1')).toMatchObject({
+        entityType: EntityNodeType.OWNER, metadata: { userId: 'u1' },
+      });
+      expect(await entityStore.findLinksBySource('project-123', 'ticket-user')).toContainEqual(
+        expect.objectContaining({ targetId: 'owner:u1', relation: EntityLinkRelation.TICKET_TO_OWNER }),
+      );
+    });
+
+    it('AC-3/4: assigned agent creates an owner node with metadata and links it to the ticket', async () => {
+      await service.onTicketEvent({
+        type: 'ticket_event', id: 'event-agent', ticketId: 'ticket-agent', projectId: 'project-123',
+        actorId: 'user-1', action: 'assigned', data: { assignedTo: 'a1', assigneeType: 'agent' }, timestamp: new Date(),
+      });
+      expect(await entityStore.findNodeByEntityId('project-123', 'owner:a1')).toMatchObject({
+        entityType: EntityNodeType.OWNER, metadata: { agentId: 'a1' },
+      });
+      expect(await entityStore.findLinksBySource('project-123', 'ticket-agent')).toContainEqual(
+        expect.objectContaining({ targetId: 'owner:a1', relation: EntityLinkRelation.TICKET_TO_OWNER }),
+      );
+    });
+
+    it('AC-5/6: null assignment keeps ticket node but creates no owner link', async () => {
+      await service.onTicketEvent({
+        type: 'ticket_event', id: 'event-null', ticketId: 'ticket-null', projectId: 'project-123',
+        actorId: 'user-1', action: 'assigned', data: { assignedTo: null, assigneeType: null }, timestamp: new Date(),
+      });
+      expect(await entityStore.findNodeByEntityId('project-123', 'ticket-null')).toMatchObject({ entityType: EntityNodeType.TICKET });
+      expect((await entityStore.findLinksBySource('project-123', 'ticket-null')).filter((l) => l.relation === EntityLinkRelation.TICKET_TO_OWNER)).toEqual([]);
+    });
+
+    it('AC-7: assignment without a supported assigneeType creates no owner link', async () => {
+      await service.onTicketEvent({
+        type: 'ticket_event', id: 'event-undiscriminated', ticketId: 'ticket-unknown', projectId: 'project-123',
+        actorId: 'user-1', action: 'assigned', data: { assignedTo: 'x1' }, timestamp: new Date(),
+      });
+      expect((await entityStore.findLinksBySource('project-123', 'ticket-unknown')).filter((l) => l.relation === EntityLinkRelation.TICKET_TO_OWNER)).toEqual([]);
     });
 
     it('BUG-1: onTicketEvent(assigned) upserts the ticket node even when it does not already exist', async () => {
@@ -83,7 +107,7 @@ describe('EntityGraphService', () => {
         projectId: 'project-123',
         actorId: 'user-1',
         action: 'assigned',
-        data: { assignedToUserId: 'user-abc' },
+        data: { assignedTo: 'user-abc', assigneeType: 'user' },
         timestamp: new Date(),
       });
 
