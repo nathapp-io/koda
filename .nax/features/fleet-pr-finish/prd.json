@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T05:20:36.832Z",
+  "updatedAt": "2026-11-04T05:37:57.679Z",
   "userStories": [
     {
       "id": "US-001",
@@ -395,14 +395,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security override: derived ticket/comment writes intentionally use fleet.job.rule rather than separate privileges; concurrency locks, principal attribution and transaction rollback also need strict isolation."
+        "reasoning": "Security override: derived ticket/comment writes intentionally use fleet.job.rule rather than separate privileges; concurrency locks, principal attribution and transaction rollback also need strict isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
@@ -453,7 +456,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5d224271774f1898062f037575f8e06411f73202"
     },
     {
       "id": "US-006",
