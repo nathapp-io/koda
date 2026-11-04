@@ -1,7 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { TicketStatus } from '../../common/enums';
+import { TicketStatus, TicketType } from '../../common/enums';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { TicketsService } from '../../tickets/tickets.service';
+import { FleetTicketsService } from './fleet-tickets.service';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { TicketTransitionsService } from '../../tickets/state-machine/ticket-transitions.service';
@@ -23,7 +28,7 @@ const STARTABLE: ReadonlySet<string> = new Set([TicketStatus.CREATED, TicketStat
 const agentTypeOf = (job: { requestedByType?: 'USER' | 'AGENT' }): { actorType?: 'agent' } =>
   job.requestedByType === 'AGENT' ? { actorType: 'agent' } : {};
 
-/** Fleet C9 §3: ticket-side effects of fleet jobs. After commit, best-effort per ticket, never throws (D451). */
+/** Fleet ticket effects: legacy terminal/dispatch effects are best-effort; ruling effects are transactional. */
 @Injectable()
 export class FleetJobTicketEffects {
   private readonly logger = new Logger(FleetJobTicketEffects.name);
@@ -35,7 +40,35 @@ export class FleetJobTicketEffects {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly afterCommit: AfterCommitService,
+    private readonly tickets: TicketsService,
+    private readonly fleetTickets: FleetTicketsService,
   ) {}
+
+  /** Rulings are atomic: call inside the ruling transaction; never defer or swallow failures. */
+  async ensureFinishTicket(job: { id: string }, principal: KodaPrincipal): Promise<string> {
+    await this.repo.lockJobRow(job.id);
+    const existing = await this.repo.findEligibleFinishTicket(job.id);
+    if (existing) return existing.ticketId;
+    const run = await this.repo.findJobForFinishTicket(job.id);
+    if (!run) throw new NotFoundAppException({}, 'fleet.jobs');
+    const prNumber = run.resultPrUrl ? prNumberFor(run.repo, run.resultPrUrl) : null;
+    if (prNumber === null || !run.resultPrUrl) throw new ConflictAppException({}, 'fleet.rulings.notDraft');
+    const ticket = await this.tickets.create(run.projectSlug, {
+      type: TicketType.TASK, title: `Finish draft PR #${prNumber} (${run.feature})`,
+    }, principal);
+    await this.transitions.startForDispatch(run.projectSlug, ticket.ref, principal);
+    await this.fleetTickets.link(run.id, [ticket]);
+    await this.repo.upsertFleetPrLink({
+      ticketId: ticket.id, jobId: run.id, url: run.resultPrUrl, provider: run.repo.provider, prNumber,
+      externalRef: `${run.repo.owner}/${run.repo.name}#${prNumber}`, now: new Date(),
+    });
+    return ticket.id;
+  }
+
+  /** Authored as the ruling principal, inside the same transaction (fleet.job.rule is sufficient). */
+  createRulingComment(ticketId: string, body: string, principal: KodaPrincipal): Promise<{ id: string }> {
+    return this.repo.createRulingComment(ticketId, body, principal);
+  }
 
   /**
    * D452: a RUN dispatch starts each CREATED/VERIFIED ticket as the requester; PLAN callers never call

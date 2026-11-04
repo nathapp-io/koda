@@ -18,6 +18,7 @@ import {
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { CommentResponseDto } from './dto/comment-response.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../approvals/route/approval-pending';
@@ -79,7 +80,7 @@ export class CommentsController {
   @Requires('comment.create')
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a comment on a ticket' })
-  @ApiResponse({ status: 201, description: 'Comment created' })
+  @ApiResponse({ status: 201, description: 'Comment created', type: CommentResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'comment.create is missing' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
@@ -102,7 +103,7 @@ export class CommentsController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('comment.read')
   @ApiOperation({ summary: 'List all comments for a ticket' })
-  @ApiResponse({ status: 200, description: 'List of comments' })
+  @ApiResponse({ status: 200, description: 'List of comments', type: [CommentResponseDto] })
   @ApiResponse({ status: 403, description: 'comment.read is missing' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,7 +122,7 @@ export class CommentsController {
   // known after the row lookup, so `CommentsService.update` makes the check.
   @Requires('comment.update', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Update a comment' })
-  @ApiResponse({ status: 200, description: 'Comment updated' })
+  @ApiResponse({ status: 200, description: 'Comment updated', type: CommentResponseDto })
   @ApiResponse({ status: 403, description: 'comment.update is missing, or the comment is someone else\'s and only comment.update.own is held' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
   async updateFromHttp(

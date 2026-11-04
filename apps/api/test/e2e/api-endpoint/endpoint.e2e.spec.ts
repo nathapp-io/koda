@@ -6278,7 +6278,11 @@ describeIntegration('Fleet ruling endpoint lifecycle', () => {
   }, 60000);
   afterAll(async () => { await app?.close(); });
   it('creates, replaces and lists rulings including history', async () => {
-    const first = body<{ id: string }>(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'confirm: test green' }).expect(201));
+    const first = body<{ id: string; commentId: string }>(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'confirm: test green' }).expect(201));
+    expect(await db.comment.findUnique({ where: { id: first.commentId } })).toMatchObject({
+      type: 'RULING', authorUserId: world.ids.root, authorAgentId: null, body: 'D-1 (review): confirm: test green',
+    });
+    expect(await db.fleetJobTicket.count({ where: { jobId } })).toBe(1);
     await db.fleetPrRuling.update({ where: { id: first.id }, data: { createdAt: new Date(0) } });
     const second = body<{ id: string }>(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'waive: scope' }).expect(201));
     const listed = body<{ id: string; state: string }[]>(await request(server()).get(url()).set(auth()).expect(200));

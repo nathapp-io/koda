@@ -22,7 +22,7 @@ export class CommentResponseDto {
   @ApiProperty({
     description: 'Comment type',
     example: 'GENERAL',
-    enum: ['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'],
+    enum: ['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL', 'RULING'],
   })
   type!: string;
 

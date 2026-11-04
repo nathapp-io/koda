@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { CommentType, TicketLinkSource } from '../../common/enums';
 import { parseTicketRef } from '../../common/utils/ticket-ref.util';
 
@@ -126,6 +128,35 @@ export class PrismaFleetTicketsRepository {
       data: { notifiedEpoch: epoch },
     });
     return count === 1;
+  }
+
+  /** Serialize first-ruling ticket selection/creation. Caller owns the ruling transaction. */
+  async lockJobRow(jobId: string): Promise<void> {
+    await this.db.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${jobId} FOR UPDATE`;
+  }
+
+  async findEligibleFinishTicket(jobId: string): Promise<{ ticketId: string } | null> {
+    return this.db.fleetJobTicket.findFirst({
+      where: { jobId, ticket: { deletedAt: null, status: { notIn: ['CLOSED', 'REJECTED'] } } },
+      orderBy: [{ createdAt: 'asc' }, { ticketId: 'asc' }],
+      select: { ticketId: true },
+    });
+  }
+
+  async findJobForFinishTicket(jobId: string) {
+    const row = await this.db.fleetJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, projectId: true, feature: true, resultPrUrl: true,
+        project: { select: { slug: true } }, repo: { select: { provider: true, owner: true, name: true } } },
+    });
+    return row ? { ...row, projectSlug: row.project.slug, repo: { ...row.repo, provider: row.repo.provider as 'github' | 'gitlab' } } : null;
+  }
+
+  async createRulingComment(ticketId: string, body: string, principal: KodaPrincipal): Promise<{ id: string }> {
+    return this.db.comment.create({
+      data: { ticketId, body, type: CommentType.RULING, ...actorForeignKeys(principal, 'authoredBy') },
+      select: { id: true },
+    });
   }
 
   async createSystemComment(ticketId: string, body: string): Promise<{ id: string }> {

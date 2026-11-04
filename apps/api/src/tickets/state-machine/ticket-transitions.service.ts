@@ -453,7 +453,8 @@ export class TicketTransitionsService {
    * `start`: the state-machine validation, the conditional status write, the STATUS_CHANGE activity
    * row with the dispatcher as actor, the webhook and the ticket event.
    *
-   * Only `FleetJobTicketEffects.onRunDispatched` may call this; a route or tool that moves a ticket on
+   * Only `FleetJobTicketEffects.onRunDispatched` and `FleetJobTicketEffects.ensureFinishTicket`
+   * (authorized by `fleet.job.rule`) may call this; a route or tool that moves a ticket on
    * a user's behalf must go through `start`, which checks `ticket.transition.start`.
    */
   async startForDispatch(

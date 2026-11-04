@@ -17,7 +17,7 @@ describe('FleetPrRulingsService', () => {
     };
     const tx = { run: vi.fn(async <T>(fn: () => Promise<T>) => { order.push('tx'); return fn(); }), getClient: vi.fn(), isInTransaction: () => true };
     const audit = { record: vi.fn(async () => { order.push('audit'); expect(currentActor()).toEqual({ type: 'AGENT', id: agent.id }); }) };
-    return { repo, tx, audit, order, service: new FleetPrRulingsService(repo, tx, audit as unknown as AuditRecorder) };
+    return { repo, tx, audit, order, service: new FleetPrRulingsService(repo, tx, audit as unknown as AuditRecorder, { ensureFinishTicket: vi.fn(async () => 'ticket'), createRulingComment: vi.fn(async () => ({ id: 'comment' })) } as never) };
   };
   it('AC-10/11/12/13: normalizes, attributes, replaces and audits within the transaction', async () => {
     const { service, repo, audit, order } = setup();
