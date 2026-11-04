@@ -22,6 +22,9 @@ describeDb('AssistantActionRequest committed migration (PG)', () => {
     // later migrations add to ApprovalRequest too.
     await applyMigration(scratch.db, '20261108090000_approval_request_variant');
     await applyMigration(scratch.db, '20261109090000_approval_request_redeem');
+    // Same reason for ChatThread: the client selects `mode` and `pendingApprovals`, which only the
+    // thread_modes migration adds to this chain.
+    await applyMigration(scratch.db, '20261124090000_thread_modes');
   }, 120_000);
   afterAll(async () => { await scratch?.drop(); });
 
