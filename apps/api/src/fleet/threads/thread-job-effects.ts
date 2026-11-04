@@ -7,6 +7,7 @@ import type { ThreadLiveEvent } from '../../live/thread-event-bus';
 import { isThreadKind } from '../common/thread-jobs';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { ThreadSession, ThreadWriteResult } from './domain/chat-thread.domain';
+import { readApprovalDecision } from './thread-decision';
 
 /** Job ends that mean the runner died or failed; the session snapshot shows them as `failed`, the rest as `closed`. */
 const FAILED_END_STATES: readonly string[] = [FleetJobState.CRASHED, FleetJobState.FAILED];
@@ -28,8 +29,13 @@ export class ThreadJobEffects {
       if (typeof messageId === 'string' && result === 'rejected') await this.prisma.client.chatMessage.updateMany({ where: { id: messageId }, data: { status: 'errored', errorReason: detail.slice(0, 200) } });
       if (typeof messageId === 'string') await this.replaceCommandPayload(command.id, { messageId });
     } else if (command.type === FleetCommandType.THREAD_ANSWER) {
-      const { requestId } = command.payload as { requestId?: unknown };
-      if (result === 'ok' && typeof requestId === 'string') await this.clearAnsweredQuestion(command.jobId, requestId);
+      const { requestId, decision } = command.payload as { requestId?: unknown; decision?: unknown };
+      // US-008 F2: only a text answer answers the pending question. A decision shares the command type but not the
+      // pending list — the two are written by independent ingest paths, so they can hold the same request id, and an
+      // accepted decision must not delete a question nobody answered.
+      if (result === 'ok' && typeof requestId === 'string' && readApprovalDecision(decision) === null) {
+        await this.clearAnsweredQuestion(command.jobId, requestId);
+      }
       await this.replaceCommandPayload(command.id, { requestId });
     }
   }

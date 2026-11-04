@@ -19,7 +19,7 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
-import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { fixtureDb } from '../../helpers/action-context';
 
@@ -236,6 +236,43 @@ describeIntegration('fleet thread approval decisions (PG, US-008)', () => {
 
     expect(res.body.message).toBe(EN.noApproval['409']);
     expect(ZH.noApproval?.['409']).toBeTruthy();
+  });
+
+  /**
+   * F2 (fix round 1): the pending lists are written by independent ingest paths, so a question and an approval can
+   * carry the same request id. An accepted decision is not an answer to the question, and its ack must not delete it.
+   */
+  it('F2: the ack of a decision leaves a pendingQuestion that shares its request id', async () => {
+    const s = await fresh('decide-ack-collision');
+    await pending(s, ['r1']);
+    const question = { requestId: 'r1', text: 'Which database?', expiresAt: EXPIRES_AT };
+    await prisma.chatThread.update({ where: { id: s.threadId }, data: { pendingQuestion: question } });
+
+    await decide(s, 'r1', { decision: 'allow' }).expect(200);
+    const [command] = await commandsOf(s);
+    if (!command) throw new Error('Missing decision command');
+    // The runner accepts the decision, which is the ack that used to clear the question.
+    await request(server).post('/api/fleet/runner/sync').set(auth(s.runnerKey))
+      .send(syncBody({ protocolVersion: 4, commandAcks: [{ commandId: command.id, leaseEpoch: 1, result: 'ok' }] }))
+      .expect(200);
+
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } })).pendingQuestion).toEqual(question);
+  });
+
+  it('the ack of a text answer still clears its question', async () => {
+    const s = await fresh('answer-ack-clears');
+    const question = { requestId: 'q1', text: 'Which database?', expiresAt: EXPIRES_AT };
+    await prisma.chatThread.update({ where: { id: s.threadId }, data: { pendingQuestion: question } });
+
+    await request(server).post(`${projectPath}/${s.threadId}/answer`).set(auth(world.tokens.dev))
+      .send({ requestId: 'q1', text: 'postgres' }).expect(200);
+    const [command] = await commandsOf(s);
+    if (!command) throw new Error('Missing answer command');
+    await request(server).post('/api/fleet/runner/sync').set(auth(s.runnerKey))
+      .send(syncBody({ protocolVersion: 4, commandAcks: [{ commandId: command.id, leaseEpoch: 1, result: 'ok' }] }))
+      .expect(200);
+
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } })).pendingQuestion).toBeNull();
   });
 
   it('the thread creator who is not the turn requester is refused the session, not the row', async () => {

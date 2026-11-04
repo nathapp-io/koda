@@ -55,6 +55,32 @@ describe('ThreadJobEffects.onInputAck (US-004)', () => {
   });
 });
 
+/**
+ * thread-agents-modes US-008 fix round 1 (F2): a decision shares the `THREAD_ANSWER` type with a text answer but not
+ * its pending question. The two pending lists are written by independent ingest paths, so they can hold the same
+ * request id; an accepted decision must not delete the unanswered question.
+ */
+describe('ThreadJobEffects.onInputAck for an approval decision (US-008 F2)', () => {
+  const decisionCommand = (over: Partial<FleetCommandRecord> = {}): FleetCommandRecord =>
+    answerCommand({ payload: { requestId: 'q1', decision: 'allow' }, ...over });
+
+  it('F2: an ok ack for a decision keeps a pendingQuestion that shares its requestId', async () => {
+    const { prisma, thread } = fakePrisma();
+
+    await new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'ok', '');
+
+    expect(thread.pendingQuestion).toMatchObject({ requestId: 'q1' });
+  });
+
+  it('F2: the decision ack still rewrites the command payload to the requestId', async () => {
+    const { prisma, fleetCommand } = fakePrisma();
+
+    await new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'ok', '');
+
+    expect(fleetCommand.update).toHaveBeenCalledWith({ where: { id: 'cmd1' }, data: { payload: { requestId: 'q1' } } });
+  });
+});
+
 const publishCommand = (over: Partial<FleetCommandRecord> = {}): FleetCommandRecord => ({
   id: 'cmdP', runnerId: 'R', jobId: 'JP', type: FleetCommandType.THREAD_PUBLISH, leaseEpoch: 1,
   payload: {}, createdAt: new Date(0), deliveredAt: null, ackedAt: null, ackResult: null,
