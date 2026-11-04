@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T06:37:19.166Z",
+  "updatedAt": "2026-11-04T06:46:42.564Z",
   "userStories": [
     {
       "id": "US-001",
@@ -998,14 +998,17 @@
         "US-001",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive result rendering and comment-type presentation using existing DTO, locale and SFC patterns; no change to backend permissions."
+        "reasoning": "Additive result rendering and comment-type presentation using existing DTO, locale and SFC patterns; no change to backend permissions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
@@ -1047,7 +1050,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a346356008e65adc18ff21d2629f38d40b7cd6b3"
     },
     {
       "id": "US-012",
