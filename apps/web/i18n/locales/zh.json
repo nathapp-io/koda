@@ -1103,7 +1103,40 @@
       "replies": "已回复 {count} 条",
       "resolved": "已解决 {count} 条"
     },
+    "rulings": {
+      "title": "未解决事项与裁定",
+      "item": "事项",
+      "latest": "最新裁定",
+      "rule": "记录裁定",
+      "none": "暂无裁定",
+      "keyword": "裁定关键字",
+      "reason": "证据或理由",
+      "hint": "使用 fixed 时，请以提交 SHA 开头。服务器将验证裁定。",
+      "submit": "提交裁定",
+      "finish": "完成 PR",
+      "created": "裁定已记录",
+      "pendingApproval": "裁定等待审批",
+      "unexpectedApproval": "审批响应异常，请刷新审批收件箱。",
+      "validation": {
+        "evidence": "请提供证据或理由",
+        "tooLong": "裁定不得超过 2000 个字符"
+      },
+      "disposition": { "fixed": "已修复", "waived": "已豁免", "overridden": "已覆盖", "confirmed": "已确认", "verified": "已验证" },
+      "state": { "pending": "待处理", "applied": "已应用", "skipped": "已跳过", "replaced": "已替换" },
+      "skipReason": {
+        "unknown-item": "未知事项",
+        "stale-key": "事项标识已过期",
+        "already-settled": "事项已解决",
+        "superseded-by-writer": "已被仓库写入者的裁定取代",
+        "ambiguous-item": "事项不明确",
+        "echo-failed": "线程回复失败",
+        "recorder-failed": "记录失败",
+        "untrusted-pr": "不受信任的 PR",
+        "head-mismatch": "PR 最新提交已变更"
+      }
+    },
     "misfit": {
+      "bot_rulings": "此运行器无法应用 PR 裁定",
       "disabled": "执行机已停用",
       "offline": "执行机离线",
       "budget_paused": "执行机的舰队预算已暂停",

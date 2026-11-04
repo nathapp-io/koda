@@ -1103,7 +1103,40 @@
       "replies": "{count} replies",
       "resolved": "{count} resolved"
     },
+    "rulings": {
+      "title": "Open items and rulings",
+      "item": "Item",
+      "latest": "Latest ruling",
+      "rule": "Record a ruling",
+      "none": "No ruling yet",
+      "keyword": "Ruling keyword",
+      "reason": "Evidence or reason",
+      "hint": "For fixed, start with the commit SHA. The server validates the ruling.",
+      "submit": "Submit ruling",
+      "finish": "Finish",
+      "created": "Ruling recorded",
+      "pendingApproval": "Ruling pending approval",
+      "unexpectedApproval": "Unexpected approval response. Refresh the approval inbox.",
+      "validation": {
+        "evidence": "Evidence or a reason is required",
+        "tooLong": "Ruling must be at most 2000 characters"
+      },
+      "disposition": { "fixed": "Fixed", "waived": "Waived", "overridden": "Overridden", "confirmed": "Confirmed", "verified": "Verified" },
+      "state": { "pending": "Pending", "applied": "Applied", "skipped": "Skipped", "replaced": "Replaced" },
+      "skipReason": {
+        "unknown-item": "Unknown item",
+        "stale-key": "Item key is stale",
+        "already-settled": "Already settled",
+        "superseded-by-writer": "Superseded by a repository writer",
+        "ambiguous-item": "Ambiguous item",
+        "echo-failed": "Thread reply failed",
+        "recorder-failed": "Recording failed",
+        "untrusted-pr": "Untrusted PR",
+        "head-mismatch": "PR head changed"
+      }
+    },
     "misfit": {
+      "bot_rulings": "This runner cannot apply PR rulings",
       "disabled": "Runner is disabled",
       "offline": "Runner is offline",
       "budget_paused": "Runner's fleet budget is paused",

@@ -12,6 +12,8 @@ import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vu
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
 import FleetJobWorkflow from '~/components/fleet/FleetJobWorkflow.vue'
+import FleetJobOpenItems from '~/components/fleet/FleetJobOpenItems.vue'
+import { draftRunPrNumber } from '~/lib/fleet-rulings'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
@@ -332,6 +334,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       </div>
 
       <FleetJobWorkflow v-if="job.workflow" :workflow="job.workflow" />
+      <FleetJobOpenItems v-if="draftRunPrNumber(job) !== null" :slug="slug" :job="job" />
 
       <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="canEditConfig" @regenerate="regenOpen = true" />
 

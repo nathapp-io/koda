@@ -154,7 +154,7 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'trust_domain'
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain'
 
 /** Fleet job kinds, including config jobs and PR reviews. */
 export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
@@ -200,6 +200,27 @@ export interface FleetJobWorkflowItemDto {
   file: string | null
   line: number | null
   suggestion: string | null
+}
+
+export interface FleetPrRulingDto {
+  id: string
+  projectId: string
+  repoId: string
+  prNumber: number
+  jobId: string
+  itemId: string
+  itemKind: string
+  text: string
+  disposition: 'fixed' | 'waived' | 'overridden' | 'confirmed' | 'verified'
+  actorType: 'USER' | 'AGENT'
+  actorId: string
+  state: 'pending' | 'applied' | 'skipped' | 'replaced'
+  skipReason: string | null
+  appliedJobId: string | null
+  commentId: string | null
+  approvalRequestId: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface FleetJobWorkflowDto {
