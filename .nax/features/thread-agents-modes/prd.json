@@ -3,7 +3,7 @@
   "feature": "thread-agents-modes",
   "branchName": "feat/thread-agents-modes",
   "createdAt": "2026-11-24T00:00:00Z",
-  "updatedAt": "2026-11-04T16:21:41.327Z",
+  "updatedAt": "2026-11-04T16:36:09.569Z",
   "userStories": [
     {
       "id": "US-001",
@@ -644,14 +644,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "An existing publisher gains mode-dependent file selection and commit wording, and two existing callers forward the field; mutex/ref-CAS algorithms and authentication/session logic stay unchanged, so focused test-first git and caller tests suffice."
+        "reasoning": "An existing publisher gains mode-dependent file selection and commit wording, and two existing callers forward the field; mutex/ref-CAS algorithms and authentication/session logic stay unchanged, so focused test-first git and caller tests suffice.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/thread/thread-publish.ts",
@@ -670,7 +673,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0f77044ebb5c5cfb34fe255578ddc2f8788ea276"
     },
     {
       "id": "US-011",
