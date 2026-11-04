@@ -112,8 +112,9 @@ describe('ThreadJobRun preparation (US-003)', () => {
     const run = context.makeRun();
     const starting = run.start('prepare');
     await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
+    // The run removes the stream and recreates it, so a read can miss the file for an instant: "not yet".
     await waitFor(async () => {
-      const stream = await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8');
+      const stream = await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8').catch(() => '');
       return stream.includes('"type":"turn_end"') && stream.includes('"status":"completed"');
     });
     run.halt();
@@ -129,7 +130,7 @@ describe('ThreadJobRun preparation (US-003)', () => {
     const starting = run.start('prepare');
     await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
     await waitFor(async () => {
-      const stream = await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8');
+      const stream = await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8').catch(() => '');
       return stream.includes('"type":"session_started"') && stream.includes('"mode":"ask"');
     });
     run.halt();
