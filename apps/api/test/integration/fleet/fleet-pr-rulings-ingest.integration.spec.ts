@@ -94,6 +94,13 @@ const now = new Date('2026-11-15T12:00:00Z');
     expect(await db.comment.count({ where: { ticketId: b.ticket.id, body } })).toBe(1);
     expect(await db.comment.count({ where: { ticketId: { in: [other.ticket.id, foreign.ticket.id] }, body } })).toBe(0);
   });
+  it.each(['/', '/?view=files#review', '?view=files#review'])('AC-13 ready includes parser-accepted RUN URL suffix %s', async (suffix) => {
+    const { fix, run, ticket } = await fixture('COMPLETED', true);
+    await db.fleetJob.update({ where: { id: run.id }, data: { resultPrUrl: `${run.resultPrUrl}${suffix}` } });
+    await attach(fix.id, undefined); await ingest.drain(now); await rerun(fix.id);
+    expect(await comments(ticket.id)).toEqual([expect.objectContaining({ body: `PR #12 marked ready by FIX ${fix.id}`, type: 'GENERAL' })]);
+    expect(await db.ticket.findUnique({ where: { id: ticket.id } })).toMatchObject({ status: 'IN_PROGRESS' });
+  });
   it('AC-15 default system comment remains GENERAL with null authors', async () => {
     const { ticket } = await fixture();
     await withTestActor({ type: 'SYSTEM', id: 'ingest' }, () => app.get(PrismaFleetTicketsRepository).createSystemComment(ticket.id, 'legacy'));

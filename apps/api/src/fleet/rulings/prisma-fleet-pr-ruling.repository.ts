@@ -132,7 +132,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
     const pageSize = 100;
     for (let page = 0; page < 1000; page++) {
       const rows = await this.prisma.client.fleetJob.findMany({
-        where: { repoId, command: 'RUN', resultPrUrl: { endsWith: `/pull/${prNumber}` } },
+        // prNumberFor owns URL normalization (including trailing slash, query and fragment).
+        where: { repoId, command: 'RUN', resultPrUrl: { not: null } },
         select: { id: true, resultPrUrl: true }, orderBy: { id: 'asc' }, take: pageSize, skip: page * pageSize,
       });
       for (const row of rows) if (row.resultPrUrl && prNumberFor({ ...repo, provider: 'github' }, row.resultPrUrl) === prNumber) result.push(row.id);
