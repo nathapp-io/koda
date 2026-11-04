@@ -46,7 +46,7 @@ describe('ThreadEventWriter write-path lines (US-002)', () => {
     const { path, writer } = makeWriter();
     writer.started({ resumed: false, backend: { kind: 'native' }, skillShas: [], stale: false });
     const last = (await readLines(path)).at(-1) ?? {};
-    expect(last).toEqual({ type: 'session_started', at: CLOCK, resumed: false, backend: { kind: 'native' }, skillShas: [] });
+    expect(last).toEqual({ type: 'session_started', mode: 'read', at: CLOCK, resumed: false, backend: { kind: 'native' }, skillShas: [] });
     expect('stale' in last).toBe(false);
   });
 
