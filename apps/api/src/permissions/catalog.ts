@@ -126,6 +126,9 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'memory.update': 'any',
   'fleet.job.shell.escalate': 'project',
   'fleet.budget.override': 'any',
+  // FIX on an unprotected default branch: its own key so grants and approval policies for the other
+  // repo toggles never reach it.
+  'fleet.repo.fix.unprotected': 'global',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);

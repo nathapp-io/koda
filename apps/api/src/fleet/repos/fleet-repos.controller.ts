@@ -128,16 +128,16 @@ export class FleetReposController {
   @Patch(':id/fix-unprotected')
   @HttpCode(200)
   @UseGuards(RequiresGuard)
-  @Requires('fleet.repo.review.configure')
+  @Requires('fleet.repo.fix.unprotected')
   @ApprovalGated()
-  @ApiOperation({ summary: 'Allow FIX on an unprotected default branch for a registered repo (fleet.repo.review.configure, global)' })
+  @ApiOperation({ summary: 'Allow FIX on an unprotected default branch for a registered repo (fleet.repo.fix.unprotected, global)' })
   @ApiResponse({ status: 200, type: FleetRepoDto })
-  @ApiResponse({ status: 403, description: 'fleet.repo.review.configure is missing globally' })
+  @ApiResponse({ status: 403, description: 'fleet.repo.fix.unprotected is missing globally' })
   @ApiResponse({ status: 404, description: 'No such repo' })
   @ApiResponse({ status: 422, description: 'The override cannot be enabled for this repo: { reason }' })
   async configureFixUnprotected(@Param('id') id: string, @Body() dto: UpdateFixUnprotectedDto) {
     const outcome = await this.routeGate.run<FleetRepoDto>({
-      key: 'fleet.repo.review.configure',
+      key: 'fleet.repo.fix.unprotected',
       variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
       projectId: null,
       input: { id, patch: dto },

@@ -253,7 +253,7 @@ describe('fleet OpenAPI contract', () => {
       ['/api/fleet/repos/{id}/check', 'post', 'fleet.repo.check'],
       ['/api/fleet/repos/{id}/auto-review', 'patch', 'fleet.repo.review.configure'],
       ['/api/fleet/repos/{id}/fix-checks', 'patch', 'fleet.repo.review.configure'],
-      ['/api/fleet/repos/{id}/fix-unprotected', 'patch', 'fleet.repo.review.configure'],
+      ['/api/fleet/repos/{id}/fix-unprotected', 'patch', 'fleet.repo.fix.unprotected'],
       ['/api/fleet/repos/{id}', 'delete', 'fleet.repo.delete'],
       ['/api/fleet/enrollments', 'get', 'fleet.enrollment.read'],
       ['/api/fleet/enrollments', 'post', 'fleet.enrollment.create'],

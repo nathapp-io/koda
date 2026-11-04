@@ -43,7 +43,7 @@ describe('FleetReposService.configureFixUnprotected', () => {
     const result = await configure(true);
     expect(repo.updateFixUnprotected).toHaveBeenCalledExactlyOnceWith('r1', true);
     expect(audit.record).toHaveBeenCalledExactlyOnceWith({
-      key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: 'r1',
+      key: 'fleet.repo.fix.unprotected', resourceType: 'fleet-repo', resourceId: 'r1',
       projectId: 'p1', summary: 'fix on unprotected default branch allowed',
     });
     expect(result).toMatchObject({ id: 'r1', fixAllowUnprotected: true });
@@ -53,7 +53,7 @@ describe('FleetReposService.configureFixUnprotected', () => {
     const result = await configure(false);
     expect(repo.updateFixUnprotected).toHaveBeenCalledExactlyOnceWith('r1', false);
     expect(audit.record).toHaveBeenCalledExactlyOnceWith({
-      key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: 'r1',
+      key: 'fleet.repo.fix.unprotected', resourceType: 'fleet-repo', resourceId: 'r1',
       projectId: 'p1', summary: 'fix on unprotected default branch disallowed',
     });
     expect(result).toMatchObject({ id: 'r1', fixAllowUnprotected: false });

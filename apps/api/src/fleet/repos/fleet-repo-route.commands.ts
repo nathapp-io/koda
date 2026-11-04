@@ -89,7 +89,7 @@ export class FleetRepoRouteCommands implements OnModuleInit {
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<FixUnprotectedInput, FleetRepoDto>({
-      key: 'fleet.repo.review.configure', variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
+      key: 'fleet.repo.fix.unprotected', variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
       parse: (input) => {
         const { id } = parseRouteInput(input, ['id']);
         return { id, patch: parseBody(UpdateFixUnprotectedDto, (input as { patch?: unknown }).patch) };

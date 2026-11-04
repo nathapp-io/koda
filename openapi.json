@@ -8559,7 +8559,7 @@
             }
           },
           "403": {
-            "description": "fleet.repo.review.configure is missing globally"
+            "description": "fleet.repo.fix.unprotected is missing globally"
           },
           "404": {
             "description": "No such repo"
@@ -8573,7 +8573,7 @@
             "bearer": []
           }
         ],
-        "summary": "Allow FIX on an unprotected default branch for a registered repo (fleet.repo.review.configure, global)",
+        "summary": "Allow FIX on an unprotected default branch for a registered repo (fleet.repo.fix.unprotected, global)",
         "tags": [
           "fleet"
         ]

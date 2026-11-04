@@ -150,7 +150,7 @@ export class FleetReposService {
       }
       const updated = await this.repo.updateFixUnprotected(id, dto.allowUnprotected);
       await this.audit.record({
-        key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
+        key: 'fleet.repo.fix.unprotected', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
         summary: dto.allowUnprotected ? 'fix on unprotected default branch allowed' : 'fix on unprotected default branch disallowed',
       });
       return FleetRepoDto.from(updated);

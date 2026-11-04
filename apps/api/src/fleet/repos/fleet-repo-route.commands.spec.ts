@@ -45,7 +45,7 @@ describe('FleetRepoRouteCommands', () => {
       raw: { id: 'r1', patch: { ...fixPatch, extra: 1 } }, parsed: { id: 'r1', patch: fixPatch },
     },
     {
-      action: 'fixUnprotected', key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.fix-unprotected',
+      action: 'fixUnprotected', key: 'fleet.repo.fix.unprotected', variant: 'rest:fleet-repos.fix-unprotected',
       raw: { id: 'r1', patch: { ...unprotectedPatch, extra: 1 } }, parsed: { id: 'r1', patch: unprotectedPatch },
     },
   ] as const;

@@ -17,7 +17,7 @@ import { resetDb } from '../../helpers/reset-db';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
-const KEY = 'fleet.repo.review.configure';
+const KEY = 'fleet.repo.fix.unprotected';
 
 interface RepoBody { id: string; fixAllowUnprotected: boolean }
 interface Pending { id: string; permissionKey: string; projectId: string | null }
