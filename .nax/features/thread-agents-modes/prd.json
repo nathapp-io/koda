@@ -3,7 +3,7 @@
   "feature": "thread-agents-modes",
   "branchName": "feat/thread-agents-modes",
   "createdAt": "2026-11-24T00:00:00Z",
-  "updatedAt": "2026-11-04T14:11:31.004Z",
+  "updatedAt": "2026-11-04T14:39:10.274Z",
   "userStories": [
     {
       "id": "US-001",
@@ -332,14 +332,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Replayable multi-key authorization and concurrent session closure must atomically preserve turn, message, audit and command invariants."
+        "reasoning": "Replayable multi-key authorization and concurrent session closure must atomically preserve turn, message, audit and command invariants.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/threads.controller.ts",
@@ -370,7 +373,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "640a7f2070e253b347d2b91d65a83e195c7c2f4f"
     },
     {
       "id": "US-006",
