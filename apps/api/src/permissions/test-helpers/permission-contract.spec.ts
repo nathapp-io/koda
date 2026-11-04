@@ -6,8 +6,6 @@ import { findContractViolations, type ContractViolation, type PermissionDeclarat
 describe('permission contract checker', () => {
   const expectedPending = new Set([
     'member.remove',
-    'thread.mode.ask',
-    'thread.mode.full',
     'fleet.job.shell.escalate',
     'fleet.budget.override',
   ]);
