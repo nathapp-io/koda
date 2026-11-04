@@ -102,10 +102,13 @@ four agents, the same three permission modes, credentials kept on the machine ru
 
 ## Design
 
-### 1. Dependency bump (the #367 prerequisite)
+### 1. Dependency
 
-Bump `@nathapp/nax-agent` to `0.91.8-canary.1` and add `@nathapp/nax-agent-acp` `0.91.8-canary.1` to
-`apps/runner`, exact pins. Move both to the stable release when it ships (a later chore, not this slice).
+Add `@nathapp/nax-agent-acp` `0.91.7` (exact pin) to `apps/runner`, matching the existing
+`@nathapp/nax-agent` `0.91.7` pin (#367 already bumped it). No canary: verified on the published 0.91.7
+tarballs (2026-11-04) that `@nathapp/nax-agent-acp/client` exports `acpBackend`, `launchCandidateKind`,
+`isAgentLaunchable`, `registryEntry` and `TOOL_HOST_SERVER_NAME`, its `AcpAgentName` includes `cursor`, and
+`@nathapp/nax-agent` 0.91.7 has `AnswerReply` with a decision form.
 
 ### 2. ACP agents on the runner (#368)
 
