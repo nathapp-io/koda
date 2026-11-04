@@ -760,7 +760,44 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
   test('#395: a GitHub RUN whose start fails removes the token file and propagates the error', async () => {
     const w = await injectedWorld('RUN', { spawnError: new Error('ENOENT nax') });
     await expect(w.ex.spawn(w.row)).rejects.toThrow('ENOENT nax');
-    await expect(stat(w.tokenPath)).rejects.toThrow();
+    await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('#395: a GitHub RUN whose token wait was cancelled (runner stopping) starts nothing', async () => {
+    const w = await injectedWorld('RUN', { freshToken: { ok: false, reason: 'cancelled' } });
+    await expect(w.ex.spawn(w.row)).rejects.toThrow('cancelled');
+    expect(w.calls).toEqual([]);
+    await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('#395: a GitHub RUN with no fresh-token provider starts without the identity and warns', async () => {
+    const w = await injectedWorld('RUN', { omitCurrentToken: true });
+    await w.ex.spawn(w.row);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({
+      level: 'warn', message: 'RUN starts without a forge identity', fields: { jobId: 'rjob1', reason: 'git token: none' },
+    }));
+  });
+
+  test('#395: a GitHub RUN whose token file cannot be written still starts, without the identity, and warns', async () => {
+    const w = await injectedWorld('RUN');
+    await mkdir(join(w.tokenPath, 'blocker'), { recursive: true });   // a directory where the file must go
+    await w.ex.spawn(w.row);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
+    expect(w.calls[0]?.options.env['NAX_FORGE_LOGIN']).toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({
+      level: 'warn', message: 'RUN starts without a forge identity', fields: expect.objectContaining({ jobId: 'rjob1' }),
+    }));
+  });
+
+  test('#395: cleanup removes a GitHub RUN token file nax never consumed', async () => {
+    const w = await injectedWorld('RUN');
+    await w.ex.spawn(w.row);
+    expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);
+    await w.ex.cleanup(w.row);
+    await expect(stat(w.tokenPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   test('US-008 AC-8: FIX spawn hands caller rulings to review only', async () => {

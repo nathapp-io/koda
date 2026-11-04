@@ -276,11 +276,18 @@ export class HostExecutor implements JobExecutor {
     const result = getFreshToken
       ? await getFreshToken.call(this.deps.credentials, job, FORGE_TOKEN_MIN_REMAINING_MS)
       : { ok: false as const, reason: 'git token: none' };
+    // The runner stopping (or the job cancelled) during the token wait is not a missing identity: start nothing.
+    if (!result.ok && result.reason === 'cancelled') throw new Error(result.reason);
     if (!result.ok) {
       this.deps.log.warn('RUN starts without a forge identity', { jobId: job.jobId, reason: result.reason });
       return {};
     }
-    return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, result.token), NAX_FORGE_LOGIN: job.assign.gitIdentity.name };
+    try {
+      return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, result.token), NAX_FORGE_LOGIN: job.assign.gitIdentity.name };
+    } catch (error) {
+      this.deps.log.warn('RUN starts without a forge identity', { jobId: job.jobId, reason: `token file: ${errorMessage(error)}` });
+      return {};
+    }
   }
 
   isAlive(pid: number): boolean {
