@@ -32,7 +32,8 @@ export class FleetPrRulingsService {
     if (!pending.length) return undefined;
     try {
       if (repo.githubInstallationId === null) return { notSent: 'head-unreadable' };
-      const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
+      // Reading a PR needs pull_requests:read; the contents-only read token gets a 403 on a private repo.
+      const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
       const pr = await this.github.getPullRequest(token, repo.owner, repo.name, prNumber);
       if (!pr || pr.state !== 'open') return { notSent: 'pr-not-open' };
       if (!pr.headSha) return { notSent: 'head-unreadable' };

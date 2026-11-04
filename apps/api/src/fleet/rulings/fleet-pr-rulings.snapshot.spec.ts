@@ -12,7 +12,7 @@ function setup() {
       { id: 'r2', itemId: 'B3', text: 'waived: scope', actorType: 'USER', actorName: `A\n${'x'.repeat(120)}`, createdAt: at },
     ]),
   };
-  const github = { mintReadOnlyToken: vi.fn(async () => ({ token: 'ephemeral' })), getPullRequest: vi.fn(async (): Promise<unknown> => ({ state: 'open', headSha })) };
+  const github = { mintThreadReadToken: vi.fn(async () => ({ token: 'ephemeral' })), getPullRequest: vi.fn(async (): Promise<unknown> => ({ state: 'open', headSha })) };
   const service = new FleetPrRulingsService(repo as never, {} as never, {} as never, {} as never, github as never);
   return { service, repo, github };
 }
@@ -27,7 +27,7 @@ describe('FIX ruling snapshot', () => {
       { rulingId: 'r1', item: 'D-1', ruling: 'confirmed: evidence', by: 'koda:agent:rev-bot', at: at.toISOString() },
       { rulingId: 'r2', item: 'B3', ruling: 'waived: scope', by: `koda:user:A${'x'.repeat(89)}`, at: at.toISOString() },
     ] });
-    expect(github.mintReadOnlyToken).toHaveBeenCalledExactlyOnceWith(42n, 'app');
+    expect(github.mintThreadReadToken).toHaveBeenCalledExactlyOnceWith(42n, 'app');
     expect(github.getPullRequest).toHaveBeenCalledExactlyOnceWith('ephemeral', 'acme', 'app', 42);
   });
   it('caps the snapshot at the oldest 100 even if a repository returns more', async () => {
@@ -39,7 +39,7 @@ describe('FIX ruling snapshot', () => {
   it('AC-4 does not read GitHub when none are pending', async () => {
     const { service, repo, github } = setup(); repo.pendingForFix.mockResolvedValue([]);
     expect(await service.snapshotForFix(repoRef as never, 42)).toBeUndefined();
-    expect(github.mintReadOnlyToken).not.toHaveBeenCalled();
+    expect(github.mintThreadReadToken).not.toHaveBeenCalled();
   });
   it('no RUN means no snapshot', async () => {
     const { service, repo } = setup(); repo.latestRunForPr.mockResolvedValue(null as never);
