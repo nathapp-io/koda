@@ -3,7 +3,7 @@
   "feature": "thread-agents-modes",
   "branchName": "feat/thread-agents-modes",
   "createdAt": "2026-11-24T00:00:00Z",
-  "updatedAt": "2026-11-04T16:36:09.569Z",
+  "updatedAt": "2026-11-04T17:04:19.580Z",
   "userStories": [
     {
       "id": "US-001",
@@ -705,14 +705,17 @@
         "US-001",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-form capability aggregation and request discrimination include access-controlled execution-mode selection, triggering strict permission TDD."
+        "reasoning": "Cross-form capability aggregation and request discrimination include access-controlled execution-mode selection, triggering strict permission TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/pages/threads/new.vue",
@@ -751,7 +754,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f9ce27c111055cc42b2759479afde480fb66562d"
     },
     {
       "id": "US-012",
