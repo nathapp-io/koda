@@ -20,7 +20,7 @@ import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-res
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { reviewPosted } from '../verdict/review-posted';
-import { readFixResult, readPushedSha, type FixOutcome } from '../verdict/fix-result';
+import { readFixResult, readFixState, type FixOutcome } from '../verdict/fix-result';
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
@@ -320,7 +320,7 @@ export class HostExecutor implements JobExecutor {
       ? { kind: 'none' as const, logPath: null }
       : await readFixResult(join(jobDir, 'fix.stdout'), prNumber);
 
-    let pushedSha: string | null = null;
+    let fixState: Awaited<ReturnType<typeof readFixState>> = null;
     if (result.logPath !== null && prNumber !== undefined) {
       const expectedRoot = resolve(outDir, 'bot', `pr-${prNumber}`);
       try {
@@ -335,7 +335,7 @@ export class HostExecutor implements JobExecutor {
         const stateRel = relative(realRoot, realStatePath);
         const inside = (rel: string): boolean => rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`));
         if (rootRel === '' && inside(logRel) && inside(stateRel)) {
-          pushedSha = await readPushedSha(join(realLogDir, 'bot.jsonl'));
+          fixState = await readFixState(join(realLogDir, 'bot.jsonl'));
         }
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -350,7 +350,7 @@ export class HostExecutor implements JobExecutor {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return { ...result, pushedSha, stderrLine };
+    return { ...result, pushedSha: fixState?.pushedSha ?? null, fixReady: fixState?.fixReady ?? null, stderrLine };
   }
 
   async hasFixStep(job: JobRow): Promise<boolean> {

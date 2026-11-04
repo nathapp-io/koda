@@ -495,7 +495,12 @@ export class JobRun {
           catch { outcome = { kind: 'none' as const, logPath: null, pushedSha: null, stderrLine: null }; }
           if (outcome.kind === 'pushed' || outcome.kind === 'nothing') {
             verdict = { state: 'COMPLETED', reason: null };
-            snapshot = { ...snapshot, fixOutcome: outcome.kind, ...(outcome.pushedSha ? { resultSha: outcome.pushedSha } : {}) };
+            snapshot = {
+              ...snapshot,
+              fixOutcome: outcome.kind,
+              ...(outcome.pushedSha ? { resultSha: outcome.pushedSha } : {}),
+              ...(outcome.fixReady ? { fixReady: outcome.fixReady } : {}),
+            };
           } else verdict = { state: 'FAILED', reason: outcome.stderrLine ?? 'fix not pushed' };
         }
       }

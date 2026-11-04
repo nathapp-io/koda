@@ -106,7 +106,7 @@ describe('HostExecutor FIX outcome reader (US-011)', () => {
     await mkdir(resultDir, { recursive: true });
     await writeFile(join(w.row.jobDir, 'fix.stdout'), `nax bot fix: PR #4 — pushed abc1234\nnax bot fix: log ${join(resultDir, 'bot.jsonl')}\n`);
     await writeFile(join(resultDir, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
-    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'pushed', logPath: join(resultDir, 'bot.jsonl'), pushedSha: sha, stderrLine: null });
+    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'pushed', logPath: join(resultDir, 'bot.jsonl'), pushedSha: sha, fixReady: null, stderrLine: null });
   });
 
   test('AC-8: refuses to read state for a log path outside this job and PR', async () => {
@@ -139,7 +139,7 @@ describe('HostExecutor FIX outcome reader (US-011)', () => {
 
   test('AC-10: missing fix output files produce the none outcome', async () => {
     const w = await fixWorld();
-    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'none', logPath: null, pushedSha: null, stderrLine: null });
+    expect(await w.ex.readFixOutcome(w.row)).toEqual({ kind: 'none', logPath: null, pushedSha: null, fixReady: null, stderrLine: null });
   });
 });
 

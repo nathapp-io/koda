@@ -456,6 +456,19 @@ describe('FIX verdict (US-012)', () => {
     expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'nothing' });
     expect(lastSnapshot(b)).not.toHaveProperty('resultSha');
   });
+  test('AC-9: ready FIX result is included beside the unchanged nothing outcome', async () => {
+    const fixReady = { markedReady: true };
+    const b = await judged({ outcome: { kind: 'nothing', logPath: null, pushedSha: null, stderrLine: null, fixReady } });
+    expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'nothing', fixReady });
+  });
+  test('AC-10/12: null or unavailable ready result does not change outcome or add snapshot key', async () => {
+    for (const fixReady of [null, undefined]) {
+      const b = await judged({ outcome: { kind: 'nothing', logPath: null, pushedSha: null, stderrLine: null, fixReady } });
+      expect(states(b).at(-1)?.to).toBe('COMPLETED');
+      expect(lastSnapshot(b)).toMatchObject({ fixOutcome: 'nothing' });
+      expect(lastSnapshot(b)).not.toHaveProperty('fixReady');
+    }
+  });
   test.each([
     ['AC-5', false, '0.2500', '0.25', 'budget spent by review'],
     ['AC-6', false, undefined, '1', 'cost ledger unreadable'],
