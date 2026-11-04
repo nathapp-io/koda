@@ -528,7 +528,7 @@ None. The new cards are additive components; the existing page specs mount them 
 - [integration] A developer creating a REPO thread with `mode: 'full'` gets 403 and no thread is written.
 - [integration] A project admin creating a REPO thread with `mode: 'full'` gets 201 and the stored mode is `full`.
 - [integration] An agent holding `thread.create` and `thread.mode.ask` with no approval policy creating a REPO thread with `mode: 'ask'` gets 202 and no thread is written until approved.
-- [integration] Creating a PROJECT thread with `mode: 'ask'` gets 400 naming `mode`.
+- [integration] Creating a PROJECT or WORKSPACE thread with `mode: 'ask'` gets 400 naming `mode`.
 - [integration] After a REPO thread's first message, `findThreadAssign` for the turn's job returns `mode` equal to the thread's mode.
 - [integration] A turn created before the thread's mode changed keeps its own `mode` in `findThreadAssign`.
 
@@ -541,7 +541,7 @@ None. The new cards are additive components; the existing page specs mount them 
 - [integration] The PATCH `{ mode: 'read' }` from `ask` by the creator holding only `thread.cap.update.own` answers 200.
 - [integration] The PATCH while the thread's SESSION job is QUEUED answers 409 `threads.turnRunning` and the mode is unchanged.
 - [integration] The PATCH while a turn is running in the live session answers 409 `threads.turnRunning`.
-- [integration] The PATCH while a PUBLISH job is active answers 409 `threads.busy`.
+- [integration] The PATCH while a PUBLISH or DISCARD job is active answers 409 `threads.busy`.
 - [integration] The PATCH while the live session is idle answers 200, stores the mode and creates exactly one `THREAD_CLOSE` command for that job.
 - [integration] The PATCH while a `THREAD_CLOSE` is already queued for the job answers 200, stores the mode and creates no second `THREAD_CLOSE`.
 - [integration] The PATCH to the current mode answers 200 with no system message and no command.

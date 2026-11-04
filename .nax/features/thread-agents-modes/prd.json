@@ -1,0 +1,756 @@
+{
+  "project": "koda",
+  "feature": "thread-agents-modes",
+  "branchName": "feat/thread-agents-modes",
+  "createdAt": "2026-11-24T00:00:00Z",
+  "updatedAt": "2026-11-04T12:20:47.939Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "API and protocol accept ACP agents on every thread kind",
+      "description": "**Goal** — Accept Claude Code, Codex and Cursor ACP backends on every thread kind and carry bounded discovery offers through the API.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — A thread pinned to a runner whose agent became unavailable fails placement with the existing `thread_backend` misfit.\n\nTarget: `'claude' | 'codex' | 'cursor'`. Target: `{ native: string[]; acp: ThreadAgent[]; acpOffers?: ThreadAcpOffer[] }`; `acp` lists the agents that are launchable AND logged in (placement keeps `acp.includes(agent)`); new `ThreadAcpOffer { agent: ThreadAgent; launchable: boolean; loggedIn: boolean | null; models: string[]; efforts: string[] }` (`loggedIn: null` = not probed or probe failed).\n\nTarget: agents add `cursor`; an optional `acpOffers` (at most `THREAD_LIMITS.maxAcpAgents` entries, each agent at most once, `models` at most `maxNativeModels` ids matching `ACP_MODEL_ID_RE`, `efforts` at most 8 entries matching `^[a-z0-9_-]{1,32}$`) is kept when valid and dropped when malformed, the rest of the report still accepted. ACP model ids in `acpOffers` and in an `acp` create backend are checked with it; native model ids keep `MODEL_ID_RE`.\n\nTarget: `acp` agent `claude|codex|cursor` on every kind. `RunnerSummaryDto.threadBackends` and web `RunnerThreadBackends` (`apps/web/lib/thread-types.ts`, `lib/fleet-types.ts`) carry a valid `acpOffers` through. The web mirror work is consumed in US-011.\n\n**Scope** — In: protocol exports and API runtime mirror, capability parsing, normalized backend types/validation, runner summary projection, existing ACP placement rule and regression specs. Update PROJECT/WORKSPACE input tests that currently refuse ACP; update capabilities-thread.spec.ts's exactly-two-keys expectation and runner-summary.dto.spec.ts projection assertions. Out: host probes (US-002), session opening/assign parsing (US-003), modes and permissions (US-004), web forms (US-011). ACP agents other than `claude`, `codex` and `cursor` (nax-agent-acp also knows `gemini`, `opencode`, `pi`).\n\n**Interface** — `ThreadAgent`: `'claude' | 'codex' | 'cursor'`; `ThreadBackends`: `{ native: string[]; acp: ThreadAgent[]; acpOffers?: ThreadAcpOffer[] }`; `ThreadAcpOffer { agent: ThreadAgent; launchable: boolean; loggedIn: boolean | null; models: string[]; efforts: string[] }`. New `ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\\/@=,\\[\\]-]{0,127}$/` (protocol constant, mirrored at runtime in `thread-jobs.ts`). API imports fleet-protocol as types only; mirror the regex locally.\n\n**Verification** — Extend the existing normalizer, capabilities, DTO and placement unit specs with strict unknown-agent/unknown-key rejection and malformed-offer degradation; retain native-model regression behavior.",
+      "acceptanceCriteria": [
+        "[unit] parseThreadBackends({ native: [], acp: ['cursor'] }) returns { native: [], acp: ['cursor'] }.",
+        "[unit] parseThreadBackends with acp: ['gemini'] throws the same refusal as any unknown agent.",
+        "[unit] parseThreadBackends with acpOffers: [{ agent: 'cursor', launchable: true, loggedIn: true, models: ['gpt-5.5[context=272k,reasoning=medium]'], efforts: ['high'] }] returns it unchanged under acpOffers.",
+        "[unit] parseThreadBackends with an acpOffers entry whose models contains 'bad model!' returns a result without acpOffers and keeps native and acp.",
+        "[unit] parseThreadBackends with two acpOffers entries for the same agent returns a result without acpOffers.",
+        "[unit] parseThreadBackends with an extra key other than acpOffers still throws.",
+        "[unit] RunnerSummaryDto built from capabilities whose threadBackends has a valid acpOffers exposes the same acpOffers under threadBackends.",
+        "[unit] The REPO/PROJECT create normaliser accepts a PROJECT thread with backend { kind: 'acp', agent: 'codex' }.",
+        "[unit] The REPO/PROJECT create normaliser accepts a REPO thread with backend { kind: 'acp', agent: 'cursor', model: 'gpt-5.5[context=272k,reasoning=medium]' }.",
+        "[unit] The REPO/PROJECT create normaliser refuses backend { kind: 'acp', agent: 'gemini' } with a validation error naming backend.",
+        "[unit] validateCreateWorkspaceThread accepts backend { kind: 'acp', agent: 'claude' }.",
+        "[unit] The placement rule answers no misfit for a SESSION job of a PROJECT thread with backend { kind: 'acp', agent: 'cursor' } on a runner whose threadBackends.acp is ['cursor'].",
+        "[unit] The placement rule answers thread_backend for a SESSION job of a PROJECT thread with backend { kind: 'acp', agent: 'cursor' } on a runner whose threadBackends.acp is ['claude']."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "api",
+        "protocol",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-package wire and runtime validation changes affect which session backends can execute; strict isolation applies to the session trust boundary."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/threads.ts",
+        "apps/api/src/fleet/common/capabilities-core.ts",
+        "apps/api/src/fleet/threads/thread-input.ts",
+        "apps/api/src/fleet/runners/dto/runner-summary.dto.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts"
+      ],
+      "suggestedCriteria": [
+        "parseCapabilities preserves an older runner's threadBackends report without adding an acpOffers key when none was reported.",
+        "The native create normaliser refuses a bracketed Cursor model id that is accepted for an ACP backend."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/thread-input.spec.ts",
+          "reason": "its case asserting that a PROJECT thread with an `acp` backend is refused with `backend` becomes: an `acp` backend (`claude`, `codex` or `cursor`) is accepted on PROJECT; an unknown agent is still refused with `backend`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-thread-input.spec.ts",
+          "reason": "its case asserting WORKSPACE threads refuse an `acp` backend becomes: an `acp` backend with `claude`, `codex` or `cursor` is accepted."
+        },
+        {
+          "path": "apps/api/src/fleet/common/capabilities-thread.spec.ts",
+          "reason": "its assertion that `threadBackends` must have exactly the keys `native` and `acp` becomes: an optional valid `acpOffers` is kept, a malformed one is dropped, any other extra key is still refused."
+        },
+        {
+          "path": "apps/api/src/fleet/runners/dto/runner-summary.dto.spec.ts",
+          "reason": "its expectation that `threadBackends` is exactly `{ native, acp }` becomes: a valid `acpOffers` is carried through, and absent when the runner reported none."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Runner advertises its ACP agents",
+      "description": "**Goal** — Discover launchable/logged-in ACP agents with their offered models and efforts and advertise them through production runner sync.\n\n**Motivation** — `nax chat` already offers all four agents with read/ask/full modes on one machine.\n\n**Approach** — `probeAcpAgents` checks `claude`, `codex`, `cursor` in parallel:\n`launchCandidateKind(agent, env)` decides `launchable` (local binary or `npx` fallback); for a launchable agent it opens a tool-less, memory-only `ask` session through `acpBackend` with `initializeTimeoutMs` 20000 and a 20 s overall timeout, reads `backend.capabilities.offeredModels` / `offeredEfforts`, drops ids failing `ACP_MODEL_ID_RE` (models, capped at 32) or the effort pattern (capped at 8), and closes the session; `AGENT_SESSION_AUTH_REQUIRED` gives `loggedIn: false`; a timeout or other error gives `loggedIn: null` with empty lists, and a session that opens after its timeout is closed when it settles. A thread pinned to a runner whose agent became unavailable fails placement with the existing `thread_backend` misfit.\n\n`NaxCapabilityProbe` (`nax-probe.ts:145-180`). Target: `NaxProbeDeps.acpProbe?: AcpAgentProbe`; when present its result fills `acp` and `acpOffers` (omitted when empty); when absent `acp` stays `[]`. `DaemonOptions` (`apps/runner/src/daemon/daemon.ts`) gains `acpProbe?: AcpAgentProbe`, passed to `createCapabilityProbe`; the `run` command (`apps/runner/src/commands/run.ts`) passes the real `probeAcpAgents`. Other `startDaemon` callers (tests) get no ACP probe.\n\n**Scope** — In: exact @nathapp/nax-agent-acp 0.91.7 dependency and lockfile update, new acp-agent-probe source/spec, dependency injection through capability construction/daemon/run command, bounded report integration and concurrent timeout cleanup. Existing @nathapp/nax-agent is already 0.91.7. Update nax-probe.spec.ts to distinguish absent, injected and failed probe behavior; exercise a real injected daemon sync without host logins. Out: actual thread session opening (US-003), threadModes reporting (US-006). The central credential vault (#371): credentials stay on the runner (the agent's own login for ACP, the nax auth store or its existing `credentials.source: exec` config for native). Any sandbox for ACP agents: they run unsandboxed on the runner host in every mode, as in `nax chat` (user ruling). Bumping `@nathapp/nax-agent` beyond `0.91.7`.\n\n**Interface** — `NaxProbeDeps.acpProbe?: AcpAgentProbe`; `DaemonOptions.acpProbe?: AcpAgentProbe`; `ThreadAcpOffer { agent: ThreadAgent; launchable: boolean; loggedIn: boolean | null; models: string[]; efforts: string[] }`; dependency entry `\"@nathapp/nax-agent-acp\": \"0.91.7\"`. Use `launchCandidateKind` and `acpBackend` from `@nathapp/nax-agent-acp/client` 0.91.7. Opens inherit the accepted unsandboxed ACP host behavior.\n\n**Verification** — Inject launch checks, backend/session creation and timers; prove concurrent starts, all outcomes, session closure even after timeout, and run-command-to-daemon-to-sync wiring. Preserve the operator's static capability override and the no-probe default in other daemon tests.",
+      "acceptanceCriteria": [
+        "[unit] probeAcpAgents with an injected launch check answering no candidate for codex reports { agent: 'codex', launchable: false, loggedIn: null, models: [], efforts: [] } and opens no session for it.",
+        "[unit] probeAcpAgents for a launchable claude whose injected probe backend reports offeredModels: ['claude-sonnet-4-5'] and offeredEfforts: ['high'] reports loggedIn: true with those lists and closes the session.",
+        "[unit] probeAcpAgents drops an offered model failing ACP_MODEL_ID_RE and keeps the valid ones.",
+        "[unit] probeAcpAgents keeps at most 32 models and 8 efforts per agent.",
+        "[unit] probeAcpAgents for a launchable cursor whose probe open throws code AGENT_SESSION_AUTH_REQUIRED reports loggedIn: false with empty lists.",
+        "[unit] probeAcpAgents with a probe open that does not settle within 20 s (injected clock) reports loggedIn: null with empty models for that agent and still returns the other agents.",
+        "[unit] When a timed-out probe open settles later with a session, probeAcpAgents closes that session.",
+        "[unit] probeAcpAgents passes initializeTimeoutMs: 20000 to the acpBackend factory.",
+        "[unit] probeAcpAgents starts the probe opens of two launchable agents before either resolves.",
+        "[unit] NaxCapabilityProbe.probe with an injected acpProbe reporting claude launchable and logged in and codex launchable with loggedIn: false reports threadBackends.acp equal to ['claude'] and acpOffers with both entries.",
+        "[unit] NaxCapabilityProbe.probe with no acpProbe reports threadBackends.acp equal to [] and no acpOffers key.",
+        "[unit] NaxCapabilityProbe.probe with an acpProbe that throws reports threadBackends.acp equal to [] and no acpOffers key.",
+        "[unit] The run command calls startDaemon with an acpProbe that is probeAcpAgents.",
+        "[unit] startDaemon with an injected acpProbe reporting claude logged in sends a sync whose capabilities carry threadBackends.acp equal to ['claude'].",
+        "[unit] When an ACP agent probe fails with a non-authentication error, probeAcpAgents reports loggedIn: null with empty models and still reports the other agents."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "runner",
+        "acp",
+        "capabilities",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New external-agent authentication/session probing plus concurrent timeout disposal and production wiring require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/src/capabilities/create-probe.ts",
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/runner/src/commands/run.ts",
+        "apps/runner/package.json"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/capabilities/acp-agent-probe.ts",
+        "apps/runner/src/capabilities/acp-agent-probe.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "its assertion that `threadBackends.acp` is `[]` becomes: with no `acpProbe` it is still `[]` with no `acpOffers`; with an injected probe `acp` and `acpOffers` come from it."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Runner opens ACP thread sessions",
+      "description": "**Goal** — Open ACP threads through the injected ACP backend factory with declared thread tools and accept Cursor assignments.\n\n**Motivation** — `nax chat` already offers all four agents with read/ask/full modes on one machine.\n\n**Approach** — Opening an `acp` thread uses `acpBackend({ agent, allowUnsandboxed: true, inheritEnv: true, model?, effort? })` with the same session options as native (workdir, instructions, declared tools, transcript store, approval timeout, turn timeout 900 s).\n\nACP agents run unsandboxed on the runner host in every mode, exactly as `nax chat` opens them (`acpBackend({ agent, allowUnsandboxed: true, inheritEnv: true, model?, effort? })`, no sandbox option). Accepted by the user. nax#2444 is done: `acpBackend` serves the session's declared tools over its loopback tool host, so ACP agents get koda's thread tools and are allowed on REPO, PROJECT and WORKSPACE threads.\n\n`ThreadSessionFactory.open`. Target: opens `acp` through an injectable `acpBackend` factory (factory dependency `acpBackend`, default the package's). Assign parser (`apps/runner/src/supervisor/assign-parser.ts:34-60,320-337`). Target: accepts `cursor` (ACP model by `ACP_MODEL_ID_RE`).\n\n**Scope** — In: ACP factory dependency with production default, native/ACP backend branching, model/effort forwarding, declared tools/transcript/options reuse, structural auth/unavailable error mapping, existing resume/create fallback, Cursor assign parsing. Update thread-session-factory.spec.ts's unconditional ACP refusal and assign-parser-thread.spec.ts's Cursor refusal; native tests must not call ACP. ACP opens bypass nativeModels() membership checks. Out: discovery and dependency installation (US-002), mode/profile behavior and mode parser (US-006). Any sandbox for ACP agents: they run unsandboxed on the runner host in every mode, as in `nax chat` (user ruling). Per-turn time limits beyond the existing `turnTimeoutSeconds` 900; an approval left waiting longer ends with the turn. The cost cap applies to reported usage only, and an ACP agent that reports no usage counts as zero.\n\n**Interface** — `ThreadSessionFactory.open(input: OpenThreadSessionOptions): Promise<OpenThreadSessionResult>`; `OpenThreadSessionOptions { jobId; thread: ThreadAssign; worktree; tools: CreateAgentSessionOptions['tools']; approvalTimeoutSec }`. Existing result shape: `{ ok: true; session: AgentSession; resumed: boolean } | { ok: false; reason: ThreadFailReason }`; the successful-open criterion checks the ok discriminator, not exact equality with a one-field object. It maps `AGENT_SESSION_AUTH_REQUIRED` to `agent_not_logged_in` and `AGENT_SESSION_BACKEND_UNAVAILABLE` to `backend_unavailable` and resumes with `resumeAgentSession`, falling back to `createAgentSession` on `AGENT_SESSION_NOT_FOUND`. Preserve the current SESSION_EXISTS fallback too.\n\n**Verification** — Use injected ACP/native factories and fake sessions to assert exact backend options, tools and workdir, native isolation, failure mapping, resume behavior and Cursor assign parsing without starting a real ACP binary.",
+      "acceptanceCriteria": [
+        "[unit] ThreadSessionFactory.open with backend { kind: 'acp', agent: 'codex', model: 'gpt-5-codex' } calls the injected acpBackend factory once with { agent: 'codex', allowUnsandboxed: true, inheritEnv: true, model: 'gpt-5-codex' } and returns an OpenThreadSessionResult with ok: true (alongside its session and resumed fields).",
+        "[unit] An acp backend carrying effort: 'high' passes effort: 'high' to the factory.",
+        "[unit] An acp backend passes the input's tools, worktree as workdir, and thread.instructions to the created session.",
+        "[unit] An acp open whose creation throws code AGENT_SESSION_AUTH_REQUIRED returns { ok: false, reason: 'agent_not_logged_in' }.",
+        "[unit] An acp open whose creation throws code AGENT_SESSION_BACKEND_UNAVAILABLE returns { ok: false, reason: 'backend_unavailable' }.",
+        "[unit] A native open never calls the acpBackend factory.",
+        "[unit] The assign parser accepts a THREAD assign whose backend is { kind: 'acp', agent: 'cursor', model: 'gpt-5.5[context=272k,reasoning=medium]' }.",
+        "[unit] The assign parser refuses a THREAD assign whose backend is { kind: 'acp', agent: 'gemini' }."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "runner",
+        "acp",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Backend creation executes unsandboxed authenticated sessions and preserves tool exposure and resume semantics; the security override applies."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/session-factory.ts",
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/test/unit/thread-session-factory.spec.ts",
+        "apps/runner/src/supervisor/assign-parser-thread.spec.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "suggestedCriteria": [
+        "An ACP open succeeds when nativeModels() would reject, provided the injected ACP session opens successfully.",
+        "An ACP resume that throws AGENT_SESSION_NOT_FOUND falls back to creating a session with the same tools and thread session id."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/thread-session-factory.spec.ts",
+          "reason": "its case asserting an `acp` backend fails with `backend_unavailable` becomes: an `acp` backend opens through the injected `acpBackend` factory; `backend_unavailable` remains for an agent that cannot be launched."
+        },
+        {
+          "path": "apps/runner/src/supervisor/assign-parser-thread.spec.ts",
+          "reason": "its case refusing an `acp` agent other than `claude`/`codex` becomes: `cursor` is accepted; an unknown agent is still refused."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Thread mode stored, permissioned, placed and carried to the runner",
+      "description": "**Goal** — Persist per-thread and per-turn mode, permission REPO ask/full creation, and negotiate mode-capable placement.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — Profile mapping `read` → `read`, `ask` → `ask`, `full` → `full`, native and ACP alike. `mode` lives on `ChatThread` and is snapshotted onto each `FleetThreadTurn`; `findThreadAssign` carries the turn's mode. Creating a REPO thread with `ask`/`full` passes `alsoKeys: [<mode key>]` to the create gate and the service checks the key (`permissions.can`) against the thread's project.\n\n`thread.mode.` joins `HIGH_RISK_PREFIXES`, so both keys are high risk: approvable, floor `none`, default `agent` (an agent waits for approval by default, a human acts directly), like other high-risk keys. The mode is not re-checked on every message: a thread keeps its mode until someone changes it (see Out of Scope).\n\nPrisma `ChatThread` gains `mode String @default(\"read\")` and `pendingApprovals Json?`; `FleetThreadTurn` gains `mode String @default(\"read\")`. Migration `20261124090000_thread_modes` also appends `thread.mode.ask` to the stored `permissions` of the existing `developer` role when absent (precedent `migrations/20261106090000_approval_fleet_core/migration.sql:4-8`).\n\nThe create normalisers in `apps/api/src/fleet/threads/thread-input.ts`: the normalised result carries `mode` only for REPO (`read` when absent); `mode` `ask`/`full` on PROJECT or WORKSPACE is a validation error naming `mode`. `parseCapabilities` keeps `threadModes` only when exactly `true`. `PlacementThread` gains `mode`, filled from the thread assign by both builders in `placement.service.ts`; a SESSION job whose mode is `ask` or `full` needs `runner.capabilities.threadModes === true`, else misfit `thread_modes`. `MisfitReason`, `MISFIT_REASONS` and the `PlacementMisfitDto` enum gain `thread_modes`.\n\n**Scope** — In: protocol mode/capability/session_started fields, runtime mirrors, schema and migration, role seed and guarded developer backfill, catalog keys/risk and temporary PENDING_SURFACE_KEYS, REPO create gate and service authorization, domain/repository/DTO maps, mode snapshots for all turns and findThreadAssign, both placement builders and misfit consumers, regenerated OpenAPI and CLI client. Update role-matrix cell count 227 to 229 and regenerate its snapshot; catalog mirrors, pending contract set and fleet-openapi misfit pin; REPO normalizer expectations gain read, PROJECT/WORKSPACE omit mode. Out: mode PATCH and removal of pending exemptions (US-005), runner execution/reporting (US-006), approval ingest using the new JSON column (US-007), web selects (US-011). Re-checking the mode key on every message: a thread keeps its mode after its creator loses `thread.mode.full`, and an any-row `thread.message.send` holder may message an `ask`/`full` thread without holding the mode key.\n\n**Interface** — New `ThreadMode = 'read' | 'ask' | 'full'` in `threads.ts`; `ThreadAssign` gains `mode?: ThreadMode` (absent = `read`). `RunnerCapabilities` gains `threadModes?: true`. `ThreadRunnerLine` `session_started` variant gains `mode?: ThreadMode`. `ThreadDto` gains `mode: ThreadMode`; `CreateThreadDto` gains optional `mode`. Service-level key check: `this.permissions.can(principal, key, { projectId })`. Both new mode keys are non-ownable, project scope, high risk, approval `{ approvable: true, floor: 'none', default: 'agent' }`. US-004 lists both mode keys in `PENDING_SURFACE_KEYS` (the create route only names them through `alsoKeys`, which is not a declaration); US-005 removes them in the change that declares them on the mode route.\n\n**Verification** — Strict security TDD: catalog/placement/parser unit specs plus DB-backed create, permission/approval replay, migration and immutable-turn snapshot scenarios. Regenerate Prisma and API/CLI contracts through repository commands, never hand-edit generated clients. Preserve read behavior for old rows/runners.",
+      "acceptanceCriteria": [
+        "[unit] findCatalogEntry('thread.mode.ask') returns scope project, ownable false, risk high and approval { approvable: true, floor: 'none', default: 'agent' }.",
+        "[unit] findCatalogEntry('thread.mode.full') returns scope project, ownable false, risk high and approval { approvable: true, floor: 'none', default: 'agent' }.",
+        "[unit] The developer system role grants thread.mode.ask and not thread.mode.full.",
+        "[unit] parseCapabilities keeps threadModes: true and drops threadModes: 'yes'.",
+        "[unit] The placement rule answers thread_modes for a SESSION job whose turn mode is ask on a runner without threadModes, and no misfit for a read turn there.",
+        "[integration] Applying the migration to a database whose developer role lacks thread.mode.ask leaves the role holding it exactly once.",
+        "[integration] Creating a REPO thread with no mode stores read, and the response has mode: 'read'.",
+        "[integration] A developer creating a REPO thread with mode: 'ask' gets 201 and the stored mode is ask.",
+        "[integration] A developer creating a REPO thread with mode: 'full' gets 403 and no thread is written.",
+        "[integration] A project admin creating a REPO thread with mode: 'full' gets 201 and the stored mode is full.",
+        "[integration] An agent holding thread.create and thread.mode.ask with no approval policy creating a REPO thread with mode: 'ask' gets 202 and no thread is written until approved.",
+        "[integration] Creating a PROJECT or WORKSPACE thread with mode: 'ask' gets 400 naming mode.",
+        "[integration] After a REPO thread's first message, findThreadAssign for the turn's job returns mode equal to the thread's mode.",
+        "[integration] A turn created before the thread's mode changed keeps its own mode in findThreadAssign."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "api",
+        "permissions",
+        "database",
+        "protocol",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-cutting schema migration, approval-gated access control, role backfill, turn snapshot consistency and mixed-version placement require strict security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261124090000_thread_modes/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "its per-role cell count `toHaveLength(227)` becomes 229 for the two new keys, and the regenerated snapshot shows `thread.mode.ask` granted to developer and above and `thread.mode.full` granted only through `*` (owner, project admin, admin)."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated with the two new keys' cells for every role."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its `NEW_KEY_SCOPES` mirror gains `thread.mode.ask: 'project'` and `thread.mode.full: 'project'`, and its re-derived `HIGH_RISK_PREFIXES` mirror gains `thread.mode.`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/thread-input.spec.ts",
+          "reason": "its `toEqual` expectations on the normalised REPO create result gain `mode: 'read'`; PROJECT results stay without `mode`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-thread-input.spec.ts",
+          "reason": "its `toEqual` expectations stay without `mode`; a new case refuses `mode: 'ask'`."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its `expectedPending` set gains `thread.mode.ask` and `thread.mode.full`."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "its pinned placement-misfit enum gains `thread_modes`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Change a thread's mode between turns",
+      "description": "**Goal** — Add an approval-gated REPO mode endpoint that atomically changes mode between turns and closes idle sessions for a profiled resume.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — `PATCH /projects/:slug/threads/:id/mode` declares `@Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })`; the controller validates the body and gates with the key of the TARGET mode (`read` → `thread.cap.update`), and the route command `rest:threads.mode` is registered under all three keys. There is no WORKSPACE mode route: WORKSPACE threads are always `read`. The caller must also be the thread's creator or hold an any-row `thread.cap.update`. A change is refused with 409 when `sendRefusalFor` answers `turnRunning` (a turn is QUEUED, ASSIGNED or running) or a PUBLISH/DISCARD job is active (`threads.busy`); `closing` (a THREAD_CLOSE already queued) still changes the mode without a second command; an idle live SESSION job gets one `THREAD_CLOSE` in the same transaction, so the next message starts a turn that resumes the same session id with the new profile. The change writes a system message (role `system`, status `complete`, content `Mode changed from <from> to <to> by <display name>`, the name resolved when written) and an audit entry.\n\n`threadAuditKey` takes no key; the mode change records its audit entry with `audit.record` directly under the target mode's gate key. Every catalog key must be declared by a route, tool or system writer, or it is reported as `unused-key`, unless it is listed in `PENDING_SURFACE_KEYS`; a listed key that some route declares is reported as `pending-key-declared`. US-005 removes both mode keys from `PENDING_SURFACE_KEYS` in the change that declares them on the mode route.\n\n**Scope** — In: target-mode body validation, controller/service/repository contract, triple-key command registration, creator-or-any-row check in replayable execution, same-transaction mode/message/audit/close writes with job-before-thread locking, no-op response and refusal i18n, catalog exemption removal, OpenAPI/CLI regeneration. Controller-key tests gain the mode handler with mode any/enforcedBy service; approval OpenAPI and permission integration gated-route counts grow 131 to 132. Out: mode storage and creation (US-004), runner profile handling (US-006), decision endpoints (US-008), UI (US-012). `ask` and `full` on PROJECT and WORKSPACE threads: those kinds have no worktree or publish and stay `read`. Changing a thread's agent (backend) after creation; only the mode changes.\n\n**Interface** — `PATCH /projects/:slug/threads/:id/mode` body `{ mode }`; `@Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })`; route command `rest:threads.mode` registered under `thread.mode.ask`, `thread.mode.full`, `thread.cap.update`; target key mapping `read` → `thread.cap.update`, `ask` → `thread.mode.ask`, `full` → `thread.mode.full`. Current-mode requests return 200 with no system message and no command. Errors are 400 naming mode, 403 for denied target/ownership, 409 threads.turnRunning or threads.busy for active work.\n\n**Verification** — Use the existing gated project thread and permission integration fixtures to prove policy deferral/replay, all owner/target combinations, queued/running versus idle/closing session states, PUBLISH/DISCARD refusals and transactional message/command/audit behavior. Resolve display names at write time and emit live changes/wakes only after commit.",
+      "acceptanceCriteria": [
+        "[integration] PATCH /projects/:slug/threads/:id/mode { mode: 'ask' } by the creator (a developer) on a thread with no live session answers 200, stores ask and appends a complete system message 'Mode changed from read to ask by <creator's name>'.",
+        "[integration] The PATCH { mode: 'full' } by a developer creator answers 403 and the mode is unchanged.",
+        "[integration] The PATCH { mode: 'full' } by a project admin who is not the creator answers 200 and stores full.",
+        "[integration] The PATCH { mode: 'ask' } by a developer who is not the creator answers 403.",
+        "[integration] The PATCH { mode: 'read' } from ask by the creator holding only thread.cap.update.own answers 200.",
+        "[integration] The PATCH while the thread's SESSION job is QUEUED answers 409 threads.turnRunning and the mode is unchanged.",
+        "[integration] The PATCH while a turn is running in the live session answers 409 threads.turnRunning.",
+        "[integration] The PATCH while a PUBLISH or DISCARD job is active answers 409 threads.busy and the mode is unchanged.",
+        "[integration] The PATCH while the live session is idle answers 200, stores the mode and creates exactly one THREAD_CLOSE command for that job.",
+        "[integration] The PATCH while a THREAD_CLOSE is already queued for the job answers 200, stores the mode and creates no second THREAD_CLOSE.",
+        "[integration] The PATCH to the current mode answers 200 with no system message and no command.",
+        "[integration] An agent holding thread.mode.ask with no approval policy calling the PATCH { mode: 'ask' } gets 202 and the mode is unchanged until approved.",
+        "[integration] A successful PATCH records an audit entry under the target mode's key whose summary names the from and to modes.",
+        "[integration] The PATCH with { mode: 'bogus' } answers 400 naming mode."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "api",
+        "permissions",
+        "approvals",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Replayable multi-key authorization and concurrent session closure must atomically preserve turn, message, audit and command invariants."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/thread-audit.ts",
+        "apps/api/src/fleet/threads/workspace-threads.controller.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.keys.spec.ts",
+          "reason": "its handler table gains the mode handler with keys `thread.mode.ask`, `thread.mode.full`, `thread.cap.update`, mode `any`, `enforcedBy: 'service'`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "the gated-operation list gains the mode route (PATCH /api/projects/{slug}/threads/{id}/mode); the count 131 becomes 132."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gated route count 131 becomes 132 (the mode route)."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its `expectedPending` set loses `thread.mode.ask` and `thread.mode.full` again (declared by the mode route now)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Runner opens sessions in the thread's mode",
+      "description": "**Goal** — Execute every thread turn using its snapshotted mode and advertise runner support for mode execution.\n\n**Motivation** — `nax chat` already offers all four agents with read/ask/full modes on one machine.\n\n**Approach** — Profile mapping `read` → `read`, `ask` → `ask`, `full` → `full`, native and ACP alike.\n\nNative `ask`/`full` sessions pass `allowUnsandboxed: true` to the native backend, as `nax chat` does (`chat/open-chat-session.ts`): nax's sandbox is used when the runner has one, and the session still opens when it does not (nax-agent throws `AGENT_SESSION_SANDBOX_UNAVAILABLE` for `ask`/`full` otherwise).\n\n`ThreadSessionFactory.open`. Target: sets `profile` from `thread.mode`; native `ask`/`full` add `allowUnsandboxed: true` to the native backend options. Resume does not store the profile; it is passed again on every resume, so a resumed session can open with a different profile. Assign parser: keeps a valid `mode`; an invalid `mode` refuses the assign. The probe reports `threadModes: true`.\n\n**Scope** — In: optional-mode assign parsing, read fallback at execution, native/ACP create/resume profile mapping, native unsandboxed option only in ask/full, session_started mode through event writer and all opening paths, threadModes advertisement. Update the existing session-factory profile assertions; keep the parsed assign without mode when absent rather than inventing a wire field during parsing. Out: API snapshots/placement (US-004), API mode-change endpoint (US-005), approval decision commands (US-009), broader publishing (US-010). Any sandbox for ACP agents: they run unsandboxed on the runner host in every mode, as in `nax chat` (user ruling).\n\n**Interface** — `ThreadMode = 'read' | 'ask' | 'full'`; `ThreadAssign.mode?: ThreadMode` (absent = `read`); `ThreadRunnerLine` `session_started` variant gains `mode?: ThreadMode`; `RunnerCapabilities.threadModes?: true`. `ThreadSessionFactory.open(input: OpenThreadSessionOptions): Promise<OpenThreadSessionResult>` uses the same profile on resume and create.\n\n**Verification** — Inject native and ACP factories to assert exact profiles/options for each mode and fallback, exercise malformed assigns, and inspect emitted session_started lines and capability reports without real agent processes.",
+      "acceptanceCriteria": [
+        "[unit] ThreadSessionFactory.open with thread.mode ask creates the session with profile: 'ask'.",
+        "[unit] ThreadSessionFactory.open with thread.mode full creates the session with profile: 'full'.",
+        "[unit] ThreadSessionFactory.open with no thread.mode creates the session with profile: 'read'.",
+        "[unit] A native open with thread.mode ask passes allowUnsandboxed: true in the native backend options, and a native read open does not set it.",
+        "[unit] An acp open with thread.mode full creates the session with profile: 'full'.",
+        "[unit] The resume path passes the same profile to resumeAgentSession as the create path.",
+        "[unit] The assign parser keeps mode: 'full' from a THREAD assign.",
+        "[unit] The assign parser refuses a THREAD assign with mode: 'write'.",
+        "[unit] The assign parser returns a ThreadAssign without mode when the assign has none.",
+        "[unit] A thread job whose session opens writes a session_started line carrying the assign's mode (read when absent).",
+        "[unit] NaxCapabilityProbe.probe reports threadModes: true."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "runner",
+        "sessions",
+        "capabilities",
+        "security"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Mode parsing, profile selection, event metadata and a capability flag extend existing seams without a new abstraction; session permission and sandbox changes still require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/session-factory.ts",
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/test/unit/thread-session-factory.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/thread-session-factory.spec.ts",
+          "reason": "its assertion that the session opens with `profile: 'read'` becomes: the profile follows `thread.mode` (`read` when absent)."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Session approvals become pending on the thread",
+      "description": "**Goal** — Fold answerable session approvals into a bounded per-thread pending list exposed in thread DTOs.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — Ingest appends an answerable, complete `approval_requested` line to `ChatThread.pendingApprovals` (independently of the tool-summary fold; oldest first, at most 20, later ones dropped) and removes it on the matching `approval_resolved`; `session_closed`, `session_failed` and `onJobEnded` clear the list.\n\n`ApprovalRequestedThreadLine` (`apps/api/src/fleet/threads/ingest/thread-line.ts:71-75`). Target: also keeps `tool`, `summary`, `command?`, `reason`, `expiresAt`, `unsandboxed?`, `answerable` (malformed optional fields dropped; a line missing `tool`, `summary` or `expiresAt` keeps today's minimal shape and is not made pending).\n\n**Scope** — In: parser fields and backward-compatible minimal line handling, session_started optional mode, independent pending approval fold without requiring callId, oldest-first cap 20, matching resolution, all session/job-end cleanup, domain/projection/DTO array default, thread live events through existing ingest transactions. Update thread-line.spec.ts's minimal-only approval and session_started expectations, extend existing ingest/job-effects/integration suites, and regenerate API contracts when changing DTOs. Out: schema column creation (US-004), decision routes and ThreadAnswerPayload union (US-008), runner answer forwarding (US-009), UI cards (US-012). More than 20 pending approvals per thread: later ones are not listed (the agent still waits for them until they expire).\n\n**Interface** — `ThreadDto` gains `pendingApprovals: ThreadPendingApprovalDto[]`; a pending entry carries `{ requestId, tool, summary, command, reason, expiresAt, unsandboxed }` with optional fields omitted when absent. From `@nathapp/nax-agent` 0.91.7: the `approval_requested` session event `{ requestId; callId?; tool; summary; command?; reason; expiresAt; unsandboxed?: true; answerable?: false }`. `ThreadRunnerLine` `session_started` variant has `mode?: ThreadMode`. Absent answerable parses as true; explicit false remains false.\n\n**Verification** — Unit-test tolerant field parsing, then use real DB ingest to prove callId-less requests appear independently of toolSummary, minimal/informational lines do not become pending, resolutions/end events clear state, the cap preserves the oldest twenty and GET returns the configured mode plus the ordered array. Maintain job-before-thread lock order and existing cursor atomicity.",
+      "acceptanceCriteria": [
+        "[unit] The thread-line parser keeps tool, summary, command, reason, expiresAt and unsandboxed: true from a valid approval_requested line.",
+        "[unit] The thread-line parser reads answerable: false when the line says so.",
+        "[unit] The thread-line parser reads answerable: true when absent.",
+        "[unit] The thread-line parser accepts a session_started line with mode: 'ask' and keeps the mode.",
+        "[integration] Ingesting an answerable approval_requested line with no callId appends { requestId, tool, summary, command, reason, expiresAt, unsandboxed } to pendingApprovals.",
+        "[integration] Ingesting an approval_requested line with answerable: false leaves pendingApprovals unchanged.",
+        "[integration] Ingesting an approval_requested line without summary leaves pendingApprovals unchanged.",
+        "[integration] Ingesting the matching approval_resolved line removes that request.",
+        "[integration] Ingesting a session_closed line clears pendingApprovals.",
+        "[integration] The thread's job ending as CRASHED clears pendingApprovals through onJobEnded.",
+        "[integration] Ingesting a 21st pending request leaves the oldest 20.",
+        "[integration] GET /projects/:slug/threads/:id returns pendingApprovals oldest first and mode."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "api",
+        "ingest",
+        "approvals",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Untrusted session-event parsing and concurrent approval state lifecycle are security-sensitive even without a new decision endpoint."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/ingest/thread-line.ts",
+        "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+        "apps/api/src/fleet/threads/thread-job-effects.ts",
+        "apps/api/src/fleet/threads/dto/thread.dto.ts",
+        "apps/api/src/fleet/threads/domain/chat-thread.domain.ts"
+      ],
+      "suggestedCriteria": [
+        "Ingesting a session_failed line clears pendingApprovals.",
+        "Ingesting an approval_requested line missing tool or expiresAt leaves pendingApprovals unchanged while preserving its minimal parsed shape.",
+        "Ingesting an approval_requested line with a malformed optional command drops command and retains its otherwise usable approval fields."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/ingest/thread-line.spec.ts",
+          "reason": "its expectation that a parsed `approval_requested` line has only `requestId` (and `callId`) becomes: the line also keeps `tool`, `summary`, `command`, `reason`, `expiresAt`, `unsandboxed` and `answerable` when present and valid; its `session_started` expectations accept an optional `mode`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Decide a session approval",
+      "description": "**Goal** — Add project and workspace approval decision endpoints that send authorized fenced THREAD_ANSWER commands without conflating questions and approvals.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — `POST /projects/:slug/threads/:id/approvals/:requestId` and `POST /threads/:id/approvals/:requestId`, body `{ decision }`, `@Requires('thread.answer')` gated like the text answer (variants `rest:threads.approve`, `rest:workspace-threads.approve`), call `command()` with `THREAD_ANSWER { requestId, decision }`; `command()` checks a decision payload against `pendingApprovals` (409 `threads.noApproval`) instead of `pendingQuestion`, and keeps every other check. The runner calls `session.answer(requestId, { decision })`. Runner forwarding belongs to US-009.\n\n`threadAuditKey` (`apps/api/src/fleet/threads/thread-audit.ts:4`) gains the action `approve` (audited under `thread.answer`).\n\n**Scope** — In: protocol decision union, two request DTO/routes, approval registry variants, project/workspace service forwarding, command validation branch retaining creator/any-row and turn-requester checks, live-session checks/fencing, approve audit summary, threads.noApproval English/Chinese i18n, regenerated OpenAPI/CLI client. Update controller key tables and approval OpenAPI/permission-contract gated-route counts 132 to 134. Approval decisions leave pendingQuestion untouched; ingest resolution, not text-question ack cleanup, owns approval removal. Out: pending ingest/DTO (US-007), runner forwarding (US-009), web cards (US-012). No new CLI commands or changes to the existing assistant pendingActions decision flow.\n\n**Interface** — `ThreadAnswerPayload`: `{ requestId: string; text: string } | { requestId: string; decision: 'allow' | 'deny' }`. `command(scope, threadId, userId, type, payload, canOperate)` sends `THREAD_ANSWER { requestId, decision }` to the RUNNING job. Routes use `@Requires('thread.answer')`, `@ApprovalGated()` and their registered variants; text `.../answer` continues to require the matching pendingQuestion. Invalid decisions return 400 naming decision, non-pending ids return 409 threads.noApproval, and a fixture-pending id without a live session returns 409 threads.noSession.\n\n**Verification** — Strict security integration coverage for allow/deny, requester ownership even when another member holds permissions, pendingQuestion independence, noApproval/noSession ordering and no-command failures, workspace routing, localized errors and decision audit entries. Preserve existing text-answer behavior and epoch fencing.",
+      "acceptanceCriteria": [
+        "[integration] POST /projects/:slug/threads/:id/approvals/:requestId { decision: 'allow' } by the turn's requester for a pending request on a live session answers 200 and creates one THREAD_ANSWER command with payload { requestId, decision: 'allow' }.",
+        "[integration] POST /projects/:slug/threads/:id/approvals/:requestId with { decision: 'deny' } by the turn's requester for a pending request on a live session creates a THREAD_ANSWER command with payload { requestId, decision: 'deny' }.",
+        "[integration] The decision POST succeeds while a different text question is pending, and leaves pendingQuestion unchanged.",
+        "[integration] The decision POST for a request id not in pendingApprovals answers 409 threads.noApproval and creates no command.",
+        "[integration] The decision POST with { decision: 'maybe' } answers 400 naming decision.",
+        "[integration] The decision POST for a request id present in pendingApprovals (fixture-written) on a thread whose job is no longer RUNNING answers 409 threads.noSession and creates no command.",
+        "[integration] The decision POST by a member who is not the turn's requester answers 403.",
+        "[integration] The text answer POST .../answer for a request id that is only in pendingApprovals still answers 409 threads.noQuestion.",
+        "[integration] A successful decision POST records an audit entry under thread.answer whose summary names the decision.",
+        "[integration] POST /threads/:id/approvals/:requestId on a WORKSPACE thread creates the THREAD_ANSWER decision command.",
+        "[integration] The 409 threads.noApproval response message is the English text from the threads i18n file, and the Chinese file has the same key."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "api",
+        "approvals",
+        "permissions",
+        "protocol",
+        "security"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New approval-gated routes authorize mutating session actions and must preserve principal, pending-request and lease fencing invariants."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/src/fleet/threads/workspace-threads.controller.ts",
+        "apps/api/src/fleet/threads/thread-audit.ts",
+        "apps/api/src/fleet/threads/thread-route.commands.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/threads.controller.keys.spec.ts",
+          "reason": "its handler table gains the approval handler with key `thread.answer`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts",
+          "reason": "its handler table gains the workspace approval handler with key `thread.answer`."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "the gated-operation list gains the two approval routes (POST /api/projects/{slug}/threads/{id}/approvals/{requestId} and POST /api/threads/{id}/approvals/{requestId}); the count 132 becomes 134."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "the gated route count 132 becomes 134 (the two approval routes)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Runner hands decisions to the session",
+      "description": "**Goal** — Extend THREAD_ANSWER parsing and execution to deliver allow/deny decisions to the active agent session.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — `readAnswer`/`applyAnswer` (`thread-job-run.ts:171-175,921-935`). Target: also accept `{ requestId, decision }` and call `session.answer(requestId, { decision })`. The runner calls `session.answer(requestId, { decision })`.\n\n**Scope** — In: decision payload validation and union branch, exact AnswerReply mapping, accepted/nonaccepted ack behavior for both sync and async session results, rejected invalid payloads, preservation of text answers and safe exception containment. Extend existing thread-job-run command/answer-safety specs rather than replacing them. Out: API union/routes/pending validation (US-008), pending ingest (US-007), web decision controls (US-012).\n\n**Interface** — `ThreadAnswerPayload = { requestId: string; text: string } | { requestId: string; decision: 'allow' | 'deny' }`. From `@nathapp/nax-agent` 0.91.7: `AnswerReply = { decision: 'allow' | 'deny' } | { text }`. `session.answer(requestId, { decision })` returning `accepted` produces ack `ok`; other statuses produce rejected with that status as detail. Malformed decisions produce rejected detail `invalid payload` without calling answer.\n\n**Verification** — Strict isolated unit tests drive ThreadJobRun commands with a fake session and assert exact reply objects and ack outcomes, while preserving every existing text-answer and thrown/rejected-answer regression.",
+      "acceptanceCriteria": [
+        "[unit] A THREAD_ANSWER with payload { requestId: 'r1', decision: 'allow' } calls the session's answer('r1', { decision: 'allow' }) and acks ok when it answers accepted.",
+        "[unit] A THREAD_ANSWER with { requestId: 'r1', decision: 'deny' } calls answer('r1', { decision: 'deny' }).",
+        "[unit] A THREAD_ANSWER with { requestId: 'r1', decision: 'maybe' } is rejected with detail invalid payload and answer is not called.",
+        "[unit] A THREAD_ANSWER with { requestId: 'r1', text: 'yes' } still calls answer('r1', { text: 'yes' }).",
+        "[unit] A decision whose session answers a status other than accepted is rejected with that status as the detail."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "runner",
+        "approvals",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Only the existing readAnswer/applyAnswer branches in one source file change; forwarding approval decisions to a session nevertheless requires strict security TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/unit/thread-job-run-commands.spec.ts",
+        "apps/runner/test/unit/thread-job-run-answer-safety.spec.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Publish commits code changes in ask and full modes",
+      "description": "**Goal** — Publish changed regular code files as well as docs when the assign's mode is ask or full.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — Both publish paths (the PUBLISH job and the live publish) pass the assign's mode.\n\n`publishThreadDocs` (`apps/runner/src/thread/thread-publish.ts`). Target: takes `mode`; in `ask`/`full` it stages every changed regular file (`lstat().isFile()`, as today), and when a staged path is not a doc path the message is `feat(<feature>): changes from koda thread \"<title>\"`. The `publishedLineFits` limit (200 paths of at most 512 characters) applies unchanged.\n\n**Scope** — In: publisher mode input with read fallback at both caller paths, mode-dependent regular-file selection, docs versus feat message choice, PUBLISH job and ThreadLivePublish input propagation, existing git regression specs. Keep branch/ref CAS, mutex, sorted paths, publication bounds and symlink refusal unchanged; this does not add deletion publishing. Update thread-publish.spec.ts's non-doc ignored assertion to be read-only and add ask/full cases. Out: runner session mode execution (US-006), API mode storage/change (US-004/US-005), approval handling (US-007..US-009). PR creation or a hand-off to a fleet RUN from a thread; changes leave only through the existing publish (commit to `feat/<feature>`) and discard. A publish of more than 200 changed paths, or a path over 512 characters: it fails as today. Publishing code changes made in `ask`/`full` after the thread is switched back to `read`: publish follows the mode at publish time, so those code changes are reported as ignored.\n\n**Interface** — `publishThreadDocs` takes `mode`; `PublishThreadDocsInput` carries the thread mode. Both callers pass the assign's mode (`read` when absent). Doc-only message remains `docs(<feature>): spec from koda thread \"<title>\"`; any staged non-doc path selects `feat(<feature>): changes from koda thread \"<title>\"`. Existing `paths`, `ignored`, `specPresent` and failure results remain the publication contract.\n\n**Verification** — Use real temporary git repositories in existing thread-publish.spec.ts and injected publishers in job/live-publish tests to assert staged contents, commit prefixes, symlink exclusion and correct mode propagation without changing branch safety behavior.",
+      "acceptanceCriteria": [
+        "[unit] publishThreadDocs with mode: 'ask' and a changed src/math.ts stages it, reports it in paths and commits with a message starting 'feat(<feature>): changes from koda thread'.",
+        "[unit] publishThreadDocs with mode: 'full' and a changed doc path plus src/math.ts stages both with the feat( message.",
+        "[unit] publishThreadDocs with mode: 'ask' and only a changed doc path commits with the 'docs(<feature>): spec from koda thread' message.",
+        "[unit] publishThreadDocs with mode: 'read' and a changed src/math.ts reports it in ignored and does not stage it.",
+        "[unit] publishThreadDocs with mode: 'full' and a changed symlink reports the symlink in ignored.",
+        "[unit] A PUBLISH job whose assign has mode: 'full' calls the publisher with mode: 'full'.",
+        "[unit] A PUBLISH job whose assign has no mode calls the publisher with mode: 'read'.",
+        "[unit] A live publish during a SESSION job whose assign has mode: 'ask' calls the publisher with mode: 'ask'.",
+        "[unit] publishThreadDocs with mode: 'full' and only doc paths changed commits with a message starting 'docs(<feature>): spec from koda thread'."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "runner",
+        "git",
+        "publish"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "An existing publisher gains mode-dependent file selection and commit wording, and two existing callers forward the field; mutex/ref-CAS algorithms and authentication/session logic stay unchanged, so focused test-first git and caller tests suffice."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-publish.ts",
+        "apps/runner/src/thread/thread-action-run.ts",
+        "apps/runner/src/thread/thread-live-publish.ts",
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/unit/thread-publish.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/thread-publish.spec.ts",
+          "reason": "its case asserting a non-doc changed path is reported in `ignored` becomes: that holds in `read` mode; in `ask`/`full` the path is staged in `paths` and the message starts with `feat(`."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Web new-thread forms choose agent and mode",
+      "description": "**Goal** — Let users choose an executable agent and its models/efforts, plus a permitted REPO mode, when creating a thread.\n\n**Motivation** — `nax chat` already offers all four agents with read/ask/full modes on one machine.\n\n**Approach** — New-thread forms: an agent select (Native, Claude Code, Codex, Cursor) from the eligible runners' `threadBackends`/`acpOffers`; an agent no eligible runner can start is disabled with `not installed` (no runner has it launchable) or `not logged in` (launchable, `loggedIn === false` everywhere); models and efforts from the chosen agent; on the project REPO form a mode select (Read, Ask, Full) limited to the modes the caller's project permissions allow; the body always carries `mode` for REPO threads and never for PROJECT/WORKSPACE.\n\n`RunnerSummaryDto.threadBackends` and web `RunnerThreadBackends` (`apps/web/lib/thread-types.ts`, `lib/fleet-types.ts`) carry a valid `acpOffers` through. ACP readiness still comes from `acp`; `loggedIn: null` = not probed or probe failed.\n\n**Scope** — In: web agent/offer/mode type mirrors, eligible-agent/model/effort helpers, BackendPicker agent selection and update:agent, project and workspace forms/schema/body builders, permission-filtered REPO mode choices, English/Chinese locale keys, existing picker/page/helper specs. Eligibility retains online/enabled/scope-capability filters; preserve workspace setup-time composable creation and home-project runner loading. Do not silently label unknown login as false. Update exact bodies in threads-new-page.spec.ts, workspace-threads-new-page.spec.ts, thread-create.spec.ts, thread-create-project.spec.ts and workspace-thread-create.spec.ts. Out: API discovery/validation (US-001), host probes (US-002), mode PATCH/approval UI (US-012). Changing a thread's agent (backend) after creation; only the mode changes. `ask` and `full` on PROJECT and WORKSPACE threads: those kinds have no worktree or publish and stay `read`.\n\n**Interface** — Agent select values identify Native or `ThreadAgent = 'claude' | 'codex' | 'cursor'`; BackendPicker emits `update:agent` as well as existing `update:model` and `update:effort`. `ThreadBackends`: `{ native: string[]; acp: ThreadAgent[]; acpOffers?: ThreadAcpOffer[] }`; `ThreadAcpOffer { agent: ThreadAgent; launchable: boolean; loggedIn: boolean | null; models: string[]; efforts: string[] }`. REPO requests carry `mode` and `backend` native or `{ kind: 'acp', agent, model?, effort? }`; PROJECT/WORKSPACE requests carry backend but never mode.\n\n**Verification** — Jest helper tests for eligibility/reasons and body discrimination; component/page tests for agent updates, model/effort choice, permission-filtered modes, exact submitted payloads and bilingual disabled reasons. UI permissions reflect effective keys rather than hardcoded roles; the API remains authoritative.",
+      "acceptanceCriteria": [
+        "[unit] The ACP eligibility helper for runners whose acpOffers list claude launchable and logged in returns claude available with its models.",
+        "[unit] The helper returns codex unavailable with reason 'not logged in' when every eligible runner reports it launchable with loggedIn: false.",
+        "[unit] The helper returns cursor unavailable with reason 'not installed' when no eligible runner reports it launchable.",
+        "[unit] The backend picker renders Native, Claude Code, Codex and Cursor, with an unavailable agent's option disabled and its reason shown.",
+        "[unit] Choosing Claude Code in the picker emits update:agent with claude and lists Claude Code's models.",
+        "[unit] On the project REPO form, the mode select lists Read and Ask, not Full, when the caller holds thread.mode.ask but not thread.mode.full.",
+        "[unit] On the project REPO form, the mode select lists Read, Ask and Full when the caller holds both keys.",
+        "[unit] The project PROJECT-kind form shows no mode select.",
+        "[unit] Submitting the project REPO form with Codex, model gpt-5-codex and mode Ask posts backend { kind: 'acp', agent: 'codex', model: 'gpt-5-codex' } and mode: 'ask'.",
+        "[unit] Submitting the project REPO form with Native and an unchanged mode posts backend.kind native and mode: 'read'.",
+        "[unit] Submitting the workspace form with Cursor posts an acp backend with agent cursor and no mode.",
+        "[unit] The disabled-agent reason renders as the English text 'Not logged in' with the English locale and as the Chinese text with the Chinese locale."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "web",
+        "forms",
+        "permissions",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-form capability aggregation and request discrimination include access-controlled execution-mode selection, triggering strict permission TDD."
+      },
+      "contextFiles": [
+        "apps/web/pages/threads/new.vue",
+        "apps/web/pages/[project]/threads/new.vue",
+        "apps/web/components/fleet/threads/BackendPicker.vue",
+        "apps/web/lib/thread-create.ts",
+        "apps/web/lib/thread-types.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/thread-backend-picker.spec.ts",
+          "reason": "its props-only `{ models, model, effort }` rendering becomes: the picker also renders the agent select and emits `update:agent`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-new-page.spec.ts",
+          "reason": "its expectation of the exact submitted body becomes: the body carries the chosen agent's backend (and no `mode` for a WORKSPACE thread)."
+        },
+        {
+          "path": "apps/web/tests/pages/workspace-threads-new-page.spec.ts",
+          "reason": "its exact-body expectations become: the chosen agent's backend, no `mode`."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-create.spec.ts",
+          "reason": "its exact create-body expectation for a REPO thread gains `mode` (`read` when unchanged)."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-create-project.spec.ts",
+          "reason": "its exact create-body expectations stay without `mode` for PROJECT threads and accept an `acp` backend."
+        },
+        {
+          "path": "apps/web/tests/lib/workspace-thread-create.spec.ts",
+          "reason": "its exact create-body expectation accepts an `acp` backend and has no `mode`."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Web thread page changes mode and decides approvals",
+      "description": "**Goal** — Add a REPO mode control and pending session approval cards to thread detail pages using their correct API scopes.\n\n**Motivation** — To get code changes a person must dispatch a fleet RUN.\n\n**Approach** — Thread page: a mode control (REPO threads only), one approval card per `pendingApprovals` entry (tool, summary, command, reason, an \"unsandboxed\" badge when set, Approve / Deny), and system messages rendered as today.\n\n`PATCH /projects/:slug/threads/:id/mode` declares `@Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })`; the controller validates the body and gates with the key of the TARGET mode (`read` → `thread.cap.update`). `POST /projects/:slug/threads/:id/approvals/:requestId` and `POST /threads/:id/approvals/:requestId`, body `{ decision }`, `@Requires('thread.answer')` gated like the text answer (variants `rest:threads.approve`, `rest:workspace-threads.approve`), call `command()` with `THREAD_ANSWER { requestId, decision }`. These server contracts are implemented upstream and consumed here.\n\n**Scope** — In: new ThreadModeControl and ThreadApprovalCard plus their specs, project/workspace detail page wiring, shared thread-controller and composable actions where needed, local DTO mode/pending-approval mirrors, permission-aware controls and endpoint errors, safe interpolation and bilingual labels. The project page renders modes only for REPO; workspace has approval cards but no mode action. Preserve existing system messages, pendingQuestion and assistant pendingActions UI; session approvals are a separate list. Out: API mode and decision routes (US-005/US-008), runner forwarding (US-009), new-thread form selection (US-011). Changing a thread's agent (backend) after creation; only the mode changes.\n\n**Interface** — `ThreadDto.mode: ThreadMode`; `ThreadDto.pendingApprovals: ThreadPendingApprovalDto[]`. Mode action calls `PATCH /projects/:slug/threads/:id/mode` with `{ mode: 'read' | 'ask' | 'full' }`. Approval action calls `POST /projects/:slug/threads/:id/approvals/:requestId` or `POST /threads/:id/approvals/:requestId` with `{ decision: 'allow' | 'deny' }`; Approve maps to allow and Deny maps to deny. Full is disabled without thread.mode.full; current mode is selected; 409 API text appears in the mode control.\n\n**Verification** — Jest component specs cover selected/disabled modes, error text, approval text/badge and exact allow/deny transport mapping; both detail-page suites prove conditional mode/card rendering and project versus workspace endpoints. Render untrusted approval fields as text only and test English/Chinese labels. Reuse the existing shared controller lifecycle and live refetch rather than opening extra streams.",
+      "acceptanceCriteria": [
+        "[unit] ThreadModeControl shows the thread's current mode as selected.",
+        "[unit] Choosing Ask in ThreadModeControl calls the thread's mode endpoint with { mode: 'ask' }.",
+        "[unit] ThreadModeControl disables Full when the caller lacks thread.mode.full.",
+        "[unit] ThreadModeControl renders the API error text when the mode endpoint answers 409.",
+        "[unit] The project thread page renders ThreadModeControl for a REPO thread and not for a PROJECT thread.",
+        "[unit] ThreadApprovalCard renders the request's tool, summary, command and reason.",
+        "[unit] ThreadApprovalCard renders an Unsandboxed badge when the request has unsandboxed: true, and none otherwise.",
+        "[unit] Clicking Approve posts { decision: 'allow' } to the approval endpoint for its request id.",
+        "[unit] Clicking Deny posts { decision: 'deny' } to the approval endpoint for its request id.",
+        "[unit] The project thread page renders one ThreadApprovalCard per pendingApprovals entry and none when the list is empty.",
+        "[unit] The workspace thread page renders the same approval cards from its thread's pendingApprovals, posting to the workspace approval endpoint.",
+        "[unit] The approval card's Approve label renders as English 'Approve' with the English locale and as the Chinese text with the Chinese locale."
+      ],
+      "tags": [
+        "thread-agents-modes",
+        "web",
+        "approvals",
+        "permissions",
+        "i18n",
+        "security"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Permission-aware mode mutation and allow/deny controls steer privileged sessions across two API scopes; strict security TDD applies."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/threads/[id].vue",
+        "apps/web/pages/threads/[id].vue",
+        "apps/web/components/fleet/threads/ThreadQuestionCard.vue",
+        "apps/web/composables/useThread.ts",
+        "apps/web/composables/useWorkspaceThread.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadApprovalCard.vue",
+        "apps/web/components/fleet/threads/ThreadModeControl.vue",
+        "apps/web/tests/components/thread-approval-card.spec.ts",
+        "apps/web/tests/components/thread-mode-control.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "FEATURE AND BASELINE\nThis enhancement closes #368 and #369 and makes threads match nax chat for Native, Claude Code, Codex and Cursor. All agents support REPO, PROJECT and WORKSPACE; only REPO supports ask/full and code publishing. Read is the backward-compatible default. The binding twelve-story dependency graph is retained, including the specified apps/api workdirs for stories that also change protocol types or generated contracts outside that package. Discovery used direct file reads and text search because codebase-memory MCP is unavailable in this tool set; no graph-index completeness is claimed. The checked-in specification is .nax/features/thread-agents-modes/spec.md:1. No implementation changes or test execution are part of this PRD task.\n\nACTUAL ARCHITECTURE AND RULES\nThe detected Express/Next.js metadata is incorrect: .nax/mono/apps/api/context.md:23 identifies NestJS 12 + Fastify and Prisma 7; .nax/mono/apps/web/context.md:22 identifies Nuxt 4 SSR, Vue, Shadcn and Tailwind. Runner is Bun-only ESM with SQLite and bun:test (.nax/mono/apps/runner/context.md:14). API owns permissions, persistence, state transitions and approval gating; web is a handwritten Nuxt API client, not a generated client. API may import fleet-protocol only as types, with runtime constants mirrored locally (.nax/mono/apps/api/context.md:216 and apps/api/src/fleet/common/thread-jobs.ts:1). Read the nathapp-nestjs-patterns skill before actual NestJS implementation. Do not edit generated AGENTS guidance or generated CLI source manually. API contract edits require root bun run generate to regenerate openapi.json and apps/cli/src/generated; no new CLI commands are requested. API and web i18n are separate and both require English/Chinese parity. Agent-written tool names, summaries, commands, reasons and system names must render as interpolated text; preserve the existing assistant-only sanitized Markdown exception (.nax/mono/apps/web/context.md:70). Additive form/card work should reuse tokens and primitives; read docs/ux/redesign/MASTER-PLAN.md:33 before changing layout/navigation and update its Status/Decisions if such changes are made.\n\nUS-001 PROTOCOL, VALIDATION AND PLACEMENT\npackages/fleet-protocol/src/threads.ts:12 currently limits ThreadAgent to claude/codex; :26 declares ThreadBackends with native/acp only, :68 declares ThreadAssign, :97 is the text-only ThreadAnswerPayload, :106 contains the native THREAD_MODEL_ID_RE and :113 starts ThreadRunnerLine. Extend exports and the apps/api/src/fleet/common/thread-jobs.ts:1 runtime/type mirror without introducing runtime workspace imports in the API. The new ACP regex permits Cursor bracketed model identifiers; keep native validation unchanged. apps/api/src/fleet/common/capabilities-core.ts:62-80 contains the strict native/acp parser and :126 begins whole-report validation, including the 65536-byte cap. Allow only acpOffers as the additional backend key; malformed offers are discarded independently rather than rejecting the usable native/acp report. Validate unique known agents, collection limits, booleans/null login, model and effort patterns. parseThreadBackends is currently private: test through the existing public parser where appropriate rather than casually expanding its API. apps/api/src/fleet/threads/thread-input.ts:6-25 encodes native-only PROJECT/WORKSPACE normalized types; :70-79 rejects unsupported ACP agents, applies native MODEL_ID_RE to every backend and refuses PROJECT ACP. Remove both runtime and type restrictions; select regex by backend kind. RunnerSummaryDto currently strips offers in its projection (apps/api/src/fleet/runners/dto/runner-summary.dto.ts:15-24,50-60). firstMisfit already uses backends.acp.includes for SESSION placement (apps/api/src/fleet/jobs/placement-rules.ts:136-151); preserve this ready-agent authority instead of treating offers as placement eligibility. Existing specs to revise are capabilities-thread.spec.ts, thread-input.spec.ts, workspace-thread-input.spec.ts and runner-summary.dto.spec.ts in the spec-listed directories; placement rule specs cover scope and agent mismatches.\n\nUS-002 AND US-003 ACP DISCOVERY AND EXECUTION\napps/runner/package.json:21 already pins @nathapp/nax-agent to 0.91.7; the context's 0.91.6 note is stale. Add only @nathapp/nax-agent-acp at exact 0.91.7 and update bun.lock through installation; do not upgrade nax-agent beyond 0.91.7. NaxProbeDeps currently has no ACP injection (apps/runner/src/capabilities/nax-probe.ts:38-46); probe() builds native-only threadBackends with acp: [] at :167. createCapabilityProbe has an operator-supplied static override and otherwise constructs NaxCapabilityProbe (apps/runner/src/capabilities/create-probe.ts:8-11); preserve that override. DaemonOptions at apps/runner/src/daemon/daemon.ts:44 and reporter construction at :135 must forward the optional probe; runCommand currently calls deps.start without one (apps/runner/src/commands/run.ts:26). Production alone supplies probeAcpAgents; tests that directly startDaemon do not accidentally launch host agents or npx. New discovery runs all agents concurrently with injected launch/session/timer seams. Authentication-required means false, absent candidate means false launchable/null login, unknown probe failures mean null login, never false login. Close successful and late-settling sessions so timeout races do not leak agent processes; advertise acp only for launchable and loggedIn true. Retain existing bounded-report logic at nax-probe.ts:114-141 and ensure offers cannot inflate a report past the API cap.\nThreadSessionFactory is injectable today but native-only: apps/runner/src/thread/session-factory.ts:14-26 holds factory dependencies, :84-90 rejects ACP, :92-114 validates native models/builds native host protections, :115-144 handles session options and resume/create fallback. Add the ACP dependency without requiring it in old native test fakes. ACP must not depend on nativeModels() or native model membership; pass model/effort independently and use the same declared tools, transcript store, workdir, instructions, bounded approval timeout and 900-second turn timeout. Existing error mapping is structural as well as instanceof (:47-63), useful for duplicated package instances; preserve it. Keep SESSION_EXISTS and SESSION_NOT_FOUND fallbacks. The assign parser applies the native regex before backend branching and accepts only claude/codex (apps/runner/src/supervisor/assign-parser.ts:34-60); change only ACP model validation and agents here, retaining other strict assign checks. Existing runner tests include test/unit/thread-session-factory.spec.ts and thread-session-factory-hardening.spec.ts, src/supervisor/assign-parser-thread.spec.ts, src/capabilities/nax-probe.spec.ts and injected daemon/command tests.\n\nUS-004 STORAGE, ROLE CATALOG AND CAPABILITY NEGOTIATION\nPrisma ChatThread currently has backend, pendingQuestion and session but no mode/approvals (apps/api/prisma/schema.prisma:1213-1241); FleetThreadTurn stores action/instructions/backend/skills/resume at :1284-1292. Migration 20261124090000_thread_modes adds ChatThread.mode and FleetThreadTurn.mode as String default read plus nullable ChatThread.pendingApprovals JSON, preserving existing rows and avoiding Prisma enums. Append thread.mode.ask to existing developer Role.permissions only when absent, following the guarded JSONB update precedent at apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql:4-8; also update seeded roles in apps/api/src/permissions/system-roles.ts:56-87. Existing wildcard thread.*.own grants cannot imply the new non-ownable mode keys. Catalog scope additions belong in apps/api/src/permissions/catalog.ts:124, risk prefix in :141 and temporary pending declarations in :64. Both keys are high-risk project keys, floor none/default agent, and full is available only through owner/admin wildcard grants by default. Catalog/role-matrix tests and snapshot need two new cells per role, 227 to 229; permission-contract expectedPending must add the keys in US-004 and remove them only in US-005.\nThread creation is a two-pass normalizer/service flow (apps/api/src/fleet/threads/threads.service.ts:35-57); extend domain/repository create/map contracts, not just DTOs. CreateThreadDto is currently @Allow fields at apps/api/src/fleet/threads/dto/thread.dto.ts:104-112; mode must survive validation. Workspace delegates to PROJECT normalization (thread-input.ts:9-14), so explicitly forward/check mode rather than silently dropping it before validation. Create gates use thread.create (threads.controller.ts:41-56; thread-route.commands.ts:64-75); add alsoKeys for ask/full AND a service permissions.can check in project scope using the actual principal, including approval-command replay. Validate denied create before writes. createThreadJob snapshots per-job fields at prisma-chat-thread.repository.ts:513-536; add mode for every action, and read turn.mode rather than mutable thread.mode in findThreadAssign (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:274-291). Extend ChatThreadRecord/repository contracts at apps/api/src/fleet/threads/domain/chat-thread.domain.ts:80,127 and mapThread projections. Protocol RunnerCapabilities is re-exported type-only by apps/api/src/fleet/common/protocol.ts:1-48; source declaration is packages/fleet-protocol/src/index.ts:78. Add optional threadModes?: true with tolerant parsing: invalid values are dropped, unlike many older strict boolean flags. Both placement builders must supply turn mode (apps/api/src/fleet/jobs/placement.service.ts:94 and :171). Mode-capability checks apply to SESSION only; ask/full must remain queued on older runners with recoverable thread_modes, not become permanent dispatch failures. Extend dashboard MISFIT_REASONS, PlacementMisfitDto and the OpenAPI enum contract; web misfit translations/types are downstream consumers to inspect as necessary.\n\nUS-005 ATOMIC MODE CHANGES\nReuse the route/command/service/repository layers, not direct controller writes. ThreadsController update and answer precedents are apps/api/src/fleet/threads/threads.controller.ts:91-104,175-193; ThreadRouteCommands registers key/variant pairs at apps/api/src/fleet/threads/thread-route.commands.ts:13-25,77-91. ApprovalGate rejects an unregistered pair and merges alsoKeys approval policies (apps/api/src/approvals/approval-gate.service.ts:71-73,98-129). Register rest:threads.mode under ask, full and cap.update, declare all three keys on the single REPO mode route and remove pending catalog exemptions atomically with that declaration. Body validation determines the TARGET key; any-row cap.update is an additional ownership bypass, not a substitute for target-mode permission. Read transitions allow the creator with cap.update.own. Keep project scope and creator checks in replayable service/repository execution as well as route guards.\nRepository updates lock current job before ChatThread and re-read under locks (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:177-195). Follow that order for mode changes and message sequencing to avoid send/terminal/ingest deadlocks. sendRefusalFor uses pending/streaming messages, queued jobs and existing close commands at :457-477; use turnRunning as the refusal while treating closing specially. activeThreadJob includes turn.action at :492-500 and detects active publish/discard work; do not confuse idle RUNNING SESSION with a running turn. Change mode, allocate one complete system message using the resolved display name, audit under target key and optionally queue exactly one epoch-fenced THREAD_CLOSE inside the same transaction. Notify runners/live pages only after commit. A no-op returns 200 without a message or command; busy/unauthorized changes must leave state unchanged. threadAuditKey has no override argument (apps/api/src/fleet/threads/thread-audit.ts:1-20), so mode audit calls audit.record directly. There is no WORKSPACE mode route; PROJECT mode mutations must not broaden the REPO-only rule. Update English/Chinese i18n, controller-key tables and gated-operation count 131 to 132 in OpenAPI and permission-contract integration expectations.\n\nUS-007 THROUGH US-009 APPROVAL LIFECYCLE AND COMMANDS\nApprovalRequestedThreadLine currently retains only requestId/callId (apps/api/src/fleet/threads/ingest/thread-line.ts:71-75). Preserve complete bounded fields while retaining backward-compatible minimal lines; absent answerable means true, explicit false remains false. Ingest holds job then thread locks and persists the cursor atomically (apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts:75-92,171-204). Existing foldToolLine ignores callId-less requests at :378-384; approval pending-state updates MUST be independent of that summary fold so a valid callId-less request still appears. Append oldest-first to at most twenty entries, drop later requests, remove only matching resolved requests and mark threadChanged so the existing live thread event reloads the DTO. Clear approvals on session_closed/session_failed and on terminal job effects; ThreadJobEffects.onJobEnded currently clears only pendingQuestion under the thread lock (apps/api/src/fleet/threads/thread-job-effects.ts:42-61). Keep session-mode metadata separate from mutable configured thread mode: old session_started lines must not undo later changes. ThreadDto/domain/maps must expose null storage as [] and retain ordering.\nprisma-chat-thread.repository.ts:198-250 command() checks creator/any-row permission, locks/rechecks, validates pendingQuestion, requires the same RUNNING job with runner, refuses a queued THREAD_CLOSE, asserts the turn requester, writes a fenced command and audit and notifies after commit. Branch THREAD_ANSWER validation on decision versus text; pendingApprovals is not pendingQuestion, and text answers must not resolve approvals. Preserve the requester check even for an any-row permission holder. New approval routes share thread.answer and register rest:threads.approve/rest:workspace-threads.approve; workspace route/service ownership stays personal. Keep these runner tool approvals distinct from the separate API assistant pendingActions/approval engine already exposed by ThreadDetailDto at apps/api/src/fleet/threads/dto/thread.dto.ts:38-54. Add approve to threadAuditKey under thread.answer with decision in the summary. ThreadJobEffects.onInputAck strips answer payloads and clears a matching text question (:29-32,86-96); a decision must leave an unrelated question intact, with pending approvals resolved by ingest. API failure ordering must return noApproval for an unknown request and noSession for a pending request without a RUNNING session. Gated route counts grow from 132 to 134; regenerate contracts after DTO/route changes, including the additive pendingApprovals DTO contract.\nOn the runner, readAnswer is text-only (apps/runner/src/thread/thread-job-run.ts:171-175); applyAnswer at :921-943 sends session.answer and supports synchronous or Promise results, returning ok only for accepted, rejected/status otherwise, and swallowing thrown/rejected errors into safe ack details. Add the discriminated decision branch without weakening request-id/text validation or exception containment: sync command handling must not be failed by an agent answer. Existing test/unit/thread-job-run-commands.spec.ts, thread-job-run-answer-safety.spec.ts and commands-hardening specs anchor that behavior.\n\nUS-010 PUBLISH\npublishThreadDocs obtains a repository mutex, verifies the worktree and feature ref, collects git porcelain paths and permits regular doc paths only today (apps/runner/src/thread/thread-publish.ts:29-72). Broaden only the path allowlist in ask/full: retain lstat().isFile(), no symlink following, bounded publication lines, sorted paths, branch_moved CAS handling and rollback. Deletions have no regular file to lstat and are not implicitly enabled by this design. Select feat message only if a staged path is outside the doc allowlist; doc-only edits remain docs. PUBLISH action invokes publisher in apps/runner/src/thread/thread-action-run.ts:31-36; live publish takes a prepared input through ThreadLivePublish (thread-live-publish.ts:5-12,35-41) constructed in thread-job-run.ts:365-376. Pass assign.mode ?? read through both, never a stale mutable global. Existing real-git tests include test/unit/thread-publish.spec.ts, thread-published-line-fits.spec.ts and thread-job-run-publish.spec.ts. Mode at publish time is authoritative, so code edited before switching back to read remains ignored. No new PR, push or RUN handoff work.\n\nUS-011 AND US-012 WEB\napps/web/lib/thread-types.ts:26-28 has claude/codex only; ThreadDto at :103-132 lacks mode/pendingApprovals and RunnerThreadBackends at :184-188 lacks offers. Carry new shapes into the duplicate summary declaration in lib/fleet-types.ts as needed. thread-create.ts:7-26 currently has native-only form/body types, :80-96 builds native-only requests, :99-111 filters eligible online/enabled/scope-capable runners and unions native models. Update existing helpers and workspace-thread-create.ts to choose backend by agent, union only eligible runners' models/efforts, and never leak REPO mode/fields to PROJECT/WORKSPACE. acp is the executable readiness list; offers supply discovery/login reasons and optional choices. Do not equate loggedIn null with false. The spec does not prescribe text for unknown probe status, so preserve the distinction rather than inventing a false not-logged-in report. BackendPicker currently has props models/model/effort, emits two updates and hardcodes native efforts (apps/web/components/fleet/threads/BackendPicker.vue:4-14). Add four agent options and update:agent, choose offered efforts for ACP and retain native behavior. Project creation uses useProjectPermissions and kind-specific fields (apps/web/pages/[project]/threads/new.vue:19-47); workspace loads runner summaries only from setup-created composables and follows homeProject (apps/web/pages/threads/new.vue:25-83), so preserve that Nuxt lifecycle/SSR fix. Mode options use effective project permissions, not role names. REPO bodies always include read/ask/full; others omit mode.\nDetail pages already compose header/controls/timeline (apps/web/pages/[project]/threads/[id].vue:19-65,70-122) and rely on adapters to a shared framework-free createThreadController. useThread passes slug/id and mounts one stream (apps/web/composables/useThread.ts:14-56); useWorkspaceThread reuses the controller with a personal threadPath (apps/web/composables/useWorkspaceThread.ts:31-50). Shared action URLs are built in apps/web/lib/thread-controller.ts:85-89,285-305, so add mode and decision actions there as appropriate instead of duplicating networking inside pages. New cards can emit page/controller actions, following ThreadQuestionCard (apps/web/components/fleet/threads/ThreadQuestionCard.vue:17-52), but approval cards must show every pending entry even without tool call summaries. Keep creator/requester/server permissions authoritative; UI selection must not claim to grant access. Mode changes show endpoint errors including 409; approvals map Approve to allow and Deny to deny using the correct project/workspace base URL and escaped path segments. System messages already have rendering tests (apps/web/tests/components/thread-system-note.spec.ts); preserve them. Existing Jest suites cover backend picker, both creation pages, thread-create/project/workspace helpers, both detail pages and shared controller errors. New component specs are explicit outputs in US-012.\n\nMIGRATION, ROLLOUT AND VERIFICATION\nApply the additive schema migration and regenerate Prisma before deploying API code that reads the new columns; retain read defaults for historical thread/turn rows, missing assign mode and older runner lines. Upgrade API acceptance of ACP before enabling production probe reports; add runner ACP dependency/probe then session opening, store mode/capability negotiation before advertising mode execution. US-004 temporarily exempts mode catalog keys until US-005 declares their surface. API can ship ahead of new runners because ask/full uses threadModes and unavailable ACP keeps thread_backend misfits; existing read/native threads remain routable. New optional acpOffers must not disable old reports. Full execution and unsandboxed ACP host/environment access are accepted explicit trust decisions, not sandbox guarantees. Credential vault remains deferred. Preserve existing credential redaction and runner transport/journal boundaries.\nUse strict three-session-tdd for session, auth/login, approval and access-control stories regardless of nominal complexity; US-010 uses tdd-simple: mode-dependent file selection and caller forwarding extend the existing publisher without changing its mutex/ref-CAS or authentication algorithms. Unit DI tests stay DB-free and co-located with API source. API behavior/integration suites live in test/integration/fleet and permissions/audit directories; existing gated-thread-session, gated-workspace-thread-session, permissions-project/workspace-threads, thread-ingest-stream, thread-content-events, thread-publish and fleet-chat-threads-schema suites provide fixtures/regression anchors. New integration coverage can be added to these existing files rather than inventing additional stories. Vitest uses vi, lazy imports and emitted decorator metadata. Run targeted bun run test:scoped for API; real database checks require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, private test DB/container for another checkout, and no simultaneous force-reset runs against one DB (.nax/mono/apps/api/context.md:173-186). Skips are not verification. Runner tests inject launch checks, sessions and clock, never depend on real host ACP login; use real temp files/git where publishing needs them. Web Jest tests mock Nuxt composables and transport. Generated acceptance files remain untouched and run through package-specific acceptance commands filtered by assigned AC ids. Build/lint/typecheck are pipeline quality gates, not acceptance criteria. Only new explicitly planned outputs are listed under expectedFiles; other coverage extends existing specs unless a later implementation needs an additional narrowly scoped file.\n\nREFINE-PASS SELF-AUDIT\nManually re-read all 133 criteria under the spec's Acceptance Criteria heading and all 18 Failure Handling rows. All original assertions and their qualifying clauses remain in their original stories. The PRD has 143 acceptance entries: 133 original criteria, one extra entry because US-007's two answerable cases are split, and nine additional entries covering explicit failure-table cases. No deprecated file/grep/verbatim tags occur. Each assertion observes parsed output, thrown refusal, HTTP response, stored rows, sent command/factory arguments, emitted stream lines, git contents/messages or rendered UI. No acceptance criterion was removed. Story workdirs, ids and binding dependencies are unchanged and every referenced dependency exists. All twelve stories already include negative cases, so no invented failure behavior was promoted from suggestedCriteria.\n\nCriterion-by-criterion preservation ledger follows. Numbers are local ordinals under each spec story, not new story ids. Unless otherwise noted, spec ordinal N maps to acceptanceCriteria ordinal N in that same story; concise labels identify the assertion whose full wording remains in the array.\nUS-001 (13): 1 Cursor backend parsed; 2 gemini throws same unknown-agent refusal; 3 Cursor offer including bracketed model retained unchanged; 4 malformed offered model drops offers but keeps native/acp; 5 duplicate offered agent drops offers; 6 unexpected backend key still throws; 7 runner summary retains offers; 8 PROJECT Codex accepted; 9 REPO Cursor bracketed model accepted; 10 unknown create backend names backend; 11 WORKSPACE Claude accepted; 12 PROJECT Cursor placement fits matching acp list; 13 same job on Claude-only runner yields thread_backend. Item 13 now repeats its complete job precondition rather than relying on the previous sentence.\nUS-002 (14): 1 unavailable Codex reports nonlaunchable/null login/empty lists without opening; 2 successful Claude probe keeps offered lists and closes; 3 invalid model dropped while valid models remain; 4 model/effort caps; 5 auth-required means false/empty lists; 6 20-second injected-clock timeout means null and other agents still returned; 7 late-open session closed; 8 initializeTimeoutMs 20000 forwarded; 9 concurrent launchable-agent starts; 10 only logged-in Claude in acp while both offers remain; 11 absent injection preserves empty acp/no offers; 12 throwing injection preserves empty acp/no offers; 13 production run passes the real probe; 14 injected daemon sync carries Claude. Item 6 additionally makes the failure table's empty-model timeout result explicit. Added item 15 covers other probe errors without suppressing other agents.\nUS-003 (8): 1 exact Codex ACP factory arguments and successful result; 2 effort forwarded; 3 tools/workdir/instructions forwarded; 4 auth-required maps to agent_not_logged_in; 5 unavailable maps to backend_unavailable; 6 native never invokes ACP factory; 7 Cursor bracketed-model assign accepted; 8 unknown agent assign refused. Item 1 now explicitly checks the result discriminator while retaining session/resumed, matching the existing OpenThreadSessionResult union at apps/runner/src/thread/session-factory.ts:38-40 rather than implying equality to a one-field object.\nUS-004 (14): 1 ask catalog scope/non-ownable/risk/approval shape; 2 full same shape; 3 developer gets ask not full; 4 exactly-true capability retained and invalid value dropped; 5 ask misfit versus read compatibility without capability; 6 guarded migration grants ask exactly once; 7 omitted create mode stored/returned read; 8 developer ask succeeds; 9 developer full denied without a row; 10 admin full succeeds; 11 agent create remains unwritten until approval; 12 PROJECT ask rejected naming mode; 13 first turn assignment carries thread mode; 14 older turn keeps its own mode after a thread change. Added items 15-17 cover absent mode-key creates, both non-REPO kinds/mutating modes, and recoverable queued thread_modes placement. To test item 14 before US-005 exists, fixture-update the thread row; it does not require adding a dependency on the mode endpoint.\nUS-005 (14): 1 developer creator changes idle thread with exact complete system message/name; 2 developer full denied with unchanged mode; 3 noncreator admin full succeeds; 4 noncreator developer denied; 5 creator with cap.update.own can return to read; 6 queued SESSION refused with unchanged mode; 7 running turn refused; 8 active PUBLISH refused; 9 idle session closes exactly once with mode write; 10 already-closing session changes without a second close; 11 same-mode no-op has no message/command; 12 agent waits for approval without changing mode; 13 target-key audit names both modes; 14 bogus mode validation names mode. Added items 15-18 cover DISCARD busy/unchanged and the failure table's general ownership, target-key and queued/running unchanged guarantees.\nUS-006 (11): 1 ask profile; 2 full profile; 3 absent mode read profile; 4 ask native allowUnsandboxed versus unchanged read options; 5 ACP full profile; 6 resume/create profile parity; 7 full retained by assign parser; 8 write refused; 9 absent mode remains absent in parsed assign; 10 session_started carries mode with read fallback; 11 threadModes advertisement.\nUS-007 (11 spec criteria mapped to 12 PRD entries): 1 retained approval fields maps to entry 1; 2 explicit false and absent true map to entries 2 and 3; 3 session_started ask retained maps to 4; 4 callId-less approval appended maps to 5; 5 unanswerable leaves pending list unchanged maps to 6; 6 missing summary leaves list unchanged maps to 7; 7 matching resolution removes only that request maps to 8; 8 session close clears maps to 9; 9 CRASHED terminal effect clears maps to 10; 10 twenty-first request leaves oldest twenty maps to 11; 11 GET returns oldest-first approvals and mode maps to 12. The qualifiers no callId, matching, unchanged and oldest-first are retained.\nUS-008 (11): 1 requester allow creates one exact decision command; 2 requester deny creates deny command; 3 independent text question remains unchanged; 4 unknown pending id returns noApproval without command; 5 maybe names decision in 400; 6 fixture-pending id on non-RUNNING job yields noSession without command; 7 nonrequester member denied; 8 text-only endpoint still refuses approval-only id with noQuestion; 9 thread.answer audit names decision; 10 WORKSPACE endpoint writes decision command; 11 English localized noApproval message and corresponding Chinese key. Item 2 now states its full endpoint/requester/live-session precondition instead of relying on 'same POST'.\nUS-009 (5): 1 allow forwards exact reply and accepted maps to ok; 2 deny forwards exact reply; 3 invalid decision rejects invalid payload without calling session; 4 existing text answer still forwarded unchanged; 5 nonaccepted status becomes rejection detail.\nUS-010 (8): 1 ask stages/reports code and feat prefix; 2 full stages docs plus code with feat prefix; 3 ask doc-only retains docs message; 4 read still ignores/nonstages code; 5 full still ignores symlink; 6 PUBLISH forwards full; 7 absent assign mode forwards read; 8 live SESSION forwards ask. Added item 9 covers the failure table's full/doc-only docs message and now states the concrete prefix rather than the shorthand docs(...).\nUS-011 (12): 1 logged-in eligible Claude with models; 2 all launchable Codex logins false means unavailable/not logged in; 3 no launchable Cursor means unavailable/not installed; 4 four agent options with disabled reason; 5 Claude agent update and model list; 6 ask-only key gives Read/Ask not Full; 7 both mode keys give all modes; 8 PROJECT no mode select; 9 Codex/Ask exact backend and mode body; 10 unchanged native/read body; 11 WORKSPACE Cursor backend and no mode; 12 disabled-login reason in English/Chinese.\nUS-012 (12): 1 selected current mode; 2 Ask posts mode; 3 Full disabled without key; 4 mode 409 error text rendered; 5 REPO-only mode control; 6 approval fields rendered; 7 unsandboxed badge iff true; 8 Approve sends allow to matching request endpoint; 9 Deny sends deny (now explicitly to its request endpoint); 10 one project card per pending entry and none when empty; 11 same workspace cards use workspace endpoint; 12 Approve label in English/Chinese.\n\nNegative-path/regression audit: US-001 unknown agents/extra keys/malformed offers preserve refusals; US-002 absent/failed probe preserves acp []; US-003 mapped auth/unavailable errors and native factory isolation; US-004 denied creates and default read; US-005 turn/busy/permission refusals and no-op; US-006 invalid mode refusal and absent/read compatibility; US-007 incomplete/unanswerable requests remain nonpending and oldest twenty survive overflow; US-008 noApproval/noSession/nonrequester refusals and the existing text-answer guard; US-009 invalid decisions and unchanged text replies; US-010 symlink/code refusal in read and legacy caller read fallback; US-011 unavailable agents and unchanged native/read body; US-012 409/permission/empty-list states protect additive rendering.\n\nContext alignment: US-005 now includes workspace-threads.controller.ts, replacing the less critical service file in its five context slots, so every story includes all spec-recommended context files within the limit. No file created by its own story is listed as context. Routing corrected to medium/strict for US-006's additive existing seams, simple/strict for US-009's one-source-file branch and medium/tdd-simple for US-010's existing publisher/callers; security overrides remain for actual session/permission/approval work. Generated clients remain in scope only as regenerated artifacts, not new CLI commands. Mode and approval route-count pins are cumulative feature expectations: unrelated bound branches must reconcile their current route sets when merged, without adding a dependency omitted by the binding table.\n\nAll 13 feature exclusions were compared verbatim: credential vault; ACP sandbox; non-REPO mutating modes; per-message mode rechecks; new PR/RUN handoff; CLI commands; changing backend; new time/usage accounting behavior; more than twenty approvals; publication size/path caps; code publishing after switching back to read; additional ACP agents; nax-agent upgrades beyond 0.91.7. They remain separate top-level entries, with nearby story Scope exclusions intact. No story-local exclusion was hoisted. This is a manual specification/code audit, not a claim that implementation tests or a runtime JSON parser were executed.",
+  "outOfScope": [
+    "The central credential vault (#371): credentials stay on the runner (the agent's own login for ACP, the nax auth store or its existing `credentials.source: exec` config for native).",
+    "Any sandbox for ACP agents: they run unsandboxed on the runner host in every mode, as in `nax chat` (user ruling).",
+    "`ask` and `full` on PROJECT and WORKSPACE threads: those kinds have no worktree or publish and stay `read`.",
+    "Re-checking the mode key on every message: a thread keeps its mode after its creator loses `thread.mode.full`, and an any-row `thread.message.send` holder may message an `ask`/`full` thread without holding the mode key.",
+    "PR creation or a hand-off to a fleet RUN from a thread; changes leave only through the existing publish (commit to `feat/<feature>`) and discard.",
+    "CLI commands for thread agents, modes or approvals.",
+    "Changing a thread's agent (backend) after creation; only the mode changes.",
+    "Per-turn time limits beyond the existing `turnTimeoutSeconds` 900; an approval left waiting longer ends with the turn. The cost cap applies to reported usage only, and an ACP agent that reports no usage counts as zero.",
+    "More than 20 pending approvals per thread: later ones are not listed (the agent still waits for them until they expire).",
+    "A publish of more than 200 changed paths, or a path over 512 characters: it fails as today.",
+    "Publishing code changes made in `ask`/`full` after the thread is switched back to `read`: publish follows the mode at publish time, so those code changes are reported as ignored.",
+    "ACP agents other than `claude`, `codex` and `cursor` (nax-agent-acp also knows `gemini`, `opencode`, `pi`).",
+    "Bumping `@nathapp/nax-agent` beyond `0.91.7`."
+  ],
+  "routingProfile": "native-codex-ds"
+}
