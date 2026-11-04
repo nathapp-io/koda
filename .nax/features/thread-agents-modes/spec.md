@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Thread agents and modes (nax chat parity)
 
 Closes: #368, #369
@@ -56,8 +55,8 @@ Read-only symbols (verified on `feat/thread-agents-modes` = main `7093ced1` + do
   (`apps/runner/src/thread/session-factory.ts:84`); `OpenThreadSessionOptions { jobId; thread: ThreadAssign; worktree;
   tools: CreateAgentSessionOptions['tools']; approvalTimeoutSec }`; it maps `AGENT_SESSION_AUTH_REQUIRED` to
   `agent_not_logged_in` and `AGENT_SESSION_BACKEND_UNAVAILABLE` to `backend_unavailable` (`:60-61`) and resumes with
-  `resumeAgentSession`, falling back to `createAgentSession` on `AGENT_SESSION_NOT_FOUND` (`:126-144`). Resume ignores
-  the profile, so a resumed session can open with a different profile.
+  `resumeAgentSession`, falling back to `createAgentSession` on `AGENT_SESSION_NOT_FOUND` (`:126-144`). Resume does not
+  store the profile; it is passed again on every resume, so a resumed session can open with a different profile.
 - `ThreadJobRun` opens the session with `[...buildThreadTools(...), ...this.kodaToolProxies(thread)]`
   (`apps/runner/src/thread/thread-job-run.ts:325-344`, PROJECT path `:397`); live publish runs through
   `ThreadLivePublish` (`:365-376`), the PUBLISH job through `thread-action-run.ts:31-42`.
@@ -78,7 +77,10 @@ Read-only symbols (verified on `feat/thread-agents-modes` = main `7093ced1` + do
   (`apps/api/src/approvals/approval-gate.service.ts:71-73`) and accepts `alsoKeys` (`:98`).
 - Service-level key check: `this.permissions.can(principal, key, { projectId })` (`workspace-threads.service.ts:190,199`).
 - Permission contract: every catalog key must be declared by a route, tool or system writer, or it is reported as
-  `unused-key` (`apps/api/src/permissions/test-helpers/permission-contract.ts`, `findContractViolations`).
+  `unused-key` (`apps/api/src/permissions/test-helpers/permission-contract.ts`, `findContractViolations`), unless it is
+  listed in `PENDING_SURFACE_KEYS` (`apps/api/src/permissions/catalog.ts:64`); a listed key that some route declares
+  is reported as `pending-key-declared`. US-004 lists both mode keys there (the create route only names them through
+  `alsoKeys`, which is not a declaration); US-005 removes them in the change that declares them on the mode route.
 - `thread.*.own` expands only `OWNABLE_KEYS` (`apps/api/src/permissions/entry-matcher.ts:107`).
 - `RunnerSummaryDto` copies `threadBackends` as `{ native, acp }` (`apps/api/src/fleet/runners/dto/runner-summary.dto.ts:15-24`).
 - From `@nathapp/nax-agent-acp/client` 0.91.7: `acpBackend`, `launchCandidateKind`; a backend's capabilities carry
@@ -124,8 +126,9 @@ Mutated symbols. The baseline exists only to locate the code; it is never the in
   minimal shape and is not made pending).
 - `ThreadDto` (`apps/api/src/fleet/threads/dto/thread.dto.ts:9`) gains `mode: ThreadMode` and `pendingApprovals:
   ThreadPendingApprovalDto[]`; `CreateThreadDto` gains optional `mode`.
-- `threadAuditKey` (`apps/api/src/fleet/threads/thread-audit.ts:4`) gains actions `mode` (audited under the gate key
-  used) and `approve` (audited under `thread.answer`).
+- `threadAuditKey` (`apps/api/src/fleet/threads/thread-audit.ts:4`) gains the action `approve` (audited under
+  `thread.answer`); the mode change records its audit entry with `audit.record` directly under the target mode's gate
+  key (`threadAuditKey` takes no key).
 - `publishThreadDocs` (`apps/runner/src/thread/thread-publish.ts`). Baseline: stages only paths passing
   `isAllowedThreadDocPath`, message `docs(<feature>): spec from koda thread "<title>"`. Target: takes `mode`; in
   `ask`/`full` it stages every changed regular file (`lstat().isFile()`, as today), and when a staged path is not a doc
@@ -144,8 +147,11 @@ Mutated symbols. The baseline exists only to locate the code; it is never the in
   Other `startDaemon` callers (tests) get no ACP probe.
 - Assign parser (`apps/runner/src/supervisor/assign-parser.ts:34-60,320-337`). Target: accepts `cursor` (ACP model by
   `ACP_MODEL_ID_RE`) and keeps a valid `mode`; an invalid `mode` refuses the assign.
-- Placement (`apps/api/src/fleet/jobs/placement-rules.ts:136-151`). Target: a SESSION job whose turn mode is `ask` or
-  `full` needs `runner.capabilities.threadModes === true`, else misfit `thread_modes`.
+- Placement (`apps/api/src/fleet/jobs/placement-rules.ts:136-151`). Target: `PlacementThread` (`:25-31`) gains `mode`,
+  filled from the thread assign by both builders in `placement.service.ts` (`:95`, `:176`); a SESSION job whose mode is
+  `ask` or `full` needs `runner.capabilities.threadModes === true`, else misfit `thread_modes`. `MisfitReason`
+  (`placement-rules.ts:13`), `MISFIT_REASONS` (`apps/api/src/fleet/dashboard/dashboard.types.ts:111-113`) and the
+  `PlacementMisfitDto` enum (`apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:140`) gain `thread_modes`.
 
 ### Approach
 
@@ -163,11 +169,11 @@ transcript store, approval timeout, turn timeout 900 s).
 **Modes (US-004..US-006).** Profile mapping `read` → `read`, `ask` → `ask`, `full` → `full`, native and ACP alike.
 `mode` lives on `ChatThread` and is snapshotted onto each `FleetThreadTurn`; `findThreadAssign` carries the turn's
 mode. Creating a REPO thread with `ask`/`full` passes `alsoKeys: [<mode key>]` to the create gate and the service
-checks the key (`permissions.can`) against the thread's project. `PATCH /projects/:slug/threads/:id/mode` and
-`PATCH /threads/:id/mode` (WORKSPACE threads are always `read`, so this route only accepts `read` there) declare
+checks the key (`permissions.can`) against the thread's project. `PATCH /projects/:slug/threads/:id/mode` declares
 `@Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })`;
 the controller validates the body and gates with the key of the TARGET mode (`read` → `thread.cap.update`), and the
-route commands `rest:threads.mode` / `rest:workspace-threads.mode` are registered under all three keys. The caller must
+route command `rest:threads.mode` is registered under all three keys. There is no WORKSPACE mode route: WORKSPACE
+threads are always `read`. The caller must
 also be the thread's creator or hold an any-row `thread.cap.update`. A change is refused with 409 when
 `sendRefusalFor` answers `turnRunning` (a turn is QUEUED, ASSIGNED or running) or a PUBLISH/DISCARD job is active
 (`threads.busy`); `closing` (a THREAD_CLOSE already queued) still changes the mode without a second command; an idle
@@ -229,6 +235,7 @@ control (REPO threads only), one approval card per `pendingApprovals` entry (too
 - Per-turn time limits beyond the existing `turnTimeoutSeconds` 900; an approval left waiting longer ends with the turn. The cost cap applies to reported usage only, and an ACP agent that reports no usage counts as zero.
 - More than 20 pending approvals per thread: later ones are not listed (the agent still waits for them until they expire).
 - A publish of more than 200 changed paths, or a path over 512 characters: it fails as today.
+- Publishing code changes made in `ask`/`full` after the thread is switched back to `read`: publish follows the mode at publish time, so those code changes are reported as ignored.
 - ACP agents other than `claude`, `codex` and `cursor` (nax-agent-acp also knows `gemini`, `opencode`, `pi`).
 - Bumping `@nathapp/nax-agent` beyond `0.91.7`.
 
@@ -258,14 +265,18 @@ accepts `cursor`.
 Workdir: `apps/api`. Depends on US-001. `ThreadMode`, `ThreadAssign.mode`, `RunnerCapabilities.threadModes` (parsed),
 the `thread_modes` placement misfit, columns `ChatThread.mode` / `FleetThreadTurn.mode` and migration
 `20261124090000_thread_modes` (with the developer role append), keys `thread.mode.ask` / `thread.mode.full` in
-`NEW_KEY_SCOPES` with `thread.mode.` in `HIGH_RISK_PREFIXES`, the developer grant, REPO create with `mode` (gate
-`alsoKeys`, service check), `ThreadDto.mode`, `findThreadAssign` carrying the turn's mode.
+`NEW_KEY_SCOPES` with `thread.mode.` in `HIGH_RISK_PREFIXES` and both keys in `PENDING_SURFACE_KEYS`, the developer
+grant, REPO create with `mode` (gate `alsoKeys`, service check), `ThreadDto.mode`, `findThreadAssign` carrying the
+turn's mode, the protocol `ThreadRunnerLine` `session_started.mode` field, `PlacementThread.mode` from both placement
+builders, `thread_modes` in `MisfitReason`, `MISFIT_REASONS` and the `PlacementMisfitDto` enum, regenerated
+`openapi.json` and CLI client.
 
 ### US-005: Change a thread's mode between turns
 
-Workdir: `apps/api`. Depends on US-004. The two `PATCH .../mode` routes, the multi-key `@Requires`, route commands
-under the three keys, creator/any-row check, refusals, `THREAD_CLOSE` of an idle session, system message, audit key
-`mode`, i18n, regenerated `openapi.json` and CLI client.
+Workdir: `apps/api`. Depends on US-004. `PATCH /projects/:slug/threads/:id/mode`, the multi-key `@Requires`, the route
+command under the three keys, removing both mode keys from `PENDING_SURFACE_KEYS`, creator/any-row check, refusals,
+`THREAD_CLOSE` of an idle session, system message, audit entry under the target key, i18n, regenerated `openapi.json`
+and CLI client.
 
 ### US-006: Runner opens sessions in the thread's mode
 
@@ -322,9 +333,9 @@ Workdir: `apps/web`. Depends on US-005, US-008. `ThreadModeControl`, `ThreadAppr
 **US-004**
 - `apps/api/src/fleet/threads/prisma-chat-thread.repository.ts` — `createThreadJob`
 - `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` — `findThreadAssign`
-- `apps/api/src/permissions/catalog.ts` — `NEW_KEY_SCOPES`, `HIGH_RISK_PREFIXES`
-- `apps/api/src/permissions/system-roles.ts` — developer grants
-- `apps/api/src/fleet/threads/threads.controller.ts` — the create route and gate
+- `apps/api/src/permissions/catalog.ts` — `NEW_KEY_SCOPES`, `HIGH_RISK_PREFIXES`, `PENDING_SURFACE_KEYS`
+- `apps/api/src/fleet/jobs/placement-rules.ts` — `PlacementThread`, `MisfitReason`, the thread rule
+- `apps/api/src/fleet/jobs/placement.service.ts` — the two placement builders
 
 **US-005**
 - `apps/api/src/fleet/threads/threads.controller.ts` — `PATCH :id` precedent
@@ -409,12 +420,14 @@ Workdir: `apps/web`. Depends on US-005, US-008. `ThreadModeControl`, `ThreadAppr
 - `apps/api/src/permissions/catalog.spec.ts` — its `NEW_KEY_SCOPES` mirror gains `thread.mode.ask: 'project'` and `thread.mode.full: 'project'`, and its re-derived `HIGH_RISK_PREFIXES` mirror gains `thread.mode.`.
 - `apps/api/src/fleet/threads/thread-input.spec.ts` — its `toEqual` expectations on the normalised REPO create result gain `mode: 'read'`; PROJECT results stay without `mode`.
 - `apps/api/src/fleet/threads/workspace-thread-input.spec.ts` — its `toEqual` expectations stay without `mode`; a new case refuses `mode: 'ask'`.
+- `apps/api/src/permissions/test-helpers/permission-contract.spec.ts` — its `expectedPending` set gains `thread.mode.ask` and `thread.mode.full`.
+- `apps/api/src/fleet/fleet-openapi.contract.spec.ts` — its pinned placement-misfit enum gains `thread_modes`.
 
 **US-005**
 - `apps/api/src/fleet/threads/threads.controller.keys.spec.ts` — its handler table gains the mode handler with keys `thread.mode.ask`, `thread.mode.full`, `thread.cap.update`, mode `any`, `enforcedBy: 'service'`.
-- `apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts` — its handler table gains the workspace mode handler with the same three keys, mode `any`, `enforcedBy: 'service'`.
-- `apps/api/src/approvals/approval-openapi.contract.spec.ts` — the gated-operation list gains the two mode routes (PATCH /api/projects/{slug}/threads/{id}/mode and PATCH /api/threads/{id}/mode); the count 131 becomes 133.
-- `apps/api/test/integration/permissions/permission-contract.integration.spec.ts` — the gated route count 131 becomes 133 (the two mode routes).
+- `apps/api/src/approvals/approval-openapi.contract.spec.ts` — the gated-operation list gains the mode route (PATCH /api/projects/{slug}/threads/{id}/mode); the count 131 becomes 132.
+- `apps/api/test/integration/permissions/permission-contract.integration.spec.ts` — the gated route count 131 becomes 132 (the mode route).
+- `apps/api/src/permissions/test-helpers/permission-contract.spec.ts` — its `expectedPending` set loses `thread.mode.ask` and `thread.mode.full` again (declared by the mode route now).
 
 **US-006**
 - `apps/runner/test/unit/thread-session-factory.spec.ts` — its assertion that the session opens with `profile: 'read'` becomes: the profile follows `thread.mode` (`read` when absent).
@@ -425,8 +438,8 @@ Workdir: `apps/web`. Depends on US-005, US-008. `ThreadModeControl`, `ThreadAppr
 **US-008**
 - `apps/api/src/fleet/threads/threads.controller.keys.spec.ts` — its handler table gains the approval handler with key `thread.answer`.
 - `apps/api/src/fleet/threads/workspace-threads.controller.keys.spec.ts` — its handler table gains the workspace approval handler with key `thread.answer`.
-- `apps/api/src/approvals/approval-openapi.contract.spec.ts` — the gated-operation list gains the two approval routes (POST /api/projects/{slug}/threads/{id}/approvals/{requestId} and POST /api/threads/{id}/approvals/{requestId}); the count 133 becomes 135.
-- `apps/api/test/integration/permissions/permission-contract.integration.spec.ts` — the gated route count 133 becomes 135 (the two approval routes).
+- `apps/api/src/approvals/approval-openapi.contract.spec.ts` — the gated-operation list gains the two approval routes (POST /api/projects/{slug}/threads/{id}/approvals/{requestId} and POST /api/threads/{id}/approvals/{requestId}); the count 132 becomes 134.
+- `apps/api/test/integration/permissions/permission-contract.integration.spec.ts` — the gated route count 132 becomes 134 (the two approval routes).
 
 **US-009**
 
@@ -534,7 +547,6 @@ None. The new cards are additive components; the existing page specs mount them 
 - [integration] The PATCH to the current mode answers 200 with no system message and no command.
 - [integration] An agent holding `thread.mode.ask` with no approval policy calling the PATCH `{ mode: 'ask' }` gets 202 and the mode is unchanged until approved.
 - [integration] A successful PATCH records an audit entry under the target mode's key whose summary names the from and to modes.
-- [integration] `PATCH /threads/:id/mode` on a WORKSPACE thread with `{ mode: 'ask' }` answers 400 naming `mode`.
 - [integration] The PATCH with `{ mode: 'bogus' }` answers 400 naming `mode`.
 
 ### US-006: Runner opens sessions in the thread's mode
@@ -572,7 +584,7 @@ None. The new cards are additive components; the existing page specs mount them 
 - [integration] The decision POST succeeds while a different text question is pending, and leaves `pendingQuestion` unchanged.
 - [integration] The decision POST for a request id not in `pendingApprovals` answers 409 `threads.noApproval` and creates no command.
 - [integration] The decision POST with `{ decision: 'maybe' }` answers 400 naming `decision`.
-- [integration] The decision POST when the thread has no RUNNING job answers 409 `threads.noSession`.
+- [integration] The decision POST for a request id present in `pendingApprovals` (fixture-written) on a thread whose job is no longer RUNNING answers 409 `threads.noSession` and creates no command.
 - [integration] The decision POST by a member who is not the turn's requester answers 403.
 - [integration] The text answer `POST .../answer` for a request id that is only in `pendingApprovals` still answers 409 `threads.noQuestion`.
 - [integration] A successful decision POST records an audit entry under `thread.answer` whose summary names the decision.
