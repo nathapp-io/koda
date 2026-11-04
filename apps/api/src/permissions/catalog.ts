@@ -63,6 +63,7 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
+  'fleet.job.rule',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
 ]);
@@ -196,6 +197,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'fleet.ingest.backfill': ['global'],
   'fleet.ingest.rerun': ['global'],
   'fleet.job.dispatch': ['project'],
+  'fleet.job.rule': ['project'],
   'fleet.job.cancel': ['project'],
   'fleet.job.requeue': ['project'],
   'fleet.job.read': ['project'],

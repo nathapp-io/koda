@@ -157,6 +157,7 @@ model Project {
   webhookDeliveries  WebhookDelivery[]
   fleetRepos         FleetRepo[]
   fleetJobs          FleetJob[]
+  fleetPrRulings     FleetPrRuling[]
   jobSchedules       JobSchedule[]
   chatThreads        ChatThread[]
   notifications      Notification[]
@@ -1015,6 +1016,35 @@ model JobSchedule {
   @@index([projectId])
 }
 
+/// Durable workflow ruling; the originating RUN and project own its lifetime.
+model FleetPrRuling {
+  id                String   @id @default(cuid())
+  projectId         String
+  repoId            String
+  prNumber          Int
+  jobId             String
+  itemId            String
+  itemKind          String
+  text              String   @db.Text
+  disposition       String // fixed | waived | overridden | confirmed | verified
+  actorType         String // USER | AGENT
+  actorId           String
+  state             String   @default("pending") // pending | applied | skipped | replaced
+  skipReason        String?
+  appliedJobId      String?
+  commentId         String?
+  approvalRequestId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  job     FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([repoId, prNumber, state])
+  @@index([jobId, itemId])
+  @@index([projectId])
+}
+
 /// Fleet S1 slice 2 (spec §2). One dispatched nax run or plan.
 model FleetJob {
   id                 String    @id @default(cuid())
@@ -1099,6 +1129,7 @@ model FleetJob {
   configEdit          FleetConfigEdit?
   assistantToolCalls  AssistantToolCall[]
   runOutcomes         FleetRunOutcome[]
+  prRulings           FleetPrRuling[]
 
   @@index([state])
   @@index([runnerId, state])

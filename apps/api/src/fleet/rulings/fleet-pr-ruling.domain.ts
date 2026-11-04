@@ -1,0 +1,38 @@
+export const FLEET_PR_RULING_REPOSITORY = Symbol('FLEET_PR_RULING_REPOSITORY');
+export type RulingDisposition = 'fixed' | 'waived' | 'overridden' | 'confirmed' | 'verified';
+export type RulingState = 'pending' | 'applied' | 'skipped' | 'replaced';
+
+export interface FleetPrRuling {
+  id: string;
+  projectId: string;
+  repoId: string;
+  prNumber: number;
+  jobId: string;
+  itemId: string;
+  itemKind: string;
+  text: string;
+  disposition: RulingDisposition;
+  actorType: 'USER' | 'AGENT';
+  actorId: string;
+  state: RulingState;
+  skipReason: string | null;
+  appliedJobId: string | null;
+  commentId: string | null;
+  approvalRequestId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+export interface CreateRulingInput { itemId: string; text: string }
+export type NewFleetPrRuling = Omit<FleetPrRuling, 'id' | 'createdAt' | 'updatedAt'>;
+export interface RulingJobTarget {
+  projectId: string;
+  repoId: string;
+  prNumber: number | null;
+  openItems: { id: string; kind: string }[];
+}
+export interface IFleetPrRulingRepository {
+  /** Lock the RUN before replacing its rulings. Must be called inside the write transaction. */
+  lockTarget(slug: string, jobId: string): Promise<RulingJobTarget | null>;
+  replacePending(jobId: string, itemId: string): Promise<void>;
+  insert(data: NewFleetPrRuling): Promise<FleetPrRuling>;
+}

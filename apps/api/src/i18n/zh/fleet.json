@@ -10,6 +10,11 @@
   "repoCheck": { "422": "仓库检查失败：{reason}" },
   "autoReview": { "422": "无法配置自动审查：{reason}。" },
   "fixChecks": { "422": "无法信任检测到的检查：{reason}。" },
+  "rulings": {
+    "invalidText": { "400": "文本必须以支持的裁决关键字及所需证据开头" },
+    "unknownItem": { "404": "未找到工作流条目" },
+    "invalidPr": { "400": "任务必须指定 GitHub 拉取请求" }
+  },
   "jobs": { "404": "未找到任务", "409": "该功能已有进行中的任务：{activeJobId}" },
   "jobState": { "409": "任务状态为 {state}，不允许此操作" },
   "configRequeue": { "409": "此配置编辑因 {outcome} 失败；请重新打开编辑，而不是重新排队" },

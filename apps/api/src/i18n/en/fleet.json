@@ -10,6 +10,11 @@
   "repoCheck": { "422": "Repository check failed: {reason}" },
   "autoReview": { "422": "Auto-review cannot be configured: {reason}." },
   "fixChecks": { "422": "Detected checks cannot be trusted: {reason}." },
+  "rulings": {
+    "invalidText": { "400": "Text must start with a supported ruling and the required evidence" },
+    "unknownItem": { "404": "Workflow item not found" },
+    "invalidPr": { "400": "The job must identify a GitHub pull request" }
+  },
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "configRequeue": { "409": "This config edit failed with {outcome}; reopen the edits instead of requeueing" },

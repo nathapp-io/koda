@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { FleetRulingsModule } from './rulings/fleet-rulings.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { FleetActivityModule } from './activity/fleet-activity.module';
@@ -22,6 +23,6 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 
 /** Fleet S1 (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md). */
 @Module({
-  imports: [FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetReviewsModule, FleetJobsModule, RepoConfigModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule, ThreadsModule, ThreadIngestModule, AssistantModule, KnowledgeModule],
+  imports: [FleetRulingsModule, FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetReviewsModule, FleetJobsModule, RepoConfigModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule, ThreadsModule, ThreadIngestModule, AssistantModule, KnowledgeModule],
 })
 export class FleetModule {}
