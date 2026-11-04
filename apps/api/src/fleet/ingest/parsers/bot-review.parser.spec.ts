@@ -16,6 +16,24 @@ const files = (artifacts: Array<{ name: string; text: string }>, stdout: string 
 const run = (name: string, value: unknown = artifact()) => ({ name: `nax-out/bot/pr-42/${name}/bot-review.json`, text: JSON.stringify(value) });
 
 describe('parseBotReview', () => {
+  it('US009 AC-1 parses caller rulings and drops malformed entries', () => {
+    expect(parseBotReview(files([run('r1', artifact([], { callerRulings: {
+      applied: [null, { item: 2, disposition: 'confirmed' }, { item: 'D-1', disposition: 'confirmed' }],
+      skipped: [{ item: 'G-1' }, { item: 'G-1', reason: 'superseded-by-writer' }],
+    } }))]), 42)).toMatchObject({ callerRulings: {
+      applied: [{ item: 'D-1', disposition: 'confirmed' }], skipped: [{ item: 'G-1', reason: 'superseded-by-writer' }],
+    } });
+  });
+  it('US009 AC-2 drops unknown ignored values', () => {
+    expect(parseBotReview(files([run('r1', artifact([], { callerRulings: { ignored: 'other' } }))]), 42))
+      .toHaveProperty('callerRulings', { applied: [], skipped: [] });
+  });
+  it('US009 AC-3 preserves old done shape', () => {
+    expect(parseBotReview(files([run('r1', artifact([]))]), 42)).toEqual({ outcome: 'done', trusted: true, events: [] });
+  });
+  it.each(['untrusted-pr', 'head-mismatch'])('US009 keeps ignored %s', (ignored) => {
+    expect(parseBotReview(files([run('r1', artifact([], { callerRulings: { ignored } }))]), 42)).toHaveProperty('callerRulings.ignored', ignored);
+  });
   it.each([1, 2147483647, 2147483648, Number.MAX_SAFE_INTEGER, 1e100, 0, -1, 1.5, '12', null])(
     'B1 keeps optional line %s within the SQL INTEGER persistence boundary', async (line) => {
       const parse = parseBotReview(files([run('r1', artifact([event({ line })]))]), 42);

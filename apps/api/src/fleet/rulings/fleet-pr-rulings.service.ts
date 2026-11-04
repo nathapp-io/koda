@@ -8,8 +8,10 @@ import { currentContext, runWithActionContext } from '../../action-context/actio
 import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling } from './fleet-pr-ruling.domain';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { GitHubAppClient } from '../git-broker/github-app-client';
-import type { FleetRepoRef, FleetJobPrRulings } from '../jobs/domain/fleet-job.domain';
+import type { FleetRepoRef, FleetJobPrRulings, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { parseRulingText } from './ruling-keyword';
+import type { BotReviewParse } from '../ingest/parsers/bot-review.parser';
+import { prNumberOfReviewFeature } from '../common/review-jobs';
 
 /** Sole ruling writer and eligibility boundary shared by REST and approved execution. */
 @Injectable()
@@ -42,6 +44,37 @@ export class FleetPrRulingsService {
     } catch {
       // Deliberately do not log provider errors: they may contain the ephemeral credential.
       return { notSent: 'head-unreadable' };
+    }
+  }
+
+  /** Ingest owns the transaction, terminal-state/epoch fence and FIX job lock. */
+  async recordResults(job: Pick<FleetJobRecord, 'id' | 'repoId' | 'feature' | 'prRulings' | 'fixReady'>, parse: BotReviewParse): Promise<void> {
+    const caller = parse.outcome === 'done' ? parse.callerRulings : undefined;
+    const snapshot = job.prRulings;
+    const summaries = new Map<string, { applied: string[]; skipped: string[] }>();
+    if (caller && caller.ignored !== 'head-mismatch' && snapshot && 'rulings' in snapshot) {
+      for (const sent of snapshot.rulings) {
+        const applied = caller.applied.find((entry) => entry.item === sent.item);
+        const skipped = caller.skipped.find((entry) => entry.item === sent.item);
+        const reason = caller.ignored === 'untrusted-pr' ? 'untrusted-pr' : applied ? null : skipped?.reason;
+        if (reason === undefined || reason === 'echo-failed' || reason === 'recorder-failed') continue;
+        const state = reason === null ? 'applied' : 'skipped';
+        const changed = await this.repo.settlePending(sent.rulingId, job.repoId, { state, appliedJobId: job.id, skipReason: reason });
+        if (!changed) continue;
+        const summary = summaries.get(changed.jobId) ?? { applied: [], skipped: [] };
+        summary[state].push(`${sent.item} (${state === 'applied' ? applied?.disposition : reason})`);
+        summaries.set(changed.jobId, summary);
+      }
+      for (const [runId, summary] of summaries) {
+        const parts = [summary.applied.length ? `applied ${summary.applied.join(', ')}` : '', summary.skipped.length ? `skipped ${summary.skipped.join(', ')}` : ''].filter(Boolean);
+        await this.ticketEffects.commentOnRulingResult(runId, `Finish ${job.id}: ${parts.join('; ')}`);
+      }
+    }
+    const prNumber = prNumberOfReviewFeature(job.feature);
+    if (job.fixReady?.markedReady && prNumber !== null) {
+      for (const runId of await this.repo.runsForPr(job.repoId, prNumber)) {
+        await this.ticketEffects.commentOnReady(runId, `PR #${prNumber} marked ready by FIX ${job.id}`);
+      }
     }
   }
 

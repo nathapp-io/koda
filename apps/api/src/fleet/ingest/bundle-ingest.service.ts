@@ -110,6 +110,7 @@ export class BundleIngestService {
         reviewPrNumber === null ? {} : { reviewPrNumber });
       const pending = parsed.botReview
         ? (await this.reviewEvents.recordForJob(job, claim.leaseEpoch, parsed.botReview)).pending : 0;
+      if (reviewEligible && job.command === 'FIX') await this.prRulings.recordResults(job, parsed.botReview ?? { outcome: 'absent' });
       // S5b 3c-2-D1: outcomes are stored for RUN jobs only; every other command writes an empty list.
       const isRun = job.command === 'RUN';
       await this.repo.replaceRows(

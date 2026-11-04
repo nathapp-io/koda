@@ -3,7 +3,7 @@ import { AbstractPrismaRepository, PrismaService, type PrismaModelDelegate } fro
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { FleetPrRuling as RulingRow, PrismaClient } from '../../generated/prisma/client';
 import { prNumberFor } from '../sync/pr-attribution.service';
-import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget } from './fleet-pr-ruling.domain';
+import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget, RulingResultPatch } from './fleet-pr-ruling.domain';
 
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
@@ -115,6 +115,30 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
         { createdAt: { lt: job.createdAt } }, { createdAt: job.createdAt, id: { lt: job.id } },
       ] } }, data: { state: 'replaced' },
     });
+  }
+
+  /** Atomic pending predicate fences re-rulings; only snapshot ids are eligible. In ingest's transaction. */
+  async settlePending(id: string, repoId: string, patch: RulingResultPatch): Promise<{ jobId: string } | null> {
+    const rows = await this.prisma.client.fleetPrRuling.updateManyAndReturn({
+      where: { id, repoId, state: 'pending' }, data: patch, select: { jobId: true },
+    });
+    return rows[0] ?? null;
+  }
+
+  async runsForPr(repoId: string, prNumber: number): Promise<string[]> {
+    const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId } });
+    if (!repo || repo.provider !== 'github') return [];
+    const result: string[] = [];
+    const pageSize = 100;
+    for (let page = 0; page < 1000; page++) {
+      const rows = await this.prisma.client.fleetJob.findMany({
+        where: { repoId, command: 'RUN', resultPrUrl: { endsWith: `/pull/${prNumber}` } },
+        select: { id: true, resultPrUrl: true }, orderBy: { id: 'asc' }, take: pageSize, skip: page * pageSize,
+      });
+      for (const row of rows) if (row.resultPrUrl && prNumberFor({ ...repo, provider: 'github' }, row.resultPrUrl) === prNumber) result.push(row.id);
+      if (rows.length < pageSize) return result;
+    }
+    throw new Error('Fleet ruling ready RUN lookup exceeded page limit');
   }
 
   async replacePending(jobId: string, itemId: string): Promise<void> {

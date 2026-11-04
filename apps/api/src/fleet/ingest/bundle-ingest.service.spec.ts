@@ -16,7 +16,7 @@ function make(attempts: number, opts: { expired?: boolean; storeFails?: boolean 
   };
   const store = { get: vi.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
   const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never,
-    { record: vi.fn() } as never, { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined) } as never,
+    { record: vi.fn() } as never, { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined), recordResults: vi.fn().mockResolvedValue(undefined) } as never,
   );
   return { svc, repo };
 }
@@ -137,7 +137,7 @@ describe('BundleIngestService audit coverage (permissions P2 US-007)', () => {
       { record: vi.fn() } as never, { signal: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never,
       { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never,
       { record: vi.fn(async () => undefined) } as never,
-      { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined) } as never,
+      { recordForJob: vi.fn().mockResolvedValue({ pending: 0 }) } as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined), recordResults: vi.fn().mockResolvedValue(undefined) } as never,
     );
     return { svc, repo, seen };
   }
@@ -217,7 +217,7 @@ describe('review event ingest', () => {
       { record: vi.fn() } as never, { signal: vi.fn() } as never,
       { run: async (fn: () => Promise<unknown>) => { order.push('start'); const result = await fn(); order.push('commit'); return result; } } as never,
       { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, events as never,
-      { record: vi.fn() } as never, reviewEvents as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined) } as never,
+      { record: vi.fn() } as never, reviewEvents as never, { replaceOlderRuns: vi.fn().mockResolvedValue(undefined), recordResults: vi.fn().mockResolvedValue(undefined) } as never,
     );
     return { svc, repo, reviewEvents, events, order, job };
   }

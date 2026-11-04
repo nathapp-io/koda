@@ -159,9 +159,13 @@ export class PrismaFleetTicketsRepository {
     });
   }
 
-  async createSystemComment(ticketId: string, body: string): Promise<{ id: string }> {
+  async hasCommentBody(ticketId: string, body: string): Promise<boolean> {
+    return !!await this.db.comment.findFirst({ where: { ticketId, body }, select: { id: true } });
+  }
+
+  async createSystemComment(ticketId: string, body: string, type: CommentType = CommentType.GENERAL): Promise<{ id: string }> {
     return this.db.comment.create({
-      data: { ticketId, body, type: CommentType.GENERAL, authorUserId: null, authorAgentId: null },
+      data: { ticketId, body, type, authorUserId: null, authorAgentId: null },
       select: { id: true },
     });
   }

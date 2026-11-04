@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { TicketStatus, TicketType } from '../../common/enums';
+import { CommentType, TicketStatus, TicketType } from '../../common/enums';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -68,6 +68,25 @@ export class FleetJobTicketEffects {
   /** Authored as the ruling principal, inside the same transaction (fleet.job.rule is sufficient). */
   createRulingComment(ticketId: string, body: string, principal: KodaPrincipal): Promise<{ id: string }> {
     return this.repo.createRulingComment(ticketId, body, principal);
+  }
+
+  commentOnRulingResult(runId: string, body: string): Promise<void> {
+    return this.commentOnFinish(runId, body, CommentType.RULING);
+  }
+
+  commentOnReady(runId: string, body: string): Promise<void> {
+    return this.commentOnFinish(runId, body, CommentType.GENERAL);
+  }
+
+  /** Called inside FIX ingest's transaction and job lock, never via the failure notifiedEpoch claim. */
+  private async commentOnFinish(runId: string, body: string, type: CommentType): Promise<void> {
+    const job = await this.repo.findJobForEffects(runId);
+    if (!job) return;
+    for (const ticket of await this.repo.findTicketsForJob(runId)) {
+      if (await this.repo.hasCommentBody(ticket.ticketId, body)) continue;
+      const comment = await this.repo.createSystemComment(ticket.ticketId, body, type);
+      await this.audit.record({ key: 'comment.create', resourceType: 'comment', resourceId: comment.id, projectId: job.projectId, summary: `on ${ticket.ref}` });
+    }
   }
 
   /**
