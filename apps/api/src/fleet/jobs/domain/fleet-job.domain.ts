@@ -235,6 +235,8 @@ export interface FleetRepoRef {
   defaultBranch: string;
   githubInstallationId: bigint | null;
   fixTrustDetectedChecks?: boolean;
+  /** FIX override: skip the default-branch protection check before minting FIX write credentials. */
+  fixAllowUnprotected?: boolean;
 }
 
 export interface ActiveJobRef {

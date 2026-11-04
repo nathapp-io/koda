@@ -10,6 +10,7 @@ import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
+import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
 
 export const FLEET_REPO_ROUTE_VARIANTS = {
   create: 'rest:fleet-repos.create',
@@ -17,6 +18,7 @@ export const FLEET_REPO_ROUTE_VARIANTS = {
   check: 'rest:fleet-repos.check',
   autoReview: 'rest:fleet-repos.auto-review',
   fixChecks: 'rest:fleet-repos.fix-checks',
+  fixUnprotected: 'rest:fleet-repos.fix-unprotected',
 } as const;
 
 /** The `{ id, patch }` input the auto-review route freezes: an id-addressed write with a body. */
@@ -29,6 +31,12 @@ interface AutoReviewInput {
 interface FixChecksInput {
   id: string;
   patch: UpdateFixChecksDto;
+}
+
+/** The same `{ id, patch }` shape for the fix-unprotected override route. */
+interface FixUnprotectedInput {
+  id: string;
+  patch: UpdateFixUnprotectedDto;
 }
 
 @Injectable()
@@ -78,6 +86,15 @@ export class FleetRepoRouteCommands implements OnModuleInit {
         return { id, patch: parseBody(UpdateFixChecksDto, (input as { patch?: unknown }).patch) };
       },
       run: (principal, input) => this.repos.configureFixChecks(principal, input.id, input.patch),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<FixUnprotectedInput, FleetRepoDto>({
+      key: 'fleet.repo.review.configure', variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
+      parse: (input) => {
+        const { id } = parseRouteInput(input, ['id']);
+        return { id, patch: parseBody(UpdateFixUnprotectedDto, (input as { patch?: unknown }).patch) };
+      },
+      run: (principal, input) => this.repos.configureFixUnprotected(principal, input.id, input.patch),
       toResult: (result) => result,
     }, this.loader));
   }

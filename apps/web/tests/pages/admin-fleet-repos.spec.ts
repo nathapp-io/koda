@@ -73,10 +73,10 @@ function mountRepos(
   const app = mountSfc(reposPage, {
     components: uiStubs,
     // The reachability badge is mounted for real: its label is the page's main output.
-    fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks'],
+    fleetComponents: ['FleetRepoReachabilityBadge', 'FleetRepoAutoReview', 'FleetRepoFixChecks', 'FleetRepoFixUnprotected'],
     alias: {
       '~/composables/useApi': apiModule,
-      '~/composables/useFleetRepos': { useFleetRepos: () => ({ setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
+      '~/composables/useFleetRepos': { useFleetRepos: () => ({ setFixChecks: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setFixUnprotected: async () => ({ kind: 'pending', request: { id: 'ap1' } }), setAutoReview: async () => ({ kind: 'pending', request: { id: 'ap1' } }) }) },
     },
     globals: {
       ref, computed, watch, nextTick,
@@ -123,10 +123,12 @@ describe('Fleet admin Repos page (behaviour)', () => {
     delete (globalThis as Record<string, unknown>).useApi
   })
 
-  test('mounts fix-checks switches only for GitHub repos with installations (AC-8)', async () => {
+  test('mounts fix-checks and fix-unprotected switches only for GitHub repos with installations (AC-8)', async () => {
     const { app, settle, unmount } = mountRepos({ repos: [repo('github'), repo('gitlab', { provider: 'gitlab', githubInstallationId: null }), repo('no-install', { githubInstallationId: null })] })
     await settle()
-    expect(app.find('[data-stub="switch"]')).toHaveLength(2)
+    const labels = app.find('[data-stub="switch"]').map((node) => node.props['aria-label'])
+    // Only the one GitHub repo with an installation gets switches: auto-review, fix-checks and the unprotected override.
+    expect(labels).toEqual(['Enable automatic reviews', 'Trust detected checks for fixes', 'Allow fixes on an unprotected default branch'])
     unmount()
   })
 

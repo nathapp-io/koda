@@ -132,6 +132,8 @@ export interface FleetRepo {
   autoReviewEnabledByType: 'USER' | 'AGENT' | null
   autoReviewEnabledAt: string | null
   fixTrustDetectedChecks: boolean
+  /** FIX may push although the default branch is unprotected (audited override, default off). */
+  fixAllowUnprotected: boolean
   createdAt: string
 }
 

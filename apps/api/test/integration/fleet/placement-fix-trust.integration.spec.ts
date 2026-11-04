@@ -62,6 +62,16 @@ describeIntegration('FIX assignment detected-check trust (PG)', () => {
     expect(await jobs.findRepo(target.id)).toEqual(expect.objectContaining({ fixTrustDetectedChecks: true }));
   });
 
+  it('findRepo reads the fixAllowUnprotected override the git token broker uses, default false', async () => {
+    const target = await prisma.fleetRepo.create({ data: {
+      projectId: world.projectId, provider: 'github', owner: 'acme', name: 'fix-unprotected-default', defaultBranch: 'main',
+      githubInstallationId: BigInt(77), createdById: world.ids.root,
+    } });
+    expect(await jobs.findRepo(target.id)).toEqual(expect.objectContaining({ fixAllowUnprotected: false }));
+    await prisma.fleetRepo.update({ where: { id: target.id }, data: { fixAllowUnprotected: true } });
+    expect(await jobs.findRepo(target.id)).toEqual(expect.objectContaining({ fixAllowUnprotected: true }));
+  });
+
   it('AC-6: dispatch stores true in the actual ASSIGN command for an enabled FIX repo', async () => {
     await prisma.fleetRepo.update({ where: { id: world.repoId }, data: { fixTrustDetectedChecks: true } });
     const result = await dispatch(61);

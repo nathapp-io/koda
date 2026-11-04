@@ -1657,6 +1657,11 @@
       "autoReview": {
         "heading": "Auto-review", "toggle": "Enable automatic reviews", "edit": "Edit", "title": "Auto-review settings", "profiles": "Profiles (comma-separated)", "maxCost": "Maximum cost (USD)", "save": "Save", "pending": "Approval is pending; the saved setting has not changed.", "profilesInvalid": "Use at most 8 profiles, each no longer than 64 characters.", "maxCostInvalid": "Enter a cost from 0.0001 to 10000 with at most 4 decimal places."
       },
+      "fixUnprotected": {
+        "toggle": "Allow fixes on an unprotected default branch",
+        "pending": "Approval is pending; the saved setting has not changed.",
+        "hint": "Override: FIX jobs may push even though the default branch has no protection rule. Leave off unless the repository cannot be protected."
+      },
       "fixChecks": {
         "toggle": "Trust detected checks for fixes",
         "pending": "Approval is pending; the saved setting has not changed.",

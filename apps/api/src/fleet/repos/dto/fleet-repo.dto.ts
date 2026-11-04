@@ -19,6 +19,8 @@ export class FleetRepoDto {
   @ApiPropertyOptional({ nullable: true }) declare autoReviewEnabledAt: string | null;
   @ApiProperty({ description: 'Allow FIX to run the check commands it detects for a base branch without nax check commands' })
   declare fixTrustDetectedChecks: boolean;
+  @ApiProperty({ description: 'Allow FIX to push although the default branch is unprotected (override, default off)' })
+  declare fixAllowUnprotected: boolean;
 
   static from(r: FleetRepoRecord): FleetRepoDto {
     return Object.assign(new FleetRepoDto(), {
@@ -29,6 +31,7 @@ export class FleetRepoDto {
       autoReviewEnabledByType: r.autoReviewEnabledByType,
       autoReviewEnabledAt: r.autoReviewEnabledAt?.toISOString() ?? null,
       fixTrustDetectedChecks: r.fixTrustDetectedChecks === true,
+      fixAllowUnprotected: r.fixAllowUnprotected === true,
     });
   }
 }

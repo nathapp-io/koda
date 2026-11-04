@@ -25,6 +25,11 @@ export interface FleetRepoRecord {
    * absent means `false` (the migration default).
    */
   fixTrustDetectedChecks?: boolean;
+  /**
+   * FIX override: a FIX may mint write credentials although the default branch is unprotected. Optional so
+   * older fixtures stay valid; absent means `false` (the migration default).
+   */
+  fixAllowUnprotected?: boolean;
 }
 
 export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
@@ -34,11 +39,13 @@ export type AutoReviewPatch = Partial<Pick<FleetRepoRecord,
 export interface IFleetRepoRepository {
   findProject(slug: string): Promise<{ id: string; slug: string } | null>;
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
-  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks'>): Promise<FleetRepoRecord>;
+  create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
   updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>;
   /** The fix-checks setting (fleet FIX US-001): one boolean column, answered as the updated record. */
   updateFixChecks(id: string, value: boolean): Promise<FleetRepoRecord>;
+  /** The FIX unprotected-branch override: one boolean column, answered as the updated record. */
+  updateFixUnprotected(id: string, value: boolean): Promise<FleetRepoRecord>;
   /**
    * The project's anchor repo (fleet S5b-R13): the smallest `createdAt`, ties broken by the smallest `id`; null when
    * the project has no fleet repo. A PROJECT thread uses it as bookkeeping only — no checkout, no git token.

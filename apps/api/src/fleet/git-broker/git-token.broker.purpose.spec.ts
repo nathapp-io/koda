@@ -57,6 +57,30 @@ describe('GitTokenBroker job purposes', () => {
     expect(result).toEqual({ ok: true, token: { jobId: 'j1', token: 'minted', username: 'x-access-token', expiresAt: minted.expiresAt.toISOString() } });
   });
 
+  it('a repo with fixAllowUnprotected mints FIX write credentials without the protection check', async () => {
+    github.isBranchProtected.mockResolvedValue(false);
+    const result = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: { ...repo, fixAllowUnprotected: true }, purpose: 'fix' }, NOW);
+    expect(github.isBranchProtected).not.toHaveBeenCalled();
+    expect(github.mintReadOnlyToken).not.toHaveBeenCalled();
+    expect(github.mintInstallationToken).toHaveBeenCalledExactlyOnceWith(repo.githubInstallationId, repo.name);
+    expect(result).toEqual({ ok: true, token: { jobId: 'j1', token: 'minted', username: 'x-access-token', expiresAt: minted.expiresAt.toISOString() } });
+  });
+
+  it('fixAllowUnprotected false still refuses an unprotected default branch', async () => {
+    github.isBranchProtected.mockResolvedValue(false);
+    await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: { ...repo, fixAllowUnprotected: false }, purpose: 'fix' }, NOW)).resolves.toEqual({
+      ok: false, error: { jobId: 'j1', reason: 'default_branch_unprotected' },
+    });
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('fixAllowUnprotected does not change a REVIEW mint', async () => {
+    const result = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: { ...repo, fixAllowUnprotected: true }, purpose: 'review' }, NOW);
+    expect(github.mintReviewToken).toHaveBeenCalledTimes(1);
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, token: { token: 'review' } });
+  });
+
   it('AC-9, AC-10: maps protection-check errors and never mints a write token', async () => {
     github.isBranchProtected.mockRejectedValue(new RepoCheckException('provider_error'));
     await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo, purpose: 'fix' }, NOW)).resolves.toEqual({

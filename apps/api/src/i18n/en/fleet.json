@@ -10,6 +10,7 @@
   "repoCheck": { "422": "Repository check failed: {reason}" },
   "autoReview": { "422": "Auto-review cannot be configured: {reason}." },
   "fixChecks": { "422": "Detected checks cannot be trusted: {reason}." },
+  "fixUnprotected": { "422": "FIX on an unprotected default branch cannot be allowed: {reason}." },
   "rulings": {
     "notDraft": { "409": "Only draft RUN jobs with a GitHub pull request can be ruled" },
     "notLatest": { "409": "Only the latest RUN of this pull request can be ruled" },
