@@ -181,15 +181,17 @@ export class HostExecutor implements JobExecutor {
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     const env: Record<string, string | undefined> = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path };
     // US-006: a REVIEW overlays the stripped environment AFTER stripping, so a copy the daemon inherited cannot leak in.
-    const review = reviewJob;
-    if (review) Object.assign(env, await this.reviewEnv(job, jobDir));
+    // #395: a GitHub RUN gets the same overlay, best-effort (see runIdentityEnv).
+    const identity = reviewJob ? await this.reviewEnv(job, jobDir) : await this.runIdentityEnv(job, jobDir);
+    Object.assign(env, identity);
+    const tokenWritten = identity['NAX_FORGE_TOKEN_FILE'] !== undefined;
     const options: SpawnNaxOptions = {
       cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'), env,
     };
     try {
       return this.startNax(argv, options);
     } catch (error) {
-      if (review) await this.dropReviewToken(job, jobDir);   // no nax started, so nothing else deletes the token file
+      if (tokenWritten) await this.dropReviewToken(job, jobDir);   // no nax started, so nothing else deletes the token file
       throw error;
     }
   }
@@ -259,6 +261,26 @@ export class HostExecutor implements JobExecutor {
     const login = job.assign.review?.botLogin;
     if (login === undefined) throw new Error('invalid review');   // buildNaxArgv already refused such an assign
     return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, token), NAX_FORGE_LOGIN: login };
+  }
+
+  /**
+   * #395: nax posts a published draft's item threads and item index only after reading "who am I", which a GitHub App
+   * installation token cannot answer. A GitHub RUN therefore gets the REVIEW/FIX identity (token file + the App bot
+   * login, `gitIdentity.name`). Best-effort: a RUN worked before without it, so a refused token only loses the index.
+   * Interim: nax then uses this one token for every forge call, so a RUN longer than the token's remaining life
+   * (FORGE_TOKEN_MIN_REMAINING_MS at start) cannot publish; a login-only nax identity removes that limit.
+   */
+  private async runIdentityEnv(job: JobRow, jobDir: string): Promise<Record<string, string>> {
+    if (job.command !== 'RUN' || job.assign.repo.provider !== 'github') return {};
+    const getFreshToken = this.deps.credentials.freshToken;
+    const result = getFreshToken
+      ? await getFreshToken.call(this.deps.credentials, job, FORGE_TOKEN_MIN_REMAINING_MS)
+      : { ok: false as const, reason: 'git token: none' };
+    if (!result.ok) {
+      this.deps.log.warn('RUN starts without a forge identity', { jobId: job.jobId, reason: result.reason });
+      return {};
+    }
+    return { NAX_FORGE_TOKEN_FILE: await writeReviewToken(jobDir, result.token), NAX_FORGE_LOGIN: job.assign.gitIdentity.name };
   }
 
   isAlive(pid: number): boolean {
