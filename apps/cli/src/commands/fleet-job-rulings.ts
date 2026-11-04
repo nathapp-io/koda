@@ -7,8 +7,17 @@ import { table } from '../utils/output';
 
 interface Options { project?: string; json?: boolean }
 
+function validationCommand(command: Command): Command {
+  const commanderError = command.error.bind(command);
+  command.error = (message, options): never => {
+    commanderError(message, options?.code === 'commander.unknownOption' ? { ...options, exitCode: 3 } : options);
+    throw new Error(message);
+  };
+  return command;
+}
+
 function registerList(job: Command): void {
-  job.command('rulings <jobId>')
+  validationCommand(job.command('rulings <jobId>'))
     .description('List rulings recorded on a fleet job')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
@@ -24,7 +33,7 @@ function registerList(job: Command): void {
 }
 
 function registerCreate(job: Command): void {
-  job.command('rule <jobId> <itemId> <text>')
+  validationCommand(job.command('rule <jobId> <itemId> <text>'))
     .description('Record a ruling on an open fleet job item')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (jobId: string, itemId: string, text: string, options: Options) => {

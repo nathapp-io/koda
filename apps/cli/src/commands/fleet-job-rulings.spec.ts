@@ -9,7 +9,7 @@ import { fleetRulingsControllerCreate, fleetRulingsControllerList } from '../gen
 import { resolveContext } from '../config';
 import { registerFleetJobRulings } from './fleet-job-rulings';
 
-const ruling = { id: 'rule-1', itemId: 'D-1', disposition: 'confirmed', state: 'pending', actorType: 'USER', skipReason: null };
+const ruling = { id: 'rule-1', itemId: 'D-1', disposition: 'confirmed', state: 'skipped', actorType: 'USER', skipReason: 'unknown-item' };
 describe('fleet job rulings', () => {
   let program: Command;
   let exit: jest.SpyInstance;
@@ -31,7 +31,7 @@ describe('fleet job rulings', () => {
   it('lists rulings in a table with the requested fields', async () => {
     await run('fleet', 'job', 'rulings', 'j1');
     const out = log.mock.calls.flat().join(' ');
-    for (const value of ['D-1', 'confirmed', 'pending', 'USER']) expect(out).toContain(value);
+    for (const value of ['D-1', 'confirmed', 'skipped', 'USER', 'unknown-item', 'Skip reason']) expect(out).toContain(value);
     expect(fleetRulingsControllerList).toHaveBeenCalledWith({ path: { slug: 'p', id: 'j1' } });
   });
   it('outputs the ruling list as JSON', async () => {
@@ -50,7 +50,7 @@ describe('fleet job rulings', () => {
     expect(exit).toHaveBeenLastCalledWith(3);
   });
   it('rejects an invalid option before any API call', async () => {
-    await expect(run('fleet', 'job', 'rulings', 'j1', '--unknown')).rejects.toThrow();
+    await expect(run('fleet', 'job', 'rulings', 'j1', '--unknown')).rejects.toMatchObject({ exitCode: 3 });
     expect(fleetRulingsControllerList).not.toHaveBeenCalled();
   });
   it.each([[400, 3], [401, 2], [403, 2], [404, 4], [500, 1]])('maps API status %i to exit %i', async (status, code) => {
