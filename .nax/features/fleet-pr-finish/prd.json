@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T06:26:27.574Z",
+  "updatedAt": "2026-11-04T06:37:19.166Z",
   "userStories": [
     {
       "id": "US-001",
@@ -910,14 +910,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security override: assistant/MCP write registration must preserve project permissions, approval policy, requester attribution and stale-target checks across tool execution."
+        "reasoning": "Security override: assistant/MCP write registration must preserve project permissions, approval policy, requester attribution and stale-target checks across tool execution.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
@@ -969,7 +972,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1489d772d5ab24eed03d741890ed173cb76315f9"
     },
     {
       "id": "US-011",
