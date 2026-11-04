@@ -102,6 +102,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         const deltaText = new Map<string, string>();
         const resetTurns = new Set<string>();
         const questions: Array<{ requestId: string; text: string }> = [];
+        // An attempt that is over (the job reached a terminal state) or that no longer holds the job (a requeue gave the
+        // thread a new leaseEpoch) is a boot catch-up replay: its transcript still folds, but its session state must not.
+        const stale = isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch;
         let threadChanged = false;
         if (threadId && job) {
           for (const { line } of batch.lines) {
@@ -117,8 +120,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
               const folded = await this.foldToolLine(threadId, line);
               skippedLines += folded.skipped;
               // thread-agents-modes US-007: the pending list folds on its own, so a request with no callId still
-              // lists (the tool-summary fold only knows lines that name a call).
-              if (await this.foldPendingApproval(threadId, line)) threadChanged = true;
+              // lists (the tool-summary fold only knows lines that name a call). A replay never moves it (US-007 F1).
+              if (await this.foldPendingApproval(threadId, line, stale)) threadChanged = true;
               if ('turnId' in line && folded.messageId) {
                 changedTurns.add(line.turnId);
                 messageEventTurns.add(line.turnId);
@@ -141,7 +144,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
               }
             }
             else if (isSessionLine(line)) {
-              const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch, job.runnerId);
+              const erroredIds = await this.foldSessionLine(batch, threadId, line, stale, job.runnerId);
               for (const id of erroredIds) messageIds.add(id);
               threadChanged = true;
             }
@@ -414,10 +417,17 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * on, oldest first and at most `MAX_PENDING_APPROVALS`. An `approval_requested` line that is answerable and complete
    * appends its entry; the matching `approval_resolved` removes it. It runs beside the tool-summary fold, so a request
    * with no callId still lists, and a minimal or informational line changes nothing. The caller holds the thread row
-   * lock. Returns whether the thread row changed (which publishes its live event).
+   * lock.
+   *
+   * A `stale` attempt (its job is over, or a requeue moved the job to another leaseEpoch) never moves the list
+   * (US-007 F1): a crashed stream need not carry a closing event, so a boot catch-up would otherwise append a request
+   * the job-end cleanup already dropped — or resolve a newer session's request — long after the session is gone.
+   *
+   * Returns whether the thread row changed (which publishes its live event).
    */
-  private async foldPendingApproval(threadId: string, line: ToolThreadLine): Promise<boolean> {
+  private async foldPendingApproval(threadId: string, line: ToolThreadLine, stale: boolean): Promise<boolean> {
     if (line.type !== 'approval_requested' && line.type !== 'approval_resolved') return false;
+    if (stale) return false;
     const entry = line.type === 'approval_requested' ? this.pendingEntryOf(line) : null;
     if (line.type === 'approval_requested' && entry === null) return false;
     const db = this.prisma.client;

@@ -14,6 +14,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { ThreadJobEffects } from '../../../src/fleet/threads/thread-job-effects';
+import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
+import type { ThreadLine } from '../../../src/fleet/threads/ingest/thread-line';
 import type { FleetJobRecord } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -152,5 +154,52 @@ describeIntegration('fleet thread pending approvals (PG, US-007)', () => {
     const res = await request(server).get(`/api/projects/web/threads/${s.threadId}`)
       .set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
     expect(data<{ pendingApprovals: unknown }>(res).pendingApprovals).toEqual([]);
+  });
+
+  /** Folds parsed lines the way `ThreadIngestBootstrap` catch-up does: as the `thread` system component. */
+  const foldLines = (job: { id: string }, lines: ThreadLine[], endOffset = 1024, leaseEpoch = 1): Promise<unknown> =>
+    withTestActor({ type: 'SYSTEM', id: 'thread' }, () =>
+      app.get(PrismaThreadIngestRepository, { strict: false }).fold({
+        jobId: job.id, leaseEpoch, badLines: 0, endOffset,
+        lines: lines.map((line, i) => ({ line, endOffset: (i + 1) * 10 })),
+      }));
+  const listApproval = (requestId: string, summary = 'Run the test suite'): ThreadLine => ({
+    type: 'approval_requested', requestId, tool: 'bash', summary, command: 'bun run test', reason: 'reads the worktree',
+    expiresAt: EXPIRES_AT, unsandboxed: true, answerable: true,
+  });
+
+  it('US-007 F1: catch-up after the crash leaves the cleared list cleared and still folds the transcript', async () => {
+    const s = await seedThreadJobFor(prisma, world, runner, { feature: 'approvals-f1-crash' });
+    await foldLines({ id: s.jobId }, [listApproval('r1')]);
+    expect(await pendingOf(s)).toEqual([expect.objectContaining({ requestId: 'r1' })]);
+    await prisma.fleetJob.update({ where: { id: s.jobId }, data: { state: 'CRASHED', finishedAt: new Date() } });
+    const job = await prisma.fleetJob.findUniqueOrThrow({ where: { id: s.jobId } });
+    await withTestActor({ type: 'RUNNER', id: runner.runnerId }, () =>
+      app.get(ThreadJobEffects, { strict: false }).onJobEnded(job as unknown as FleetJobRecord));
+    expect(await pendingOf(s)).toBeNull();
+    // A crashed stream need not carry a closing event: the boot catch-up replays the request the cleanup dropped.
+    await foldLines({ id: s.jobId }, [listApproval('r1'), { type: 'turn_start', turnId: 't9' }], 2048);
+    expect(await pendingOf(s)).toBeNull();
+    expect(await prisma.chatMessage.count({ where: { threadId: s.threadId, turnId: 't9' } })).toBe(1);
+  });
+
+  it('US-007 F1: a replayed terminated attempt leaves the live session request listed', async () => {
+    const s = await fresh('approvals-f1-live');
+    await foldLines({ id: s.jobId }, [listApproval('r-live', 'Live')]);
+    // The attempt that held the job is over; the thread's list belongs to the session that is live now.
+    const dead = await prisma.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${s.threadId}`,
+      profiles: [], selectorLabels: [], maxCostUsd: '5', requestedById: world.ids.dev, state: 'CRASHED',
+      runnerId: runner.runnerId, leaseEpoch: 1, threadId: s.threadId,
+    } });
+    await foldLines({ id: dead.id }, [listApproval('r-dead', 'Dead'), { type: 'approval_resolved', requestId: 'r-live', decidedBy: 'user' }], 512);
+    expect(await pendingOf(s)).toEqual([expect.objectContaining({ requestId: 'r-live' })]);
+  });
+
+  it('US-007 F1: a replay under a replaced lease epoch leaves the current attempt list alone', async () => {
+    const s = await fresh('approvals-f1-epoch');
+    await prisma.fleetJob.update({ where: { id: s.jobId }, data: { leaseEpoch: 2 } });
+    await foldLines({ id: s.jobId }, [listApproval('r-old')], 512, 1);
+    expect(await pendingOf(s)).toBeNull();
   });
 });

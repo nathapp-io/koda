@@ -895,3 +895,43 @@ describe('PrismaThreadIngestRepository.fold pending approvals (thread-agents-mod
     expect(linked.events.filter((event) => event.type === 'message')).toHaveLength(1);
   });
 });
+
+describe('PrismaThreadIngestRepository.fold pending approvals of a stale attempt (US-007 F1)', () => {
+  it('US-007 F1: a terminated job appends nothing to the pending list', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED' });
+    await repoWith(client).fold(batch([approval({ requestId: 'r1' })]));
+    expect(thread.pendingApprovals).toBeNull();
+  });
+
+  it('US-007 F1: catch-up after a crash leaves the cleared list cleared', async () => {
+    // onJobEnded cleared the list when the job crashed; the un-folded request line of that attempt must not restore it.
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED', pendingApprovals: Prisma.DbNull });
+    await repoWith(client).fold(batch([start('t1'), approval({ requestId: 'r1' })]));
+    expect(thread.pendingApprovals).toBe(Prisma.DbNull);
+  });
+
+  it('US-007 F1: a mismatched lease epoch leaves another attempt pending list alone', async () => {
+    // The job was requeued under epoch 2; this batch is the epoch-1 attempt replaying its un-folded request.
+    const live = [{ requestId: 'r-live', tool: 'bash', summary: 'Run', expiresAt: '2026-11-24T01:00:00.000Z' }];
+    const { client, thread } = fakeClient({ nextSeq: 2, leaseEpoch: 2, pendingApprovals: live });
+    await repoWith(client).fold(batch([approval({ requestId: 'r-dead' })]));
+    expect(thread.pendingApprovals).toEqual(live);
+  });
+
+  it('US-007 F1: a stale approval_resolved does not remove a newer session request', async () => {
+    const live = [{ requestId: 'r1', tool: 'bash', summary: 'Run', expiresAt: '2026-11-24T01:00:00.000Z' }];
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'COMPLETED', pendingApprovals: live });
+    await repoWith(client).fold(batch([{ type: 'approval_resolved', requestId: 'r1', decidedBy: 'user' }]));
+    expect(thread.pendingApprovals).toEqual(live);
+  });
+
+  it('US-007 F1: a stale attempt still folds its transcript and advances the cursor', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2, jobState: 'CRASHED' });
+    await repoWith(client).fold(batch([start('t1'), delta('Hi'), approval({ requestId: 'r1' })], { endOffset: 250 }));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ role: 'assistant', content: 'Hi' });
+    expect(client.threadIngestCursor.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ offset: 250n }),
+    }));
+  });
+});
