@@ -21,7 +21,7 @@ const setupRepo = async () => {
 };
 const publish = (overrides: Partial<Parameters<typeof publishThreadDocs>[0]> = {}) => publishThreadDocs({
   git: createGit(), mutex, repoKey: 'r1', worktree: repoDir, feature: 'divide', threadId: 't1',
-  title: 'Divide brainstorm', identity, ...overrides,
+  title: 'Divide brainstorm', identity, mode: 'read', ...overrides,
 });
 const write = async (path: string, content = 'doc\n') => {
   await mkdir(dirname(join(repoDir, path)), { recursive: true });
@@ -54,13 +54,52 @@ test('refuses publication results beyond the thread line budget before committin
   expect(await git(repoDir, 'show-ref', '--verify', '--quiet', 'refs/heads/feat/divide').then(() => true, () => false)).toBe(false);
 });
 
-test('publishes only allowlisted dirty files', async () => {
+test('read mode publishes only allowlisted dirty files', async () => {
   await write('docs/a.md');
   await write('src/x.ts');
-  const result = await publish();
+  const result = await publish({ mode: 'read' });
   expect(result).toMatchObject({ ok: true, paths: ['docs/a.md'], ignored: ['src/x.ts'] });
   if (!result.ok) throw new Error('publish failed');
   expect(await git(repoDir, 'diff-tree', '--no-commit-id', '--name-only', '-r', result.sha)).toBe('docs/a.md');
+});
+
+test.each(['ask', 'full'] as const)('%s mode publishes code with feat commit message', async (mode) => {
+  await write('src/math.ts');
+  const result = await publish({ mode });
+  expect(result).toMatchObject({ ok: true, paths: ['src/math.ts'], ignored: [] });
+  if (!result.ok) throw new Error('publish failed');
+  expect(await git(repoDir, 'show', '-s', '--format=%s', result.sha)).toBe('feat(divide): changes from koda thread "Divide brainstorm"');
+  expect(await git(repoDir, 'diff-tree', '--no-commit-id', '--name-only', '-r', result.sha)).toBe('src/math.ts');
+});
+
+test('full mode publishes docs and code with feat commit message', async () => {
+  await write('docs/a.md');
+  await write('src/math.ts');
+  const result = await publish({ mode: 'full' });
+  expect(result).toMatchObject({ ok: true, paths: ['docs/a.md', 'src/math.ts'], ignored: [] });
+  if (!result.ok) throw new Error('publish failed');
+  expect(await git(repoDir, 'show', '-s', '--format=%s', result.sha)).toStartWith('feat(divide): changes from koda thread');
+});
+
+test('ask mode with docs only keeps docs commit message', async () => {
+  await write('docs/a.md');
+  const result = await publish({ mode: 'ask' });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('publish failed');
+  expect(await git(repoDir, 'show', '-s', '--format=%s', result.sha)).toStartWith('docs(divide): spec from koda thread');
+});
+
+test('full mode with docs only keeps docs commit message', async () => {
+  await write('docs/a.md');
+  const result = await publish({ mode: 'full' });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('publish failed');
+  expect(await git(repoDir, 'show', '-s', '--format=%s', result.sha)).toStartWith('docs(divide): spec from koda thread');
+});
+
+test('full mode reports changed symlinks as ignored', async () => {
+  await symlink('README.md', join(repoDir, 'src-link.ts'));
+  expect(await publish({ mode: 'full' })).toMatchObject({ ok: true, paths: [], ignored: ['src-link.ts'] });
 });
 
 test('does not include unrelated pre-staged files in the publish commit', async () => {

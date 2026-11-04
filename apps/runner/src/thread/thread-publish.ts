@@ -19,6 +19,7 @@ export interface PublishThreadDocsInput {
   readonly threadId: string;
   readonly title: string;
   readonly identity: GitIdentity;
+  readonly mode: 'read' | 'ask' | 'full';
 }
 export type PublishThreadDocsResult =
   | { ok: true; sha: string; paths: string[]; ignored: string[]; specPresent: boolean }
@@ -57,7 +58,7 @@ export async function publishThreadDocs(input: PublishThreadDocsInput): Promise<
     const ignored: string[] = [];
     for (const path of dirty) {
       let regular = false;
-      if (isAllowedThreadDocPath(path, input.feature)) {
+      if (input.mode !== 'read' || isAllowedThreadDocPath(path, input.feature)) {
         try { regular = (await lstat(join(worktree, path))).isFile(); } catch { regular = false; }
       }
       (regular ? paths : ignored).push(path);
@@ -88,7 +89,10 @@ export async function publishThreadDocs(input: PublishThreadDocsInput): Promise<
       await git.ok(['add', '--', ...paths], options);
       const { name, email } = input.identity;
       const title = input.title.replace(/[\r\n]/g, ' ').slice(0, 200);
-      const message = `docs(${input.feature}): spec from koda thread "${title}"\n\nKoda-Thread: ${input.threadId}`;
+      const hasCodePath = paths.some((path) => !isAllowedThreadDocPath(path, input.feature));
+      const message = hasCodePath
+        ? `feat(${input.feature}): changes from koda thread "${title}"\n\nKoda-Thread: ${input.threadId}`
+        : `docs(${input.feature}): spec from koda thread "${title}"\n\nKoda-Thread: ${input.threadId}`;
       await git.ok(['-c', `user.name=${name}`, '-c', `user.email=${email}`, '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-q', '-m', message, '--', ...paths], {
         ...options,
         env: { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email },

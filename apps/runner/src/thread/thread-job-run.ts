@@ -369,7 +369,7 @@ export class ThreadJobRun {
     this.livePublish = new ThreadLivePublish({
       publish: this.deps.host.publish ?? publishThreadDocs,
       input: { git: this.deps.host.git, mutex: publishInputMutex(this.deps.mutex), repoKey: row.repoKey, worktree: prepared.worktree,
-        feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity },
+        feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity, mode: thread.mode ?? 'read' },
       writer: () => this.writer,
       turnRunning: () => this.turnRunning,
       stopped: () => this.halted,
