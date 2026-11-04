@@ -196,6 +196,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'fleet.ingest.backfill': ['global'],
   'fleet.ingest.rerun': ['global'],
   'fleet.job.dispatch': ['project'],
+  'fleet.job.rule': ['project'],
   'fleet.job.cancel': ['project'],
   'fleet.job.requeue': ['project'],
   'fleet.job.read': ['project'],

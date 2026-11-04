@@ -32,6 +32,24 @@ function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['gi
   return { run: () => prober.probe(), removed, empty };
 }
 
+describe('US-008 botRulings', () => {
+  test('AC-11 advertises rulings only with successful help and token safety', async () => {
+    const home = await naxHome([]);
+    for (const [stdout, code, timedOut, safe, expected] of [
+      ['--decisions --full --rulings', 0, false, true, true],
+      ['--decisions --full', 0, false, true, false],
+      ['--rulings', 0, false, true, false],
+      ['--decisions --rulings', 1, false, true, false],
+      ['--decisions --rulings', 0, true, true, false],
+      ['--decisions --rulings', 0, false, false, false],
+    ] as const) {
+      const nax = new FakeNaxCli({ botReview: { code, stdout, stderr: '', timedOut }, k0Version: { code: safe ? 1 : 0, stdout: '0.83.1', stderr: safe ? 'NAX_FORGE_TOKEN is not supported' : '', timedOut: false } });
+      const { capabilities } = await probeWith(home, nax).run();
+      expect(capabilities.botRulings).toBe(expected ? true : undefined);
+    }
+  });
+});
+
 describe('listProfileNames (D98, D112)', () => {
   test('json files only, koda job overlays excluded, sorted by code unit', async () => {
     const home = await naxHome(['beta', 'Alpha', 'koda-job-cabc', 'alpha2']);   // distinct letters: macOS file names are case-insensitive

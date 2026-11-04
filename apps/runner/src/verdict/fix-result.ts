@@ -7,9 +7,22 @@ export interface FixResult {
   readonly logPath: string | null;
 }
 
+export interface FixReady {
+  readonly markedReady: boolean;
+  readonly readyHeld?: string;
+  readonly replied?: number;
+  readonly resolved?: number;
+}
+
+export interface FixState {
+  readonly pushedSha: string | null;
+  readonly fixReady: FixReady | null;
+}
+
 export interface FixOutcome extends FixResult {
   readonly pushedSha: string | null;
   readonly stderrLine: string | null;
+  readonly fixReady?: FixReady | null;
 }
 
 const LOG_MARKER = 'nax bot fix: log ';
@@ -42,18 +55,31 @@ export async function readFixResult(stdoutPath: string, prNumber: number): Promi
 }
 
 /** The run state sits beside the bot.jsonl named by nax's log marker. */
-export async function readPushedSha(logPath: string): Promise<string | null> {
+export async function readFixState(logPath: string): Promise<FixState | null> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(join(dirname(logPath), 'bot-state.json'), constants.O_RDONLY | constants.O_NOFOLLOW);
     const state: unknown = JSON.parse(await handle.readFile('utf8'));
     if (state === null || typeof state !== 'object' || Array.isArray(state)) return null;
-    const pushedSha = (state as Record<string, unknown>)['pushedSha'];
-    return typeof pushedSha === 'string' && SHA.test(pushedSha) ? pushedSha : null;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ELOOP' || error instanceof SyntaxError) return null;
-    throw error;
+    const record = state as Record<string, unknown>;
+    const rawSha = record['pushedSha'];
+    const pushedSha = typeof rawSha === 'string' && SHA.test(rawSha) ? rawSha : null;
+    const markedReady = record['markedReady'];
+    if (typeof markedReady !== 'boolean') return { pushedSha, fixReady: null };
+    const readyHeld = record['readyHeld'];
+    const replied = record['replied'];
+    const resolved = record['resolved'];
+    return {
+      pushedSha,
+      fixReady: {
+        markedReady,
+        ...(typeof readyHeld === 'string' ? { readyHeld: readyHeld.slice(0, 500) } : {}),
+        ...(typeof replied === 'number' && Number.isInteger(replied) && replied >= 0 ? { replied } : {}),
+        ...(typeof resolved === 'number' && Number.isInteger(resolved) && resolved >= 0 ? { resolved } : {}),
+      },
+    };
+  } catch {
+    return null;
   } finally {
     await handle?.close();
   }

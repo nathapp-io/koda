@@ -11,10 +11,32 @@ export interface WithdrawnEvent {
   disagreedBy: string[];
 }
 
+export interface CallerRulings {
+  applied: { item: string; disposition: string }[];
+  skipped: { item: string; reason: string }[];
+  ignored?: 'untrusted-pr' | 'head-mismatch';
+}
+
+function parseCallerRulings(value: unknown): CallerRulings | undefined {
+  const raw = obj(value);
+  if (!raw) return undefined;
+  const result: CallerRulings = { applied: [], skipped: [] };
+  for (const value of Array.isArray(raw.applied) ? raw.applied : []) {
+    const entry = obj(value);
+    if (entry && typeof entry.item === 'string' && typeof entry.disposition === 'string') result.applied.push({ item: entry.item, disposition: entry.disposition });
+  }
+  for (const value of Array.isArray(raw.skipped) ? raw.skipped : []) {
+    const entry = obj(value);
+    if (entry && typeof entry.item === 'string' && typeof entry.reason === 'string') result.skipped.push({ item: entry.item, reason: entry.reason });
+  }
+  if (raw.ignored === 'untrusted-pr' || raw.ignored === 'head-mismatch') result.ignored = raw.ignored;
+  return result;
+}
+
 export type BotReviewParse =
   | { outcome: 'absent' }
   | { outcome: 'invalid'; reason: 'artifact-ambiguous' | 'artifact-invalid' }
-  | { outcome: 'done'; trusted: boolean; events: WithdrawnEvent[] };
+  | { outcome: 'done'; trusted: boolean; events: WithdrawnEvent[]; callerRulings?: CallerRulings };
 
 const KEY = /^f-[0-9a-f]{8,64}$/;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
@@ -73,5 +95,6 @@ export function parseBotReview(files: BundleFiles, prNumber: number): BotReviewP
     if (event) events.push(event);
     if (events.length === 50) break;
   }
-  return { outcome: 'done', trusted: root.trusted, events };
+  const callerRulings = parseCallerRulings(root.callerRulings);
+  return { outcome: 'done', trusted: root.trusted, events, ...(callerRulings ? { callerRulings } : {}) };
 }

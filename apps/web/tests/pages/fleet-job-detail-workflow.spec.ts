@@ -93,6 +93,7 @@ function mountPage(job: FleetJobDto) {
     components: { ...uiStubs, FleetBudgetBanner: stubBanner },
     alias: {
       '~/composables/useApi': apiModule,
+      '~/composables/useFleetRulings': { useFleetRulings: () => ({ list: jest.fn(async () => []), create: jest.fn() }) },
       '~/composables/useApprovalInbox': {
         useApprovalInbox: () => ({ listForJob: jest.fn(async () => []) }),
       },
@@ -158,9 +159,10 @@ function mountPage(job: FleetJobDto) {
 
 describe('job detail workflow (US-006)', () => {
   test('AC-8: a job with a non-null workflow renders the workflow outcome', async () => {
-    const { app, settle } = mountPage(jobFixture({ workflow: workflowValue }))
+    const { app, settle } = mountPage(jobFixture({ workflow: workflowValue, resultPrUrl: 'https://github.com/org/repo/pull/12' }))
     await settle()
     expect(app.find('[data-testid="fleet-job-workflow-outcome"]')).toHaveLength(1)
+    expect(app.find('[data-testid="fleet-job-open-items"]')).toHaveLength(1)
     app.unmount()
   })
 

@@ -153,6 +153,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
       ]);
       const botFix = botReview && await this.botFix(empty.dir);
+      const botRulings = botReview && await this.botRulings(empty.dir);
       const nativeConfig = await readNativeModelConfig(this.deps.naxHome);
       const providers = [...new Set([...scan.providers, ...nativeConfig.providers])].sort();
       const credentials = await this.credentials(empty.dir, providers);
@@ -177,6 +178,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         kodaTools: true,
         projectCode: true,
         ...(botReview ? { botReview: true as const } : {}),
+        ...(botRulings ? { botRulings: true as const } : {}),
         ...(botFix ? { botFix: true as const } : {}),
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
@@ -270,6 +272,11 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     if (review.code !== 0 || review.timedOut || review.spawnError !== undefined || !review.stdout.includes('--full')) return false;
     const fix = await this.deps.nax.run(['bot', 'fix', '--help'], { cwd });
     return fix.code === 0 && !fix.timedOut && fix.spawnError === undefined && fix.stdout.includes('--no-rereview');
+  }
+
+  private async botRulings(cwd: string): Promise<boolean> {
+    const help = await this.deps.nax.run(['bot', 'review', '--help'], { cwd });
+    return help.code === 0 && !help.timedOut && help.spawnError === undefined && help.stdout.includes('--rulings');
   }
 
   private async protocols(): Promise<NaxProtocol[]> {

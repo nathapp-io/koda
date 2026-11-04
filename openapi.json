@@ -5132,7 +5132,14 @@
         },
         "responses": {
           "201": {
-            "description": "Comment created"
+            "description": "Comment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentResponseDto"
+                }
+              }
+            }
           },
           "202": {
             "description": "The write waits for approval",
@@ -5194,7 +5201,17 @@
         ],
         "responses": {
           "200": {
-            "description": "List of comments"
+            "description": "List of comments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommentResponseDto"
+                  }
+                }
+              }
+            }
           },
           "403": {
             "description": "comment.read is missing"
@@ -5239,7 +5256,14 @@
         },
         "responses": {
           "200": {
-            "description": "Comment updated"
+            "description": "Comment updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentResponseDto"
+                }
+              }
+            }
           },
           "202": {
             "description": "The write waits for approval",
@@ -6317,6 +6341,263 @@
         "summary": "Stop watching this ticket; assignments and mentions still notify",
         "tags": [
           "notifications"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/rulings": {
+      "post": {
+        "operationId": "FleetRulingsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRulingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetPrRulingDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Awaiting approval\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ruling text or item id"
+          },
+          "403": {
+            "description": "fleet.job.rule is missing"
+          },
+          "404": {
+            "description": "Job or item not found"
+          },
+          "409": {
+            "description": "Not a latest draft RUN, or item already applied"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rule on an open draft RUN item (fleet.job.rule)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "get": {
+        "operationId": "FleetRulingsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FleetPrRulingDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all rulings of a RUN, newest first (fleet.job.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/fleet-jobs": {
+      "get": {
+        "operationId": "TicketFleetJobsController_list",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketFleetJobDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.ticket-job.read is missing"
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (fleet.ticket-job.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}": {
+      "delete": {
+        "operationId": "TicketFleetJobsController_unlink",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Unlinked"
+          },
+          "403": {
+            "description": "fleet.ticket-job.unlink is missing"
+          },
+          "404": {
+            "description": "Ticket not found, or the job is not linked to it"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay",
+        "tags": [
+          "fleet"
         ]
       }
     },
@@ -7465,128 +7746,6 @@
           }
         ],
         "summary": "Job timeline, ordered by seq (fleet.job.read)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/tickets/{ref}/fleet-jobs": {
-      "get": {
-        "operationId": "TicketFleetJobsController_list",
-        "parameters": [
-          {
-            "name": "ref",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TicketFleetJobDto"
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "fleet.ticket-job.read is missing"
-          },
-          "404": {
-            "description": "Ticket not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (fleet.ticket-job.read)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}": {
-      "delete": {
-        "operationId": "TicketFleetJobsController_unlink",
-        "parameters": [
-          {
-            "name": "ref",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "jobId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "204": {
-            "description": "Unlinked"
-          },
-          "403": {
-            "description": "fleet.ticket-job.unlink is missing"
-          },
-          "404": {
-            "description": "Ticket not found, or the job is not linked to it"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay",
         "tags": [
           "fleet"
         ]
@@ -17333,6 +17492,73 @@
           }
         }
       },
+      "CommentResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Comment unique identifier",
+            "example": "comment-123"
+          },
+          "ticketId": {
+            "type": "string",
+            "description": "Ticket ID this comment belongs to",
+            "example": "ticket-123"
+          },
+          "body": {
+            "type": "string",
+            "description": "Comment body text",
+            "example": "This is a test comment"
+          },
+          "type": {
+            "type": "string",
+            "description": "Comment type",
+            "example": "GENERAL",
+            "enum": [
+              "VERIFICATION",
+              "FIX_REPORT",
+              "REVIEW",
+              "STATUS_CHANGE",
+              "GENERAL",
+              "RULING"
+            ]
+          },
+          "authorUserId": {
+            "type": "string",
+            "nullable": true,
+            "description": "User ID of comment author (if user authored)",
+            "example": "user-123"
+          },
+          "authorAgentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Agent ID of comment author (if agent authored)",
+            "example": "agent-123"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Comment creation timestamp",
+            "example": "2026-03-17T10:00:00Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Comment last update timestamp",
+            "example": "2026-03-17T10:00:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "ticketId",
+          "body",
+          "type",
+          "authorUserId",
+          "authorAgentId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
       "UpdateCommentDto": {
         "type": "object",
         "properties": {
@@ -17730,6 +17956,188 @@
         "required": [
           "watching",
           "count"
+        ]
+      },
+      "CreateRulingDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "itemId",
+          "text"
+        ]
+      },
+      "FleetPrRulingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "prNumber": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "itemKind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "fixed",
+              "waived",
+              "overridden",
+              "confirmed",
+              "verified"
+            ],
+            "type": "string"
+          },
+          "actorType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "replaced"
+            ],
+            "type": "string"
+          },
+          "skipReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "appliedJobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "commentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvalRequestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "prNumber",
+          "jobId",
+          "itemId",
+          "itemKind",
+          "text",
+          "disposition",
+          "actorType",
+          "actorId",
+          "state",
+          "skipReason",
+          "appliedJobId",
+          "commentId",
+          "approvalRequestId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "TicketFleetJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "PLAN"
+            ]
+          },
+          "feature": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "stateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "escalationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "costUsd": {
+            "type": "string",
+            "description": "USD spent across all attempts (costSpentUsd + costCarriedUsd)"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "feature",
+          "state",
+          "costUsd",
+          "queuedAt"
         ]
       },
       "BudgetPolicyDto": {
@@ -18456,6 +18864,11 @@
             "type": "string",
             "description": "A FIX job's outcome, mirrored from its snapshots (US-004)"
           },
+          "fixReady": {
+            "type": "object",
+            "nullable": true,
+            "description": "A FIX job’s ready result; null until reported."
+          },
           "stories": {
             "nullable": true,
             "description": "PRD stories in PRD order (S1b §1.2). Null on list pages (D149).",
@@ -18572,7 +18985,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }
@@ -18618,66 +19032,6 @@
         "required": [
           "job",
           "placement"
-        ]
-      },
-      "TicketFleetJobDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "command": {
-            "type": "string",
-            "enum": [
-              "RUN",
-              "PLAN"
-            ]
-          },
-          "feature": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "stateReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "escalationReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "resultBranch": {
-            "type": "string",
-            "nullable": true
-          },
-          "resultSha": {
-            "type": "string",
-            "nullable": true
-          },
-          "resultPrUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "costUsd": {
-            "type": "string",
-            "description": "USD spent across all attempts (costSpentUsd + costCarriedUsd)"
-          },
-          "queuedAt": {
-            "type": "string"
-          },
-          "finishedAt": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "id",
-          "command",
-          "feature",
-          "state",
-          "costUsd",
-          "queuedAt"
         ]
       },
       "ScheduleDto": {
@@ -20646,7 +21000,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }
@@ -21298,7 +21653,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }

@@ -7,8 +7,8 @@ import { KODA_LIST_APPROVALS, kodaToolDescriptorsFor } from '../koda-tool-descri
  *
  * The MCP route serves the WORKSPACE projection of the catalog — `koda_my_projects` and every project tool with its
  * required `project` argument (3-D3) — but the thread wording does not hold there: an MCP call is not a thread, and
- * an MCP write runs at once instead of waiting for the user to approve a proposal (3-R6, 3-D13). Ten descriptions
- * are therefore replaced — the nine write tools and `koda_get_action` — the same input schemas are kept, and the
+ * an MCP write runs at once instead of waiting for the user to approve a proposal (3-R6, 3-D13). Eleven descriptions
+ * are therefore replaced — the ten write tools and `koda_get_action` — the same input schemas are kept, and the
  * sentence every catalog entry carries is rewritten to the form that is true outside a thread.
  */
 
@@ -20,7 +20,7 @@ const WORKSPACE_PROJECT_SENTENCE =
 const MCP_PROJECT_SENTENCE = 'Name the project with `project` (a slug koda_my_projects lists).';
 
 /**
- * 3-D16: the MCP description of `koda_get_action` and of each of the nine write tools. Their catalog descriptions
+ * 3-D16: the MCP description of `koda_get_action` and of each of the ten write tools. Their catalog descriptions
  * tell the model that the change happens "only after the user approves it" and that it must "not call this tool
  * again" — false over MCP, where there is no user to approve and the call is the change. Every one of these
  * descriptions ends with the MCP project sentence, and each write description says the call runs at once and that
@@ -75,6 +75,11 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
     'Requeue one fleet job of this project, so it runs again: a job that failed, crashed or was cancelled. The ' +
     'call runs at once as the calling agent, so the job is requeued by this call and the answer ends with the ' +
     `action id that names it. ${MCP_PROJECT_SENTENCE}`,
+
+  koda_rule_pr_item:
+    'Rule on an open item of a draft RUN in this project. Supply the ruling text and its evidence. The call ' +
+    'runs at once as the calling agent under direct policy; a policy requiring approval holds it for approval, and ' +
+    `the answer ends with the action id when an action is recorded. ${MCP_PROJECT_SENTENCE}`,
 
   koda_cancel_job:
     'Cancel one fleet job of this project. The call runs at once as the calling agent, so the job is cancelled ' +

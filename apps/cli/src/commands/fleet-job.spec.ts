@@ -89,6 +89,23 @@ describe('koda fleet job', () => {
     for (const want of ['RUNNING', 'box-1', 'US-002', 'implement', '1.2500', '5', 'escalate (asks wait 600 s)', 'Pending approvals']) expect(out).toContain(want);
   });
 
+  it('show prints FIX ready status and counts', async () => {
+    (fleetJobsControllerGet as jest.Mock).mockResolvedValue({ ret: 0, data: job({ command: 'FIX', fixReady: { markedReady: true, replied: 2, resolved: 1 } }) });
+    await run('show', 'j1');
+    expect(logSpy.mock.calls.flat().join('\\n')).toContain('marked ready (replied 2, resolved 1)');
+  });
+
+  it('show prints a held FIX as a draft and omits Ready for RUN', async () => {
+    (fleetJobsControllerGet as jest.Mock).mockResolvedValue({ ret: 0, data: job({ command: 'FIX', fixReady: { markedReady: false, readyHeld: 'CI failure: x' } }) });
+    await run('show', 'j1');
+    expect(logSpy.mock.calls.flat().join('\\n')).toContain('kept as draft: CI failure: x');
+    jest.clearAllMocks();
+    (resolveContext as jest.Mock).mockResolvedValue(CTX);
+    (fleetJobsControllerGet as jest.Mock).mockResolvedValue({ ret: 0, data: job() });
+    await run('show', 'j1');
+    expect(logSpy.mock.calls.flat().join('\\n')).not.toContain('Ready');
+  });
+
   it('cancel posts and prints the new state', async () => {
     (fleetJobsControllerCancel as jest.Mock).mockResolvedValue({ ret: 0, data: job({ state: 'RUNNING', cancelRequestedAt: '2026-10-01T10:05:00.000Z' }) });
     await run('cancel', 'j1');

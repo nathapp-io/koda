@@ -46,6 +46,12 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
         prNumber: reviewPrNumber, botLogin: gitIdentity.name,
         ...(Array.isArray(job.reviewDecisions) && job.reviewDecisions.length > 0 ? { decisions: job.reviewDecisions } : {}),
         ...(job.command === 'FIX' && repo.fixTrustDetectedChecks === true ? { trustDetectedChecks: true as const } : {}),
+        ...(job.command === 'FIX' && job.prRulings && 'rulings' in job.prRulings && job.prRulings.rulings.length > 0 ? {
+          rulings: {
+            headSha: job.prRulings.headSha,
+            rulings: job.prRulings.rulings.map(({ item, ruling, by, at }) => ({ item, ruling, by, at })),
+          },
+        } : {}),
       },
     } : {}),
     ...(thread ? { thread } : {}),

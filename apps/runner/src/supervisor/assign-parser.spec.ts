@@ -186,3 +186,27 @@ describe('parseAssign: config jobs (S3 §3)', () => {
     expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: `invalid ${detail}` });
   });
 });
+
+describe('US-008 caller rulings', () => {
+  const ruling = { item: 'D-1', ruling: 'confirm: checked', by: 'koda:agent:dev', at: '2026-01-01T00:00:00Z' };
+  const rulings = { headSha: 'a'.repeat(40), rulings: [ruling] };
+  const payload = (command = 'FIX', value: unknown = rulings) => ({ ...assignFor(), command, review: { prNumber: 4, botLogin: 'fleet[bot]', rulings: value } });
+  test('AC-1 preserves valid FIX rulings and strips unknown fields', () => {
+    const parsed = parseAssign(cmd(payload('FIX', { ...rulings, rulings: [{ ...ruling, rulingId: 'private' }] })));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.review?.rulings).toEqual(rulings);
+  });
+  test('AC-2 refuses REVIEW rulings', () => {
+    expect(parseAssign(cmd(payload('REVIEW')))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('AC-3 refuses newline in by', () => {
+    expect(parseAssign(cmd(payload('FIX', { ...rulings, rulings: [{ ...ruling, by: 'a\nb' }] })))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test.each([
+    null, { ...rulings, headSha: 'abc' }, { ...rulings, rulings: [] },
+    { ...rulings, rulings: Array(101).fill(ruling) }, { ...rulings, rulings: [ruling, ruling] },
+    ...[{ item: 'bad/item' }, { ruling: '' }, { ruling: 'x'.repeat(2001) }, { by: '' }, { by: 'x'.repeat(101) }, { by: 'a\rb' }, { at: 'yesterday' }, { at: '2026-01-01' }, { at: '2999-01-01T00:00:00Z' }].map(over => ({ ...rulings, rulings: [{ ...ruling, ...over }] })),
+  ])('refuses malformed rulings %j', value => {
+    expect(parseAssign(cmd(payload('FIX', value)))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+});

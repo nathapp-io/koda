@@ -20,7 +20,7 @@ import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-res
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { reviewPosted } from '../verdict/review-posted';
-import { readFixResult, readPushedSha, type FixOutcome } from '../verdict/fix-result';
+import { readFixResult, readFixState, type FixOutcome } from '../verdict/fix-result';
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
@@ -35,6 +35,7 @@ import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { removeReviewToken, writeReviewToken } from './review-token';
 import { REVIEW_DECISIONS_FILE, writeReviewDecisions } from './review-decisions-file';
+import { REVIEW_RULINGS_FILE, writeReviewRulings } from './review-rulings-file';
 import { cleanWorkspace, ensureClone } from './workspace';
 
 export const FORGE_TOKEN_MIN_REMAINING_MS = 3_000_000;
@@ -60,7 +61,7 @@ export interface HostExecutorDeps {
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 // US-008: `forge-token` is a REVIEW/FIX token file; a retry must not start with the previous attempt's.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE];
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE, REVIEW_RULINGS_FILE];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -167,7 +168,12 @@ export class HostExecutor implements JobExecutor {
     const reviewJob = job.command === 'REVIEW' || job.command === 'FIX';
     const decisions = reviewJob ? job.assign.review?.decisions : undefined;
     const decisionsPath = decisions !== undefined && decisions.length > 0 ? await writeReviewDecisions(jobDir, decisions) : undefined;
-    const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, decisionsPath === undefined ? {} : { decisionsPath });
+    const rulings = job.command === 'FIX' ? job.assign.review?.rulings : undefined;
+    const rulingsPath = rulings !== undefined && rulings.rulings.length > 0 ? await writeReviewRulings(jobDir, rulings) : undefined;
+    const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, {
+      ...(decisionsPath === undefined ? {} : { decisionsPath }),
+      ...(rulingsPath === undefined ? {} : { rulingsPath }),
+    });
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
     const binDir = acquired.ok ? acquired.credentials.binDir : null;
     const inherited = process.env['PATH'] ?? '';
@@ -320,7 +326,7 @@ export class HostExecutor implements JobExecutor {
       ? { kind: 'none' as const, logPath: null }
       : await readFixResult(join(jobDir, 'fix.stdout'), prNumber);
 
-    let pushedSha: string | null = null;
+    let fixState: Awaited<ReturnType<typeof readFixState>> = null;
     if (result.logPath !== null && prNumber !== undefined) {
       const expectedRoot = resolve(outDir, 'bot', `pr-${prNumber}`);
       try {
@@ -335,7 +341,7 @@ export class HostExecutor implements JobExecutor {
         const stateRel = relative(realRoot, realStatePath);
         const inside = (rel: string): boolean => rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`));
         if (rootRel === '' && inside(logRel) && inside(stateRel)) {
-          pushedSha = await readPushedSha(join(realLogDir, 'bot.jsonl'));
+          fixState = await readFixState(join(realLogDir, 'bot.jsonl'));
         }
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -350,7 +356,7 @@ export class HostExecutor implements JobExecutor {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return { ...result, pushedSha, stderrLine };
+    return { ...result, pushedSha: fixState?.pushedSha ?? null, fixReady: fixState?.fixReady ?? null, stderrLine };
   }
 
   async hasFixStep(job: JobRow): Promise<boolean> {

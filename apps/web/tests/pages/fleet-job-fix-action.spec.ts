@@ -39,6 +39,7 @@ function mountEnginePage(job: FleetJobDto, permissions: string[]) {
       '~/components/fleet/FleetJobStateBadge.vue': { __esModule: true, default: { setup: () => () => null } },
       '~/components/fleet/FleetJobTimeline.vue': { __esModule: true, default: { setup: () => () => null } },
       '~/components/fleet/FleetJobWorkflow.vue': { __esModule: true, default: { setup: () => () => null } },
+      '~/components/fleet/FleetJobOpenItems.vue': { __esModule: true, default: { setup: () => () => h('div', { 'data-testid': 'open-items-panel' }) } },
       '~/components/fleet/FleetPlacementResult.vue': { __esModule: true, default: { setup: () => () => null } },
       '~/components/fleet/JobAnalytics.vue': { __esModule: true, default: { setup: () => () => null } },
       '~/components/fleet/story-graph/FleetJobPipeline.vue': { __esModule: true, default: { setup: () => () => null } },
@@ -73,7 +74,16 @@ function mountEnginePage(job: FleetJobDto, permissions: string[]) {
 
 afterEach(() => { delete g.useApi; jest.useRealTimers() })
 
-describe('completed REVIEW Fix action', () => {
+test('AC-13: draft RUN gets a separate panel, ready RUN gets none', async () => {
+  for (const outcome of ['draft', 'ready'] as const) {
+    const m = mountEnginePage(jobFixture({ workflow: { runId: 'run1', outcome, workflowPassed: true, reasons: [], openItems: [] }, resultPrUrl: 'https://github.com/org/repo/pull/12' }), ['fleet.job.dispatch'])
+    await m.settle()
+    expect(m.byId('open-items-panel')).toHaveLength(outcome === 'draft' ? 1 : 0)
+    m.app.unmount()
+  }
+})
+
+describe('completed REVIEW Fix action (AC-15 regression)', () => {
   const review = () => jobFixture({ command: 'REVIEW', state: 'COMPLETED', feature: 'review-pr-23', profiles: ['native-codex'] })
 
   test('AC-1: renders Fix for a completed review when viewer can dispatch', async () => {

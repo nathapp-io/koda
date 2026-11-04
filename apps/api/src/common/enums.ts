@@ -40,6 +40,7 @@ export type Priority = (typeof Priority)[keyof typeof Priority];
 
 export const CommentType = {
   GENERAL: 'GENERAL',
+  RULING: 'RULING',
   VERIFICATION: 'VERIFICATION',
   FIX_REPORT: 'FIX_REPORT',
   REVIEW: 'REVIEW',

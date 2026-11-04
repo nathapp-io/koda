@@ -18,12 +18,12 @@ describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
     auditRecord.mockReset();
     auditRecord.mockImplementation(async () => undefined);
     transitions = { startForDispatch: vi.fn().mockResolvedValue({}) };
-    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, new AfterCommitService());
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, new AfterCommitService(), {} as never, {} as never);
   });
 
   it('AC-13: starts only after the owning scope callback returned', async () => {
     const afterCommit = new AfterCommitService();
-    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit);
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit, {} as never, {} as never);
     const order: string[] = [];
     transitions.startForDispatch.mockImplementation(async () => { order.push('start'); });
     await afterCommit.scope(async () => {
@@ -37,7 +37,7 @@ describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
 
   it('drops deferred starts when the scope rolls back', async () => {
     const afterCommit = new AfterCommitService();
-    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit);
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder, afterCommit, {} as never, {} as never);
     await expect(afterCommit.scope(async () => {
       await effects.onRunDispatched(actor, [t('WEB-1', 'CREATED')]);
       throw new Error('rollback');
@@ -79,7 +79,7 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
       upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService());
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService(), {} as never, {} as never);
   });
 
   it('AC-3: loads failed-job linked tickets inside the task scope', async () => {
@@ -207,7 +207,7 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
       upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService());
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, new AfterCommitService(), {} as never, {} as never);
   });
 
   it('links the PR on every linked ticket and records TICKET_UPDATED for each created row', async () => {

@@ -46,7 +46,7 @@ describe('FleetJobsService.cancelForProjectDelete (US-001)', () => {
     };
     service = new FleetJobsService(
       repo as never, {} as never, {} as never, {} as never, transitions as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
     );
     warn = vi.fn();
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(warn);

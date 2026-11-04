@@ -1,3 +1,4 @@
+import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -49,6 +50,7 @@ export class BundleIngestService {
     private readonly events: EventEmitter2,
     private readonly audit: AuditRecorder,
     private readonly reviewEvents: FleetReviewEventsService,
+    private readonly prRulings: FleetPrRulingsService,
   ) {}
 
   /**
@@ -108,6 +110,7 @@ export class BundleIngestService {
         reviewPrNumber === null ? {} : { reviewPrNumber });
       const pending = parsed.botReview
         ? (await this.reviewEvents.recordForJob(job, claim.leaseEpoch, parsed.botReview)).pending : 0;
+      if (reviewEligible && job.command === 'FIX') await this.prRulings.recordResults(job, parsed.botReview ?? { outcome: 'absent' });
       // S5b 3c-2-D1: outcomes are stored for RUN jobs only; every other command writes an empty list.
       const isRun = job.command === 'RUN';
       await this.repo.replaceRows(
@@ -117,6 +120,8 @@ export class BundleIngestService {
       const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish, workflow: parsed.workflow ?? null, workflowOutcome: parsed.workflowOutcome ?? null, workflowUrl: parsed.workflowUrl ?? null });
       const changed = Object.keys(correction.patch).length > 0;
       const updated = changed ? await this.jobs.update(job.id, correction.patch) : job;
+      // A final snapshot may already have mirrored workflow; ingest still retires older RUN rulings.
+      if (isRun && job.leaseEpoch === claim.leaseEpoch && parsed.workflow && updated.resultPrUrl) await this.prRulings.replaceOlderRuns(updated);
       const prFilled = 'resultPrUrl' in correction.patch;
       if (correction.escalated || prFilled) await this.outcomes.onIngestCorrection(updated, { escalated: correction.escalated, prFilled });
       if (correction.escalated) {

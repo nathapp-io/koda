@@ -1,4 +1,4 @@
-import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -148,6 +148,26 @@ function cleanReviewDecisions(v: unknown): ReviewDecision[] | null {
   return out;
 }
 
+function cleanReviewRulings(v: unknown): NonNullable<NonNullable<AssignPayload['review']>['rulings']> | null {
+  if (!isObj(v) || typeof v['headSha'] !== 'string' || !/^[a-fA-F0-9]{40}$/.test(v['headSha'])) return null;
+  const entries = v['rulings'];
+  if (!Array.isArray(entries) || entries.length < 1 || entries.length > 100) return null;
+  const rulings: CallerRuling[] = [];
+  const items = new Set<string>();
+  for (const entry of entries) {
+    if (!isObj(entry)) return null;
+    const { item, ruling, by, at } = entry;
+    if (typeof item !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(item) || items.has(item)) return null;
+    if (!text(ruling, 2000) || !text(by, 100) || /[\r\n]/.test(by)) return null;
+    if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(at)) return null;
+    const time = Date.parse(at);
+    if (!Number.isFinite(time) || time > Date.now() + 5 * 60_000) return null;
+    items.add(item);
+    rulings.push({ item, ruling, by, at });
+  }
+  return { headSha: v['headSha'], rulings };
+}
+
 function cleanProjectUnavailable(v: unknown): ProjectRepoUnavailable[] | null {
   if (!Array.isArray(v) || v.length > PROJECT_CODE_LIMITS.maxUnavailable) return null;
   const out: ProjectRepoUnavailable[] = [];
@@ -196,8 +216,15 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw')) return bad('bashMode');
   const rawReview = p['review'];
   let reviewDecisions: ReviewDecision[] | undefined;
+  let reviewRulings: NonNullable<AssignPayload['review']>['rulings'];
   if (isReview) {
     if (!isObj(rawReview) || !Number.isSafeInteger(rawReview['prNumber']) || (rawReview['prNumber'] as number) <= 0 || typeof rawReview['botLogin'] !== 'string' || rawReview['botLogin'].length < 1 || rawReview['botLogin'].length > 100 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(rawReview['botLogin'])) return bad('review');
+    if (Object.hasOwn(rawReview, 'rulings')) {
+      if (kind !== 'FIX') return bad('review');
+      const cleaned = cleanReviewRulings(rawReview['rulings']);
+      if (cleaned === null) return bad('review');
+      reviewRulings = cleaned;
+    }
     const hasTrustDetectedChecks = Object.hasOwn(rawReview, 'trustDetectedChecks');
     if (kind === 'FIX' ? hasTrustDetectedChecks && rawReview['trustDetectedChecks'] !== true : hasTrustDetectedChecks) return bad('review');
     if (rawReview['decisions'] !== undefined) {
@@ -239,6 +266,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       prNumber: reviewValue['prNumber'] as number,
       botLogin: reviewValue['botLogin'] as string,
       ...(kind === 'FIX' && reviewValue['trustDetectedChecks'] === true ? { trustDetectedChecks: true as const } : {}),
+      ...(reviewRulings === undefined ? {} : { rulings: reviewRulings }),
       ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
     } } : {};
     return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review } };

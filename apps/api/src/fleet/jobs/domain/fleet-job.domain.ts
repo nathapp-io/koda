@@ -13,6 +13,16 @@ export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 /** S6 K3 (US-004): the outcome a FIX job's snapshot may report. */
 export type FixOutcome = 'pushed' | 'nothing';
 
+export type FleetJobPrRulings = { headSha: string; rulings: { rulingId: string; item: string; ruling: string; by: string; at: string }[] }
+  | { notSent: 'head-unreadable' | 'pr-not-open' };
+
+export interface FixReady {
+  markedReady: boolean;
+  readyHeld?: string;
+  replied?: number;
+  resolved?: number;
+}
+
 /** US-004: the `String?` column as the domain value. Anything the runner did not report is null. */
 export function fixOutcomeOf(value: string | null | undefined): FixOutcome | null {
   return value === 'pushed' || value === 'nothing' ? value : null;
@@ -70,6 +80,7 @@ export interface FleetJobRecord {
   feature: string;
   planFrom: string | null;
   reviewDecisions?: ReviewDecision[] | null;
+  prRulings?: FleetJobPrRulings | null;
   profiles: string[];
   /** Decimal as string. */
   maxCostUsd: string;
@@ -127,6 +138,7 @@ export interface FleetJobRecord {
   configResult: ConfigJobResult | null;
   /** S6 K3 (US-004): a FIX job's pushed/nothing outcome, mirrored from its snapshots; cleared on requeue. */
   fixOutcome?: FixOutcome | null;
+  fixReady?: FixReady | null;
   threadId: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
@@ -142,6 +154,7 @@ export interface NewFleetJob {
   feature: string;
   planFrom: string | null;
   reviewDecisions?: ReviewDecision[] | null;
+  prRulings?: FleetJobPrRulings | null;
   profiles: string[];
   maxCostUsd: string;
   bashMode: BashMode;
@@ -161,7 +174,7 @@ type Mutable =
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
   | 'finishResult' | 'escalationReason' | 'exitCode' | 'workflow'
   | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq'
-  | 'configResult' | 'fixOutcome';
+  | 'configResult' | 'fixOutcome' | 'fixReady' | 'prRulings';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };

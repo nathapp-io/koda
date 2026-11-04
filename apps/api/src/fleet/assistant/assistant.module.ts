@@ -11,6 +11,8 @@ import { TicketLinksModule } from '../../ticket-links/ticket-links.module';
 import { TicketsModule } from '../../tickets/tickets.module';
 import { LiveModule } from '../../live/live.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { FleetRulingsModule } from '../rulings/fleet-rulings.module';
+import { PrRulingTools } from './tools/pr-ruling-tools';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { LogsModule } from '../logs/logs.module';
@@ -44,7 +46,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
     ProjectAccessModule, TicketsModule, CommentsModule, TicketLinksModule,
     // US-004: the services the fleet read tools call (each module exports its service only). The approval read tool
     // goes through `ApprovalRequestQueries`, which `ApprovalEngineModule` exports.
-    FleetJobsModule, AnalyticsModule, RunnersModule, LogsModule,
+    FleetRulingsModule, FleetJobsModule, AnalyticsModule, RunnersModule, LogsModule,
     // US-005: the runner tool route fences through the sync module's FenceService (1b-D8).
     SyncModule,
     // US-004: the memory read tool's service. No cycle: nothing reachable from MemoryModule imports a fleet module.
@@ -81,6 +83,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
     // S5b 2b2 US-003: the fleet write group. `koda_dispatch_job` registers on init (2b2-D8) and dispatches through
     // FleetJobsModule's service; KnowledgeModule resolves the repository the input names.
     FleetWriteTools,
+    PrRulingTools,
     // S5b 2b1 US-006: the memory write group. `koda_add_memory` registers on init (2b1-D8) and upserts through
     // the repository MemoryModule already exports.
     MemoryWriteTools,

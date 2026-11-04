@@ -55,6 +55,25 @@ function mountThread(comments: unknown[] = []) {
   return { app, api, fields }
 }
 
+describe('US-011 ruling comments', () => {
+  const ruling = { id: 'c1', body: 'D-1 (advisor): confirm: test green', type: 'RULING', createdAt: '2026-11-22T00:00:00.000Z', authorUserId: 'u1' }
+
+  test('AC-5: renders the translated RULING label', async () => {
+    const { app } = mountThread([ruling])
+    await settle()
+    expect(app.text()).toContain('Ruling')
+    app.unmount()
+  })
+
+  test('AC-6: a viewer-authored RULING comment has no edit control', async () => {
+    const { app } = mountThread([ruling])
+    await settle()
+    expect(app.text()).not.toContain('Edit')
+    expect(app.text()).toContain('Delete')
+    app.unmount()
+  })
+})
+
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
 // ──────────────────────────────────────────────────────────────────────────────

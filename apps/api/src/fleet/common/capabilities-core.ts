@@ -118,7 +118,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads, botReview, botFix } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads, botReview, botFix, botRulings } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -149,6 +149,7 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (botReview !== undefined && botReview !== true) fail('botReview');
   // Fleet PR fix: strict capability flag, absent on runners that cannot safely fix PRs.
   if (botFix !== undefined && botFix !== true) fail('botFix');
+  if (botRulings !== undefined && botRulings !== true) fail('botRulings');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -174,5 +175,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(workspaceThreads === true ? { workspaceThreads: true as const } : {}),
     ...(botReview === true ? { botReview: true as const } : {}),
     ...(botFix === true ? { botFix: true as const } : {}),
+    ...(botRulings === true ? { botRulings: true as const } : {}),
   };
 }

@@ -6,7 +6,9 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchFeatureOf, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
 import type { DispatchFormValues } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
-import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
+import type { FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
+import type { DispatchResponse } from '~/composables/useFleetJobs'
+import { inboxHref } from '~/lib/approval-requests'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import FleetTokenListInput from '~/components/fleet/FleetTokenListInput.vue'
 import FleetTicketPicker from '~/components/fleet/TicketPicker.vue'
@@ -87,7 +89,7 @@ function runnerOptionLabel(runner: FleetRunnerSummary): string {
   return runner.online ? runner.name : `${runner.name} (${t('fleet.dispatch.runnerOffline')})`
 }
 const pinOptions = computed(() => options.runners.value.map(r => ({ value: r.id, label: runnerOptionLabel(r) })))
-const result = ref<DispatchResultDto | null>(null)
+const result = ref<DispatchResponse | null>(null)
 const activeJob = ref<FleetJobDto | null>(null)
 /** #231: a 409 that is not an active-job conflict means a target ticket already has an open PR. */
 const prConflict = ref<{ values: DispatchFormValues; tickets: string[] } | null>(null)
@@ -328,6 +330,7 @@ async function confirmPrConflict(): Promise<void> {
       </div>
     </div>
 
-    <FleetPlacementResult v-if="result" :slug="slug" :result="result" :runner-name="options.runnerName" />
+    <NuxtLink v-if="result && 'permissionKey' in result" :to="inboxHref(slug, result.id)" class="text-primary underline">{{ t('fleet.dispatch.pendingApproval', { id: result.id }) }}</NuxtLink>
+    <FleetPlacementResult v-if="result && 'job' in result" :slug="slug" :result="result" :runner-name="options.runnerName" />
   </div>
 </template>

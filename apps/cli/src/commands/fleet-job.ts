@@ -16,6 +16,7 @@ import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 import { registerLogs } from './fleet-job-logs';
 import { registerJobAnalytics } from './fleet-analytics';
+import { registerFleetJobRulings } from './fleet-job-rulings';
 import { ago, bashModeText, type FleetPage, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
@@ -89,7 +90,11 @@ function showRows(j: FleetJobDto, runner: string): string[][] {
     ['Runner', runner],
     ['Story', opt(j.currentStoryId)], ['Phase', opt(j.currentPhase)], ['Cost (USD)', `${j.costSpentUsd} of ${j.maxCostUsd}`],
     ['Finish', opt(j.finishResult)], ['Escalation', opt(j.escalationReason)], ['Branch', opt(j.resultBranch)],
-    ['PR', opt(j.resultPrUrl)], ['Queued', j.queuedAt], ['Finished', opt(j.finishedAt)],
+    ['PR', opt(j.resultPrUrl)],
+    ...(j.command === 'FIX' && j.fixReady ? [['Ready', j.fixReady.markedReady
+      ? `marked ready${j.fixReady.replied !== undefined || j.fixReady.resolved !== undefined ? ` (replied ${j.fixReady.replied ?? 0}, resolved ${j.fixReady.resolved ?? 0})` : ''}`
+      : `kept as draft${j.fixReady.readyHeld ? `: ${j.fixReady.readyHeld}` : ''}`]] : []),
+    ['Queued', j.queuedAt], ['Finished', opt(j.finishedAt)],
   ];
 }
 
@@ -193,4 +198,5 @@ export function registerFleetJob(fleet: Command): void {
   registerBundle(job);
   registerLogs(job);
   registerJobAnalytics(job);
+  registerFleetJobRulings(job);
 }

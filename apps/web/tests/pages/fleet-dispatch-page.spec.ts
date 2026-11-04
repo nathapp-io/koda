@@ -26,7 +26,7 @@ describe('dispatch page', () => {
 
   test('PLAN shows the spec path; the placement result is rendered after submit', () => {
     expect(dispatch).toContain('v-if="values.command === \'PLAN\'"')
-    expect(dispatch).toContain('<FleetPlacementResult v-if="result"')
+    expect(dispatch).toContain('<FleetPlacementResult v-if="result && \'job\' in result"')
   })
 
   test('repo, command and pin are native selects bound through FleetNativeSelect (4b D137)', () => {

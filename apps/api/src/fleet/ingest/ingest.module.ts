@@ -1,3 +1,4 @@
+import { FleetRulingsModule } from '../rulings/fleet-rulings.module';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
@@ -23,7 +24,7 @@ import { PrismaBundleIngestRepository } from './prisma-bundle-ingest.repository'
  * (S5b 3c-2-D8); this module never imports `KnowledgeModule`.
  */
 @Module({
-  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ArtifactStoreModule, FleetJobsModule, FleetActivityModule, BudgetsModule, FleetTicketsModule, FleetReviewsModule],
+  imports: [FleetRulingsModule, ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ArtifactStoreModule, FleetJobsModule, FleetActivityModule, BudgetsModule, FleetTicketsModule, FleetReviewsModule],
   controllers: [FleetIngestController],
   providers: [
     PrismaBundleIngestRepository, { provide: BUNDLE_INGEST_REPOSITORY, useExisting: PrismaBundleIngestRepository },

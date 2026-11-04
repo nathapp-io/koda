@@ -257,14 +257,23 @@ describeIntegration('runner sync (PG)', () => {
     const sha40 = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
     const e = { jobId: fixJob.id, leaseEpoch: fixJob.leaseEpoch };
 
-    const res = await sync({ jobs: [{ ...e, events: [ev(1, 'snapshot', { fixOutcome: 'pushed', resultSha: sha40 })] }] });
+    const res = await sync({ jobs: [{ ...e, events: [ev(1, 'snapshot', { fixOutcome: 'pushed', resultSha: sha40, fixReady: { markedReady: true } })] }] });
     expect(res.jobAcks).toEqual([{ jobId: fixJob.id, ackedSeq: 1 }]);
-    expect(await job(fixJob.id)).toEqual(expect.objectContaining({ state: 'RUNNING', fixOutcome: 'pushed', resultSha: sha40 }));
+    expect(await job(fixJob.id)).toEqual(expect.objectContaining({ state: 'RUNNING', fixOutcome: 'pushed', resultSha: sha40, fixReady: { markedReady: true } }));
 
     const dto = data<Record<string, unknown>>(
       await request(server).get(`/api/projects/web/fleet/jobs/${fixJob.id}`).set({ Authorization: `Bearer ${world.tokens.dev}` }).expect(200),
     );
-    expect(dto).toEqual(expect.objectContaining({ id: fixJob.id, command: 'FIX', fixOutcome: 'pushed', resultSha: sha40 }));
+    expect(dto).toEqual(expect.objectContaining({ id: fixJob.id, command: 'FIX', fixOutcome: 'pushed', resultSha: sha40, fixReady: { markedReady: true } }));
+
+    const runJob = await prisma.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: 'fix-ready-run-null',
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev,
+    } });
+    const runDto = data<Record<string, unknown>>(
+      await request(server).get(`/api/projects/web/fleet/jobs/${runJob.id}`).set({ Authorization: `Bearer ${world.tokens.dev}` }).expect(200),
+    );
+    expect(runDto).toEqual(expect.objectContaining({ id: runJob.id, command: 'RUN', fixReady: null }));
 
     // An unknown value is dropped: the stored outcome is left alone, and the rest of the snapshot still applies.
     await sync({ jobs: [{ ...e, events: [ev(2, 'snapshot', { fixOutcome: 'done', currentPhase: 'fix' })] }] });

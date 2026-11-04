@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFixResult, readPushedSha } from './fix-result';
+import { readFixResult, readFixState } from './fix-result';
 
 const dirs: string[] = [];
 async function tempDir(): Promise<string> {
@@ -42,17 +42,15 @@ test('AC-4: reads a log path only from a line-start log marker', async () => {
   expect(await readFixResult(stdout, 4)).toEqual({ kind: 'none', logPath: join(dir, 'bot.jsonl') });
 });
 
-test('AC-5: accepts a full lowercase pushed SHA from sibling bot-state.json', async () => {
+test('AC-1/3: reads a full pushed SHA while absent ready fields remain null', async () => {
   const dir = await tempDir();
-  await writeFile(join(dir, 'bot-state.json'), JSON.stringify({ pushedSha: 'a'.repeat(40) }));
-  expect(await readPushedSha(join(dir, 'bot.jsonl'))).toBe('a'.repeat(40));
+  const sha = 'a'.repeat(40);
+  await writeFile(join(dir, 'bot-state.json'), JSON.stringify({ pushedSha: sha }));
+  expect(await readFixState(join(dir, 'bot.jsonl'))).toEqual({ pushedSha: sha, fixReady: null });
 });
 
-test('AC-6: missing state or a short pushed SHA returns null', async () => {
+test('AC-4: invalid pushed SHA returns null', async () => {
   const dir = await tempDir();
-  expect(await readPushedSha(join(dir, 'missing', 'bot.jsonl'))).toBeNull();
-  const stateDir = join(dir, 'short');
-  await mkdir(stateDir);
-  await writeFile(join(stateDir, 'bot-state.json'), JSON.stringify({ pushedSha: 'a'.repeat(39) }));
-  expect(await readPushedSha(join(stateDir, 'bot.jsonl'))).toBeNull();
+  await writeFile(join(dir, 'bot-state.json'), JSON.stringify({ pushedSha: 'a'.repeat(39) }));
+  expect(await readFixState(join(dir, 'bot.jsonl'))).toEqual({ pushedSha: null, fixReady: null });
 });

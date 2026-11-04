@@ -3,6 +3,9 @@ import { apiPath } from '~/lib/api-path'
 import { bundleFileName, pickActiveJob } from '~/lib/fleet-jobs'
 import type { DispatchBody, DispatchResultDto, FleetJobDto, FleetJobEventDto, FleetPage } from '~/lib/fleet-types'
 import { saveBlob } from '~/lib/save-blob'
+import type { ApprovalRequestSummary } from '~/lib/approval-requests'
+
+export type DispatchResponse = DispatchResultDto | ApprovalRequestSummary
 
 export const FLEET_JOB_PAGE_SIZE = 20
 export const FLEET_EVENT_PAGE_SIZE = 50
@@ -69,8 +72,8 @@ export function useFleetJobs(slug: string) {
       query: { current: String(current), size: String(FLEET_EVENT_PAGE_SIZE) },
     })
 
-  const dispatch = (body: DispatchBody): Promise<DispatchResultDto> =>
-    $api.post<DispatchResultDto>(base, { ...body })
+  const dispatch = (body: DispatchBody): Promise<DispatchResponse> =>
+    $api.post<DispatchResponse>(base, { ...body })
 
   const cancel = (id: string): Promise<FleetJobDto> => $api.post<FleetJobDto>(apiPath`/projects/${slug}/fleet/jobs/${id}/cancel`)
 

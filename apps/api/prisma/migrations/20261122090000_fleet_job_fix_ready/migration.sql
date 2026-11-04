@@ -1,0 +1,1 @@
+ALTER TABLE "FleetJob" ADD COLUMN "fixReady" JSONB;

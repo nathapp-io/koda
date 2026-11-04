@@ -13,7 +13,7 @@ function reviewPrNumber(assign: AssignPayload): number {
 }
 
 /** S1 spec §5.2 step 4. Every dynamic piece is checked again here (D30): the chain is joined with commas. */
-export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload, opts: { decisionsPath?: string } = {}): string[] {
+export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload, opts: { decisionsPath?: string; rulingsPath?: string } = {}): string[] {
   const feature = assertFeature(assign.feature);
   for (const profile of assign.profiles) {
     if (!PROFILE_NAME.test(profile) || profile.startsWith(RESERVED_PREFIX)) throw new PathError('invalid profile');
@@ -28,6 +28,7 @@ export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayloa
       ...naxCommand, 'bot', 'review', String(prNumber),
       ...(assign.command === 'FIX' ? ['--full'] : []), '--profile', chain,
       ...(opts.decisionsPath === undefined ? [] : ['--decisions', opts.decisionsPath]),
+      ...(assign.command === 'FIX' && opts.rulingsPath !== undefined ? ['--rulings', opts.rulingsPath] : []),
     ];
   }
   if (!COST_RE.test(assign.maxCostUsd)) throw new PathError('invalid maxCostUsd');

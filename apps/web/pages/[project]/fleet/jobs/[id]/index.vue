@@ -12,6 +12,8 @@ import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vu
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
 import FleetJobWorkflow from '~/components/fleet/FleetJobWorkflow.vue'
+import FleetJobOpenItems from '~/components/fleet/FleetJobOpenItems.vue'
+import { draftRunPrNumber } from '~/lib/fleet-rulings'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useApprovalInbox } from '~/composables/useApprovalInbox'
@@ -304,6 +306,14 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <FleetJobStateBadge :state="job.state" />
         <span v-if="job.command === 'FIX' && job.fixOutcome === 'pushed'" data-testid="fleet-job-fix-outcome">{{ t('fleet.fixOutcome.pushed') }}</span>
         <span v-else-if="job.command === 'FIX' && job.fixOutcome === 'nothing'" data-testid="fleet-job-fix-outcome">{{ t('fleet.fixOutcome.nothing') }}</span>
+        <span v-if="job.command === 'FIX' && job.fixReady" data-testid="fleet-job-fix-ready">
+          <template v-if="job.fixReady.markedReady">
+            {{ t('fleet.fixReady.markedReady') }}
+            <template v-if="job.fixReady.replied !== undefined"> {{ t('fleet.fixReady.replies', { count: job.fixReady.replied }) }}</template>
+            <template v-if="job.fixReady.resolved !== undefined"> {{ t('fleet.fixReady.resolved', { count: job.fixReady.resolved }) }}</template>
+          </template>
+          <template v-else>{{ t('fleet.fixReady.held', { reason: job.fixReady.readyHeld ?? '' }) }}</template>
+        </span>
         <span v-if="job.stateReason" class="text-sm text-muted-foreground" :title="job.stateReason" data-testid="fleet-job-state-reason">
           <template v-if="budgetPolicyId">
             {{ t('fleet.jobs.detail.budgetStop') }}
@@ -324,6 +334,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       </div>
 
       <FleetJobWorkflow v-if="job.workflow" :workflow="job.workflow" />
+      <FleetJobOpenItems v-if="draftRunPrNumber(job) !== null" :slug="slug" :job="job" />
 
       <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="canEditConfig" @regenerate="regenOpen = true" />
 

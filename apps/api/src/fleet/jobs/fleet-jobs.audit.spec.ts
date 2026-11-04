@@ -22,7 +22,8 @@ describe('FleetJobsService transactional audit', () => {
       transitions, { notify: vi.fn() }, { assertNotPaused: vi.fn() },
       { run: async (fn: () => Promise<unknown>) => { inside = true; try { return await fn(); } finally { inside = false; } } },
       { countPendingByJob: vi.fn().mockResolvedValue(new Map()) },
-      { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn(), forJob: vi.fn().mockResolvedValue([]) }, {}, {}, { record }];
+      { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn(), forJob: vi.fn().mockResolvedValue([]) }, {}, {}, { record },
+      { selectForReview: vi.fn().mockResolvedValue([]) }, { snapshotForFix: vi.fn().mockResolvedValue(undefined) }];
     // Include the new dependency before implementation, without hiding missing calls.
     const service = new FleetJobsService(...args as unknown as ConstructorParameters<typeof FleetJobsService>);
     return { service, record, repo, order };
