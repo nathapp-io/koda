@@ -286,6 +286,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
   const action = t['action'];
   if (action !== 'SESSION' && action !== 'PUBLISH' && action !== 'DISCARD') return bad('thread action');
+  const rawMode = t['mode'];
+  if (rawMode !== undefined && rawMode !== 'read' && rawMode !== 'ask' && rawMode !== 'full') return bad('thread mode');
   // Fleet S5b: `kind` is optional (absent means REPO); a PROJECT or WORKSPACE thread only ever runs a SESSION.
   const rawKind = t['kind'];
   if (rawKind !== undefined && rawKind !== 'REPO' && rawKind !== 'PROJECT' && rawKind !== 'WORKSPACE') return bad('thread kind');
@@ -329,6 +331,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (projectRepos === null || projectReposUnavailable === null) return bad('project repos');
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
+    ...(rawMode === undefined ? {} : { mode: rawMode }),
     action,
     ...(rawKind !== undefined ? { kind: rawKind } : {}),
     feature: t['feature'] as string,

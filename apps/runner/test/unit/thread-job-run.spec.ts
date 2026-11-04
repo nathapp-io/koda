@@ -43,10 +43,11 @@ function setup(overrides: {
   prepareResult?: { ok: true; worktree: string; tipSha: string } | { ok: false; reason: string };
   skillsResult?: { ok: true } | { ok: false; reason: string };
   openResult?: { ok: true; session: AgentSession; resumed: boolean } | { ok: false; reason: string };
+  thread?: Partial<ThreadAssign>;
 } = {}) {
   const journal = Journal.open(':memory:');
   const assign = assignFor('THREAD', {
-    jobId, ref: 'refs/heads/base-for-thread', approvalTimeoutSec: 321, thread,
+    jobId, ref: 'refs/heads/base-for-thread', approvalTimeoutSec: 321, thread: { ...thread, ...overrides.thread },
   });
   journal.insertJob({ assign, leaseEpoch, repoKey: 'acme/app', jobDir: join(workspaceRoot, '.jobs', jobId) });
   const calls: string[] = [];
@@ -118,6 +119,21 @@ describe('ThreadJobRun preparation (US-003)', () => {
     run.halt();
     await starting;
     expect(stateEvents(context.journal).map((event) => event.to)).toEqual(['RUNNING']);
+    context.journal.close();
+  });
+
+  test('US-006 AC-10: an opened ask-mode session writes the assigned mode to session_started', async () => {
+    const context = setup({ thread: { mode: 'ask' } });
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    const run = context.makeRun();
+    const starting = run.start('prepare');
+    await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
+    await waitFor(async () => {
+      const stream = await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8');
+      return stream.includes('"type":"session_started"') && stream.includes('"mode":"ask"');
+    });
+    run.halt();
+    await starting;
     context.journal.close();
   });
 

@@ -70,6 +70,25 @@ describe('parseAssign THREAD (US-001)', () => {
     expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread action' });
   });
 
+  test('US-006 AC-7: full mode is kept on the parsed THREAD assign', () => {
+    const { assign } = threadFixture({ mode: 'full' });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.mode).toBe('full');
+  });
+
+  test('US-006 AC-8: an unsupported mode refuses the THREAD assign', () => {
+    const { assign } = threadFixture({ mode: 'write' as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread mode' });
+  });
+
+  test('US-006 AC-9: absent mode stays absent on the parsed THREAD assign', () => {
+    const { assign } = threadFixture();
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('mode');
+  });
+
   test('US-001 AC-10: fixture with action PUBLISH and initialMessage null returns assign.thread with action PUBLISH', () => {
     const { assign } = threadFixture({ action: 'PUBLISH', initialMessage: null as never });
     const parsed = parseAssign(cmd(assign));

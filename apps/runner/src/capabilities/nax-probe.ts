@@ -183,6 +183,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         executors: ['host'],
         configJobs: true,
         threadWrite: true,
+        threadModes: true,
         projectThreads: true,
         // Fleet S5b 1d: a WORKSPACE thread runs on the same no-checkout path as a PROJECT one, so the runner
         // advertises it and the API places a WORKSPACE ASSIGN nowhere else.

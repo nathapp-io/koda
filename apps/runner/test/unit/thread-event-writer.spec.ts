@@ -40,6 +40,19 @@ const readLines = async (path: string): Promise<Record<string, unknown>[]> => {
 const textEvent = (text: string, round = 1): SessionEvent => ({ type: 'text_delta', ...base, round, text });
 
 describe('ThreadEventWriter (US-007)', () => {
+  test('US-006 AC-10: session_started records the selected mode', async () => {
+    const setup = await makeWriter();
+    if (!setup) return;
+    setup.writer.started({ resumed: false, backend: { kind: 'native' }, skillShas: [], mode: 'full' });
+    expect(await readLines(setup.path)).toMatchObject([{ type: 'session_started', mode: 'full' }]);
+  });
+
+  test('US-006 AC-10: session_started defaults a missing mode to read', async () => {
+    const setup = await makeWriter();
+    if (!setup) return;
+    setup.writer.started({ resumed: false, backend: { kind: 'native' }, skillShas: [] });
+    expect(await readLines(setup.path)).toMatchObject([{ type: 'session_started', mode: 'read' }]);
+  });
   test('US-007 AC-1: redacts a secret split across deltas when the round is finalized', async () => {
     const setup = await makeWriter();
     if (!setup) return;
@@ -137,7 +150,7 @@ describe('ThreadEventWriter (US-007)', () => {
     const setup = await makeWriter();
     if (!setup) return;
     setup.writer.started({ resumed: false, backend: { kind: 'native', model: 'm/x' }, skillShas: ['<sha>'] });
-    expect((await readLines(setup.path))[0]).toEqual({ type: 'session_started', at: now().toISOString(), resumed: false, backend: { kind: 'native', model: 'm/x' }, skillShas: ['<sha>'] });
+    expect((await readLines(setup.path))[0]).toEqual({ type: 'session_started', mode: 'read', at: now().toISOString(), resumed: false, backend: { kind: 'native', model: 'm/x' }, skillShas: ['<sha>'] });
   });
 
   test('US-007 AC-12: writes the consumed input runner line', async () => {

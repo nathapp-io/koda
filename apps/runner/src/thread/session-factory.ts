@@ -129,6 +129,7 @@ export class ThreadSessionFactory {
       if (!SESSION_ID_RE.test(thread.threadId)) return { ok: false, reason: 'session_error' };
 
       const backendOptions = {
+        ...(thread.mode === 'ask' || thread.mode === 'full' ? { allowUnsandboxed: true } : {}),
         model: effort === undefined ? model : `${model}[${effort}]`,
         carryHistoryAcrossModels: true,
         hostPorts: {
@@ -153,7 +154,7 @@ export class ThreadSessionFactory {
     const { thread } = input;
     const sessionOptions: CreateAgentSessionOptions = {
       backend,
-      profile: 'read',
+      profile: thread.mode ?? 'read',
       workdir: input.worktree,
       instructions: thread.instructions,
       tools: input.tools,

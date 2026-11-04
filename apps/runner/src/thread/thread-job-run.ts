@@ -649,7 +649,7 @@ export class ThreadJobRun {
       threadPath,
       lifecycle: (level, message) => this.events.lifecycle(level, message),
     });
-    if (announce) writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
+    if (announce) writer.started({ resumed, mode: thread.mode ?? 'read', backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
   }
 
   /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only idles. */

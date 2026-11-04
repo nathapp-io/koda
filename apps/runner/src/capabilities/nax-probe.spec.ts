@@ -144,6 +144,12 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
     expect('botReview' in unavailable.capabilities).toBe(false);
   });
 
+  test('US-006 AC-11: the capability report advertises thread mode execution', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli()).run();
+    expect(capabilities.threadModes).toBe(true);
+  });
+
   test('US-007 AC-4: the report advertises workspaceThreads', async () => {
     const home = await naxHome(['fast']);
     const { capabilities } = await probeWith(home, new FakeNaxCli({ config: { fast: NATIVE } })).run();
@@ -182,6 +188,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       executors: ['host'],
       configJobs: true,
       threadWrite: true,
+      threadModes: true,
       projectThreads: true,
       workspaceThreads: true,
       kodaTools: true,

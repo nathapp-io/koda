@@ -118,6 +118,45 @@ test('US-006 AC-2: resumes a requested session with the read profile', async () 
   expect(result).toEqual({ ok: true, session, resumed: true });
 });
 
+test('US-006 AC-1: ask mode is passed as the session profile', async () => {
+  const h = setup();
+  await h.open('job-1', thread({ mode: 'ask' }));
+  expect(h.calls.create[0]?.options.profile).toBe('ask');
+});
+
+test('US-006 AC-2: full mode is passed as the session profile', async () => {
+  const h = setup();
+  await h.open('job-1', thread({ mode: 'full' }));
+  expect(h.calls.create[0]?.options.profile).toBe('full');
+});
+
+test('US-006 AC-3: missing mode falls back to the read profile', async () => {
+  const h = setup();
+  await h.open('job-1', thread({ mode: undefined }));
+  expect(h.calls.create[0]?.options.profile).toBe('read');
+});
+
+test('US-006 AC-4: native ask enables unsandboxed sessions while read leaves it unset', async () => {
+  const ask = setup();
+  await ask.open('job-1', thread({ mode: 'ask' }));
+  expect(ask.calls.native[0]).toHaveProperty('allowUnsandboxed', true);
+  const read = setup();
+  await read.open('job-1', thread({ mode: 'read' }));
+  expect(read.calls.native[0]).not.toHaveProperty('allowUnsandboxed');
+});
+
+test('US-006 AC-5: ACP full mode is passed as the session profile', async () => {
+  const h = setup();
+  await h.open('job-1', thread({ mode: 'full', backend: { kind: 'acp', agent: 'codex' } }));
+  expect(h.calls.create[0]?.options.profile).toBe('full');
+});
+
+test('US-006 AC-6: resume receives the selected profile', async () => {
+  const h = setup();
+  await h.open('job-1', thread({ resume: true, mode: 'ask' }));
+  expect(h.calls.resume[0]?.options.profile).toBe('ask');
+});
+
 test('US-006 AC-3: supplies the requested worktree when creating a session', async () => {
   const h = setup();
   const result = await h.open();
