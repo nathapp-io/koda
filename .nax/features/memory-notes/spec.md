@@ -251,7 +251,7 @@ item ends with `scope project` or `scope user`.
 | US-011: the caller may not replace another principal's project note | 403 `permissions` |
 | US-009: the project's AGENT policy exists in mode `none` and the user chooses proposal | the policy is patched to `human`, never created twice |
 | US-009: creating, patching or deleting the policy fails | the error is shown with `extractApiError`, the control returns to the mode the API last reported |
-| US-010: an API or network error (not 401/403) | stderr message, exit code 1 (401/403 keep exit 2 from `handleApiError`); an invalid option value | exit code 3 |
+| US-010: an API or network error, or an invalid option value | stderr message through the shared `handleApiError`: HTTP 401/403 exit 2, HTTP 400 exit 3, HTTP 404 exit 4, other API/network failures exit 1; invalid option values exit 3 before any API call. Pending approval retains exit 5. |
 
 ## Out of Scope
 
@@ -762,6 +762,7 @@ Depends on US-004, US-006. Workdir: apps/api. nax forget: `RetireNoteDto`, the `
 - `[cli]` `koda memory search "deployed runner" --project alpha` calls `GET /projects/alpha/memory` with `text=deployed runner` and exits 0.
 - `[cli]` `koda memory list --page 0` prints an error to stderr and exits 3 without calling the API.
 - `[cli]` when the API answers 500, `koda memory list` prints the error to stderr and exits 1 through the shared `handleApiError` (a 403 keeps its existing exit 2).
+- `[cli]` when a memory create, list or search API call fails, the command uses the shared `handleApiError` mapping: HTTP 401/403 exit 2, HTTP 400 exit 3, HTTP 404 exit 4, and other API/network failures exit 1, with errors printed to stderr. Pending approval retains its existing output and exit 5.
 
 ### US-011: Retire a note
 
