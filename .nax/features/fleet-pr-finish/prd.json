@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T06:46:42.564Z",
+  "updatedAt": "2026-11-04T07:11:44.784Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1085,14 +1085,17 @@
         "US-004",
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security override for role/permission-sensitive write and dispatch controls; composes async row state, approval/error handling and explicit FIX dispatch across page, component and composable."
+        "reasoning": "Security override for role/permission-sensitive write and dispatch controls; composes async row state, approval/error handling and explicit FIX dispatch across page, component and composable.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
@@ -1137,7 +1140,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "39b82385ab84a0fb1776708dc76eb8793f726c5f"
     },
     {
       "id": "US-013",
