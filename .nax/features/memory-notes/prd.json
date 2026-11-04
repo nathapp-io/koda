@@ -1,0 +1,1099 @@
+{
+  "project": "koda",
+  "feature": "memory-notes",
+  "branchName": "feat/memory-notes",
+  "createdAt": "2026-11-03T00:00:00.000Z",
+  "updatedAt": "2026-11-03T16:02:34.748Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Store a NOTE memory item through POST /memory",
+      "description": "**Goal** — Store validated note-shaped memory with slug-based supersession through the existing REST write path.\n\n**Motivation** — MemoryItem is a subject/predicate/object triple in the kinds FACT, DECISION, PREFERENCE, CONSTRAINT and INCIDENT_PATTERN. That fits decisions, not a Markdown note with a type and a description (#376).\n\n**Approach** — A note is a `MemoryItem` with `kind: 'NOTE'`, `subject` = slug, `predicate` = type, `object` = Markdown body, `description` = the index line. The limits are nax's own (nax `packages/nax-agent/src/memory/types.ts`) so a note round-trips: `MEMORY_NOTE_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/`, `MEMORY_NOTE_TYPES = ['user', 'feedback', 'project', 'reference']`, `MEMORY_NOTE_BODY_MAX_BYTES = 8192` (UTF-8 bytes of `object`), `MEMORY_NOTE_DESCRIPTION_MAX_CHARS = 200`. They live in a new `apps/api/src/memory/memory-note.ts` with `noteFieldError(input: { kind: string; subject: string; predicate: string; object?: string; description?: string }): 'subject' | 'predicate' | 'object' | 'description' | null`, which checks in that field order: for `NOTE` the slug, the type, the body (required, at least one non-whitespace character, at most 8192 UTF-8 bytes), then the description (required, 1..200 chars after trim); for any other kind only that `description` is absent. The REST write path and the assistant tool both call it. A note's active key is `NOTE:<slug>`, so re-saving a slug with a new type, body or description supersedes the old note; an identical restatement (same type, body, description, source) is the existing no-op.\n\n**Scope** — In: MemoryKind.NOTE, nullable description column and domain/DTO mappings, shared validation, REST service validation and active-key lookups in upsert/findActive. Add migration 20261121090000_memory_note_description. Preserve transaction-local replacement checks/audit and all triple behavior. Update existing query-shape and fixture assertions, endpoint e2e and regenerate OpenAPI/client using bun run generate. Out: assistant registration/rendering (US-002), full-text search (US-003), user scope (US-004/005), export (US-006), note retire (US-011). No pending memory rows and no `status: pending` value: proposal mode is a project approval policy on `memory.create` for AGENT principals (ruling 2026-11-03); an unapproved write simply does not exist yet.\n\n**Interface** — `MemoryKind` gains `NOTE: 'NOTE'`. `MemoryItem` and `MemoryItemInput` gain `description?: string`; `CreateMemoryDto` adds `description?: string` (string, max 200). `buildActiveKey(_projectId, kind, subject, predicate)` answers `NOTE:<subject>` when `kind` is `NOTE`; unchanged for every other kind. `PrismaMemoryItemRepository.upsert(item: MemoryItemInput, options?)` finds the active project row by `{ projectId, activeKey, deletedAt: null }`; its no-op also compares `predicate` and `description`. `PrismaMemoryItemRepository.findActive(projectId, kind, subject, predicate)` matches `{ projectId, activeKey: buildActiveKey(projectId, kind, subject, predicate), status: 'active', deletedAt: null }`. `noteFieldError(input: { kind: string; subject: string; predicate: string; object?: string; description?: string }): 'subject' | 'predicate' | 'object' | 'description' | null`. A validation failure throws ValidationAppException naming the field in the memory domain before persistence.\n\nVerification: co-located pure validation tests plus real-Postgres write/supersession/no-op tests and REST 201/400 checks; preserve current decision-create refusal and permission checks.",
+      "acceptanceCriteria": [
+        "[unit] MemoryKind.NOTE imported from common/enums equals 'NOTE'.",
+        "[unit] noteFieldError({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'body', description: 'replay budget' }) returns null.",
+        "[unit] noteFieldError for a NOTE whose subject is 'Replay Budget' returns 'subject'.",
+        "[unit] noteFieldError for a NOTE whose subject is 65 characters of a returns 'subject', and 64 characters returns null.",
+        "[unit] noteFieldError for a NOTE whose predicate is 'misc' returns 'predicate'.",
+        "[unit] noteFieldError for a NOTE whose object is 8193 UTF-8 bytes returns 'object', and one of exactly 8192 bytes made of multi-byte characters returns null.",
+        "[unit] noteFieldError for a NOTE with no object, or an object of only spaces, returns 'object'.",
+        "[unit] noteFieldError for a NOTE with no description, or a description of 201 characters, returns 'description'.",
+        "[unit] noteFieldError({ kind: 'FACT', subject: 's', predicate: 'p', description: 'x' }) returns 'description', and the same input without description returns null.",
+        "[unit] buildActiveKey('p1', 'NOTE', 'replay-budget', 'project') returns 'NOTE:replay-budget', and buildActiveKey('p1', 'FACT', 's', 'p') returns 'FACT:s:p'.",
+        "[unit] MemoryWriteService.create for a NOTE input with no description throws ValidationAppException whose details name description and never calls upsert.",
+        "[integration] POST /memory by a project member with the required projectId and { kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'Budget stays 2,048 MiB.', description: 'replay budget' } answers 201 and the stored row has kind NOTE and that description.",
+        "[integration] After a NOTE replay-budget of type project, upsert of the same slug with type feedback leaves the first row superseded with a null activeKey and the second active.",
+        "[integration] upsert of a NOTE identical in type, body, description, sourceType and sourceId to the active one returns the active row's id and writes no row.",
+        "[integration] upsert of a NOTE that differs from the active one only in description supersedes the active row.",
+        "[integration] When a NOTE write fails noteFieldError, POST /memory answers 400 ValidationAppException naming that field in the memory domain and writes nothing.",
+        "[integration] When a non-NOTE write carries description, POST /memory answers 400 naming description."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "persistence",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-layer schema/DTO/repository/write changes affect active-key identity and replacement authorization, requiring strict security test isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-write.service.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory-item-repository.ts",
+        "apps/api/src/memory/dto/create-memory.dto.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/memory-note.ts",
+        "apps/api/src/memory/memory-note.spec.ts",
+        "apps/api/prisma/migrations/20261121090000_memory_note_description/migration.sql",
+        "apps/api/test/integration/memory/memory-note-write.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/common/enums.ts",
+          "reason": "`MemoryKind` gains `NOTE: 'NOTE'`."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`MemoryItem` gains `description String?`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-item-repository.ts",
+          "reason": "`MemoryItem` and `MemoryItemInput` gain `description?: string`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.ts",
+          "reason": "`findActive` matches by the active key; `buildActiveKey` answers `NOTE:<subject>` for NOTE; `toDomain`/`toPersistenceCreate`/`toPersistenceUpdate` map `description`; `upsert` finds the active row by `{ projectId, activeKey, deletedAt: null }` and its no-op also compares `predicate` and `description`."
+        },
+        {
+          "path": "apps/api/src/memory/dto/create-memory.dto.ts",
+          "reason": "gains optional `description` (string, max 200)."
+        },
+        {
+          "path": "apps/api/src/memory/memory-write.service.ts",
+          "reason": "`create` calls `noteFieldError` and throws `ValidationAppException` naming the field; passes `description` to `upsert`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.additional.spec.ts",
+          "reason": "the `describe('findActive')` assertion that pins the `findFirst` where clause on `kind`, `subject` and `predicate` changes to `{ projectId, activeKey, status: 'active', deletedAt: null }`; every behaviour assertion keeps its meaning."
+        },
+        {
+          "path": "apps/api/src/memory/memory.controller.spec.ts",
+          "reason": "any closed-world assertion on the created item's fields gains `description` where the fixture sets it; behaviour unchanged."
+        },
+        {
+          "path": "apps/api/src/memory/dto/list-memory.query.spec.ts",
+          "reason": "the accepted-kind case may include `NOTE`; the rejection cases are unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with `bun run generate` for the new kind and `description` field."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds a POST /memory NOTE happy path (201) and a NOTE-without-description case (400)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "64f42887269cb615e1c8331e0415fd1e52db8472"
+    },
+    {
+      "id": "US-002",
+      "title": "Write, list and fetch notes through assistant and MCP tools",
+      "description": "**Goal** — Expose NOTE writes and safe two-stage note recall through the assistant registry and derived MCP catalog.\n\nA note-shaped item: MemoryItem is a subject/predicate/object triple in the kinds FACT, DECISION, PREFERENCE, CONSTRAINT and INCIDENT_PATTERN; nax needs to write, list and fetch Markdown notes through the assistant and MCP tools (#376).\n\n**Approach** — `koda_add_memory` accepts `NOTE` with `description`, through the same `noteFieldError`; for a NOTE the tool's 4000-character `object` cap does not apply (the 8192-byte note cap does). `koda_get_memory` reads through a new `MemoryGovernanceService.getMemoryItem(projectId, id, owner?)`, which loads the row with the repository's `findById` and answers it only when it is not soft-deleted and is either a row of `projectId` or (after US-005) a user row whose `ownerKey` is the owner's; otherwise null. `KnowledgeTools`' constructor is unchanged (it already holds `MemoryGovernanceService`). `koda_memory_search` lists a note as its header line plus one fenced line `<slug> <type> <description>`, never the body. A new `koda_get_memory` (`getMemoryTool` in `tools/knowledge-tools.ts`, `memory.read`, read kind) takes `{ id }` and answers the header line, the fenced description (notes only) and the fenced body. After US-005 the header line of every listed or fetched item ends with `scope project` or `scope user`.\n\n**Scope** — In: add-memory parse/preview/execute carries description and reuses US-001's validator; NOTE descriptor/schema limits; getMemoryItem project/deletion checks; getMemoryTool parse, body rendering and registry registration; MCP projection and tool-name pins. Update REPO/PROJECT/WORKSPACE counts from 22/22/23 to 23/23/24 and the existing assistant-design tool table. Preserve FACT fenced triples and replace authorization during preview and execute. Out: scope-aware caller reads/header tags belong to US-005; full-text ordering belongs to US-003. No MCP twin of the export route (`koda_memory_export`); HTTP is the only export surface. US-011 only: no CLI command and no assistant or MCP tool retires a note; nax calls the REST route.\n\n**Interface** — `MemoryGovernanceService.getMemoryItem(projectId, id, owner?)`; `getMemoryTool` in `tools/knowledge-tools.ts`; `AddMemoryInput` gains `description?`; `KODA_ADD_MEMORY` / `MEMORY_WRITE_KINDS` gain NOTE and description (max 200); `KNOWLEDGE_TOOL_DESCRIPTORS` gains `KODA_GET_MEMORY`. `KODA_GET_MEMORY` requires id (1-64 chars), additionalProperties false, key memory.read. `noteFieldError(input: { kind: string; subject: string; predicate: string; object?: string; description?: string }): 'subject' | 'predicate' | 'object' | 'description' | null` is the only note validator. `parse` reports ToolInputError naming the field. NOTE preview starts `Remember in <slug>: NOTE replay-budget / project`, includes description and ends with the active replacement id when one exists, even if type changed. execute passes description to upsert and returns `memory:<id> saved`. Missing/foreign/deleted fetches answer `memory item not found`, not an error.\n\nVerification: co-located parser/preview/rendering/catalog/registry tests plus getMemoryItem DB isolation and a registered MCP call exercising AssistantToolExecutor.executeFor with origin mcp. Keep all untrusted memory text inside ctx.data fences.",
+      "acceptanceCriteria": [
+        "[unit] addMemoryTool(...).parse({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'b', description: 'd' }) returns that input with description: 'd'.",
+        "[unit] parse of a NOTE with subject 'Bad Slug' throws ToolInputError for subject, and with predicate 'misc' for predicate.",
+        "[unit] parse of a NOTE without description throws ToolInputError for description.",
+        "[unit] parse({ kind: 'FACT', subject: 's', predicate: 'p', description: 'd' }) throws ToolInputError for description.",
+        "[unit] parse of a NOTE whose object is 8000 ASCII characters returns it, and of a FACT whose object is 4001 characters throws ToolInputError for object.",
+        "[unit] preview of a NOTE replay-budget with type feedback, while NOTE replay-budget of type project is active, ends with a Replaces memory:<id> line naming the active note.",
+        "[unit] KODA_ADD_MEMORY.inputSchema.properties.kind.enum equals ['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'] and properties.description.maxLength is 200.",
+        "[unit] execute of a NOTE input calls PrismaMemoryItemRepository.upsert with kind: 'NOTE' and description: 'd' and returns memory:<id> saved.",
+        "[unit] preview of a NOTE input returns text whose first line is Remember in <slug>: NOTE replay-budget / project and that contains the description.",
+        "[unit] memorySearchTool(...).execute over a page holding a NOTE whose object is 'SECRET-BODY' returns text that contains the fenced line replay-budget project replay budget and omits SECRET-BODY.",
+        "[unit] memorySearchTool(...).execute over a FACT still renders the fenced subject predicate object line.",
+        "[unit] KODA_GET_MEMORY is in KNOWLEDGE_TOOL_DESCRIPTORS with name koda_get_memory, required id (1-64 chars) and additionalProperties: false, and its tool has key memory.read.",
+        "[unit] getMemoryTool(...).execute(ctx, { id }) calls MemoryGovernanceService.getMemoryItem with ctx.projectId and the id, and for an active NOTE it returns text with a header beginning memory:<id> NOTE active, the fenced description and the fenced body; the ellipsis in the spec denotes the remaining header fields, not literal output.",
+        "[unit] getMemoryTool(...).execute for an id whose item belongs to another project, is soft-deleted, or does not exist returns memory item not found.",
+        "[unit] After the knowledge tool group's onModuleInit, AssistantToolRegistry holds a tool named koda_get_memory.",
+        "[integration] MemoryGovernanceService.getMemoryItem(P, id) returns a NOTE of P, and returns null for a soft-deleted row and for a row of another project.",
+        "[integration] An agent holding memory.read in the project calls koda_get_memory through the MCP server registrations (kodaMcpToolRegistrations, which run AssistantToolExecutor.executeFor with origin mcp) with the project's slug and a NOTE id, and the result contains the note body.",
+        "[unit] When a NOTE tool input fails noteFieldError for object or description, addMemoryTool.parse throws ToolInputError naming that field."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "assistant",
+        "mcp",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module tool/catalog integration includes project isolation, permissioned fetches and guarded replacement of untrusted memory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/memory/memory-note.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-get-memory-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+          "reason": "`MEMORY_WRITE_KINDS` gains `NOTE`; `KODA_ADD_MEMORY` gains `description` (max 200) and an object cap that names 8192 bytes for notes; new `KODA_GET_MEMORY` added to `KNOWLEDGE_TOOL_DESCRIPTORS`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
+          "reason": "`MEMORY_WRITE_KINDS` gains `NOTE`; `parse` calls `noteFieldError` and skips the 4000-character object cap for NOTE; `AddMemoryInput` gains `description?`; `preview` and `execute` carry it."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+          "reason": "`memorySearchTool` renders a note's description instead of its body; adds `getMemoryTool` (the `koda_get_memory` tool) next to `memorySearchTool`, and the tool group registers it."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+          "reason": "the full tool-name lists gain `koda_get_memory`; the per-kind counts go from REPO 22, PROJECT 22, WORKSPACE 23 to 23, 23, 24; the `KODA_ADD_MEMORY.kind` enum pin gains `NOTE`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "the registered tool-name list gains `koda_get_memory`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+          "reason": "the `koda_add_memory` MCP description names notes next to fact, preference, constraint and incident pattern."
+        },
+        {
+          "path": "apps/api/src/memory/memory-governance.service.ts",
+          "reason": "adds `getMemoryItem(projectId, id, owner?)`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-governance.service.spec.ts",
+          "reason": "`getMemoryItem` cases added; existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts",
+          "reason": "the MCP tool-name list gains `koda_get_memory`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "the knowledge tool-name list gains `koda_get_memory`; `koda_get_memory` and NOTE listing cases are added."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts",
+          "reason": "the case that refuses every kind outside the four write kinds no longer lists `NOTE` as refused; NOTE cases are added."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-15-fleet-s5b-koda-assistant-design.md",
+          "reason": "the tool table gains a `koda_get_memory` row."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3b8b8d55c4a05184c0ec8122ebf2a1c004d479a0"
+    },
+    {
+      "id": "US-003",
+      "title": "Rank memory recall with PostgreSQL full-text search",
+      "description": "**Goal** — Replace substring-only memory recall with ranked PostgreSQL full-text search while preserving existing fallback and eligibility semantics.\n\n**Motivation** — Stemmed and multi-word queries miss, and nothing is ranked (#377).\n\n**Approach** — The migration adds `\"searchVector\" tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(\"subject\", '') || ' ' || coalesce(\"predicate\", '') || ' ' || coalesce(\"description\", '') || ' ' || coalesce(\"object\", ''))) STORED` and a GIN index on it. The migration SQL is hand-written; the schema declares the column as `Unsupported(\"tsvector\")?` so Prisma does not try to drop it. Tests build their schema with `prisma db push --force-reset` (`test/global-setup.ts`), which would create a plain, never-filled `tsvector`; a new `test/helpers/memory-search-vector.ts` exports `MEMORY_SEARCH_VECTOR_STATEMENTS` (drop the pushed column, add the generated column, create the GIN index), `global-setup.ts` replays them after the push next to `PARTIAL_UNIQUE_INDEXES`, and a unit spec pins that every statement except the drop is shipped verbatim by the migration. Hand-written index names equal Prisma's defaults: `MemoryItem_searchVector_idx`, `MemoryItem_ownerKey_activeKey_key`, `MemoryItem_projectId_updatedAt_id_idx`, `MemoryItem_ownerKey_updatedAt_id_idx`. When `ProjectMemoryQuery.text` is non-blank, the repository first asks Postgres whether `websearch_to_tsquery('english', text)` has any lexeme (`numnode(...) > 0`). With lexemes, one `$queryRaw` (tagged template, every value bound) selects the page of ids with every other filter applied in SQL (project or owner, `deletedAt IS NULL`, status, the TTL bound when status is defaulted, kind, subject prefix), ordered by `ts_rank(\"searchVector\", query) DESC, \"updatedAt\" DESC, \"id\" DESC` when `orderBy` is absent and by the requested `orderBy` (with its existing tiebreakers) otherwise, with `OFFSET`/`LIMIT` from the page; a second `$queryRaw` counts the matches; the rows are then loaded with Prisma by id and returned in the ranked order. The subject prefix in SQL is `starts_with(\"subject\", ${prefix})`, so `%` and `_` are literal. Without lexemes (stopwords only, punctuation) the existing `contains` path runs unchanged; when the full-text count is 0 the `contains` path also runs, so a Chinese (or other unsegmented) query that the `english` parser cannot split still finds the substring matches it found before this feature. The text term is always an `AND` with the TTL bound (S5b US-004 invariant).\n\n**Scope** — In: generated column/Gin migration 20261121090100_memory_full_text_search, schema declaration, trusted test schema replay helper, ranked repository path and count/hydration, ListMemoryQuery.text (1-100 chars), assistant default rank ordering for text and descriptor wording. The owner-aware extension is supplied in US-005; at this dependency stage keep project filters intact. Out: scope storage/reads (US-004/005), export indexes (US-006), UI search controls (US-008), CLI commands (US-010); No hybrid vector plus keyword ranking; the knowledge base (LanceDB) stays the semantic layer. Full-text search uses the `english` configuration only; no Chinese segmentation is added (unsegmented text falls back to the substring match).\n\n**Interface** — `ProjectMemoryQuery` remains `{ projectId, kind?, subject?, text?, status?, orderBy? }` in this story; `orderBy` absent with a text that has lexemes means rank order. `ListMemoryQuery` adds `text?: string` (1-100 chars). `PrismaMemoryItemRepository.findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>>`. `MEMORY_SEARCH_VECTOR_STATEMENTS` is exported by `apps/api/test/helpers/memory-search-vector.ts`. `memorySearchTool.execute` passes no orderBy when text is set and 'updatedAt' otherwise. Prisma gains `searchVector Unsupported(\"tsvector\")?` and `@@index([searchVector], type: Gin)`.\n\nVerification: real Postgres tests for stemming, ranking, filters, TTL, literal prefixes, stable pagination, injection-shaped text and Chinese/no-lexeme fallback; DTO/unit ordering tests; trusted SQL migration parity unit test co-located at src/memory/memory-search-vector.spec.ts per repository instructions. Update both repository mock suites to stub the lexeme probe on fallback tests, global-setup replay assertions, endpoint e2e and regenerated contract.",
+      "acceptanceCriteria": [
+        "[integration] findByProjectMemory({ projectId, text: 'deployed runner' }, page) returns an active item whose object is 'the runner deploys nightly'.",
+        "[integration] findByProjectMemory with text: 'budget' returns a NOTE whose description contains budget and whose subject, predicate and object do not.",
+        "[integration] With orderBy absent, an item matching deploy in subject, predicate and object is returned before an item matching it only in object.",
+        "[integration] With text: 'deploy' and orderBy: 'updatedAt', matches are returned newest updatedAt first regardless of rank.",
+        "[integration] text: 'the' (no lexemes) returns an item whose subject contains 'the', through the substring path, preserving the pre-feature contains behavior.",
+        "[integration] An active item matching the text whose ttlAt is in the past is not returned when status is not given.",
+        "[integration] With text: 'deploy' and status: 'superseded', only superseded matches are returned.",
+        "[integration] With text: 'deploy' and kind: 'NOTE', only NOTE matches are returned.",
+        "[integration] A soft-deleted matching item, or a matching item of another project, is not returned.",
+        "[integration] With 3 matches and page size 2, page 1 has 2 records and total 3, page 2 has the third, and no record appears on both pages.",
+        "[integration] A text containing a single quote and a semicolon (\"it's; drop\") returns a page without error.",
+        "[integration] With text: 'deploy' and subject: 'a_b', an item whose subject starts with a_b matches and one whose subject starts with axb does not.",
+        "[integration] text: '预算' returns an item whose object is '回放预算保持不变', through the substring fallback after zero full-text matches.",
+        "[unit] Every statement of MEMORY_SEARCH_VECTOR_STATEMENTS except the leading column drop is shipped verbatim by a migration under prisma/migrations.",
+        "[unit] ListMemoryQuery with text of 101 characters fails validation on text, and with 100 characters passes.",
+        "[unit] memorySearchTool(...).execute with text: 'deploy' calls getProjectMemory with no orderBy, and without text calls it with orderBy: 'updatedAt'.",
+        "[integration] GET /projects/:slug/memory?text=deployed by a member answers 200 with the item whose object is 'the runner deploys nightly'."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "postgres",
+        "search",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Generated-column/test-schema parity and ranked SQL paging are cross-cutting; raw SQL must preserve project access boundaries and resist injection.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/dto/list-memory.query.ts",
+        "apps/api/src/memory/memory-governance.service.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+        "apps/api/prisma/migrations/20261116090000_developer_memory_decision_retire/migration.sql"
+      ],
+      "expectedFiles": [
+        "apps/api/test/helpers/memory-search-vector.ts",
+        "apps/api/src/memory/memory-search-vector.spec.ts",
+        "apps/api/prisma/migrations/20261121090100_memory_full_text_search/migration.sql",
+        "apps/api/test/integration/memory/memory-full-text-search.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a full-text query has a nonzero total but the requested offset is past the final match, findByProjectMemory returns an empty records page with that full-text total rather than unrelated substring results.",
+        "When a subject prefix contains %, the ranked search returns only subjects starting with that literal prefix, not subjects matching % as a wildcard."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`MemoryItem` gains `searchVector Unsupported(\"tsvector\")?` and `@@index([searchVector], type: Gin)`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.ts",
+          "reason": "`findByProjectMemory` takes the full-text path for a text with lexemes."
+        },
+        {
+          "path": "apps/api/src/memory/memory-item-repository.ts",
+          "reason": "the `ProjectMemoryQuery.text` comment describes full-text search; `orderBy` absent with text means rank."
+        },
+        {
+          "path": "apps/api/src/memory/dto/list-memory.query.ts",
+          "reason": "gains optional `text` (1-100 chars)."
+        },
+        {
+          "path": "apps/api/src/memory/dto/list-memory.query.spec.ts",
+          "reason": "adds a 101-char `text` rejection case."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+          "reason": "`memorySearchTool.execute` passes no `orderBy` when `text` is set and `'updatedAt'` otherwise."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "the assertion that `getProjectMemory` is called with `orderBy: 'updatedAt'` holds only for a search without text; with text it is called without `orderBy`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+          "reason": "the `KODA_MEMORY_SEARCH.text` description says full-text, best match first."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.additional.spec.ts",
+          "reason": "the substring cases that mock Prisma now also stub the lexeme probe (`$queryRaw` answering zero lexemes) so they keep exercising the `contains` path; cases with lexemes live in the new integration spec."
+        },
+        {
+          "path": "apps/api/test/global-setup.ts",
+          "reason": "after `PARTIAL_UNIQUE_INDEXES`, replays `MEMORY_SEARCH_VECTOR_STATEMENTS`."
+        },
+        {
+          "path": "apps/api/test/global-setup.spec.ts",
+          "reason": "any assertion on the statements replayed after the push gains the search-vector statements."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for `ListMemoryQuery.text`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds GET /projects/:slug/memory?text= happy path and a 101-char `text` 400 case."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "146589107291494ead36e5db334cbe4cfd163ad2"
+    },
+    {
+      "id": "US-004",
+      "title": "Write principal-owned user-scoped notes",
+      "description": "**Goal** — Store NOTE memory once per calling principal across projects while retaining project-gated write authorization and approval.\n\n**Motivation** — Every item needs a projectId; user-level working agreements cannot be stored once and recalled in every project (#378).\n\n**Approach** — `scope: 'user'` is accepted only for `kind: 'NOTE'`. The request still names a `projectId`: membership, `memory.create` and the approval policy are all checked against it exactly as for a project write, so a project in proposal mode also holds a user note for approval. The stored row has `projectId: null`, `scope: 'user'`, `ownerType`/`ownerId` = the caller (an `ownerId` in the body is ignored for user scope, even for a global admin), and `ownerKey` = `${ownerType}:${ownerId}`. `ownerKey` is set only on user rows, so `@@unique([ownerKey, activeKey])` keys a principal's user notes and never touches project rows (null `ownerKey` is distinct in Postgres); `@@unique([projectId, activeKey])` keeps keying project rows (user rows have null `projectId`). Reads that pass `owner` include the owner's user rows next to the project's rows: `GET /projects/:slug/memory`, the export, `koda_memory_search` and `koda_get_memory`. Reads that do not pass `owner` (the context builder, governance, canonical state, review decisions) never see user rows, because every one of them filters on a `projectId`.\n\n**Scope** — In: write side of that design only: MemoryScope, nullable persisted/domain projectId, scope/ownerKey mapping and user active-key lookup, caller-only ownership, same-project gate/audit context and decision-retire user-row exclusion. Migration 20261121090200_memory_user_scope keeps the project active-key unique and adds the owner active-key unique. Mechanical type fixture fixes must not broaden any background read. Out: including user rows in REST/tools (US-005), export (US-006) and the new note-retire route (US-011). No org-wide memory, and no Agent-to-User ownership: a user-scoped item is owned by the principal that wrote it. User scope is NOTE-only; triples (FACT, DECISION, PREFERENCE, CONSTRAINT, INCIDENT_PATTERN) stay project-scoped.\n\n**Interface** — `MemoryScope = { PROJECT: 'project', USER: 'user' }` and its type in common/enums. `MemoryItem` / `MemoryItemInput`: `projectId: string | null` (null exactly for a user item), `description?: string`, `scope: MemoryScope` on the domain, `scope?` on the input, `ownerKey?: string` on the domain; the repository derives ownerKey as `${ownerType}:${ownerId}` when scope is user. `CreateMemoryDto` adds `scope?: 'project' | 'user'`; its request projectId remains required. `PrismaMemoryItemRepository.upsert(item: MemoryItemInput, options?)` finds the active project row by `{ projectId, activeKey }`, or user row by `{ ownerKey, activeKey }`, with `deletedAt: null`. `memoryAuditHook(audit, key, projectId?: string)` records `written.item.projectId ?? projectId`. `MemoryWriteService.retireTarget` still returns `{ projectId: string }`; `assertRetireTarget` answers `NotFoundAppException({}, 'memory.notFound')` for scope user before membership. Prisma: `projectId String?`, `project Project?` (still onDelete Cascade), `scope String @default(\"project\")`, `ownerKey String?`, `@@unique([ownerKey, activeKey])` named MemoryItem_ownerKey_activeKey_key.\n\nVerification: real-Postgres REST ownership, cross-project supersession/isolation and approval-as-requester tests; audit fallback test; regress project writes and old retire semantics; regenerate contract and Prisma client.",
+      "acceptanceCriteria": [
+        "[unit] MemoryScope.USER imported from common/enums equals 'user' and MemoryScope.PROJECT equals 'project'.",
+        "[integration] POST /memory by agent A, a member of project P, with { projectId: P, scope: 'user', kind: 'NOTE', ... } answers 201 and the row has projectId null, scope 'user', ownerType 'AGENT', ownerId A and ownerKey 'AGENT:<A>'.",
+        "[integration] POST /memory with scope: 'user' and kind: 'FACT' answers 400 naming scope and writes nothing.",
+        "[integration] POST /memory with scope: 'user' by an agent that is not a member of projectId answers 403 and writes nothing.",
+        "[integration] POST /memory with scope: 'user' by a global admin user with ownerId of another user stores the row owned by the admin (ownerKey 'USER:<admin>').",
+        "[integration] POST /memory without scope stores a row with scope 'project', the request's projectId and a null ownerKey.",
+        "[integration] Agent A writes user NOTE working-style through project P and then through project Q: the first row is superseded and the second is active.",
+        "[integration] Agents A and B each write user NOTE working-style: both rows are active.",
+        "[integration] Agent A writes user NOTE working-style and project NOTE working-style in P: both rows are active.",
+        "[integration] With a project P policy memory.create for type AGENT in mode human, agent A's user-scope POST /memory answers 202 with a pending approval request and writes no row; after a user approves the request through POST /approvals/:id/decisions, the user row owned by A exists.",
+        "[integration] POST /memory/:id/retire naming a user row answers 404 memory.notFound.",
+        "[integration] A user-scope write records one audit entry with key memory.create, resourceType 'memory-item', the new row's id and projectId P.",
+        "[integration] When scope is user and kind is any of DECISION, PREFERENCE, CONSTRAINT or INCIDENT_PATTERN, POST /memory answers 400 naming scope."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "ownership",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Nullable project storage and owner-key identity span schema, repository, service and audit, but reuse existing transactions and approval commands; ownership/attribution changes still mandate strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-write.service.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory-write.guard.ts",
+        "apps/api/src/memory/memory-audit.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261121090200_memory_user_scope/migration.sql",
+        "apps/api/test/integration/memory/memory-user-scope-write.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When user U and agent A have the same textual id and each saves the same user-note slug, both notes remain active under distinct USER:<id> and AGENT:<id> owner keys.",
+        "When AuditRecorder.record fails during a user-note replacement, the original note remains active and no replacement row is committed."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`MemoryItem.projectId` becomes `String?` with `project Project?`; gains `scope String @default(\"project\")`, `ownerKey String?`, `@@unique([ownerKey, activeKey])`."
+        },
+        {
+          "path": "apps/api/src/common/enums.ts",
+          "reason": "adds `MemoryScope = { PROJECT: 'project', USER: 'user' }` and its type."
+        },
+        {
+          "path": "apps/api/src/memory/memory-item-repository.ts",
+          "reason": "`MemoryItem.projectId` becomes `string | null`; gains `scope` and `ownerKey?`; `MemoryItemInput` gains `scope?`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.ts",
+          "reason": "maps `scope` and `ownerKey`; `upsert` writes a user row with `projectId: null` and finds its active row by `{ ownerKey, activeKey, deletedAt: null }`."
+        },
+        {
+          "path": "apps/api/src/memory/dto/create-memory.dto.ts",
+          "reason": "gains optional `scope` (`project` | `user`)."
+        },
+        {
+          "path": "apps/api/src/memory/memory-write.service.ts",
+          "reason": "`create` handles `scope: 'user'` (NOTE only, owner = caller, `ownerKey`) and passes the request's `projectId` to `memoryAuditHook`; `assertRetireTarget` answers 404 for a user row before the membership check."
+        },
+        {
+          "path": "apps/api/src/memory/memory-audit.ts",
+          "reason": "`memoryAuditHook` gains an optional `projectId` used when the item has none."
+        },
+        {
+          "path": "apps/api/src/memory/memory-audit.spec.ts",
+          "reason": "a case for a user item with the fallback project is added; existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/memory/memory.controller.spec.ts",
+          "reason": "fixtures that build a `MemoryItem` gain `scope: 'project'`; assertions unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for `CreateMemoryDto.scope` and the item's `scope`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds a POST /memory user-scope NOTE case (201) and a user-scope FACT case (400)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bf79e9a196f93048f42092bd734ebd8dfd7434e7"
+    },
+    {
+      "id": "US-005",
+      "title": "Recall caller-owned user notes alongside project memory",
+      "description": "**Goal** — Include only the caller's user notes in project memory lists and assistant single-item/list recall, with scope filtering and scope-tagged tool headers.\n\n**Motivation** — Every item needs a projectId; user-level working agreements cannot be stored once and recalled in every project (#378).\n\n**Approach** — `scope: 'user'` is accepted only for `kind: 'NOTE'`. The request still names a `projectId`: membership, `memory.create` and the approval policy are all checked against it exactly as for a project write, so a project in proposal mode also holds a user note for approval. The stored row has `projectId: null`, `scope: 'user'`, `ownerType`/`ownerId` = the caller (an `ownerId` in the body is ignored for user scope, even for a global admin), and `ownerKey` = `${ownerType}:${ownerId}`. `ownerKey` is set only on user rows, so `@@unique([ownerKey, activeKey])` keys a principal's user notes and never touches project rows (null `ownerKey` is distinct in Postgres); `@@unique([projectId, activeKey])` keeps keying project rows (user rows have null `projectId`). Reads that pass `owner` include the owner's user rows next to the project's rows: `GET /projects/:slug/memory`, the export, `koda_memory_search` and `koda_get_memory`. Reads that do not pass `owner` (the context builder, governance, canonical state, review decisions) never see user rows, because every one of them filters on a `projectId`.\n\nAssistant read design: `koda_get_memory` reads through a new `MemoryGovernanceService.getMemoryItem(projectId, id, owner?)`, which loads the row with the repository's `findById` and answers it only when it is not soft-deleted and is either a row of `projectId` or (after US-005) a user row whose `ownerKey` is the owner's; otherwise null. `KnowledgeTools`' constructor is unchanged (it already holds `MemoryGovernanceService`). After US-005 the header line of every listed or fetched item ends with `scope project` or `scope user`.\n\n**Scope** — In: owner/scope query contract; identical authorized union in substring and full-text paths; Principal in getMemory; ctx.actor in memorySearchTool/getMemoryTool; getMemoryItem owner isolation and trailing tool scope tags. Out: storage and write attribution (US-004), export route (US-006), tool introduction/registration (US-002), UI (US-008); `MemoryGovernanceService` (expire, downrank, dedupe, supersession), extraction, canonical state, review decisions and the `/context` builder are unchanged and never read user-scoped rows. A user note written through project Q is visible to its owner in every project, including a proposal-mode project P that never held it for approval; per-project review of user notes is not added. Binding dependencies remain US-003 and US-004; coordinate the shared knowledge-tools/getMemoryItem seam with US-002 without changing this dependency list.\n\n**Interface** — `ProjectMemoryQuery` adds `owner?: { ownerType: MemoryOwnerType; ownerId: string }` (the caller whose user items are included) and `scope?: 'project' | 'user' | 'all'` (default 'all'). `ListMemoryQuery` adds `scope?: 'project' | 'user' | 'all'`. `MemoryReadController.getMemory` reads the caller with `@Principal()` so it can include the caller's user items. `MemoryGovernanceService.getMemoryItem(projectId, id, owner?)`. Both repository search paths filter user rows by ownerKey computed from caller ownerType/ownerId, never a request-supplied owner. Build owner as `{ ownerType: ownerTypeFor(principal), ownerId: principal.id }` in REST and `{ ownerType: ownerTypeFor(ctx.actor), ownerId: ctx.actor.id }` in tools, using the existing helper; raw principals expose actorType, not a new uppercase type field. Tool execute returns text, not a MemoryItem: owner-authorized retrieval must render that row's header and fenced contents. Reads with no owner remain project-only even when scope user is requested.\n\nVerification: real-Postgres REST visibility/scope tests and both search paths, DB regressions for reads lacking owner, controller owner propagation and assistant missing/foreign-user results. Update endpoint e2e scope cases and regenerate OpenAPI.",
+      "acceptanceCriteria": [
+        "[integration] GET /projects/P/memory by agent A returns P's project items and A's user items, and each record carries scope 'project' or 'user'.",
+        "[integration] GET /projects/P/memory by agent A does not return agent B's user items.",
+        "[integration] GET /projects/P/memory?scope=user by A returns only A's user items, and scope=project returns only P's project items.",
+        "[unit] ListMemoryQuery with scope: 'org' fails validation on scope.",
+        "[integration] GET /projects/P/memory?text=working by A returns A's user NOTE whose description contains working, through the full-text path.",
+        "[integration] GET /projects/P/memory?text=the by A returns A's user NOTE whose subject contains the, through the substring path.",
+        "[integration] findByProjectMemory({ projectId: P }, page) with no owner never returns a user row, even when scope is 'user'.",
+        "[unit] MemoryReadController.getMemory called with an agent principal A passes owner: { ownerType: 'AGENT', ownerId: A } to MemoryGovernanceService.getProjectMemory.",
+        "[unit] memorySearchTool(...).execute passes owner built from ctx.actor to getProjectMemory, and each header line ends with scope project or scope user for the item's scope.",
+        "[unit] Given an item whose ownerKey is the caller's and whose projectId is null, getMemoryTool(...).execute returns that item's rendered text with a header line ending scope user.",
+        "[unit] getMemoryTool(...).execute for another principal's user item returns memory item not found."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "search",
+        "assistant",
+        "security"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing query/retrieval paths gain a principal-filtered union in both Prisma and SQL plus REST/tool propagation, not a new architecture; private cross-project reads require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-read.controller.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory-governance.service.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+        "apps/api/src/context/context-builder.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/memory/memory-user-scope-read.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given an expired caller-owned user NOTE matching a full-text query, when status is omitted, findByProjectMemory excludes that note.",
+        "Given a user NOTE written through Q by A and project P configured for proposal mode, when A lists P's memory, the existing user NOTE is returned without opening a new approval request."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/memory-item-repository.ts",
+          "reason": "`ProjectMemoryQuery` gains `owner?` and `scope?`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.ts",
+          "reason": "`findByProjectMemory` (both the `contains` and the full-text path) includes the owner's user rows when `owner` is given, filtered by `scope`."
+        },
+        {
+          "path": "apps/api/src/memory/dto/list-memory.query.ts",
+          "reason": "gains optional `scope` (`project` | `user` | `all`)."
+        },
+        {
+          "path": "apps/api/src/memory/memory-read.controller.ts",
+          "reason": "`getMemory` takes `@Principal()` and passes `owner`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-read.controller.spec.ts",
+          "reason": "calls to `getMemory` pass a principal; the asserted `getProjectMemory` query gains `owner`; status codes unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+          "reason": "`memorySearchTool` passes `owner` from `ctx.actor` and appends `scope <scope>` to each header line; `getMemoryTool` also finds the caller's user item and appends `scope <scope>` to its header line."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "header-line assertions of `koda_memory_search` and `koda_get_memory` gain the trailing `scope project`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for `ListMemoryQuery.scope`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds GET /projects/:slug/memory?scope=user (200) and `scope=org` (400)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5272ae80d2ff666b8dbe3ca3e78407d6106a2425"
+    },
+    {
+      "id": "US-006",
+      "title": "Export incremental memory changes including tombstones",
+      "description": "**Goal** — Give nax an authorized incremental HTTP feed over project and caller-owned user memory changes.\n\n**Motivation** — The only keyset read is findActiveAfterId, by id and active rows only, so supersede, retire and soft delete of old rows are invisible to a mirror (#379).\n\n**Approach** — `GET /projects/:slug/memory/export?since=<cursor>&take=<n>`, `memory.read`, guarded like the list. It returns every row of the project plus the caller's user rows with `(updatedAt, id)` strictly after the cursor, ordered `updatedAt ASC, id ASC`, every status and kind, soft-deleted rows included (they carry `deletedAt`). A row supersede, retire or soft delete goes through Prisma `update`, which bumps `updatedAt`, so the change reappears after the cursor. Rows whose `updatedAt` is within `MEMORY_EXPORT_SETTLE_MS = 5000` of the server clock are held back to the next call, so a transaction that commits late with an earlier `updatedAt` is not skipped. The cursor is `encodeMemoryExportCursor({ updatedAt, id })` / `decodeMemoryExportCursor(cursor): MemoryExportKey | null` in a new `apps/api/src/memory/memory-export-cursor.ts`, the same base64url `iso|id` shape as `timeline-cursor.ts`. `take` defaults to 100, range 1..500. The response is `JsonResponse.Ok({ items: MemoryItem[], nextCursor: string | null, hasMore: boolean })`: `nextCursor` is the cursor of the last item, or the `since` given when the page is empty (null when neither exists); `hasMore` is true exactly when `items.length === take`. Rows are returned as stored; fencing is an LLM-prompt concern and stays in the MCP tools.\n\n**Scope** — In: strict cursor codec, ExportMemoryQuery, repository changed-row keyset read, governance settle-window composition, memory.read-guarded export route and indexes migration 20261121090300_memory_export_indexes. Include all statuses/TTL/deleted rows without normal list eligibility filters; authorization is still the project/caller union. Out: list owner/scope filtering (US-005), write-mode (US-007), creating the note-retire operation (US-011), or an event-history table. No MCP twin of the export route (`koda_memory_export`); HTTP is the only export surface. Export and list responses are not fenced; fencing stays in the MCP tool text.\n\n**Interface** — `encodeMemoryExportCursor({ updatedAt, id })`; `decodeMemoryExportCursor(cursor): MemoryExportKey | null`. `findChangedAfter(scope: { projectId: string; ownerKey: string }, after: MemoryExportKey | null, until: Date, take: number): Promise<MemoryItem[]>`. `MemoryGovernanceService.exportProjectMemory(projectId, owner, since, take)` composes the cursor, settle window and page. `ExportMemoryQuery` supplies since and take (integer 1..500, default 100). Prisma adds `@@index([projectId, updatedAt, id])` and `@@index([ownerKey, updatedAt, id])`, with names MemoryItem_projectId_updatedAt_id_idx and MemoryItem_ownerKey_updatedAt_id_idx. Use @Principal to derive owner, ProjectMembershipGuard then RequiresGuard and @Requires('memory.read'), and ProjectAccessService slug resolution.\n\nVerification: pure cursor/DTO/fake-clock tests; real-Postgres same-timestamp pagination, re-export of changed rows, tombstones, settle exclusion and ownership isolation; REST invalid query/permission/project cases. Use controlled updatedAt/clock fixtures rather than sleeps; regenerate OpenAPI.",
+      "acceptanceCriteria": [
+        "[unit] decodeMemoryExportCursor(encodeMemoryExportCursor({ updatedAt, id })) returns the same updatedAt and id.",
+        "[unit] decodeMemoryExportCursor returns null for 'garbage', an empty string, and a base64url string without the separator.",
+        "[unit] ExportMemoryQuery with take 0, 501 or '1.5' fails validation on take; omitted take resolves to 100.",
+        "[unit] MemoryGovernanceService.exportProjectMemory with a clock at T calls findChangedAfter with until equal to T - MEMORY_EXPORT_SETTLE_MS (5000 ms).",
+        "[integration] An export with no since returns the project's rows ordered updatedAt ascending then id ascending, including a superseded row, a rejected row and a soft-deleted row with its deletedAt.",
+        "[integration] A row whose updatedAt is less than 5000 ms before the server clock is not returned.",
+        "[integration] With 3 rows and take=2, the first call returns 2 items, hasMore true and nextCursor of the second item; a call with that cursor returns the third item and hasMore false.",
+        "[integration] Two rows with the same updatedAt split by take=1 are each returned exactly once across the two calls.",
+        "[integration] After a row already exported is superseded, an export with the earlier nextCursor returns that row again with status 'superseded'.",
+        "[integration] An empty page with since returns items: [], hasMore false and nextCursor equal to since; an empty page without since returns nextCursor null.",
+        "[integration] An export by agent A includes A's user rows and excludes agent B's user rows and rows of other projects.",
+        "[integration] GET /projects/P/memory/export?since=garbage answers 400 naming since.",
+        "[integration] GET /projects/P/memory/export by a non-member answers 403, and for an unknown slug answers 404.",
+        "[integration] GET /projects/P/memory/export with take outside 1..500 or not an integer answers 400 naming take.",
+        "[integration] GET /projects/P/memory/export by a member lacking memory.read answers 403.",
+        "[integration] GET /projects/P/memory/export for a soft-deleted project slug answers 404.",
+        "[integration] After adding export, GET /projects/P/memory without status continues to exclude P's superseded, rejected, expired and soft-deleted rows, preserving the existing list eligibility rules."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "export",
+        "pagination",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Incremental cursor consistency, tombstone eligibility and private user-row export require careful pagination and strict project/principal access control.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-read.controller.ts",
+        "apps/api/src/memory/timeline-cursor.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/timeline.controller.ts",
+        "apps/api/src/common/dto/koda-page.query.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/memory-export-cursor.ts",
+        "apps/api/src/memory/memory-export-cursor.spec.ts",
+        "apps/api/src/memory/dto/export-memory.query.ts",
+        "apps/api/prisma/migrations/20261121090300_memory_export_indexes/migration.sql",
+        "apps/api/test/integration/memory/memory-export.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`MemoryItem` gains `@@index([projectId, updatedAt, id])` and `@@index([ownerKey, updatedAt, id])`."
+        },
+        {
+          "path": "apps/api/src/memory/prisma-memory-item.repository.ts",
+          "reason": "adds `findChangedAfter(scope: { projectId: string; ownerKey: string }, after: MemoryExportKey | null, until: Date, take: number): Promise<MemoryItem[]>`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-governance.service.ts",
+          "reason": "adds `exportProjectMemory(projectId, owner, since, take)` composing the cursor, settle window and page."
+        },
+        {
+          "path": "apps/api/src/memory/memory-read.controller.ts",
+          "reason": "adds the export Get handler."
+        },
+        {
+          "path": "apps/api/src/memory/memory-read.controller.spec.ts",
+          "reason": "export cases added; existing cases unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the export route."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds GET /projects/:slug/memory/export happy path (200) and a bad `since` (400)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ff9cc7c9faf1c73b8a26b60741a5ca3291895fab"
+    },
+    {
+      "id": "US-007",
+      "title": "Resolve the caller's effective memory write mode",
+      "description": "**Goal** — Report the approval gate's effective memory.create mode and the project's exact editable AGENT policy through a read-only route.\n\n**Codebase mapping** — KodaPrincipal exposes actorType ('user' | 'agent' | 'runner'), and ToolContext.actor is restricted to user/agent principals; neither supplies the uppercase approval subject type assumed by the spec's principal.type notation. Existing route guards exclude runners. For an authorized user/agent caller, derive the resolver subject with the existing ownerTypeFor(principal): subject: { type: ownerTypeFor(principal), id: principal.id }. The spec expressions below describe that normalized subject, not a new field on KodaPrincipal. Do not use a cast or change the principal interface to invent principal.type.\n\n**Motivation** — A project that wants agent memory writes reviewed first has no setting for it (#380).\n\n**Approach** — `GET /projects/:slug/memory/write-mode`, `memory.read`, answers `{ mode: 'direct' | 'proposal', policyId: string | null, source: 'policy' | 'default' | 'not-approvable', agentPolicy: { id: string; mode: ApprovalMode } | null }`. `MemoryWriteModeService.resolve(projectId, principal)` answers the mode the gate would apply to the CALLER's own `memory.create` write: it calls `ApprovalPolicyResolver.resolve({ key: 'memory.create', projectId, subject: { type: principal.type, id: principal.id } })` (the engine's own ranking: project before global, principal before role before type before all, wildcard patterns included). For an AGENT caller `mode` is `proposal` when the resolved mode is not `none`; for a USER caller `mode` is always `direct`, because `ApprovalGate.gate` executes a USER's write directly. `policyId` and `source` come from the resolver's answer. `agentPolicy` is the project's exact type-AGENT policy (`permissionPattern` `memory.create`, `principalType` `AGENT`, no role, no principal), read with `ApprovalPolicyService.list({ projectId, permissionPattern: 'memory.create' }, ...)`, or null; it is what the web toggle edits. Writing the mode is the existing policy routes. The web toggle (US-009) shows proposal when `agentPolicy` exists with a mode other than `none`; choosing proposal creates `{ permissionPattern: 'memory.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' }` when `agentPolicy` is null, or patches it to `mode: 'human'` when it exists in mode `none` (a second create would collide on the selector); choosing direct deletes it.\n\n**Scope** — In: MemoryWriteModeService and its resolver/policy collaborators, module provider registration, memory.read-guarded GET write-mode, response documentation/contract. Reuse existing ApprovalEngineModule exports; do not add a second approval engine. Out: web mutation control (US-009), note storage/scope/export and note retire (US-001/004/006/011); No project column for the write mode; the mode is derived from approval policies on every read. No pending memory rows and no `status: pending` value: proposal mode is a project approval policy on `memory.create` for AGENT principals (ruling 2026-11-03); an unapproved write simply does not exist yet.\n\n**Interface** — `MemoryWriteModeService.resolve(projectId, principal)`; for the raw KodaPrincipal implementation, `ApprovalPolicyResolver.resolve({ key: 'memory.create', projectId, subject: { type: ownerTypeFor(principal), id: principal.id } })`; `ApprovalPolicyService.list(filter: { projectId?: string | null; permissionPattern?: string }, page: { current: number; size: number }): Promise<ApprovalPolicyRecord[]>`. GET returns `JsonResponse.Ok({ mode, policyId, source, agentPolicy })`. Handler uses @Principal, ProjectAccessService slug resolution, @UseGuards(ProjectMembershipGuard, RequiresGuard), @Requires('memory.read'). Provide MemoryWriteModeService in MemoryModule and inject it into MemoryReadController, updating constructor doubles.\n\nVerification: pure resolver/mapping/selector unit tests and DB-free module DI tests; real guarded-route policy/default and actual POST gate-consistency checks. Regenerate OpenAPI for the new route and retain current read status codes.",
+      "acceptanceCriteria": [
+        "[unit] MemoryWriteModeService.resolve('p1', agentA) calls ApprovalPolicyResolver.resolve with { key: 'memory.create', projectId: 'p1', subject: { type: 'AGENT', id: agentA.id } }.",
+        "[unit] For an AGENT caller whose resolver answer is mode human with policy pol1 and source policy, resolve returns mode 'proposal', policyId 'pol1', source 'policy'.",
+        "[unit] For an AGENT caller whose resolver answer is mode none with no policy and source default, resolve returns mode 'direct', policyId null, source 'default'.",
+        "[unit] For a USER caller whose resolver answer is mode human, resolve returns mode 'direct'.",
+        "[unit] With a project policy memory.create, principalType 'AGENT', no role, no principal, mode none, resolve returns agentPolicy { id, mode: 'none' }.",
+        "[unit] With only a project policy for a role, or for one principal, resolve returns agentPolicy null.",
+        "[integration] With a project P policy memory.* for appliesTo all in mode human, GET /projects/P/memory/write-mode by an agent member answers 200 with mode 'proposal', and an agent's POST /memory in P answers 202.",
+        "[integration] With no memory.create policy, GET /projects/P/memory/write-mode by an agent member answers 200 with mode 'direct' and agentPolicy null.",
+        "[integration] GET /projects/P/memory/write-mode by a non-member answers 403, and for an unknown slug answers 404.",
+        "[integration] GET /projects/P/memory/write-mode by a member lacking memory.read answers 403.",
+        "[integration] GET /projects/P/memory/write-mode for a soft-deleted project slug answers 404.",
+        "[unit] After MemoryReadController receives MemoryWriteModeService, getMemory still calls getProjectMemory with projectId/kind/status in its query argument and { current, size } in its separate paging argument, returning the same JsonResponse-wrapped page shape."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One small service reuses the existing resolver/list APIs and the controller/module wiring; medium scope is sufficient, but subject-specific approval and guarded access still require strict security test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-policy.service.ts",
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/memory/memory-read.controller.ts",
+        "apps/api/src/memory/memory.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/memory-write-mode.service.ts",
+        "apps/api/src/memory/memory-write-mode.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given the project's exact type-AGENT memory.create policy occurs after the first policy-list page, resolve still returns it as agentPolicy.",
+        "Given only a global exact type-AGENT memory.create policy in mode human, an AGENT caller receives mode proposal with agentPolicy null."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/memory-read.controller.ts",
+          "reason": "adds the write-mode Get handler; the constructor gains `MemoryWriteModeService`."
+        },
+        {
+          "path": "apps/api/src/memory/memory.module.ts",
+          "reason": "provides `MemoryWriteModeService`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-read.controller.spec.ts",
+          "reason": "the controller construction passes a `MemoryWriteModeService` double; existing assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/memory/memory.module.spec.ts",
+          "reason": "the provider list resolves `MemoryWriteModeService`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the write-mode route."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds GET /projects/:slug/memory/write-mode (200) and an unknown slug (404)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4fb9624375dfb6ba86688c14a29a83b5d72d5dfa"
+    },
+    {
+      "id": "US-008",
+      "title": "Show notes, user scope and debounced search on the memory page",
+      "description": "**Goal** — Let humans scan NOTE descriptions, inspect bodies, recognize user scope and search memory from the existing Nuxt memory page.\n\n**Motivation** — Stemmed and multi-word queries miss, and nothing is ranked (#377).\n\n**Approach** — The kind filter lists all six kinds, a note row shows its description with the body behind an expand control, a user item carries a scope badge, and a search box sends `text` 300 ms after the last keystroke.\n\n**Scope** — In: pages/[project]/memory.vue kind options, debounced search and row expansion, useMemory query/model additions, English/Chinese labels and existing mount/composable/page pins. Preserve pagination reset, request-id stale-response protection, append retry and toast behavior. Use existing FilterBar/UI/token patterns; render agent-written description and Markdown body through text interpolation, not v-html. Out: write-mode settings (US-009), API search/scope logic (US-003/005), CLI (US-010), new navigation or note editing/retirement controls.\n\n**Interface** — `KIND_OPTIONS = ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE']`. `useMemory`'s `MemoryItem` gains `description?` and `scope`; `loadMemory` sends `text` when non-empty. The request stays GET /projects/<slug>/memory, with the existing kind/status/current query shape plus non-empty text. Add reactive search state that applies filters after a 300 ms trailing debounce, and cancels stale debounce work on unmount. A NOTE renders description first; its body appears only after expanding. Only scope user gets a badge. All new controls use en.json keys also present in zh.json.\n\nVerification: mount tests for collapsed/expanded notes and scope badge, fake-timer typing/clearing tests including the no-request-before-300ms assertion, composable query/model tests, locale parity and preservation of the prior filters/append behavior. Read the UX master plan before layout changes; keep settings/nav redesign out of this story.",
+      "acceptanceCriteria": [
+        "[unit] The memory page's KIND_OPTIONS equals ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'].",
+        "[unit] Mounting the memory page with a NOTE record renders its description and not its body until the row's expand control is clicked; after the click the body is shown.",
+        "[unit] A record with scope 'user' renders the scope badge with the i18n key for user scope; a 'project' record renders no badge.",
+        "[unit] Typing deploy in the search box makes loadMemory call $api.get on /projects/<slug>/memory with text: 'deploy' in the query once 300 ms pass with no further typing, and not before.",
+        "[unit] Clearing the search box makes the next loadMemory call, after the same 300 ms, send no text key.",
+        "[unit] useMemory().loadMemory maps description and scope from the API record onto MemoryItem.",
+        "[unit] The memory page renders no hardcoded English for the new controls: the search placeholder, badge and expand label come from en.json keys that also exist in zh.json.",
+        "[unit] When a debounced memory search request rejects, the page calls toast.error with extractApiError(error), preserving the existing filter-request error feedback."
+      ],
+      "tags": [
+        "memory-notes",
+        "web",
+        "nuxt",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard existing-page/composable changes with debounce, collapsed display and locale additions; server remains responsible for ownership authorization.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/memory.vue",
+        "apps/web/composables/useMemory.ts",
+        "apps/web/tests/pages/memory.spec.ts",
+        "apps/web/tests/composables/useMemory.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a search term changes while a later list page is selected, the debounced request uses the first page and replaces the displayed records.",
+        "When a NOTE body contains an HTML script or image tag, expanding the note displays that markup as text without executing it or fetching the image."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/memory.vue",
+          "reason": "`KIND_OPTIONS` lists all six kinds; renders description, expandable body and scope badge; adds the search box."
+        },
+        {
+          "path": "apps/web/composables/useMemory.ts",
+          "reason": "`MemoryItem` gains `description?` and `scope`; `loadMemory` sends `text` when non-empty."
+        },
+        {
+          "path": "apps/web/tests/pages/memory.spec.ts",
+          "reason": "the `KIND_OPTIONS` pin becomes `['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE']`."
+        },
+        {
+          "path": "apps/web/tests/pages/memory-mount.spec.ts",
+          "reason": "the stub set gains the components the search box and expand control use; existing assertions unchanged."
+        },
+        {
+          "path": "apps/web/tests/composables/useMemory.spec.ts",
+          "reason": "the asserted query of `loadMemory` gains `text` only when a text is set; existing cases unchanged."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "memory page strings for search, scope badge, note body toggle."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same keys in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ba9e6a22933c5d8ddca6d66d5f8112f5e27f5a13"
+    },
+    {
+      "id": "US-009",
+      "title": "Manage the agent memory approval policy from project settings",
+      "description": "**Goal** — Add a permission-gated settings card that edits the exact project AGENT memory.create approval policy.\n\n**Motivation** — A project that wants agent memory writes reviewed first has no setting for it (#380).\n\n**Approach** — `GET /projects/:slug/memory/write-mode`, `memory.read`, answers `{ mode: 'direct' | 'proposal', policyId: string | null, source: 'policy' | 'default' | 'not-approvable', agentPolicy: { id: string; mode: ApprovalMode } | null }`. `MemoryWriteModeService.resolve(projectId, principal)` answers the mode the gate would apply to the CALLER's own `memory.create` write: it calls `ApprovalPolicyResolver.resolve({ key: 'memory.create', projectId, subject: { type: principal.type, id: principal.id } })` (the engine's own ranking: project before global, principal before role before type before all, wildcard patterns included). For an AGENT caller `mode` is `proposal` when the resolved mode is not `none`; for a USER caller `mode` is always `direct`, because `ApprovalGate.gate` executes a USER's write directly. `policyId` and `source` come from the resolver's answer. `agentPolicy` is the project's exact type-AGENT policy (`permissionPattern` `memory.create`, `principalType` `AGENT`, no role, no principal), read with `ApprovalPolicyService.list({ projectId, permissionPattern: 'memory.create' }, ...)`, or null; it is what the web toggle edits. Writing the mode is the existing policy routes. The web toggle (US-009) shows proposal when `agentPolicy` exists with a mode other than `none`; choosing proposal creates `{ permissionPattern: 'memory.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' }` when `agentPolicy` is null, or patches it to `mode: 'human'` when it exists in mode `none` (a second create would collide on the selector); choosing direct deletes it.\n\n**Scope** — In: new SettingsMemoryCard and useMemoryWriteMode, existing useApprovalPolicies mutations, project settings inclusion with slug, permission gating, reload/rollback/error states and en/zh text. The card's selected state comes from agentPolicy, not from the human caller's effective mode. Existing settings tabs/cards remain in place. The server principal.type notation above denotes the normalized approval subject; raw KodaPrincipal uses actorType and the existing ownerTypeFor mapping, as US-007 implements. Out: implementing server resolution (US-007), memory-page note/search changes (US-008), or org/global policy editing. No project column for the write mode; the mode is derived from approval policies on every read. Proposal mode covers `POST /memory`, `koda_add_memory` and `POST /memory/notes/:id/retire` only (all `memory.create`); `POST /memory/extract` (`memory.extract`) and `POST /memory/decisions` (`memory.decision.record`) keep their own policies and are not switched by the write-mode toggle.\n\n**Interface** — `SettingsMemoryCard` receives the project slug. `useMemoryWriteMode` reads GET /projects/<slug>/memory/write-mode. Use `useApprovalPolicies({ kind: 'project', slug })` for create/update/remove over POST, PATCH and DELETE /projects/<slug>/approval-policies[/:id]. Proposal creation body: `{ permissionPattern: 'memory.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' }`; existing mode none patch: `{ mode: 'human' }`; direct deletes the exact agentPolicy.id. `useProjectPermissions(slug).permissions.value.has('approval.policy.manage')` gates both options and prevents writes. On create, patch or delete failure, show extractApiError and restore the mode the API last reported; on success re-read write-mode.\n\nVerification: mount tests with mocked $api and permissions for null/none/human states, POST versus PATCH identity, DELETE, permission denial and rollback on each mutation failure; settings-page slug integration and bilingual labels. Use SettingsKnowledgeCard loading/error patterns without changing navigation.",
+      "acceptanceCriteria": [
+        "[unit] Mounting SettingsMemoryCard calls $api.get on /projects/<slug>/memory/write-mode and shows the direct option selected when agentPolicy is null.",
+        "[unit] With agentPolicy null, choosing proposal calls $api.post on /projects/<slug>/approval-policies with { permissionPattern: 'memory.create', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' } and then re-reads the write mode.",
+        "[unit] With agentPolicy { id: 'pol1', mode: 'none' }, choosing proposal calls $api.patch on /projects/<slug>/approval-policies/pol1 with { mode: 'human' } and sends no post.",
+        "[unit] With agentPolicy { id: 'pol1', mode: 'human' }, the proposal option is selected, and choosing direct calls $api.delete on /projects/<slug>/approval-policies/pol1 and then re-reads the write mode.",
+        "[unit] When useProjectPermissions(slug).permissions.value.has('approval.policy.manage') is false, both options are disabled and no write is sent.",
+        "[unit] When the policy post rejects, the card shows the message from extractApiError and the selected option returns to direct.",
+        "[unit] The project settings page renders SettingsMemoryCard with the project slug.",
+        "[unit] When patching an existing mode-none AGENT policy fails, SettingsMemoryCard shows extractApiError and restores the last API-reported direct selection.",
+        "[unit] When deleting an existing proposal AGENT policy fails, SettingsMemoryCard shows extractApiError and restores the last API-reported proposal selection.",
+        "[unit] When the settings page's existing knowledge tab is selected, it still renders SettingsKnowledgeCard with the project slug after SettingsMemoryCard is added."
+      ],
+      "tags": [
+        "memory-notes",
+        "web",
+        "approvals",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing client patterns make the implementation bounded, but editing approval policy and permission-gated controls triggers strict access-control test isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/settings.vue",
+        "apps/web/components/SettingsKnowledgeCard.vue",
+        "apps/web/composables/useApprovalPolicies.ts",
+        "apps/web/lib/approval-policies.ts",
+        "apps/web/tests/components/settings-knowledge-card.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/SettingsMemoryCard.vue",
+        "apps/web/composables/useMemoryWriteMode.ts",
+        "apps/web/tests/components/settings-memory-card.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/settings.vue",
+          "reason": "renders `SettingsMemoryCard`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "memory write-mode card strings."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same keys in Chinese."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "deaacaefc13a13f954ecd1177ada39e362b3dd85"
+    },
+    {
+      "id": "US-010",
+      "title": "Create, list and search notes from the CLI",
+      "description": "**Goal** — Extend the thin memory CLI with NOTE description/scope input and paged list/full-text search commands using the generated client.\n\nMemory create, list and search need CLI surfaces for notes (#376), full-text search (#377) and user scope (#378).\n\n**Approach** — Regenerated client; `memory create` takes `--description` and `--scope`; new `memory list` and `memory search <text>`. `create` gains `--description` and `--scope` and lists NOTE in `--kind`, and validates option values before resolving the project; adds `list` and `search`.\n\n**Scope** — In: memory.ts options, early enum/paging validation, generated read/write SDK use, pretty JSON page output, concise human records, stderr/exit semantics and command tests. Run bun run generate:cli from the updated committed OpenAPI (or bun run generate to refresh both); never hand-edit generated types/sdk/index. Out: web UI, export CLI and reimplementing note body/domain rules in the CLI (option syntax, enum and paging checks above remain in scope). Existing memory retire remains decision-only. US-011 only: no CLI command and no assistant or MCP tool retires a note; nax calls the REST route.\n\n**Interface** — `koda memory create --project alpha --kind NOTE --subject replay-budget --predicate project --object \"body\" --description \"replay budget\" [--scope project|user]`. `koda memory list --project alpha [--kind NOTE] [--scope project|user|all] [--page <n>] [--json]` calls GET /projects/alpha/memory with kind/scope and the corresponding current page. `koda memory search <text> --project alpha` calls the same generated read operation with text. For --json print the entire unwrapped page as `JSON.stringify(data, null, 2)`; without it print one line per record containing id, kind, scope and NOTE description or non-NOTE subject predicate. API or network errors use the shared handleApiError mapping and go to stderr: HTTP 401/403 exit 2, HTTP 400 exit 3, HTTP 404 exit 4, and other API/network failures exit 1. Pending approval retains its existing output and exit 5. Invalid option values go to stderr with exit 3 and no API call. Validate before resolving the project. create carries description/scope in the generated create DTO.\n\nVerification: Jest generated-client mocks and Commander parseAsync cases for request arguments, output formatting, option failure before project lookup, API/network error exit 1 (500) and invalid-page/scope exit 3. Use the shared handleApiError unchanged (401/403 exit 2, 400 exit 3, 404 exit 4, other API/network failures exit 1); preserve decision retire and approval-pending output and exit 5.",
+      "acceptanceCriteria": [
+        "[cli] koda memory create --project alpha --kind NOTE --subject replay-budget --predicate project --object \"body\" --description \"replay budget\" posts kind: 'NOTE' and description: 'replay budget' and exits 0.",
+        "[cli] koda memory create ... --scope user posts scope: 'user'; --scope org prints an error to stderr and exits 3 without calling the API.",
+        "[cli] koda memory list --project alpha --kind NOTE --scope user --json calls GET /projects/alpha/memory with kind=NOTE and scope=user and prints the page as JSON.stringify(data, null, 2).",
+        "[cli] koda memory list --project alpha without --json prints one line per record with id, kind, scope and the description for a NOTE or subject predicate otherwise.",
+        "[cli] koda memory search \"deployed runner\" --project alpha calls GET /projects/alpha/memory with text=deployed runner and exits 0.",
+        "[cli] koda memory list --page 0 prints an error to stderr and exits 3 without calling the API.",
+        "[cli] When the API answers 500, koda memory list prints the error to stderr and exits 1, using the shared handleApiError mapping (a 403 keeps its existing exit 2).",
+        "[cli] When a memory create, list or search API call fails, the command uses the shared handleApiError mapping: HTTP 401/403 exit 2, HTTP 400 exit 3, HTTP 404 exit 4, and other API/network failures exit 1, with errors printed to stderr. Pending approval retains its existing output and exit 5.",
+        "[cli] When memory create writes a FACT without --description or --scope, it forwards the existing subject, predicate and object options unchanged to memoryControllerCreateMemory and exits 0."
+      ],
+      "tags": [
+        "memory-notes",
+        "cli",
+        "generated-client"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003",
+        "US-004",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Thin Commander options and formatting over generated operations; bounded changes with explicit error-code regression tests and no local authorization decisions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/memory.ts",
+        "apps/cli/src/commands/memory.spec.ts",
+        "apps/cli/src/index.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated with `bun run generate:cli` from the updated openapi.json."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "regenerated with `bun run generate:cli`."
+        },
+        {
+          "path": "apps/cli/src/generated/index.ts",
+          "reason": "regenerated with `bun run generate:cli`."
+        },
+        {
+          "path": "apps/cli/src/commands/memory.ts",
+          "reason": "`create` gains `--description` and `--scope` and lists NOTE in `--kind`, and validates option values before resolving the project; adds `list` and `search`."
+        },
+        {
+          "path": "apps/cli/src/commands/memory.spec.ts",
+          "reason": "the registered subcommand list gains `list` and `search`; existing cases unchanged."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e05a39aaee5bc283f55270e05f12f9fc4c99480f"
+    },
+    {
+      "id": "US-011",
+      "title": "Retire a note through an approval-gated REST route",
+      "description": "**Goal** — Implement nax forget as an authorized, approval-gated NOTE retirement whose rejection tombstone reappears in export.\n\n**Motivation** — The only keyset read is findActiveAfterId, by id and active rows only, so supersede, retire and soft delete of old rows are invisible to a mirror (#379).\n\n**Approach** — `POST /memory/notes/:id/retire`, body `RetireNoteDto { projectId?: string; reason?: string }` (`reason` max 500, as `RetireDecisionDto`). The handler carries `@ApprovalGated()` and `@Requires(['memory.create', 'memory.update'], { enforcedBy: 'service' })` like `createMemory`, and runs the gate with key `memory.create` and a new variant `MEMORY_ROUTE_VARIANTS.retireNote = 'rest:memory.note.retire'`, so a project in proposal mode also holds a note retire for approval; no new permission key. Before the gate, `MemoryWriteService.retireNoteTarget(principal, id, projectId?)` resolves the gate's project and runs every check that does not need the row lock, in this order:\n1. the row exists and is not soft-deleted, else 404 `memory.notFound`;\n2. for a user row, its `ownerKey` is the caller's, else 404 `memory.notFound`;\n3. for a user row, the body names `projectId`, else 400 naming `projectId`;\n4. membership of the gate's project (a project note's own `projectId`, ignoring any body `projectId`; a user note's body `projectId`), a refusal answering 404 `memory.notFound`, as for decisions;\n5. the row is a NOTE, else 422 (`MemoryRetireException`);\n6. the row is active, else 409 `memory.retireNotActive`.\nSo a bad target never opens an approval request. `MemoryWriteService.retireNote(principal, id, projectId?, reason?)` then runs `PrismaMemoryItemRepository.retire`, whose in-lock check repeats steps 1, 2, 5 and 6 on the locked row and adds the replace check (`MemoryWriteGuard.mayReplace`, 403 `permissions` otherwise; skipped for the caller's own user note). The row becomes `rejected` with a null `activeKey`; the audit entry is `memory.create` with summary `retired NOTE` (plus `: <reason>`) and `projectId` = the row's `projectId`, or the body `projectId` for a user note. The route answers `201` with the retired item. The 422 and 409 messages are reworded in `apps/api/src/i18n/{en,zh}/memory.json` to cover decisions and notes (en: `retireNotDecision` \"Only decisions and notes can be retired\", `retireNotActive` \"Only active decisions and notes can be retired\"); the keys and `MemoryRetireException` are unchanged.\n\n**Scope** — In: RetireNoteDto, ordered preflight, service authorization using the resolved project and memory.create, replayable route command variant, existing locked repository retire callback, transaction-local audit and English/Chinese error wording. Preserve ownership/membership checks when approved execution occurs as the original requester; a grant changed after proposal cannot silently authorize execution. Out: export implementation belongs to US-006. `POST /memory/:id/retire` stays decision-only; notes retire through `POST /memory/notes/:id/retire` (US-011). No soft delete or hard delete of notes is added. US-011 only: no CLI command and no assistant or MCP tool retires a note; nax calls the REST route.\n\n**Interface** — `RetireNoteDto { projectId?: string; reason?: string }`; `MemoryWriteService.retireNoteTarget(principal, id, projectId?)`; `MemoryWriteService.retireNote(principal, id, projectId?, reason?)`; `MEMORY_ROUTE_VARIANTS.retireNote = 'rest:memory.note.retire'`. Register that variant under memory.create in MemoryRouteCommands, parse RetireNoteDto with the existing route command pattern, and call retireNote with id, body.projectId and body.reason. `PrismaMemoryItemRepository.retire(id, check, onRetired): Promise<MemoryItem>` remains the row-lock/transaction boundary. Unknown/deleted/foreign targets are NotFoundAppException({}, 'memory.notFound'); non-NOTE is 422 MemoryRetireException; inactive is 409 memory.retireNotActive. Pending gate outcomes throw ApprovalPending/202 without row mutation. Chinese strings: retireNotDecision = \"只能撤销决策和笔记\", retireNotActive = \"只能撤销有效的决策和笔记\".\n\nVerification: DB-backed active/project/user/ownership/approval/race-sensitive state tests and an export cursor before retire with the fake clock advanced beyond MEMORY_EXPORT_SETTLE_MS afterward. Cover bad targets before approval creation, reason audit and subsequent same-slug creation. Update controller/command tests, route-declarations permission pin and command Map keys to key plus variant (two commands now share memory.create), add endpoint e2e NOTE 201/FACT 422 and regenerate OpenAPI.",
+      "acceptanceCriteria": [
+        "[integration] POST /memory/notes/:id/retire by the agent that owns an active project NOTE answers 201, and the row is rejected with a null activeKey.",
+        "[integration] After that retire, with the system clock advanced past MEMORY_EXPORT_SETTLE_MS (updatedAt is set client-side, so a faked clock moves it), an export with the cursor taken before the retire returns the row with status 'rejected'.",
+        "[integration] After that retire, POST /memory of a NOTE with the same slug in the same project stores a new active row.",
+        "[integration] POST /memory/notes/:id/retire for a FACT id answers 422 and leaves the row active.",
+        "[integration] POST /memory/notes/:id/retire for a superseded NOTE answers 409 memory.retireNotActive.",
+        "[integration] For an unknown id, a soft-deleted NOTE, or a NOTE of a project the caller is not a member of, the route answers 404 memory.notFound.",
+        "[integration] Agent B, a project member without an any-row memory.update grant, retiring agent A's project NOTE answers 403 and leaves the row active.",
+        "[integration] Agent A retiring its own user NOTE with { projectId: P }, P a project A is a member of, answers 201 and the row is rejected.",
+        "[integration] Agent B retiring agent A's user NOTE with { projectId: P } answers 404 and leaves the row active.",
+        "[integration] Agent A retiring its own user NOTE without projectId in the body answers 400 naming projectId, and with a projectId A is not a member of answers 404.",
+        "[integration] In a project P whose memory.create AGENT policy is human, an agent's retire of a FACT id answers 422 and opens no approval request.",
+        "[integration] With a project P policy memory.create for type AGENT in mode human, agent A's retire of its project NOTE answers 202 with a pending approval request and the row stays active; after a user approves it through POST /approvals/:id/decisions, the row is rejected.",
+        "[integration] A retire with reason: 'stale' records one audit entry with key memory.create, the row's id and summary retired NOTE: stale.",
+        "[unit] RetireNoteDto with a 501-character reason fails validation on reason.",
+        "[integration] In a proposal-mode project, retiring an inactive NOTE answers 409 memory.retireNotActive before the gate and opens no approval request.",
+        "[integration] When MemoryWriteGuard.mayReplace refuses retirement of another principal's project NOTE, the route answers 403 permissions.",
+        "[integration] Given an active project DECISION and an authorized owner with memory.decision.retire, POST /memory/:id/retire still answers 201 and leaves that decision rejected with a null activeKey.",
+        "[integration] Given a project NOTE and an authorized project member, POST /memory/:id/retire still answers 422 rather than retiring it, preserving the old route's decision-only contract."
+      ],
+      "tags": [
+        "memory-notes",
+        "api",
+        "approvals",
+        "retirement",
+        "security"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The new route reuses existing decision-retire row locking, audit callbacks and approval-command variants, with additional ordered user-note checks; authorization and locked revalidation require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory.controller.ts",
+        "apps/api/src/memory/memory-write.service.ts",
+        "apps/api/src/memory/memory-route.commands.ts",
+        "apps/api/src/memory/dto/retire-decision.dto.ts",
+        "apps/api/src/memory/memory-retire.exception.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/dto/retire-note.dto.ts",
+        "apps/api/test/integration/memory/memory-note-retire.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a project NOTE retire body names a different projectId, membership, approval and audit still use the note's stored projectId.",
+        "When an approved user-note retire executes after the target has already been superseded, execution refuses with memory.retireNotActive and leaves the replacement active."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/memory/memory.controller.ts",
+          "reason": "adds the Post handler for notes/:id/retire."
+        },
+        {
+          "path": "apps/api/src/memory/memory-route.commands.ts",
+          "reason": "`MEMORY_ROUTE_VARIANTS` gains `retireNote: 'rest:memory.note.retire'`, registered under `memory.create` and running `MemoryWriteService.retireNote`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-write.service.ts",
+          "reason": "adds `retireNoteTarget` and `retireNote`."
+        },
+        {
+          "path": "apps/api/src/memory/memory-route.commands.spec.ts",
+          "reason": "the exact `toEqual` on `MEMORY_ROUTE_VARIANTS` gains `retireNote: 'rest:memory.note.retire'`; the registered-command Maps are keyed by key and variant instead of key alone, since two commands now share `memory.create`; existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/remaining-route-declarations.spec.ts",
+          "reason": "gains a row declaring the note retire handler's `@Requires(['memory.create', 'memory.update'], { enforcedBy: 'service' })`; existing rows unchanged."
+        },
+        {
+          "path": "apps/api/src/memory/memory.controller.spec.ts",
+          "reason": "note retire cases added; existing cases unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/en/memory.json",
+          "reason": "`retireNotDecision` becomes \"Only decisions and notes can be retired\" and `retireNotActive` becomes \"Only active decisions and notes can be retired\"."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/memory.json",
+          "reason": "`retireNotDecision` becomes \"只能撤销决策和笔记\" and `retireNotActive` becomes \"只能撤销有效的决策和笔记\"."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the note retire route."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds POST /memory/notes/:id/retire happy path (201) and a FACT id (422)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e252a8f868f6ed39da44586f7cbe35b71e485a2c"
+    }
+  ],
+  "analysis": "Existing-system enhancement closing #376, #377, #378, #379 and #380; not greenfield. Navigation used direct reads and text search because this host exposes no codebase-memory MCP tools. The execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. Read the package contexts before implementation. The supplied automatic stack labels Express and Next.js are inaccurate: the repository guidance identifies NestJS 12/Fastify/Prisma 7 for API and Nuxt 4/Vue for web (.nax/mono/apps/api/context.md:22; .nax/mono/apps/web/context.md:23). Bun workspaces and Turbo orchestrate the packages (package.json:5). Implementation agents must read the nathapp-nestjs-patterns skill before writing NestJS; it was not present under that name in repository files in this session. Keep Nathapp exceptions, JsonResponse envelopes, repository/transaction-manager patterns and generated Prisma imports. This PRD writes planning JSON only, not application code.\n\nCurrent persistence and write seams: MemoryItem is a string-kind triple with mandatory projectId, optional object/owner/source, activeKey, soft delete and Prisma-managed updatedAt; only (projectId, activeKey) is unique (apps/api/prisma/schema.prisma:648). Domain inputs and output types currently have no description/scope/ownerKey, and projectId is non-null (apps/api/src/memory/memory-item-repository.ts:16). buildActiveKey currently always includes predicate (apps/api/src/memory/prisma-memory-item.repository.ts:17). upsert is serializable, executes beforeSupersede and onWritten inside its transaction, and intentionally performs no mutation/audit for an identical restatement (same file:199). Its old lookup matches kind/subject/predicate rather than activeKey; both this and findActive must use NOTE:<slug>, otherwise changing a note type evades replacement checks or collides on uniqueness. Map description in all persistence/domain directions and include predicate and description in no-op comparison, normalizing optional values consistently with stored nulls. Preserve other kinds' keys and no-op semantics. MemoryWriteService.create checks project membership and memory.create, refuses generic DECISION creation, and permits attributed ownership only with global memory.update (apps/api/src/memory/memory-write.service.ts:44, 226). User-note ownership must override that attribution path even for administrators. Keep the request project as the authorization/approval/audit context while storing null projectId for user notes. MemoryWriteGuard passes a typed createdBy resource into memory.update and is used by REST, extraction and assistant writes (apps/api/src/memory/memory-write.guard.ts:49). memoryAuditHook currently copies item.projectId directly and must accept a fallback gate project for user items (apps/api/src/memory/memory-audit.ts:33).\n\nReads and search: MemoryReadController already has the right project membership then RequiresGuard order and memory.read permission, resolves slug through ProjectAccessService and parses Koda paging before returning the standard page (apps/api/src/memory/memory-read.controller.ts:24). It currently has no Principal parameter. MemoryGovernanceService.getProjectMemory delegates to the repository; cleanup explicitly supplies projectId through findActiveAfterId/findByProject (apps/api/src/memory/memory-governance.service.ts:26, 47). findByProjectMemory uses active + TTL by default, literal subject prefix through Prisma, an AND-contained ILIKE OR over subject/predicate/object, and stable confidence/updatedAt/createdAt/id ordering (apps/api/src/memory/prisma-memory-item.repository.ts:368). Keep the TTL AND invariant in BOTH SQL and fallback paths. Full-text rank applies only for non-blank text with lexemes and no explicit orderBy; preserve explicit-order tiebreakers and fallback substring behavior, including no-lexeme and zero-full-text-match fallback for unsegmented text. Never fall back merely because an offset page is empty when total is nonzero. Bind all raw SQL values with tagged templates; whitelist sort fragments and use starts_with for literal %/_ prefixes. The raw id query and count must share authorization, scope, soft-delete, status, kind, prefix and TTL filters; hydrate by id and restore SQL order. Scope defaults to all only when owner is supplied; without owner a read remains project-only, and scope=user yields no rows. Group project-or-owner predicates separately from text and TTL so an OR cannot leak another principal's user notes.\n\nAffected dependents: the domain types are imported by extraction, the outbox subscriber, governance, audit, context, review decisions, assistant tools and many fixtures. Update type fixtures with project scope without broadening these consumers' behavior. ContextBuilderService calls findByProjectMemory with only projectId and confidence ordering, so it must remain project-only (apps/api/src/context/context-builder.service.ts:110). Canonical state, review decisions, cleanup, extraction and /context must never receive owner. findReviewDecisionRows also explicitly filters projectId (apps/api/src/memory/prisma-memory-item.repository.ts:341). Nullable projectId requires defensive narrowing in decision retirement rather than a non-null assertion that could authorize a user row. Existing assertRetireTarget masks only membership ForbiddenAppException as notFound, not infrastructure errors (apps/api/src/memory/memory-write.service.ts:190). Preserve that distinction.\n\nAssistant/MCP seams: addMemoryTool parses fields by hand, masks preview text, checks replacement during preview, and writes with a transaction-local guard/audit hook (apps/api/src/fleet/assistant/tools/add-memory-tool.ts:66). Its current 4000-character cap must remain for triples but not notes, whose limit is 8192 UTF-8 bytes. Its catalog schema currently also caps object globally at MAX_BODY_CHARS, so expose note-compatible schema/wording rather than letting schema validation reject valid notes (apps/api/src/fleet/assistant/koda-tool-descriptors.ts:461). knowledge-tools.ts already holds MemoryGovernanceService in an unchanged KnowledgeTools constructor; memorySearchTool currently orders newest and fences each triple through ctx.data (apps/api/src/fleet/assistant/tools/knowledge-tools.ts:125, 230). Register getMemoryTool there, give it memory.read, and fence note description/body with the same data mechanism. List notes by description, never body. The catalog is projected into MCP, with descriptions rewritten and koda_list_approvals deliberately filtered out; preserve that projection rather than adding bespoke MCP endpoints (apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:93). Update descriptor/catalog/module/tool-name pins and the spec's counts from 22/22/23 to 23/23/24 if still current. Read tools include the ctx.actor owner after US-005; the add tool's new scope input is NOT requested. The existing assistant/MCP execution gate continues governing memory.create.\n\nApproval seams: createMemory already uses @ApprovalGated with memory.create and variant rest:memory.create; pending means ApprovalPending/202, not a MemoryItem (apps/api/src/memory/memory.controller.ts:74). MemoryRouteCommands parses DTOs and executes under the requester loaded by ActorPrincipalLoader (apps/api/src/memory/memory-route.commands.ts:38). ApprovalGate resolves policies, directly executes USER subjects regardless of resolved mode, and opens pending requests for other callers when mode is not none (apps/api/src/approvals/approval-gate.service.ts:108). ApprovalPolicyResolver already owns project-before-global and principal/role/type/all ranking, wildcard specificity and mode floors (apps/api/src/approvals/approval-policy.resolver.ts:30). Reuse it, do not reproduce ranking. ApprovalPolicyService.list returns one page's records, not an unbounded list (apps/api/src/approvals/approval-policy.service.ts:98); when finding the exact project AGENT policy, do not confuse an inherited/global, role or principal policy with the editable selector, or miss it on a later page. Existing project policy POST/PATCH/DELETE are all approval.policy.manage guarded and selector identity is immutable (apps/api/src/approvals/project-approval-policies.controller.ts:69, 94, 117). A policy in mode none must be patched to human, not created again. The settings control edits agentPolicy, not the USER caller's always-direct mode; deleting the exact policy does not promise the effective AGENT mode is direct if inherited/wildcard policies still resolve to proposal.\n\nExport and retirement: copy the timeline cursor's base64url ISO|id conventions but key by updatedAt ascending, with strict validation and a unique id tiebreaker (apps/api/src/memory/timeline-cursor.ts:10). Export is a bounded current-row change feed, not an append-only event history or an active-item list. Include all statuses, expired rows and soft-delete tombstones; exclude only unrelated project/owner rows and rows inside the 5000ms settle window. Return the input cursor unchanged on empty pages and set hasMore exactly to length===take, not based on an extra-row probe. Prisma update already bumps updatedAt for supersede/reject/softDelete/retire (apps/api/src/memory/prisma-memory-item.repository.ts:234, 301, 319); do not bypass these updates. The settle window mitigates late commits but is not a claim of arbitrary-transaction-duration losslessness. Note retirement reuses the existing row-lock retire transaction, callbacks and rejected/null-activeKey mutation (same file:301). Validate the ordered preflight before opening approval, then repeat target/ownership/kind/active and replacement checks under lock. Gate under memory.create with rest:memory.note.retire; leave the old decision-only route and permission untouched. Audit remains inside the mutation transaction with gate-project fallback for user notes, and i18n keys/exceptions remain the same with broader decision-and-note messages.\n\nWeb: the memory page currently has only ['', FACT, INCIDENT_PATTERN, DECISION] and always interpolates object (apps/web/pages/[project]/memory.vue:23, 109). Add all six kinds in the exact requested order, a description-first NOTE row with an expandable body, a user-only badge and 300ms trailing text debounce. Continue interpolation for agent-written Markdown, not v-html. useMemory owns the paging/filter state, request-id stale-response suppression, append failure rollback and structured records (apps/web/composables/useMemory.ts:29, 46); preserve those semantics and reset paging on search changes. New UI copy belongs in both locale JSONs. Settings has four existing tabs and extracted cards (apps/web/pages/[project]/settings.vue:77); add SettingsMemoryCard with the slug without rearranging navigation. SettingsKnowledgeCard is the permission-gated loading/retry/error pattern (apps/web/components/SettingsKnowledgeCard.vue:34). useApprovalPolicies already exposes create/update/remove and project-root helpers (apps/web/composables/useApprovalPolicies.ts:75); use it for policy mutation and the new useMemoryWriteMode for the read snapshot. Follow extractApiError, prevent writes without approval.policy.manage, disable pending controls, and restore the last reported selection on failure. UX redesign guidance requires preserving tokens/layout pins and updating the MASTER-PLAN status/decisions when changing layout (docs/ux/redesign/MASTER-PLAN.md:33); do not turn this feature into a navigation redesign.\n\nCLI: memoryCommand already registers retire (decisions only), timeline, decisions and create; write commands resolve project slug to id and use generated operations, unwrap and handleApiError (apps/cli/src/commands/memory.ts:13, 133). Add description/scope plus list/search using the regenerated read operation. Validate options BEFORE project resolution/network access, map --page to API current, preserve JSON page metadata and print one human line per item. Preserve the shared handleApiError mapping for memory create/list/search: HTTP 401/403 exit 2, HTTP 400 exit 3, HTTP 404 exit 4, other API/network failures exit 1, and invalid option values exit 3 before any API call (apps/cli/src/utils/error.ts). Pending approval retains its existing output and exit 5. Preserve existing decision retire/timeline behavior; do not introduce memory-specific or repository-wide error semantic changes. The generated SDK is the only networking boundary; do not add handwritten endpoint wiring.\n\nMigration sequence and rollout: US-001 adds nullable description; US-003 adds generated english tsvector/Gin; US-004 makes projectId and relation nullable, adds scope default project and ownerKey unique; US-006 adds the two change-feed composite indexes. Keep the existing project active-key unique constraint. Use the exact migration directory names and Prisma-default index names in the story descriptions. Existing rows backfill as project scope with null ownerKey and unchanged triple keys. Deploy compatible schema before code relying on fields; regenerate the Prisma client after schema edits. The generated search column derives from subject, predicate, description and object. prisma db push cannot build its expression: replay trusted MEMORY_SEARCH_VECTOR_STATEMENTS after partial indexes in test/global-setup.ts, and pin all statements except the test-only drop to migration SQL verbatim. Do not let a later Prisma migration replace the generated column with a plain tsvector or rename hand-written indexes. Shared Prisma fixture types may require mechanical updates across packages. The full-text parity unit spec is planned at src/memory/memory-search-vector.spec.ts instead of the spec's proposed test/unit/memory path, to obey the repository's co-located unit-test instruction; its helper and integration filenames remain as specified.\n\nOpenAPI/client rollout: package.json:21 defines bun run generate as API build/export then generate:cli; all REST DTO/controller stories regenerate openapi.json and CLI outputs rather than editing generated code. The binding workdirs remain apps/api, apps/web and apps/cli exactly as requested, with root OpenAPI/downstream generated artifacts as the documented contract-generation exception. US-010 regenerates its SDK from the final available contract again. Beware concurrent modifications to schema, controllers, tests, openapi and knowledge-tools across branches. Binding dependencies remain exact. In particular US-005 enhances methods introduced by US-002 but its mandated dependencies do not include US-002; integration must coordinate these shared-file changes and retain both the getMemoryTool implementation and owner extension, without silently adding a dependency or moving ACs. Existing context files in that story are available now even if a method is not. API contracts needed by web/CLI must be present at their dependency boundary. US-007 is independent and can proceed with US-001. US-011 remains last-numbered and depends on US-004/006 so rejection tombstones are exportable.\n\nTests and verification: existing co-located memory unit suites cover repository defaults, TTL/prefix/paging, guards, audit, route commands, controller, governance, retirement and module registration (apps/api/src/memory/memory-item-repository.spec.ts:6; memory.module.spec.ts; prisma-memory-item.repository.additional.spec.ts). Both repository unit suites with substring mocks need the lexeme probe stub, not only the additional spec. Keep every existing behavior assertion meaningful while updating changed query-shape pins. Existing DB suites include permissions-memory-routes, gated-memory-routes, memory-upsert-replay, memory-governance-paging and assistant-add-memory-tool; new specs extend these patterns. Update endpoint e2e cases per story (NOTE happy/invalid, text limit, user-scope kind restrictions, scope filter validation, export cursor, write-mode slug and note-retire kind rejection). test/global-setup.ts:31 gates DB provisioning through canRunDbTests and :71 force-resets then replays partial indexes. DB integration must run outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1, a safe *_test database and no competing DB-mode run; a skipped DB spec is not verification. Module/provider wiring tests stay DB-free. Web has page source pins plus memory-mount.spec.ts and useMemory composable Jest coverage; update stubs only for real new controls and test debounce with fake timers. CLI memory.spec.ts:16 mocks generated boundaries and asserts process exits; preserve prior subcommand behavior. Generated acceptance files are never edited/copied into normal test trees. No validation, lint or test suite was run while drafting because this session has only file tools. All original story ACs and failure-table outcomes are retained; where the spec already groups parameterized examples, those are preserved as single parameterized behavioral assertions. US-002 and US-003 already exceed the mentioned maxAcCount=15; fidelity and the binding eleven-story structure take precedence over silently dropping assertions or splitting stories.\n\nAdversarial refine audit: enumerated all 129 original acceptance criteria against spec.md, retaining them as the first 15/17/17/12/11/13/9/7/7/7/14 entries respectively in US-001 through US-011; none was moved or dropped. Preserve every original qualifier, notably multi-byte exact-size validation, identical source/type restatement, FACT still-rendered triples, TTL/status eligibility, Chinese zero-match fallback, no-owner scope=user isolation, already-exported supersede replay, 300ms not-before and same-delay clearing, no-second-create policy patching, any-row grant refusal, and client-side updatedAt/faked-clock export verification. The revised total is 150 ACs: the 129 originals, 14 failure-table expansions, and seven negative/regression additions. All are observable through returns/errors, service-call arguments, UI output, file content or persisted state. US-008 now explicitly tests a rejected search request forwarding extractApiError to toast.error, matching the existing page wrapper (apps/web/pages/[project]/memory.vue:26). Added regression anchors cover export versus list eligibility, controller query-versus-page argument shape, existing settings knowledge-card rendering, legacy FACT create forwarding, and the old decision-only retire route.\n\nImportant interface correction from fresh code reads: KodaPrincipal discriminates on actorType ('user', 'agent', 'runner'), while ToolContext.actor is already a user/agent principal; neither should be extended with a new uppercase type field (apps/api/src/auth/principal/koda-principal.types.ts:8,16,25; apps/api/src/fleet/assistant/assistant-tool.types.ts:21). Where the spec writes principal.type, treat it as normalized approval-subject notation: reuse ownerTypeFor(principal) / ownerTypeFor(ctx.actor) after the existing runner exclusion to produce USER or AGENT (apps/api/src/memory/memory-write.guard.ts:92). US-007's first AC still asserts the exact AGENT/id resolver call. AssistantTool.execute returns Promise<string>, not a model (apps/api/src/fleet/assistant/assistant-tool.types.ts:48); US-005's own-user fetch criterion now explicitly asserts rendered item text with the scope-user header rather than suggesting a MemoryItem return. US-002's active NOTE header criterion treats its ellipsis as a prefix placeholder, not literal output. The NOTE REST happy-path criterion explicitly includes the already-required projectId.\n\nRouting audit reduced US-004/005/011 from expert to complex and US-007 from complex to medium: these extend existing ownership filters, serializable transactions, row-lock retirement, command variants and approval resolution rather than introducing a novel architecture. Strict three-session-tdd remains wherever ownership, permission or approval behavior is involved. A non-spec suggested assertion that the losing concurrent retire must always return 409 was removed: the existing serializable transaction can raise a serialization failure and does not promise retries; do not add an unrequested transaction-retry subsystem to satisfy that invented guarantee. All 14 feature exclusions remain verbatim at top level with near-boundary story echoes, and all spec-recommended context paths and binding dependency/workdir arrays are retained. CLI Scope now distinguishes required local option checks from excluded replication of note/body domain rules. No dependency was added to resolve the US-002/005 shared-file seam; preserve the explicitly binding graph and coordinate integration as noted above. This audit used file reads and comparisons, not an executed parser or application test run.",
+  "outOfScope": [
+    "No pending memory rows and no `status: pending` value: proposal mode is a project approval policy on `memory.create` for AGENT principals (ruling 2026-11-03); an unapproved write simply does not exist yet.",
+    "Proposal mode covers `POST /memory`, `koda_add_memory` and `POST /memory/notes/:id/retire` only (all `memory.create`); `POST /memory/extract` (`memory.extract`) and `POST /memory/decisions` (`memory.decision.record`) keep their own policies and are not switched by the write-mode toggle.",
+    "No project column for the write mode; the mode is derived from approval policies on every read.",
+    "No org-wide memory, and no Agent-to-User ownership: a user-scoped item is owned by the principal that wrote it.",
+    "User scope is NOTE-only; triples (FACT, DECISION, PREFERENCE, CONSTRAINT, INCIDENT_PATTERN) stay project-scoped.",
+    "`POST /memory/:id/retire` stays decision-only; notes retire through `POST /memory/notes/:id/retire` (US-011). No soft delete or hard delete of notes is added.",
+    "US-011 only: no CLI command and no assistant or MCP tool retires a note; nax calls the REST route.",
+    "No hybrid vector plus keyword ranking; the knowledge base (LanceDB) stays the semantic layer.",
+    "`MemoryGovernanceService` (expire, downrank, dedupe, supersession), extraction, canonical state, review decisions and the `/context` builder are unchanged and never read user-scoped rows.",
+    "No MCP twin of the export route (`koda_memory_export`); HTTP is the only export surface.",
+    "Export and list responses are not fenced; fencing stays in the MCP tool text.",
+    "A user note written through project Q is visible to its owner in every project, including a proposal-mode project P that never held it for approval; per-project review of user notes is not added.",
+    "Full-text search uses the `english` configuration only; no Chinese segmentation is added (unsegmented text falls back to the substring match).",
+    "`.nax/rules/api-data.md` and other rule files are not edited by this feature."
+  ],
+  "routingProfile": "native-codex-ds"
+}

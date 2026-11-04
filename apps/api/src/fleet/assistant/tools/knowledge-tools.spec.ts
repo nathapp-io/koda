@@ -6,6 +6,7 @@ import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
 import { KnowledgeSearchService } from '../../knowledge/knowledge-search.service';
 import { MemoryGovernanceService } from '../../../memory/memory-governance.service';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
 import { encodeTimelineCursor } from '../../../memory/timeline-cursor';
 import type { TimelineEvent, TimelineResponse } from '../../../memory/timeline.service';
 import { TimelineService } from '../../../memory/timeline.service';
@@ -13,9 +14,9 @@ import { TicketsService } from '../../../tickets/tickets.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { ToolInputError, type ToolContext } from '../assistant-tool.types';
 import { KODA_TOOL_DESCRIPTORS, KNOWLEDGE_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
-import { KnowledgeTools, memorySearchTool, timelineTool } from './knowledge-tools';
+import { KnowledgeTools, getMemoryTool, memorySearchTool, timelineTool } from './knowledge-tools';
 
-const TOOL_NAMES = ['koda_memory_search', 'koda_timeline'] as const;
+const TOOL_NAMES = ['koda_memory_search', 'koda_get_memory', 'koda_timeline'] as const;
 
 /** The parser never touches the service, so the stub only satisfies the DI graph. */
 const stubMemory = {} as MemoryGovernanceService;
@@ -41,16 +42,21 @@ const FENCE_CLOSE = '<<end-koda-data-0000000000000000>>';
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1' },
+  // A full principal, because memory-notes US-005 builds the read's owner from it (`ownerTypeFor`).
+  actor: { id: 'dev-1', actorType: 'agent' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-15T00:00:00.000Z'),
   data: (text: string) => `${FENCE_OPEN}\n${text}\n${FENCE_CLOSE}`,
 } as unknown as ToolContext;
 
+/** memory-notes US-005: the owner every memory read in this file asks for, built from `ctx.actor`. */
+const CTX_OWNER = { ownerType: 'AGENT', ownerId: 'dev-1' };
+
 const item = (over: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-1',
+  scope: 'project',
   kind: 'FACT',
   subject: 'Deploy pipeline',
   predicate: 'status',
@@ -107,14 +113,23 @@ describe('knowledge tools (US-004)', () => {
   });
 
   it('declares a read key for every knowledge tool', () => {
-    for (const name of ['koda_memory_search', 'koda_timeline']) {
-      expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: name === 'koda_memory_search' ? 'memory.read' : 'timeline.read' });
+    for (const name of ['koda_memory_search', 'koda_get_memory', 'koda_timeline']) {
+      expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: name === 'koda_timeline' ? 'timeline.read' : 'memory.read' });
     }
   });
 
-  it('AC-1: the knowledge catalog names all four tools in order, and the catalog stays inside the tool limit', () => {
+  it('AC-15: after onModuleInit the registry holds koda_get_memory, a read tool on memory.read', () => {
+    const tool = registry.get('koda_get_memory');
+
+    expect(tool).toBeDefined();
+    expect(tool?.descriptor.name).toBe('koda_get_memory');
+    expect(tool?.key).toBe('memory.read');
+    expect(tool?.kind).toBeUndefined();
+  });
+
+  it('AC-1: the knowledge catalog names all five tools in order, and the catalog stays inside the tool limit', () => {
     expect(KNOWLEDGE_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name))
-      .toEqual(['koda_memory_search', 'koda_timeline', 'koda_kb_search', 'koda_get_doc']);
+      .toEqual(['koda_memory_search', 'koda_get_memory', 'koda_timeline', 'koda_kb_search', 'koda_get_doc']);
     expect(KODA_TOOL_DESCRIPTORS.length).toBeLessThanOrEqual(KODA_TOOL_LIMITS.maxTools);
     expect(new Set(KODA_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name)).size).toBe(KODA_TOOL_DESCRIPTORS.length);
   });
@@ -133,7 +148,8 @@ describe('knowledge tools (US-004)', () => {
       ['an empty text', { text: '' }, 'text'],
       ['a whitespace-only text', { text: '   ' }, 'text'],
       ['a 101-character text', { text: 'x'.repeat(101) }, 'text'],
-      ['an unknown kind', { kind: 'NOTE' }, 'kind'],
+      // MemoryKind.NOTE is a real kind since US-001 (memory notes); MEMO is not a kind at all.
+      ['an unknown kind', { kind: 'MEMO' }, 'kind'],
       ['an unknown status', { status: 'deleted' }, 'status'],
       ['page 0', { page: 0 }, 'page'],
       ['a fractional page', { page: 1.5 }, 'page'],
@@ -161,15 +177,54 @@ describe('knowledge tools (US-004)', () => {
 });
 
 describe('koda_memory_search execute (US-004)', () => {
-  it('asks for the thread project newest-updatedAt first, one page of 20', async () => {
+  // memory-notes US-003: with a text the tool sends no orderBy, so the API answers in rank order; without
+  // one it keeps asking for newest-updatedAt first.
+  it('AC-16: asks for the thread project one page of 20 with no orderBy when a text is given', async () => {
     const { getProjectMemory, tool } = toolWith(page([item()]));
 
     await tool.execute(ctx, tool.parse({ text: 'deploy', kind: 'FACT', status: 'active', page: 3 }));
 
+    const query = getProjectMemory.mock.calls[0][0] as Record<string, unknown>;
+    expect(query).toEqual({
+      projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active', owner: CTX_OWNER,
+    });
+    expect('orderBy' in query).toBe(false);
+    expect(getProjectMemory.mock.calls[0][1]).toEqual({ current: 3, size: 20 });
+  });
+
+  it('AC-16: asks for newest-updatedAt first when no text is given', async () => {
+    const { getProjectMemory, tool } = toolWith(page([item()]));
+
+    await tool.execute(ctx, tool.parse({ kind: 'FACT', page: 2 }));
+
     expect(getProjectMemory).toHaveBeenCalledWith(
-      { projectId: 'project-1', text: 'deploy', kind: 'FACT', status: 'active', orderBy: 'updatedAt' },
-      { current: 3, size: 20 },
+      { projectId: 'project-1', text: undefined, kind: 'FACT', status: undefined, orderBy: 'updatedAt', owner: CTX_OWNER },
+      { current: 2, size: 20 },
     );
+  });
+
+  // memory-notes US-005: the tool reads the caller's own user notes beside the project's, and says which is which.
+  it('AC-9: passes the owner the context actor makes, never one the input names', async () => {
+    const { getProjectMemory, tool } = toolWith(page([]));
+
+    await tool.execute(ctx, tool.parse({ text: 'deploy', owner: { ownerType: 'AGENT', ownerId: 'someone-else' } }));
+
+    expect(getProjectMemory.mock.calls[0][0]).toMatchObject({ owner: CTX_OWNER });
+    expect(JSON.stringify(getProjectMemory.mock.calls[0][0])).not.toContain('someone-else');
+  });
+
+  it('AC-9: every header line ends with the scope of its own item', async () => {
+    const { tool } = toolWith(page([
+      item({ id: 'mem-project', projectId: 'project-1', scope: 'project' }),
+      item({ id: 'mem-user', projectId: null, scope: 'user', kind: 'NOTE', subject: 'working-style', predicate: 'user', object: 'body', description: 'index line' }),
+    ]));
+
+    const content = await tool.execute(ctx, tool.parse({}));
+
+    const headers = content.split('\n').filter((line) => line.startsWith('memory:'));
+    expect(headers).toHaveLength(2);
+    expect(headers[0].endsWith('scope project')).toBe(true);
+    expect(headers[1].endsWith('scope user')).toBe(true);
   });
 
   it('AC-7: each item is a header line and one fence holding subject, predicate and object', async () => {
@@ -180,7 +235,7 @@ describe('koda_memory_search execute (US-004)', () => {
 
     expect(content).toBe(
       [
-        'memory:mem-1 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z',
+        'memory:mem-1 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
         FENCE_OPEN,
         'Deploy pipeline status green',
         FENCE_CLOSE,
@@ -210,6 +265,166 @@ describe('koda_memory_search execute (US-004)', () => {
     const { tool } = toolWith(page([]));
 
     expect(await tool.execute(ctx, tool.parse({ page: 5 }))).toBe('no memory items');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// memory-notes US-002 — a note is listed by its index line and read by id
+// ---------------------------------------------------------------------------
+
+/** A stored note: the slug is `subject`, the type `predicate`, the Markdown body `object`. */
+const noteItem = (over: Partial<MemoryItem> = {}): MemoryItem =>
+  item({
+    id: 'note-1', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
+    object: 'SECRET-BODY', description: 'replay budget', ...over,
+  });
+
+describe('koda_memory_search notes (memory-notes US-002)', () => {
+  it('AC-10: a note is listed as slug, type and index line, and its body is never answered', async () => {
+    const { tool } = toolWith(page([noteItem()]));
+
+    const content = await tool.execute(ctx, tool.parse({}));
+
+    expect(content).toContain(`${FENCE_OPEN}\nreplay-budget project replay budget\n${FENCE_CLOSE}`);
+    expect(content).not.toContain('SECRET-BODY');
+    expect(content.split('\n')).toEqual([
+      'memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
+      FENCE_OPEN,
+      'replay-budget project replay budget',
+      FENCE_CLOSE,
+    ]);
+  });
+
+  it('AC-11: a fact of the same page still renders its fenced subject, predicate and object', async () => {
+    const { tool } = toolWith(page([item(), noteItem()]));
+
+    const content = await tool.execute(ctx, tool.parse({}));
+
+    expect(content).toContain(`${FENCE_OPEN}\nDeploy pipeline status green\n${FENCE_CLOSE}`);
+    expect(content).toContain(`${FENCE_OPEN}\nreplay-budget project replay budget\n${FENCE_CLOSE}`);
+  });
+
+  it('lists a note whose index line is missing without inventing one', async () => {
+    const { tool } = toolWith(page([noteItem({ description: undefined })]));
+
+    const content = await tool.execute(ctx, tool.parse({}));
+
+    expect(content).toContain(`${FENCE_OPEN}\nreplay-budget project\n${FENCE_CLOSE}`);
+  });
+});
+
+/** The tool under test, with the service's one item answer stubbed; null is every not-found case at once. */
+function getToolWith(answer: MemoryItem | null) {
+  const getMemoryItem = vi.fn(async () => answer);
+  return { getMemoryItem, tool: getMemoryTool({ getMemoryItem } as unknown as MemoryGovernanceService) };
+}
+
+describe('koda_get_memory (memory-notes US-002)', () => {
+  it('AC-12: the catalog pins the descriptor, its closed schema and the id bound', () => {
+    const descriptor = KNOWLEDGE_TOOL_DESCRIPTORS.find((entry) => entry.name === 'koda_get_memory');
+    const schema = descriptor?.inputSchema as {
+      required?: string[]; additionalProperties?: unknown; properties?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(descriptor?.name).toBe('koda_get_memory');
+    expect(schema.required).toEqual(['id']);
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties?.['id']).toMatchObject({ type: 'string', minLength: 1, maxLength: 64 });
+    expect(getMemoryTool(stubMemory).key).toBe('memory.read');
+    expect(getMemoryTool(stubMemory).descriptor).toBe(descriptor);
+  });
+
+  it('AC-12: the parser takes an id of 1 to 64 characters and refuses anything else', () => {
+    const tool = getMemoryTool(stubMemory);
+
+    expect(tool.parse({ id: 'note-1' })).toEqual({ id: 'note-1' });
+    expect(tool.parse({ id: 'a' })).toEqual({ id: 'a' });
+    expect(tool.parse({ id: 'a'.repeat(64) })).toEqual({ id: 'a'.repeat(64) });
+    for (const input of [{}, { id: '' }, { id: 'a'.repeat(65) }, { id: 7 }, null, 'note-1']) {
+      expect(reasonOf(() => tool.parse(input)), JSON.stringify(input)).toBe('id');
+    }
+  });
+
+  it('AC-13: reads the id through the service, scoped to the thread project', async () => {
+    const { getMemoryItem, tool } = getToolWith(noteItem());
+
+    await tool.execute(ctx, tool.parse({ id: 'note-1' }));
+
+    expect(getMemoryItem).toHaveBeenCalledExactlyOnceWith('project-1', 'note-1', CTX_OWNER);
+  });
+
+  it('AC-13: an active note answers its header, the fenced index line and the fenced body', async () => {
+    const { tool } = getToolWith(noteItem({ object: 'Budget stays 2,048 MiB.' }));
+
+    const content = await tool.execute(ctx, tool.parse({ id: 'note-1' }));
+
+    const [header, ...rest] = content.split('\n');
+    expect(header).toBe('memory:note-1 NOTE active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project');
+    expect(header?.startsWith('memory:note-1 NOTE active')).toBe(true);
+    expect(rest).toEqual([
+      FENCE_OPEN, 'replay budget', FENCE_CLOSE,
+      FENCE_OPEN, 'Budget stays 2,048 MiB.', FENCE_CLOSE,
+    ]);
+  });
+
+  it('AC-13: a triple answers its header and its value, with no index line to fence', async () => {
+    const { tool } = getToolWith(item({ id: 'mem-2' }));
+
+    const content = await tool.execute(ctx, tool.parse({ id: 'mem-2' }));
+
+    // The header names the triple, so the fenced value is the item's body alone.
+    expect(content.split('\n')).toEqual([
+      'memory:mem-2 FACT active confidence 0.90 updated 2026-10-15T00:00:00.000Z scope project',
+      FENCE_OPEN, 'green', FENCE_CLOSE,
+    ]);
+  });
+
+  it('AC-14: an id the service does not answer is memory item not found, never an error', async () => {
+    // The service is where "another project", "soft-deleted" and "no such id" become the same null answer.
+    for (const id of ['foreign-1', 'deleted-1', 'missing-1']) {
+      const { getMemoryItem, tool } = getToolWith(null);
+
+      expect(await tool.execute(ctx, tool.parse({ id }))).toBe('memory item not found');
+      expect(getMemoryItem).toHaveBeenCalledWith('project-1', id, CTX_OWNER);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// memory-notes US-005 — a user-scoped note is read by its owner alone
+// ---------------------------------------------------------------------------
+
+/** A user-scoped note: no project of its own, keyed on `<ownerType>:<ownerId>`. */
+const userNoteItem = (over: Partial<MemoryItem> = {}): MemoryItem =>
+  noteItem({
+    projectId: null, scope: 'user', ownerType: 'AGENT', ownerId: 'dev-1', ownerKey: 'AGENT:dev-1',
+    object: 'Prefers small commits with a test each.', description: 'working agreements', ...over,
+  });
+
+/** The real governance service, with the row the repository answers — the tool→service→repository path. */
+const governanceWith = (row: MemoryItem | null): MemoryGovernanceService =>
+  new MemoryGovernanceService({ findById: vi.fn(async () => row) } as unknown as PrismaMemoryItemRepository);
+
+describe('koda_get_memory user scope (memory-notes US-005)', () => {
+  it('AC-10: a note of the caller answers its header tagged scope user and its fenced body', async () => {
+    const tool = getMemoryTool(governanceWith(userNoteItem()));
+
+    const content = await tool.execute(ctx, tool.parse({ id: 'note-1' }));
+
+    const [header, ...rest] = content.split('\n');
+    expect(header.endsWith('scope user')).toBe(true);
+    expect(header.startsWith('memory:note-1 NOTE active')).toBe(true);
+    expect(rest).toEqual([
+      FENCE_OPEN, 'working agreements', FENCE_CLOSE,
+      FENCE_OPEN, 'Prefers small commits with a test each.', FENCE_CLOSE,
+    ]);
+  });
+
+  it('AC-11: another principal\'s user note is memory item not found, and reads nothing of it', async () => {
+    // Same id, same shape: only the ownerKey separates the two callers.
+    const tool = getMemoryTool(governanceWith(userNoteItem({ ownerId: 'other-agent', ownerKey: 'AGENT:other-agent' })));
+
+    expect(await tool.execute(ctx, tool.parse({ id: 'note-1' }))).toBe('memory item not found');
   });
 });
 

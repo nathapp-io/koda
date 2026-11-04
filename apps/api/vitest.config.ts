@@ -2,6 +2,15 @@ import swc from 'unplugin-swc';
 import { defineConfig, type TestProjectConfiguration } from 'vitest/config';
 import { findSharedDbSpecs } from './test/vitest-db-projects';
 import { canRunDbTests } from './test/helpers/test-environment';
+import { disableEnvProxy } from './test/helpers/no-env-proxy';
+
+// The runner process — and every worker forked from it — must never see an environment HTTP proxy: the
+// suites talk to an in-process server on loopback, and a proxy that intercepts that connection answers
+// its own status (typically `407 Proxy Authentication Required`) and fails an unrelated assertion.
+// Doing it here, at config load, covers the main process (`globalSetup`/`globalTeardown`, which reach the
+// test Postgres) and the repository/env each worker inherits; `test-setup.ts` repeats the call per worker
+// so a spec run through another config keeps the same guarantee.
+disableEnvProxy();
 
 // Nest DI reads `design:paramtypes`, which Vite's default transform does not emit,
 // so specs are compiled with SWC (legacy decorators + decorator metadata).

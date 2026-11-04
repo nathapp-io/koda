@@ -112,6 +112,10 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
         <ProjectMembersPanel v-if="projectData" :slug="slug" :project-id="projectData.id" />
 
         <ProjectInvitesPanel :slug="slug" @member-added="refreshProject()" />
+
+        <div class="rounded-md border border-border p-6 space-y-6">
+          <SettingsMemoryCard :slug="slug" />
+        </div>
       </TabsContent>
 
       <!-- VCS Integration Tab -->

@@ -180,10 +180,10 @@ describe('US-003 (2a-D15): the action group is appended, never woven in', () => 
     ]);
   });
 
-  it('gives REPO and PROJECT 22 descriptors and WORKSPACE 23, all under the runner limit', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
-    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(22);
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
+  it('gives REPO and PROJECT 23 descriptors and WORKSPACE 24, all under the runner limit', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
+    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(23);
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
     expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_cancel_job');
     for (const kind of ['REPO', 'PROJECT', 'WORKSPACE'] as const) {
       expect(kodaToolDescriptorsFor(kind).length).toBeLessThan(KODA_TOOL_LIMITS.maxTools);
@@ -222,12 +222,12 @@ describe('US-002 (2b1-D3): the five write descriptors form the last group', () =
     expect(before.map((descriptor) => descriptor.name)).toEqual(['koda_get_action', 'koda_add_comment']);
   });
 
-  it('AC-4: REPO answers 22 descriptors', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
+  it('AC-4: REPO answers 23 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
   });
 
-  it('AC-5: WORKSPACE answers 23 descriptors', () => {
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
+  it('AC-5: WORKSPACE answers 24 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
   });
 
   it('AC-6: every write description says the change happens only after the user approves', () => {
@@ -290,10 +290,19 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
     expect(KODA_UPDATE_TICKET.inputSchema).toMatchObject({ required: ['ref'] });
   });
 
-  it('AC-11: koda_add_memory takes the four non-decision kinds, in order', () => {
+  it('AC-11: koda_add_memory takes the four non-decision kinds and NOTE, in order', () => {
     expect(propertyOf(KODA_ADD_MEMORY, 'kind').enum).toEqual([
-      'FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN',
+      'FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE',
     ]);
+  });
+
+  it('AC-7 (memory-notes US-002): the catalog pins the note kind and the index line bound', () => {
+    const schema = KODA_ADD_MEMORY.inputSchema as { properties?: Record<string, Record<string, unknown>> };
+
+    expect(schema.properties?.['kind']?.['enum']).toEqual([
+      'FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE',
+    ]);
+    expect(schema.properties?.['description']?.['maxLength']).toBe(200);
   });
 
   it('bounds each item of the two batch tools', () => {
@@ -323,7 +332,9 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
 
     expect(propertyOf(KODA_ADD_MEMORY, 'subject')).toMatchObject({ minLength: 1, maxLength: 200 });
     expect(propertyOf(KODA_ADD_MEMORY, 'predicate')).toMatchObject({ minLength: 1, maxLength: 200 });
-    expect(propertyOf(KODA_ADD_MEMORY, 'object')).toMatchObject({ maxLength: 4000 });
+    // memory-notes US-002: the cap is the note body's 8192 bytes, so a note's body passes where a triple's 4000
+    // characters would not; the parser still refuses a triple over 4000 characters.
+    expect(propertyOf(KODA_ADD_MEMORY, 'object')).toMatchObject({ maxLength: 8192 });
 
     expect(propertyOf(KODA_RECORD_DECISION, 'topic')).toMatchObject({ minLength: 1, maxLength: 200 });
     expect(propertyOf(KODA_RECORD_DECISION, 'decision')).toMatchObject({ minLength: 1, maxLength: 4000 });
@@ -358,12 +369,12 @@ describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appende
     for (const [index, original] of WRITE_TOOL_DESCRIPTORS.entries()) expect(before[index]).toBe(original);
   });
 
-  it('AC-4: REPO answers 22 descriptors', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
+  it('AC-4: REPO answers 23 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
   });
 
-  it('AC-5: WORKSPACE answers 23 descriptors', () => {
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
+  it('AC-5: WORKSPACE answers 24 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
   });
 
   it('AC-6: every fleet write description says the job acts only after the user approves', () => {

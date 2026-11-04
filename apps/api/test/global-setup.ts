@@ -23,6 +23,7 @@ import { rememberTestDatabase, resolveTestDatabase } from './helpers/test-databa
 import { acquireProcessDbRunLock, releaseRememberedDbRunLock, rememberDbRunLock } from './helpers/db-run-lock';
 import { prepareSchemaOnce } from './helpers/schema-once';
 import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
+import { MEMORY_SEARCH_VECTOR_STATEMENTS } from './helpers/memory-search-vector';
 import { createTestPrismaClient } from './helpers/test-prisma';
 import { canRunDbTests } from './helpers/test-environment';
 
@@ -77,9 +78,12 @@ async function prepareSchema(databaseUrl: string): Promise<void> {
   });
 
   // `db push` cannot express partial indexes; replay the ones migrations ship (plan D2 of slice 1).
+  // Nor can it express a generated column: `MEMORY_SEARCH_VECTOR_STATEMENTS` replaces the plain tsvector
+  // it pushes for "MemoryItem"."searchVector" with the generated one and its GIN index (memory-notes US-003).
   const prisma = createTestPrismaClient(databaseUrl);
   try {
     for (const statement of PARTIAL_UNIQUE_INDEXES) await prisma.$executeRawUnsafe(statement);
+    for (const statement of MEMORY_SEARCH_VECTOR_STATEMENTS) await prisma.$executeRawUnsafe(statement);
   } finally {
     await prisma.$disconnect();
   }

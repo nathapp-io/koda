@@ -1,21 +1,33 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, Paginate, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
-import type { IPageOption } from '@nathapp/nestjs-common';
+import { Page, resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { MemoryItem as MemoryItemModel, PrismaClient } from '../generated/prisma/client';
+import { MemoryItem as MemoryItemModel, Prisma, PrismaClient } from '../generated/prisma/client';
+import { MemoryKind, MemoryScope } from '../common/enums';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
   MemoryItemInput,
   MemoryItem,
+  MemoryExportScope,
   MemoryOwnerType,
+  MemoryReadScope,
+  memoryOwnerKey,
 } from './memory-item-repository';
+import type { MemoryExportKey } from './memory-export-cursor';
 import type { MemoryWritten } from './memory-audit';
 import { reviewRepoSubject, REVIEW_EVENT_SOURCE } from './review-decisions';
 
-export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
-  return `${kind}:${subject}:${predicate}`;
+/**
+ * The one key an active row of a project is unique on.
+ *
+ * Every triple keeps `KIND:subject:predicate`. A note (US-001) keys on its slug alone — `NOTE:<slug>` — so
+ * re-saving a slug with a new type, body or index line replaces the note the project already has instead of
+ * leaving a second note of a different type behind.
+ */
+export function buildActiveKey(_projectId: string | null, kind: string, subject: string, predicate: string): string {
+  return kind === MemoryKind.NOTE ? `${MemoryKind.NOTE}:${subject}` : `${kind}:${subject}:${predicate}`;
 }
 
 export interface MemoryDedupKey {
@@ -48,6 +60,89 @@ function ownerTypeOf(model: MemoryItemModel): MemoryOwnerType | null {
   return model.ownerType === 'USER' || model.ownerType === 'AGENT' ? model.ownerType : null;
 }
 
+/** The stored scope, read back as the union the domain uses; anything but `user` is a project row (US-004). */
+function scopeOf(model: MemoryItemModel): MemoryScope {
+  return model.scope === MemoryScope.USER ? MemoryScope.USER : MemoryScope.PROJECT;
+}
+
+/**
+ * US-004: the active-key partner of a user-scoped row — `<ownerType>:<ownerId>`, the same string the domain
+ * carries as `ownerKey`, so `@@unique([ownerKey, activeKey])` is what makes one principal's note unique.
+ *
+ * Both halves are required: a user row whose owner is unknown could not be keyed (and would collide with
+ * every other unowned user row), so an item that asks for user scope without them is a programming error
+ * rather than a row. Only `MemoryWriteService.create` writes user scope, and it always sets both.
+ */
+function userOwnerKey(item: MemoryItemInput): string {
+  if (!item.ownerType || !item.ownerId) {
+    throw new Error('memory: a user-scoped item needs an ownerType and an ownerId');
+  }
+  return memoryOwnerKey({ ownerType: item.ownerType, ownerId: item.ownerId });
+}
+
+/**
+ * The PostgreSQL text-search configuration every ranked memory query uses (memory-notes US-003). English
+ * only: no Chinese segmentation is added, and an unsegmented text is answered by the substring fallback.
+ */
+const SEARCH_CONFIG = 'english';
+
+/**
+ * The text that asks for a search, or undefined. A text of whitespace is no search at all, exactly as the
+ * pre-feature `contains` path treats it (S5b US-004).
+ */
+function searchText(text: string | undefined): string | undefined {
+  return text !== undefined && text.trim().length > 0 ? text : undefined;
+}
+
+/**
+ * `websearch_to_tsquery` over the bound text — the one expression both the match and the rank read.
+ *
+ * `websearch_to_tsquery` never raises a syntax error on user text (a stray quote or semicolon is folded
+ * away), and the text is a bound parameter, so injection-shaped input stays a value. The configuration is
+ * cast because a parameter has no type for Postgres to guess `regconfig` from.
+ */
+const tsQuery = (text: string): Prisma.Sql => Prisma.sql`websearch_to_tsquery(${SEARCH_CONFIG}::regconfig, ${text})`;
+
+/**
+ * The requested `orderBy` as SQL, with the same tiebreakers the Prisma path applies. The unique `id`
+ * tiebreaker is last in every variant, so a page boundary can neither repeat nor skip a row whose rank,
+ * timestamp and confidence all tie.
+ */
+function orderBySql(orderBy: ProjectMemoryQuery['orderBy']): Prisma.Sql {
+  if (orderBy === 'updatedAt') {
+    return Prisma.sql`m."updatedAt" DESC, m."confidence" DESC, m."createdAt" DESC, m."id" DESC`;
+  }
+  if (orderBy === 'createdAt') {
+    return Prisma.sql`m."createdAt" DESC, m."confidence" DESC, m."updatedAt" DESC, m."id" DESC`;
+  }
+  return Prisma.sql`m."confidence" DESC, m."updatedAt" DESC, m."createdAt" DESC, m."id" DESC`;
+}
+
+/**
+ * memory-notes US-005: whose rows a project read answers.
+ *
+ * An owner is what makes a user row reachable at all: without one the answer is the project's own rows,
+ * whatever `scope` asked, because nothing names an owner to key the user rows on. With one, `scope`
+ * defaults to `all` — the authorized union of the project's rows and the caller's own user notes.
+ */
+function readScope(query: ProjectMemoryQuery): { scope: MemoryReadScope; ownerKey: string | undefined } {
+  if (query.owner === undefined) return { scope: MemoryScope.PROJECT, ownerKey: undefined };
+  return { scope: query.scope ?? 'all', ownerKey: memoryOwnerKey(query.owner) };
+}
+
+/**
+ * memory-notes US-005: the scope as the SQL a ranked page filters on — the project's rows, the owner's user
+ * rows, or the union of the two. The owner key is always a bound value, so it is the caller's own and never a
+ * text the query named.
+ */
+function scopeWhereSql(projectId: string, scope: MemoryReadScope, ownerKey: string | undefined): Prisma.Sql {
+  if (scope === 'user' && ownerKey !== undefined) return Prisma.sql`m."ownerKey" = ${ownerKey}`;
+  if (scope === 'all' && ownerKey !== undefined) {
+    return Prisma.sql`(m."projectId" = ${projectId} OR m."ownerKey" = ${ownerKey})`;
+  }
+  return Prisma.sql`m."projectId" = ${projectId}`;
+}
+
 @Injectable()
 export class PrismaMemoryItemRepository
   extends AbstractPrismaRepository<MemoryItem, MemoryItemModel, string> {
@@ -70,9 +165,12 @@ export class PrismaMemoryItemRepository
       subject: m.subject,
       predicate: m.predicate,
       object: m.object ?? undefined,
+      description: m.description ?? undefined,
       activeKey: m.activeKey ?? undefined,
       ownerId: m.ownerId ?? undefined,
       ownerType: ownerTypeOf(m),
+      scope: scopeOf(m),
+      ownerKey: m.ownerKey ?? undefined,
       sourceType: m.sourceType ?? undefined,
       sourceId: m.sourceId ?? undefined,
       status: m.status,
@@ -92,9 +190,12 @@ export class PrismaMemoryItemRepository
       subject: domain.subject,
       predicate: domain.predicate,
       object: domain.object ?? null,
+      description: domain.description ?? null,
       activeKey: domain.activeKey ?? null,
       ownerId: domain.ownerId ?? null,
       ownerType: domain.ownerType ?? null,
+      scope: domain.scope,
+      ownerKey: domain.ownerKey ?? null,
       sourceType: domain.sourceType ?? null,
       sourceId: domain.sourceId ?? null,
       status: domain.status,
@@ -112,9 +213,12 @@ export class PrismaMemoryItemRepository
     if (patch.subject !== undefined) data.subject = patch.subject;
     if (patch.predicate !== undefined) data.predicate = patch.predicate;
     if (patch.object !== undefined) data.object = patch.object ?? null;
+    if (patch.description !== undefined) data.description = patch.description ?? null;
     if (patch.activeKey !== undefined) data.activeKey = patch.activeKey ?? null;
     if (patch.ownerId !== undefined) data.ownerId = patch.ownerId ?? null;
     if (patch.ownerType !== undefined) data.ownerType = patch.ownerType ?? null;
+    if (patch.scope !== undefined) data.scope = patch.scope;
+    if (patch.ownerKey !== undefined) data.ownerKey = patch.ownerKey ?? null;
     if (patch.sourceType !== undefined) data.sourceType = patch.sourceType ?? null;
     if (patch.sourceId !== undefined) data.sourceId = patch.sourceId ?? null;
     if (patch.status !== undefined) data.status = patch.status;
@@ -123,6 +227,48 @@ export class PrismaMemoryItemRepository
     if (patch.supersededBy !== undefined) data.supersededBy = patch.supersededBy ?? null;
     if (patch.deletedAt !== undefined) data.deletedAt = patch.deletedAt ?? null;
     return data;
+  }
+
+  /**
+   * memory-notes US-006: the incremental export's page — every row of the project plus the caller's user
+   * rows whose `(updatedAt, id)` is strictly after `after`, ordered by that same pair, up to `take`.
+   *
+   * No eligibility filter at all: a superseded, retired, expired or soft-deleted row is in the answer with
+   * its `status` and `deletedAt` as stored, because a row that stopped being eligible is a change a mirror
+   * has to replay. `until` is what keeps the feed from skipping a late commit: only rows strictly older than
+   * the settle window are answered, so the cursor a caller stores can never pass a timestamp that an
+   * uncommitted transaction may still be writing at.
+   *
+   * The keyset condition is the pair, not the timestamp alone: rows written in the same millisecond (a
+   * supersede and its replacement) share an `updatedAt`, so the id tiebreaker is what makes a page boundary
+   * neither repeat nor skip one of them.
+   */
+  async findChangedAfter(
+    scope: MemoryExportScope,
+    after: MemoryExportKey | null,
+    until: Date,
+    take: number,
+  ): Promise<MemoryItem[]> {
+    const where: Record<string, unknown> = {
+      OR: [{ projectId: scope.projectId }, { ownerKey: scope.ownerKey }],
+      updatedAt: { lt: until },
+    };
+    if (after) {
+      where.AND = [
+        {
+          OR: [
+            { updatedAt: { gt: after.updatedAt } },
+            { updatedAt: after.updatedAt, id: { gt: after.id } },
+          ],
+        },
+      ];
+    }
+    const models = await this.prisma.client.memoryItem.findMany({
+      where,
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+      take,
+    });
+    return models.map((m) => this.toDomain(m));
   }
 
   async findByProject(query: MemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
@@ -207,24 +353,37 @@ export class PrismaMemoryItemRepository
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
+        // US-004: a user-scoped row is keyed on its owner, not on a project — the row has no project at all.
+        const scope = item.scope ?? MemoryScope.PROJECT;
+        const ownerKey = scope === MemoryScope.USER ? userOwnerKey(item) : null;
+
+        // US-001: the active row is found by its key, never by the triple, so a note (whose key is the slug
+        // alone) is replaced when the same slug comes back with another type. US-004: a user row is found by
+        // `(ownerKey, activeKey)`, so the same slug written by two principals, or from two projects, is two
+        // keys of a different kind — one principal's note never supersedes another's or a project's.
         const existingActive = await db.memoryItem.findFirst({
           where: {
-            projectId: item.projectId,
-            kind: item.kind,
-            subject: item.subject,
-            predicate: item.predicate,
-            activeKey: { not: null },
+            ...(scope === MemoryScope.USER ? { ownerKey } : { projectId: item.projectId }),
+            activeKey,
             deletedAt: null,
           },
         });
 
         // Outbox replays re-run this handler: restating the same fact from the
-        // same source is a no-op instead of superseding an identical row.
+        // same source is a no-op instead of superseding an identical row. A note
+        // compares its type and index line too (US-001), so a restatement of the
+        // whole note is the no-op while a changed type or description supersedes.
+        //
+        // Every optional field is compared in its stored form: the row holds `null` where the input says
+        // `undefined`, so a raw `===` would call an omitted `sourceId` a change and supersede the row it is
+        // restating (US-001 AC-14, re-saved from the REST route with no source at all).
         if (
           existingActive &&
           existingActive.object === (item.object ?? null) &&
-          existingActive.sourceType === item.sourceType &&
-          existingActive.sourceId === item.sourceId
+          existingActive.predicate === item.predicate &&
+          existingActive.description === (item.description ?? null) &&
+          (existingActive.sourceType ?? null) === (item.sourceType ?? null) &&
+          (existingActive.sourceId ?? null) === (item.sourceId ?? null)
         ) {
           return this.toDomain(existingActive);
         }
@@ -243,14 +402,17 @@ export class PrismaMemoryItemRepository
 
         const created = await db.memoryItem.create({
           data: {
-            projectId: item.projectId,
+            projectId: scope === MemoryScope.USER ? null : item.projectId,
             kind: item.kind,
             subject: item.subject,
             predicate: item.predicate,
             object: item.object,
+            description: item.description ?? null,
             activeKey,
             ownerId: item.ownerId,
             ownerType: item.ownerType ?? null,
+            scope,
+            ownerKey,
             sourceType: item.sourceType,
             sourceId: item.sourceId,
             status: item.status ?? 'active',
@@ -292,7 +454,12 @@ export class PrismaMemoryItemRepository
     predicate: string,
   ): Promise<MemoryItem | null> {
     const m = await this.prisma.client.memoryItem.findFirst({
-      where: { projectId, kind, subject, predicate, activeKey: { not: null }, status: 'active', deletedAt: null },
+      where: {
+        projectId,
+        activeKey: buildActiveKey(projectId, kind, subject, predicate),
+        status: 'active',
+        deletedAt: null,
+      },
     });
     return m ? this.toDomain(m) : null;
   }
@@ -365,8 +532,118 @@ export class PrismaMemoryItemRepository
     return { recorded: recorded.map((item) => this.toDomain(item)), reviewMinted: reviewMinted.map((item) => this.toDomain(item)) };
   }
 
+  /**
+   * The project's memory page (permissions P1 US-008, S5b US-004), ranked by full text when the caller
+   * searches (memory-notes US-003).
+   *
+   * A non-blank `text` is first offered to PostgreSQL: when `websearch_to_tsquery('english', text)` has any
+   * lexeme, `findRankedByText` answers the page by `ts_rank` over the generated `searchVector` — stemmed,
+   * multi-word and ranked — where the `contains` path could only match a verbatim substring of one field.
+   * Without lexemes (stopwords, punctuation) the pre-feature `contains` path runs unchanged, and it also
+   * runs when the ranked query matched nothing: an unsegmented text such as a Chinese phrase has lexemes
+   * but segments nothing, so the substring matches it always found are still found here.
+   */
   async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
-    const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
+    const text = searchText(query.text);
+    if (text !== undefined && (await this.hasSearchLexemes(text))) {
+      const ranked = await this.findRankedByText(query, text, page);
+      if (ranked.total > 0) return ranked;
+    }
+    return this.findByContains(query, page);
+  }
+
+  /** Whether `websearch_to_tsquery` kept any lexeme: only then is a full-text query worth running. */
+  private async hasSearchLexemes(text: string): Promise<boolean> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ lexemes: number }>>(
+      Prisma.sql`SELECT numnode(${tsQuery(text)}) AS "lexemes"`,
+    );
+    return (rows[0]?.lexemes ?? 0) > 0;
+  }
+
+  /**
+   * The ranked page (memory-notes US-003): one query selects the page's ids with every filter applied in
+   * SQL, a second counts the matches, and the rows are then loaded and returned in rank order.
+   *
+   * Every filter the `contains` path applies is applied here too, in the same shape: the project, the rows
+   * that are not soft-deleted, the status, the TTL bound when the status is defaulted (never an `OR` next
+   * to the text term, which would let an expired row through), the kind and the subject prefix — the last
+   * as `starts_with`, so `%` and `_` are literal characters rather than LIKE wildcards.
+   */
+  private async findRankedByText(
+    query: ProjectMemoryQuery,
+    text: string,
+    page: IPageOption,
+  ): Promise<IPageResult<MemoryItem>> {
+    const { scope, ownerKey } = readScope(query);
+    const conditions = [
+      scopeWhereSql(query.projectId, scope, ownerKey),
+      Prisma.sql`m."deletedAt" IS NULL`,
+    ];
+    if (query.status) {
+      conditions.push(Prisma.sql`m."status" = ${query.status}`);
+    } else {
+      const now = new Date();
+      conditions.push(Prisma.sql`m."status" = 'active'`, Prisma.sql`(m."ttlAt" IS NULL OR m."ttlAt" > ${now})`);
+    }
+    if (query.kind) conditions.push(Prisma.sql`m."kind" = ${query.kind}`);
+    if (query.subject && query.subject.trim().length > 0) {
+      conditions.push(Prisma.sql`starts_with(m."subject", ${query.subject})`);
+    }
+    conditions.push(Prisma.sql`m."searchVector" @@ ${tsQuery(text)}`);
+    const where = Prisma.join(conditions, ' AND ');
+
+    // Order by rank only when the caller asked for no order: an explicit `orderBy` is answered as written.
+    const order = query.orderBy === undefined
+      ? Prisma.sql`ts_rank(m."searchVector", ${tsQuery(text)}) DESC, m."updatedAt" DESC, m."id" DESC`
+      : orderBySql(query.orderBy);
+    const { current, size, skip, take } = resolvePageOption(page);
+    const [pageRows, counted] = await Promise.all([
+      this.prisma.client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT m."id" FROM "MemoryItem" m WHERE ${where} ORDER BY ${order} OFFSET ${skip} LIMIT ${take}`),
+      this.prisma.client.$queryRaw<Array<{ total: number }>>(Prisma.sql`
+        SELECT count(*)::int AS "total" FROM "MemoryItem" m WHERE ${where}`),
+    ]);
+
+    const total = counted[0]?.total ?? 0;
+    const records = await this.hydrateRanked(pageRows.map((row) => row.id));
+    return new Page({ current, size }, total, records);
+  }
+
+  /**
+   * The rows of a ranked page, in the order the rank query answered them: `in` does not preserve order, so
+   * the models are re-keyed by id and walked in `ids` order. Both queries read the same table, so a row
+   * that left between them is simply absent — the page is then one record shorter, never out of order.
+   */
+  private async hydrateRanked(ids: readonly string[]): Promise<MemoryItem[]> {
+    if (ids.length === 0) return [];
+    const models = await this.prisma.client.memoryItem.findMany({
+      where: { id: { in: [...ids] }, deletedAt: null },
+    });
+    const byId = new Map(models.map((model) => [model.id, this.toDomain(model)]));
+    return ids.flatMap((id) => {
+      const item = byId.get(id);
+      return item === undefined ? [] : [item];
+    });
+  }
+
+  /**
+   * The pre-feature page (S5b US-004): filters in Prisma, `text` as a case-insensitive substring of
+   * subject, predicate or object. Kept as it was — it is the answer for a text with no lexeme and the
+   * fallback for a ranked query that matched nothing (memory-notes US-003).
+   */
+  private async findByContains(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
+    const where: Record<string, unknown> = { deletedAt: null };
+    // memory-notes US-005: the scope is its own AND term whenever it is a union, so the TTL `OR` below and the
+    // text term keep their meaning beside it. A single-sided scope is a plain column filter.
+    const and: Record<string, unknown>[] = [];
+    const { scope, ownerKey } = readScope(query);
+    if (scope === 'user' && ownerKey !== undefined) {
+      where.ownerKey = ownerKey;
+    } else if (scope === 'all' && ownerKey !== undefined) {
+      and.push({ OR: [{ projectId: query.projectId }, { ownerKey }] });
+    } else {
+      where.projectId = query.projectId;
+    }
 
     if (query.status) {
       where.status = query.status;
@@ -384,16 +661,15 @@ export class PrismaMemoryItemRepository
     // S5b US-004: the text match is its own AND term. It must never join the TTL `OR` above: an `OR` of a
     // text match and a TTL bound would return expired rows that match the text.
     if (query.text && query.text.trim().length > 0) {
-      where.AND = [
-        {
-          OR: [
-            { subject: { contains: query.text, mode: 'insensitive' } },
-            { predicate: { contains: query.text, mode: 'insensitive' } },
-            { object: { contains: query.text, mode: 'insensitive' } },
-          ],
-        },
-      ];
+      and.push({
+        OR: [
+          { subject: { contains: query.text, mode: 'insensitive' } },
+          { predicate: { contains: query.text, mode: 'insensitive' } },
+          { object: { contains: query.text, mode: 'insensitive' } },
+        ],
+      });
     }
+    if (and.length > 0) where.AND = and;
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];

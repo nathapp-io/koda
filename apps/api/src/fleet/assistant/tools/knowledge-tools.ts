@@ -2,6 +2,8 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { MemoryKind } from '../../../common/enums';
 import { MEMORY_STATUSES } from '../../../memory/dto/list-memory.query';
 import { MemoryGovernanceService } from '../../../memory/memory-governance.service';
+import type { MemoryItem, MemoryItemOwner } from '../../../memory/memory-item-repository';
+import { ownerTypeFor } from '../../../memory/memory-write.guard';
 import { decodeTimelineCursor } from '../../../memory/timeline-cursor';
 import { TimelineService, type TimelineEvent } from '../../../memory/timeline.service';
 import { TicketsService } from '../../../tickets/tickets.service';
@@ -9,6 +11,7 @@ import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
 import { KnowledgeSearchService } from '../../knowledge/knowledge-search.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import {
+  KODA_GET_MEMORY,
   KODA_MEMORY_SEARCH,
   KODA_TIMELINE,
   TIMELINE_EVENT_TYPES,
@@ -120,15 +123,50 @@ function optionalTimelineCursor(value: unknown): string | undefined {
 /** The last line of a full page. */
 const moreLine = (tool: string, nextPage: number): string => `more: call ${tool} with page ${nextPage}`;
 
-/** `<subject> <predicate> <object>`, the object left out when the item has none. */
-const memoryText = (item: { subject: string; predicate: string; object?: string }): string =>
-  [item.subject, item.predicate, item.object].filter((part): part is string => typeof part === 'string' && part !== '').join(' ');
+/** The parts of a line that are present, in order: an absent or empty part is left out rather than doubled. */
+const partLine = (...parts: Array<string | undefined>): string =>
+  parts.filter((part): part is string => typeof part === 'string' && part !== '').join(' ');
 
 /**
- * `koda_memory_search` (US-004): one page of the project's memory items, newest `updatedAt` first. Every user-written
- * field of an item — all three of `subject`, `predicate` and `object` — is fenced, so it can never read as
- * instructions. `status` is passed through only when given: without it the service applies its own default (active
- * and not expired by `ttlAt`).
+ * The one fenced line an item is listed with. A triple is `<subject> <predicate> <object>`; a note is
+ * `<slug> <type> <description>` and never its Markdown body, which is what `koda_get_memory` reads (US-002).
+ */
+const memoryText = (item: { kind: string; subject: string; predicate: string; object?: string; description?: string }): string =>
+  item.kind === MemoryKind.NOTE
+    ? partLine(item.subject, item.predicate, item.description)
+    : partLine(item.subject, item.predicate, item.object);
+
+/**
+ * An item's header line: what it is, in what state, when it last changed, and whose memory it is. The trailing
+ * `scope project` / `scope user` tag (memory-notes US-005) is how the model tells a project row from the caller's
+ * own note now that both appear in one page.
+ */
+const memoryHeader = (item: MemoryItem): string =>
+  `memory:${item.id} ${item.kind} ${item.status} confidence ${item.confidence.toFixed(2)} updated ${item.updatedAt.toISOString()} scope ${item.scope}`;
+
+/**
+ * The owner a tool read includes next to the project's rows (memory-notes US-005): always the context's actor,
+ * never a field of the tool's input, so a model cannot name whose notes it reads.
+ */
+const ownerOf = (ctx: ToolContext): MemoryItemOwner => ({
+  ownerType: ownerTypeFor(ctx.actor),
+  ownerId: ctx.actor.id,
+});
+
+/** The one answer `koda_get_memory` gives for an id it may not read; US-002 keeps it a result, not an error. */
+const MEMORY_NOT_FOUND = 'memory item not found';
+/** The id bound `KODA_GET_MEMORY` advertises (US-002). */
+const MAX_MEMORY_ID_CHARS = 64;
+
+export interface GetMemoryInput {
+  id: string;
+}
+
+/**
+ * `koda_memory_search` (US-004): one page of the project's memory items — ranked by the `text` it was given
+ * (memory-notes US-003), newest `updatedAt` first otherwise. Every user-written field of an item — all three of
+ * `subject`, `predicate` and `object` — is fenced, so it can never read as instructions. `status` is passed
+ * through only when given: without it the service applies its own default (active and not expired by `ttlAt`).
  */
 export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool<MemorySearchInput> {
   return {
@@ -146,18 +184,60 @@ export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool
     },
     async execute(ctx: ToolContext, input: MemorySearchInput): Promise<string> {
       const page = await memory.getProjectMemory(
-        { projectId: ctx.projectId, text: input.text, kind: input.kind, status: input.status, orderBy: 'updatedAt' },
+        {
+          projectId: ctx.projectId,
+          text: input.text,
+          kind: input.kind,
+          status: input.status,
+          // memory-notes US-005: the caller's own user notes are read beside the project's, so a working
+          // agreement written once is recallable in every project the actor is a member of.
+          owner: ownerOf(ctx),
+          // memory-notes US-003: a text is answered in rank order, so the tool sends no orderBy with one;
+          // without a text the list stays newest-updatedAt first.
+          ...(input.text === undefined ? { orderBy: 'updatedAt' as const } : {}),
+        },
         { current: input.page, size: PAGE_SIZE },
       );
       if (page.records.length === 0) return 'no memory items';
       const lines: string[] = [];
       for (const item of page.records) {
-        lines.push(
-          `memory:${item.id} ${item.kind} ${item.status} confidence ${item.confidence.toFixed(2)} updated ${item.updatedAt.toISOString()}`,
-        );
+        lines.push(memoryHeader(item));
         lines.push(ctx.data(memoryText(item)));
       }
       if (page.hasNext) lines.push(moreLine(KODA_MEMORY_SEARCH.name, input.page + 1));
+      return lines.join('\n');
+    },
+  };
+}
+
+/**
+ * `koda_get_memory` (memory-notes US-002): one memory item of the thread's project, read whole. `koda_memory_search`
+ * lists items by their key line; this tool answers what the item holds — a note's index line and Markdown body, a
+ * triple's value — because a note's body is never listed.
+ *
+ * The scope is the context's project: `MemoryGovernanceService.getMemoryItem` answers only a row of that project
+ * which is not soft-deleted, so an id of another project, of a deleted item or of no item at all is the same one
+ * line, and no existence is leaked. That answer is a result, not an error: an id an agent guessed is not a failure.
+ */
+export function getMemoryTool(memory: MemoryGovernanceService): AssistantTool<GetMemoryInput> {
+  return {
+    descriptor: KODA_GET_MEMORY,
+    key: 'memory.read',
+    // The memory REST read routes' own key, like koda_memory_search.
+    parse(input: unknown): GetMemoryInput {
+      const id = asRecord(input)['id'];
+      if (typeof id !== 'string' || id.length < 1 || id.length > MAX_MEMORY_ID_CHARS) throw new ToolInputError('id');
+      return { id };
+    },
+    async execute(ctx: ToolContext, input: GetMemoryInput): Promise<string> {
+      // US-005: the caller's own user note is readable from any project; another principal's is the same null
+      // as an id of no item at all, so the tool never leaks that it exists.
+      const item = await memory.getMemoryItem(ctx.projectId, input.id, ownerOf(ctx));
+      if (!item) return MEMORY_NOT_FOUND;
+      const lines = [memoryHeader(item)];
+      // A note's index line is fenced on its own, as the list fences it; the body is the note's value.
+      if (item.kind === MemoryKind.NOTE && item.description) lines.push(ctx.data(item.description));
+      if (item.object) lines.push(ctx.data(item.object));
       return lines.join('\n');
     },
   };
@@ -247,6 +327,7 @@ export class KnowledgeTools implements OnModuleInit {
     const docs = { search: this.knowledge, index: this.index };
     this.registry.register(
       memorySearchTool(this.memory),
+      getMemoryTool(this.memory),
       timelineTool({ timeline: this.timeline, tickets: this.tickets }),
       kbSearchTool(docs),
       getDocTool(docs),

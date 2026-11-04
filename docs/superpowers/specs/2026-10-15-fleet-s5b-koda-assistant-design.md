@@ -212,11 +212,11 @@ All tools act in the thread's project. Every read result carries citations (sect
 | `koda_list_jobs`, `koda_get_job`, `koda_fleet_spend`, `koda_list_approvals`, `koda_runner_status` | read | project member (read FleetJob) | S5b-1b |
 | `koda_job_log_excerpt` | read | project member (read FleetJob) | S5b-1b |
 | `koda_get_action` | read | project member | S5b-2a |
-| `koda_kb_search` (`HybridRetrieverService.search`, `rag/hybrid-retriever.service.ts:129`), `koda_context_query` (`ContextBuilderService`), `koda_memory_search`, `koda_timeline` (`TimelineService`) | read | project member | S5b-1c |
+| `koda_kb_search` (`HybridRetrieverService.search`, `rag/hybrid-retriever.service.ts:129`), `koda_context_query` (`ContextBuilderService`), `koda_memory_search`, `koda_get_memory` (memory-notes US-002), `koda_timeline` (`TimelineService`) | read | project member | S5b-1c |
 | `koda_create_tickets` (batch, max 20), `koda_update_ticket`, `koda_link_tickets` | write | CASL create/update Ticket (DEVELOPER+; `koda-casl-ability.factory.ts:82-95`) | S5b-2b |
 | `koda_add_comment` | write | CASL create Comment (every member; `factory.ts:96-99`) | S5b-2b |
 | `koda_add_kb_doc` | write | `@ProjectRoles('ADMIN','DEVELOPER','AGENT')` (`rag.controller.ts:47`) | S5b-2b |
-| `koda_add_memory`, `koda_record_decision` | write | project member (`memory.controller.ts:31-46`) | S5b-2b |
+| `koda_add_memory` (a note included, memory-notes US-002), `koda_record_decision` | write | project member (`memory.controller.ts:31-46`) | S5b-2b |
 | `koda_dispatch_job` (PLAN / RUN, `maxCostUsd` required), `koda_requeue_job`, `koda_cancel_job` | write | CASL create/update FleetJob (DEVELOPER+) | S5b-2b |
 
 Rules:

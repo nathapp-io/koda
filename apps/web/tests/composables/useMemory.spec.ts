@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useMemory.ts')
@@ -358,6 +358,106 @@ describe('AC5 page contract: error propagates so page-level catch can feed extra
     try { await mem.loadMemory() } catch { /* page wrapper catches */ }
 
     expect(mem.isLoading.value).toBe(false)
+  })
+})
+
+describe('US-008 memory notes and search', () => {
+  beforeEach(resetGlobals)
+
+  test('bound search issues API requests only at 300ms, including a debounced clear', async () => {
+    jest.useFakeTimers()
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory, watchDebouncedMemorySearch } = await import(composablePath)
+    const scope = effectScope()
+    let memory: ReturnType<typeof useMemory> | undefined
+    scope.run(() => {
+      const scopedMemory = useMemory('acme')
+      memory = scopedMemory
+      watchDebouncedMemorySearch(scopedMemory.textFilter, () => { void scopedMemory.applyFilters() })
+    })
+    if (!memory) throw new Error('Memory composable did not initialize in scope')
+    const mem = memory
+    mem.textFilter.value = 'deploy'
+    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(299)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await jest.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query.text).toBe('deploy')
+
+    mem.textFilter.value = ''
+    await Promise.resolve()
+    await jest.advanceTimersByTimeAsync(299)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1][1] as { query: Record<string, string> }).query).not.toHaveProperty('text')
+    scope.stop()
+    jest.useRealTimers()
+  })
+
+  test('search triggers once only after 300ms without typing and a clear is debounced too', async () => {
+    jest.useFakeTimers()
+    const { watchDebouncedMemorySearch } = await import(composablePath)
+    const search = ref('')
+    const onSearch = jest.fn()
+    const scope = effectScope()
+    scope.run(() => watchDebouncedMemorySearch(search, onSearch))
+    search.value = 'deploy'
+    await Promise.resolve()
+    jest.advanceTimersByTime(299)
+    expect(onSearch).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    search.value = ''
+    await Promise.resolve()
+    jest.advanceTimersByTime(299)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(1)
+    expect(onSearch).toHaveBeenCalledTimes(2)
+    scope.stop()
+    jest.useRealTimers()
+  })
+
+  test('loadMemory sends non-empty text in query and maps note description and scope', async () => {
+    const fetched = [{ id: 'n1', subject: 'deploy', predicate: 'user', object: '**body**', kind: 'NOTE', confidence: 1, status: 'active', description: 'Deployment preference', scope: 'user' }]
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: fetched, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+    mem.textFilter.value = 'deploy'
+    await mem.loadMemory()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query.text).toBe('deploy')
+    expect(mem.items.value[0]).toMatchObject({ description: 'Deployment preference', scope: 'user' })
+  })
+
+  test('text query is capped at the API 100-character limit', async () => {
+    const { buildMemoryQuery } = await import(composablePath)
+    expect(buildMemoryQuery({ text: 'x'.repeat(150) }).text).toBe('x'.repeat(100))
+  })
+
+  test('the cap never splits a surrogate pair into a lone half', async () => {
+    const { buildMemoryQuery } = await import(composablePath)
+    // 99 ASCII characters then an emoji: a 100-code-unit cut lands in the middle of its pair.
+    const text = `${'x'.repeat(99)}😀tail`
+    const sent = buildMemoryQuery({ text }).text as string
+
+    expect(sent).toBe('x'.repeat(99))
+    expect(sent.length).toBeLessThanOrEqual(100)
+    // A lone surrogate is what `slice` would have left behind; nothing unpaired is sent.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(sent)).toBe(false)
+    expect(/[\uDC00-\uDFFF]/.test(sent)).toBe(false)
+  })
+
+  test('cleared text is omitted from the query', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+    mem.textFilter.value = ''
+    await mem.loadMemory()
+    expect((fetchMock.mock.calls[0][1] as { query: Record<string, string> }).query).not.toHaveProperty('text')
   })
 })
 

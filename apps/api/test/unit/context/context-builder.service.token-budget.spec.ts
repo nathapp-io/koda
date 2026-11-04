@@ -51,8 +51,8 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
   // Padding values computed so each block hits a target JSON length (and thus token count).
   // estimateTokenCount(s) = Math.ceil(s.length / 4).
   //
-  // semanticMemory array JSON base (one item, empty `object` field) = ~199 chars
-  //   → pad object with 201 'x' chars → total 400 chars → 100 tokens
+  // semanticMemory array JSON base (one item, empty `object` field, including the `scope` US-004 added)
+  //   = 217 chars → pad object with 183 'x' chars → total 400 chars → 100 tokens
   //
   // documents JSON base (one result item, empty `content` field) = ~288 chars
   //   → pad content with 112 'x' chars → total 400 chars → 100 tokens
@@ -67,10 +67,11 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
     {
       id: 'm1',
       projectId: PROJECT_ID,
+      scope: 'project',
       kind: 'FACT',
       subject: 's',
       predicate: 'p',
-      object: 'x'.repeat(201),
+      object: 'x'.repeat(183),
       status: 'active',
       confidence: 0.9,
       createdAt: new Date('2025-01-01T00:00:00.000Z'),

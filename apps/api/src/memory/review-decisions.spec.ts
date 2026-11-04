@@ -3,7 +3,7 @@ import type { MemoryItem } from './memory-item-repository';
 import { MAX_DECISIONS_FILE_BYTES, MAX_REVIEW_DECISIONS, REVIEW_EVENT_SOURCE, buildReviewDecisions, reviewRepoSubject } from './review-decisions';
 
 function row(id: string, predicate: string, object?: string): MemoryItem {
-  return { id, projectId: 'p1', kind: 'DECISION', subject: 'project', predicate, object, status: 'active', confidence: 1, createdAt: new Date(0), updatedAt: new Date(0) };
+  return { id, projectId: 'p1', scope: 'project', kind: 'DECISION', subject: 'project', predicate, object, status: 'active', confidence: 1, createdAt: new Date(0), updatedAt: new Date(0) };
 }
 
 describe('review decisions', () => {

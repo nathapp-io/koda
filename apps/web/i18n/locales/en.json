@@ -478,11 +478,23 @@
     }
   },
   "memory": {
+    "settings": {
+      "title": "Agent memory writes",
+      "description": "Choose whether agent memory writes apply immediately or wait for human approval.",
+      "direct": "Apply directly",
+      "proposal": "Require approval"
+    },
     "empty": "No memory items yet.",
     "error": "Failed to load memory items.",
     "loadMore": "Load more",
+    "searchPlaceholder": "Search memory...",
+    "expand": "Show note body",
+    "scope": {
+      "user": "User"
+    },
     "filter": {
       "kind": "Kind",
+      "search": "Search",
       "status": "Status",
       "all": "All"
     },

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
+import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, memoryReadControllerGetMemory, projectsControllerFindBySlug } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -18,6 +18,17 @@ async function resolveProjectId(slug: string): Promise<string> {
   } catch (err: unknown) {
     handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
   }
+}
+
+/**
+ * The 1-based page a `--page` option names: the number, `undefined` when the option is absent, or `null` when
+ * the value is not a page. Shared by `list` and `search` so both commands accept and refuse the same values,
+ * and neither reads the API's first page only.
+ */
+function pageOption(page: string | undefined): number | undefined | null {
+  if (page === undefined) return undefined;
+  const current = Number(page);
+  return /^[0-9]+$/.test(page) && Number.isSafeInteger(current) && current >= 1 ? current : null;
 }
 
 export function memoryCommand(program: Command): void {
@@ -131,20 +142,99 @@ export function memoryCommand(program: Command): void {
       }
     });
 
+  memory.command('list').description('List project memory items')
+    .option('--project <slug>', 'Project slug')
+    .option('--kind <kind>', 'Filter by memory kind')
+    .option('--scope <scope>', 'Filter by scope (project, user, all)')
+    .option('--page <n>', 'Page number (1-based)')
+    .option('--json', 'Output as JSON')
+    .action(async (options: { project?: string; kind?: string; scope?: string; page?: string; json?: boolean }) => {
+      if (options.kind && !['FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'].includes(options.kind)) {
+        handleApiError(new Error(`Invalid --kind value: ${options.kind}`), { validationError: true });
+        return;
+      }
+      if (options.scope && !['project', 'user', 'all'].includes(options.scope)) {
+        handleApiError(new Error(`Invalid --scope value: ${options.scope}`), { validationError: true });
+        return;
+      }
+      const current = pageOption(options.page);
+      if (current === null) {
+        handleApiError(new Error(`Invalid --page value: ${options.page}`), { validationError: true });
+        return;
+      }
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await memoryReadControllerGetMemory({
+          path: { slug: ctx.projectSlug },
+          query: { kind: options.kind as 'FACT' | 'DECISION' | 'PREFERENCE' | 'CONSTRAINT' | 'INCIDENT_PATTERN' | 'NOTE' | undefined, scope: options.scope as 'project' | 'user' | 'all' | undefined, current },
+        });
+        const data = unwrap<{ records?: Array<Record<string, unknown>> }>(response);
+        if (options.json) console.log(JSON.stringify(data, null, 2));
+        else for (const item of data.records ?? []) {
+          const detail = item['kind'] === 'NOTE' ? item['description'] : `${item['subject'] ?? ''} ${item['predicate'] ?? ''}`;
+          console.log(`${item['id'] ?? ''} ${item['kind'] ?? ''} ${item['scope'] ?? ''} ${detail ?? ''}`.trim());
+        }
+        process.exit(0);
+      } catch (err: unknown) { handleApiError(err); }
+    });
+
+  memory.command('search <text>').description('Search project memory, best match first')
+    .option('--project <slug>', 'Project slug')
+    .option('--page <n>', 'Page number (1-based)')
+    .option('--json', 'Output as JSON')
+    .action(async (text: string, options: { project?: string; page?: string; json?: boolean }) => {
+      const current = pageOption(options.page);
+      if (current === null) {
+        handleApiError(new Error(`Invalid --page value: ${options.page}`), { validationError: true });
+        return;
+      }
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await memoryReadControllerGetMemory({
+          path: { slug: ctx.projectSlug },
+          // The page is only sent when it was asked for; the API answers its first page otherwise.
+          query: current === undefined ? { text } : { text, current },
+        });
+        const data = unwrap(response);
+        if (options.json) console.log(JSON.stringify(data, null, 2));
+        else {
+          const page = data as { records?: Array<Record<string, unknown>>; current?: number; hasNext?: boolean };
+          for (const item of page.records ?? []) {
+            const detail = item['kind'] === 'NOTE' ? item['description'] : `${item['subject'] ?? ''} ${item['predicate'] ?? ''}`;
+            console.log(`${item['id'] ?? ''} ${item['kind'] ?? ''} ${item['scope'] ?? ''} ${detail ?? ''}`.trim());
+          }
+          // A result page is not the whole result: say so, and name the page that continues it.
+          if (page.hasNext) console.log(`\nNext: --page ${(page.current ?? current ?? 1) + 1}`);
+        }
+        process.exit(0);
+      } catch (err: unknown) { handleApiError(err); }
+    });
+
   memory
     .command('create')
     .description('Write a memory item (fact, decision, preference, constraint, or incident pattern)')
     .option('--project <slug>', 'Project slug')
-    .requiredOption('--kind <kind>', 'Memory kind: FACT, DECISION, PREFERENCE, CONSTRAINT, or INCIDENT_PATTERN')
+    .requiredOption('--kind <kind>', 'Memory kind: FACT, DECISION, PREFERENCE, CONSTRAINT, INCIDENT_PATTERN, or NOTE')
     .requiredOption('--subject <subject>', 'Subject of the memory item')
     .requiredOption('--predicate <predicate>', 'Predicate — the relationship or statement about the subject')
     .option('--object <object>', 'Object — the value/target of the predicate')
+    .option('--description <description>', 'Description for a NOTE memory item')
+    .option('--scope <scope>', 'Memory scope (project or user)')
     .option('--source-type <type>', 'Where this memory item came from (defaults to "manual")')
     .option('--source-id <id>', 'ID of the source record this memory item came from')
     .option('--confidence <n>', 'Confidence score between 0 and 1 (defaults to 0.8)')
     .option('--owner-id <id>', 'ID of the user/agent who owns this memory item (defaults to the caller)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
+      const kinds = ['FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'];
+      if (!kinds.includes(options.kind)) {
+        handleApiError(new Error(`Invalid --kind value: ${options.kind}`), { validationError: true });
+        return;
+      }
+      if (options.scope !== undefined && !['project', 'user'].includes(options.scope)) {
+        handleApiError(new Error(`Invalid --scope value: ${options.scope}`), { validationError: true });
+        return;
+      }
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
@@ -163,6 +253,8 @@ export function memoryCommand(program: Command): void {
   body: {
             projectId,
             kind: options.kind,
+            scope: options.scope,
+            description: options.description,
             subject: options.subject,
             predicate: options.predicate,
             object: options.object,

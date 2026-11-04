@@ -12,6 +12,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   };
 
   const mockPrismaService = {
@@ -37,6 +38,9 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
     vi.clearAllMocks();
+    // memory-notes US-003: the lexeme probe gates the ranked path. "No lexeme" is the default here, so the
+    // pre-feature `contains` path is the one these tests describe.
+    mockPrismaClient.$queryRaw.mockResolvedValue([{ lexemes: 0 }]);
   });
 
   describe('default active filter', () => {
@@ -255,6 +259,240 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
           size: 10,
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-003 — the ranked full-text path and its fallback
+  // -------------------------------------------------------------------------
+
+  describe('ranked full-text path (US-003)', () => {
+    const row = (id: string) => ({
+      id, projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status',
+      confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    });
+
+    /** `$queryRaw` in call order: the probe, the page of ids, the count — each as the SQL it was given. */
+    const rawCalls = (): Array<{ sql: string; values: unknown[] }> =>
+      mockPrismaClient.$queryRaw.mock.calls.map((call) => call[0] as { sql: string; values: unknown[] });
+
+    /** The probe found a lexeme, the page answers `ids` and the count answers `total`. */
+    const ranked = (ids: string[], total: number): void => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce(ids.map((id) => ({ id })))
+        .mockResolvedValueOnce([{ total }]);
+    };
+
+    it('asks Postgres for the lexemes of the text before it ranks anything', async () => {
+      ranked([], 0);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
+
+      expect(rawCalls()[0].sql).toContain('numnode(websearch_to_tsquery(');
+      expect(rawCalls()[0].values).toContain('deploy');
+      expect(rawCalls()[0].values).toContain('english');
+    });
+
+    it('ranks, filters and pages in SQL, then loads the rows by id and keeps rank order', async () => {
+      ranked(['mem-2', 'mem-1'], 2);
+      // `in` answers in its own order on purpose: the ranked order must be restored from the id list.
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1'), row('mem-2')]);
+
+      const result = await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', kind: 'FACT', subject: 'a_b' },
+        { current: 2, size: 5 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).toContain('FROM "MemoryItem" m');
+      expect(idsQuery.sql).toContain('ORDER BY ts_rank(m."searchVector", websearch_to_tsquery(');
+      expect(idsQuery.sql).toContain(`starts_with(m."subject", ?)`);
+      expect(idsQuery.sql).toContain(`m."deletedAt" IS NULL`);
+      expect(idsQuery.sql).toContain(`m."status" = 'active'`);
+      // The text term is an AND with the TTL bound, never an OR next to it (S5b US-004 invariant).
+      expect(idsQuery.sql).toContain('OR m."ttlAt" > ');
+      expect(idsQuery.sql).toMatch(/OFFSET \? LIMIT \?$/);
+      expect(idsQuery.values).toEqual(expect.arrayContaining(['project-123', 'FACT', 'a_b', 'deploy']));
+      // resolvePageOption: page 2 of 5 skips 5 and takes 5.
+      expect(idsQuery.values.slice(-2)).toEqual([5, 5]);
+
+      expect(rawCalls()[2].sql).toContain('count(*)::int');
+      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['mem-2', 'mem-1'] }, deletedAt: null },
+      });
+      expect(result.records.map((item) => item.id)).toEqual(['mem-2', 'mem-1']);
+      expect(result).toEqual(expect.objectContaining({ total: 2, current: 2, size: 5 }));
+    });
+
+    it('applies the requested orderBy instead of rank when the caller names one', async () => {
+      ranked(['mem-1'], 1);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1')]);
+
+      await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', orderBy: 'updatedAt' },
+        { current: 1, size: 10 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).not.toContain('ts_rank');
+      expect(idsQuery.sql).toContain('ORDER BY m."updatedAt" DESC, m."confidence" DESC, m."createdAt" DESC, m."id" DESC');
+    });
+
+    it('applies an explicit status without the TTL bound', async () => {
+      ranked(['mem-1'], 1);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([row('mem-1')]);
+
+      await repository.findByProjectMemory(
+        { projectId: 'project-123', text: 'deploy', status: 'superseded' },
+        { current: 1, size: 10 },
+      );
+
+      const idsQuery = rawCalls()[1];
+      expect(idsQuery.sql).toContain(`m."status" = ?`);
+      expect(idsQuery.sql).not.toContain('ttlAt');
+      expect(idsQuery.values).toContain('superseded');
+    });
+
+    it('falls back to the contains path when the ranked query matched nothing', async () => {
+      ranked([], 0);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: '预算' }, { current: 1, size: 10 });
+
+      expect(rawCalls()).toHaveLength(3);
+      expect(mockPrismaClient.memoryItem.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { subject: { contains: '预算', mode: 'insensitive' } },
+                { predicate: { contains: '预算', mode: 'insensitive' } },
+                { object: { contains: '预算', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }),
+      });
+    });
+
+    it('never probes or ranks for a blank text', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: '   ' }, { current: 1, size: 10 });
+
+      expect(mockPrismaClient.$queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // memory-notes US-005 — whose rows a project read answers
+  // -------------------------------------------------------------------------
+
+  describe('owner union and scope (US-005)', () => {
+    const owner = { ownerType: 'AGENT', ownerId: 'agent-a' } as const;
+    const OWNER_KEY = 'AGENT:agent-a';
+
+    /** The `where` the `contains` path handed Prisma on its last call. */
+    const whereOfLastFind = (): Record<string, unknown> => {
+      const calls = mockPrismaClient.memoryItem.findMany.mock.calls;
+      const last = calls[calls.length - 1] as [{ where: Record<string, unknown> }];
+      return last[0].where;
+    };
+
+    /** The ids query the ranked path issued (the probe is call 0, the page of ids call 1). */
+    const rankedIdsQuery = (): { sql: string; values: unknown[] } =>
+      mockPrismaClient.$queryRaw.mock.calls[1][0] as { sql: string; values: unknown[] };
+
+    /** The probe found a lexeme and the ranked page answered one row. */
+    const rankedOne = (): void => {
+      mockPrismaClient.$queryRaw
+        .mockResolvedValueOnce([{ lexemes: 1 }])
+        .mockResolvedValueOnce([{ id: 'mem-1' }])
+        .mockResolvedValueOnce([{ total: 1 }]);
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([
+        { id: 'mem-1', projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    };
+
+    beforeEach(() => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+    });
+
+    it('AC-7: with no owner the read stays project-only, even when scope user is asked', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'user' }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBe('project-123');
+      // Nothing of the scope survives: no owner means no user row can be named at all.
+      expect(JSON.stringify(where)).not.toContain('ownerKey');
+      expect(where.AND).toBeUndefined();
+    });
+
+    it('scope user answers the owner-keyed rows only', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'user', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.ownerKey).toBe(OWNER_KEY);
+      expect(where.projectId).toBeUndefined();
+    });
+
+    it('scope project keeps the owner out of the page', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'project', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBe('project-123');
+      expect(JSON.stringify(where)).not.toContain('ownerKey');
+    });
+
+    it('AC-1: an owner with no scope is answered the authorized union of project and owner rows', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', owner }, { current: 1, size: 10 });
+
+      const where = whereOfLastFind();
+      expect(where.projectId).toBeUndefined();
+      // The union is its own AND term, so the TTL `OR` and the text term keep their meaning beside it.
+      expect(where.AND).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('scope all is the same union as the default', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'all', owner }, { current: 1, size: 10 });
+
+      expect(whereOfLastFind().AND).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('AC-1: the union keeps the text term as a separate AND, never beside the TTL OR', async () => {
+      await repository.findByProjectMemory({ projectId: 'project-123', scope: 'all', owner, text: 'working' }, { current: 1, size: 10 });
+
+      const and = whereOfLastFind().AND as unknown[];
+      expect(and).toHaveLength(2);
+      expect(and).toContainEqual({ OR: [{ projectId: 'project-123' }, { ownerKey: OWNER_KEY }] });
+    });
+
+    it('AC-5: the ranked path filters the union by ownerKey as a bound value', async () => {
+      rankedOne();
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'working', owner }, { current: 1, size: 10 });
+
+      const query = rankedIdsQuery();
+      expect(query.sql).toContain('m."projectId" = ?');
+      expect(query.sql).toContain('m."ownerKey" = ?');
+      expect(query.values).toEqual(expect.arrayContaining(['project-123', OWNER_KEY]));
+    });
+
+    it('AC-3: the ranked path answers the owner rows only when scope user is asked', async () => {
+      rankedOne();
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'working', scope: 'user', owner }, { current: 1, size: 10 });
+
+      const query = rankedIdsQuery();
+      expect(query.sql).not.toContain('m."projectId" = ?');
+      expect(query.sql).toContain('m."ownerKey" = ?');
+      expect(query.values).toContain(OWNER_KEY);
     });
   });
 });

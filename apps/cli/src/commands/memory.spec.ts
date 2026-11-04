@@ -17,6 +17,7 @@ jest.mock('../generated', () => ({
   timelineControllerGetTimeline: jest.fn(),
   memoryControllerRecordDecision: jest.fn(),
   memoryControllerCreateMemory: jest.fn(),
+  memoryReadControllerGetMemory: jest.fn(),
   memoryControllerRetireDecision: jest.fn(),
   projectsControllerFindBySlug: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
@@ -28,13 +29,14 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { memoryCommand } from './memory';
-import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
+import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, memoryReadControllerGetMemory, memoryControllerRetireDecision, projectsControllerFindBySlug } from '../generated';
 import { resolveContext } from '../config';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockGetTimeline = timelineControllerGetTimeline as jest.Mock;
 const mockRecordDecision = memoryControllerRecordDecision as jest.Mock;
 const mockCreateMemory = memoryControllerCreateMemory as jest.Mock;
+const mockGetMemory = memoryReadControllerGetMemory as jest.Mock;
 const mockRetireDecision = memoryControllerRetireDecision as jest.Mock;
 const mockFindBySlug = projectsControllerFindBySlug as jest.Mock;
 
@@ -44,6 +46,7 @@ describe('memoryCommand', () => {
   let program: Command;
   let exitSpy: jest.SpyInstance;
   let logSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     program = new Command();
@@ -52,7 +55,7 @@ describe('memoryCommand', () => {
     mockResolveContext.mockResolvedValue(CTX);
     exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -235,6 +238,8 @@ describe('memoryCommand', () => {
         body: {
           projectId: 'proj-cuid-1',
           kind: 'FACT',
+          scope: undefined,
+          description: undefined,
           subject: 'ticket-1',
           predicate: 'blocked-by',
           object: 'ticket-2',
@@ -261,6 +266,42 @@ describe('memoryCommand', () => {
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'mem-2' }, null, 2));
     });
 
+    it('creates a NOTE with description and exits successfully', async () => {
+      mockCreateMemory.mockResolvedValue({ ret: 0, data: { id: 'note-1' } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 'replay-budget',
+        '--predicate', 'project', '--object', 'body', '--description', 'replay budget',
+      ]);
+      expect(mockCreateMemory).toHaveBeenCalledWith({ body: expect.objectContaining({ kind: 'NOTE', description: 'replay budget' }) });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('forwards user scope and rejects invalid scope before resolving context', async () => {
+      mockCreateMemory.mockResolvedValue({ ret: 0, data: { id: 'note-2' } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 's', '--predicate', 'p', '--description', 'd', '--scope', 'user',
+      ]);
+      expect(mockCreateMemory).toHaveBeenCalledWith({ body: expect.objectContaining({ scope: 'user' }) });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+
+      jest.clearAllMocks();
+      mockResolveContext.mockResolvedValue(CTX);
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create', '--kind', 'NOTE', '--subject', 's', '--predicate', 'p', '--scope', 'org',
+      ]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --scope value: org'));
+      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(mockResolveContext).not.toHaveBeenCalled();
+      expect(mockCreateMemory).not.toHaveBeenCalled();
+    });
+
+    it('prints create API failures to stderr and exits 1', async () => {
+      mockCreateMemory.mockRejectedValue(Object.assign(new Error('create unavailable'), { statusCode: 500 }));
+      await program.parseAsync(['node', 'koda', 'memory', 'create', '--kind', 'FACT', '--subject', 's', '--predicate', 'p']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ create unavailable');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
     it('exits with code 3 on a non-numeric --confidence instead of silently defaulting', async () => {
       await program.parseAsync([
         'node', 'koda', 'memory', 'create',
@@ -272,6 +313,91 @@ describe('memoryCommand', () => {
 
       expect(mockCreateMemory).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+  });
+
+  describe('list and search', () => {
+    const page = { total: 1, current: 1, size: 20, hasNext: false, hasPrev: false, records: [
+      { id: 'n1', kind: 'NOTE', scope: 'user', description: 'replay budget', subject: 'replay-budget' },
+      { id: 'f1', kind: 'FACT', scope: 'project', subject: 'runner', predicate: 'deploys' },
+    ] };
+
+    it('lists a JSON page with filters and selected page', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--project', 'alpha', '--kind', 'NOTE', '--scope', 'user', '--page', '2', '--json']);
+      expect(mockGetMemory).toHaveBeenCalledWith({ path: { slug: 'alpha' }, query: { kind: 'NOTE', scope: 'user', current: 2 } });
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(page, null, 2));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('prints concise human records', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--project', 'alpha']);
+      expect(logSpy.mock.calls.flat().join('\\n')).toContain('n1 NOTE user replay budget');
+      expect(logSpy.mock.calls.flat().join('\\n')).toContain('f1 FACT project runner deploys');
+    });
+
+    it('searches by text', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--project', 'alpha']);
+      expect(mockGetMemory).toHaveBeenCalledWith({ path: { slug: 'alpha' }, query: { text: 'deployed runner' } });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('reaches a later result page with --page', async () => {
+      mockResolveContext.mockResolvedValueOnce({ ...CTX, projectSlug: 'alpha' });
+      mockGetMemory.mockResolvedValue({ ret: 0, data: { ...page, current: 2 } });
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'search', 'deployed runner', '--project', 'alpha', '--page', '2',
+      ]);
+      expect(mockGetMemory).toHaveBeenCalledWith({
+        path: { slug: 'alpha' },
+        query: { text: 'deployed runner', current: 2 },
+      });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('names the next page when a search page has one', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: { ...page, current: 2, hasNext: true } });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--page', '2']);
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('Next: --page 3');
+    });
+
+    it('does not name a next page when the search result is the last page', async () => {
+      mockGetMemory.mockResolvedValue({ ret: 0, data: page });
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner']);
+      expect(logSpy.mock.calls.flat().join('\n')).not.toContain('Next: --page');
+    });
+
+    it('rejects an invalid search page before context resolution', async () => {
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner', '--page', '0']);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --page value: 0'));
+      expect(mockGetMemory).not.toHaveBeenCalled();
+      expect(mockResolveContext).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('rejects invalid page before context resolution', async () => {
+      await program.parseAsync(['node', 'koda', 'memory', 'list', '--page', '0']);
+      expect(mockGetMemory).not.toHaveBeenCalled();
+      expect(mockResolveContext).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('prints list HTTP 500 errors to stderr and exits 1', async () => {
+      mockGetMemory.mockRejectedValue(Object.assign(new Error('server failed'), { statusCode: 500 }));
+      await program.parseAsync(['node', 'koda', 'memory', 'list']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ server failed');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('prints search network errors to stderr and exits 1', async () => {
+      mockGetMemory.mockRejectedValue(new Error('network unavailable'));
+      await program.parseAsync(['node', 'koda', 'memory', 'search', 'deployed runner']);
+      expect(errorSpy).toHaveBeenCalledWith('✗ network unavailable');
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 });

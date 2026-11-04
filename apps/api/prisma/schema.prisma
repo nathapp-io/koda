@@ -647,35 +647,53 @@ model Symbol {
 
 model MemoryItem {
   id           String    @id @default(cuid())
-  projectId    String
-  kind         String // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN
-  subject      String // e.g. 'ticket:123'
-  predicate    String // e.g. 'status', 'assigned_to'
-  object       String? // e.g. 'IN_PROGRESS', 'user:456'
+  // memory-notes US-004: null exactly for a user-scoped row — a NOTE owned by the principal that wrote it,
+  // stored once and read in every project that passes the owner.
+  projectId    String?
+  kind         String // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN | NOTE
+  subject      String // e.g. 'ticket:123', or the slug of a NOTE
+  predicate    String // e.g. 'status', 'assigned_to', or the type of a NOTE
+  object       String? // e.g. 'IN_PROGRESS', 'user:456', or the Markdown body of a NOTE
+  description  String? // NOTE index line (US-001); null for every triple kind
   confidence   Float     @default(0.8) // 0.0 - 1.0
   ttlAt        DateTime? // null = never expires
   ownerId      String? // agent or user who created it
   ownerType    String? // USER | AGENT (which table ownerId names); null = system or unknown
+  scope        String    @default("project") // project | user (US-004: only a NOTE may be 'user')
+  ownerKey     String? // USER:<id> / AGENT:<id> on a user row (US-004); null on every project row
   sourceType   String? // ticket_event | agent_event | decision_event | manual
   sourceId     String? // ID of canonical record/source
   status       String    @default("active") // active | superseded | rejected
   supersededBy String? // ID of the MemoryItem that superseded this one
   activeKey    String? // set only for active rows; null for superseded/rejected
+  // memory-notes US-003: full-text search over subject, predicate, description and object. A generated
+  // column the migration writes by hand; Unsupported keeps Prisma from trying to drop it.
+  searchVector Unsupported("tsvector")?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // soft delete
 
-  project            Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project            Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   supersededByMemory MemoryItem?  @relation("MemorySupersession", fields: [supersededBy], references: [id])
   supersedes         MemoryItem[] @relation("MemorySupersession")
 
   @@unique([projectId, activeKey])
+  // US-004: keys one principal's user notes. A project row's ownerKey is null, and null is distinct in
+  // Postgres, so this index never touches a project row; `@@unique([projectId, activeKey])` above never
+  // touches a user row (its projectId is null).
+  @@unique([ownerKey, activeKey])
   @@index([projectId, kind])
   @@index([projectId, status])
   @@index([projectId, kind, subject, predicate])
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
   @@index([sourceType, sourceId])
+  @@index([searchVector], type: Gin)
+  // memory-notes US-006: the export feed's keyset read. The feed answers the project's rows plus the caller's
+  // user rows as one page ordered and continued by `(updatedAt, id)`, so each side is indexed on the pair it
+  // pages by — a supersede, retire or soft delete rewrites `updatedAt`, and the feed finds the row by it.
+  @@index([projectId, updatedAt, id])
+  @@index([ownerKey, updatedAt, id])
 }
 
 // ---------------------------------------------------------------------------

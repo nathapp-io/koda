@@ -30,6 +30,9 @@ const declarations: ReadonlyArray<readonly [object, string, readonly string[], '
   [RoleBindingsController, 'remove', ['role.binding.manage', 'role.binding.global', 'role.binding.owner'], 'any', 'service'],
   [MemoryController, 'createMemory', ['memory.create', 'memory.update'], 'all', 'service'],
   [MemoryController, 'recordDecision', ['memory.decision.record', 'memory.update'], 'all', 'service'],
+  // memory-notes US-011: a note retire asks for no new key — it is a `memory.create` write of the route that
+  // already carries those two keys, and the replace decision (`memory.update`) stays a service check.
+  [MemoryController, 'retireNote', ['memory.create', 'memory.update'], 'all', 'service'],
 ];
 
 describe('remaining route permission declarations', () => {

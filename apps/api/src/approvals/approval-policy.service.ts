@@ -98,6 +98,15 @@ export class ApprovalPolicyService {
     return (await this.queries.findPage(filter, page)).records;
   }
 
+  /** The exact project AGENT type selector used by the memory write-mode setting. */
+  getProjectAgentMemoryCreatePolicy(projectId: string): Promise<ApprovalPolicyRecord | null> {
+    return this.queries.findBySelector(policySelector({
+      projectId,
+      permissionPattern: 'memory.create',
+      appliesTo: { kind: 'type', principalType: 'AGENT' },
+    }));
+  }
+
   private actor() {
     const context = currentContext();
     if (!context) throw new Error('approval policy write needs an action context');

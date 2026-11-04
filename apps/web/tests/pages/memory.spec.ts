@@ -354,6 +354,62 @@ describe('Memory AC9: default layout includes a project-nav link targeting /<slu
 // No console.log
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('US-008 notes, scope, search and locale behavior', () => {
+  test('NOTE description is visible while its body is hidden, then visible when expanded', async () => {
+    const pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+    const render = async (expanded: boolean) => {
+      const ctx = createRenderContext({
+        items: VueFull.ref([{ id: 'note1', subject: 'deploy', predicate: 'user', object: 'PRIVATE_NOTE_BODY', kind: 'NOTE', confidence: 1, status: 'active', description: 'Deployment preference', scope: 'project' }]),
+        isLoading: VueFull.ref(false), error: VueFull.ref(null),
+        expandedNotes: VueFull.reactive(new Set(expanded ? ['note1'] : [])),
+      })
+      const app = VueFull.createSSRApp({ template: pageTemplate, setup: () => ctx, components: { PageHeader: stubDiv('PageHeader'), FilterBar: stubFilterBar(), LoadingState: stubDiv('LoadingState'), Button: stubDiv('Button') } })
+      return renderToString(app)
+    }
+    const collapsed = await render(false)
+    expect(collapsed).toContain('Deployment preference')
+    expect(collapsed).not.toContain('PRIVATE_NOTE_BODY')
+    const expanded = await render(true)
+    expect(expanded).toContain('PRIVATE_NOTE_BODY')
+  })
+
+  test('user scope is labeled while project scope has no scope badge', async () => {
+    const pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+    const render = async (scope: string) => {
+      const ctx = createRenderContext({
+        items: VueFull.ref([{ id: 'note1', subject: 'deploy', predicate: 'user', object: 'body', kind: 'NOTE', confidence: 1, status: 'active', description: 'Description', scope }]),
+        isLoading: VueFull.ref(false), error: VueFull.ref(null), expandedNotes: VueFull.reactive(new Set()),
+      })
+      return renderToString(VueFull.createSSRApp({ template: pageTemplate, setup: () => ctx, components: { PageHeader: stubDiv('PageHeader'), FilterBar: stubFilterBar(), LoadingState: stubDiv('LoadingState'), Button: stubDiv('Button') } }))
+    }
+    expect(await render('user')).toContain('memory.scope.user')
+    expect(await render('project')).not.toContain('memory.scope.user')
+  })
+
+  test('kind options include all six kinds in the specified order', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toMatch(/KIND_OPTIONS\s*=\s*\['',\s*'FACT',\s*'DECISION',\s*'PREFERENCE',\s*'CONSTRAINT',\s*'INCIDENT_PATTERN',\s*'NOTE'\]/)
+  })
+
+  test('new controls use matching locale keys and the search debounce routes errors through toast', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const en = JSON.parse(readFileSync(enLocalePath, 'utf-8'))
+    const zh = JSON.parse(readFileSync(zhLocalePath, 'utf-8'))
+    for (const key of ['searchPlaceholder', 'scope.user', 'expand']) {
+      const value = key.split('.').reduce((obj, part) => obj?.[part], en.memory)
+      const translated = key.split('.').reduce((obj, part) => obj?.[part], zh.memory)
+      expect(value).toEqual(expect.any(String))
+      expect(translated).toEqual(expect.any(String))
+      expect(source).toContain(`memory.${key}`)
+    }
+    expect(source).toContain('watchDebouncedMemorySearch(textFilter')
+    expect(source).toMatch(/type="search"[^>]*maxlength="100"/)
+    expect(source).toContain('@click="toggleNote(item.id)"')
+    expect(source).toMatch(/withToastError\s*\(\s*applyFilters/)
+    expect(readFileSync(composablePath, 'utf-8')).toMatch(/onScopeDispose/)
+  })
+})
+
 describe('Memory: pages/[project]/memory.vue has no console.log statements', () => {
   test('source does not contain console.log', () => {
     const source = readFileSync(pagePath, 'utf-8')
@@ -419,6 +475,8 @@ interface MemoryItem {
   kind: string
   confidence: number
   status: string
+  description?: string
+  scope?: string
 }
 
 function createRenderContext(overrides: Record<string, unknown> = {}) {
@@ -434,6 +492,8 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     hasMore: ref(false),
     kindFilter: ref(''),
     statusFilter: ref(''),
+    textFilter: ref(''),
+    expandedNotes: VueFull.reactive(new Set<string>()),
     loadMemory: jest.fn(),
     applyFilters: jest.fn(),
     loadMore: jest.fn(),
@@ -443,7 +503,7 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     loadMoreAndToast: jest.fn().mockResolvedValue(undefined),
 
     formatConfidence: (v: number) => v.toFixed(2),
-    KIND_OPTIONS: ['', 'FACT', 'INCIDENT_PATTERN', 'DECISION'],
+    KIND_OPTIONS: ['', 'FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN', 'NOTE'],
     STATUS_OPTIONS: ['', 'active', 'superseded', 'rejected'],
 
     ...overrides,

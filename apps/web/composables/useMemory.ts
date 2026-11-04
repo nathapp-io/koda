@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
 export interface MemoryItem {
@@ -9,11 +9,14 @@ export interface MemoryItem {
   kind: string
   confidence: number
   status: string
+  description?: string
+  scope: string
 }
 
 export interface MemoryQuery {
   kind?: string
   status?: string
+  text?: string
   page?: number
 }
 
@@ -26,14 +29,46 @@ export interface MemoryResponse {
   hasPrev: boolean
 }
 
+/**
+ * Clamp the search text to the API's 100-character bound without splitting a surrogate pair.
+ *
+ * `String#slice` counts UTF-16 code units, so cutting an emoji (or any astral character) at the boundary would
+ * send half a pair — malformed Unicode that corrupts the query. The unit length is kept, because the API's
+ * `@MaxLength(100)` counts code units too; only a trailing high surrogate (the half a cut would leave) is
+ * dropped, which costs one character and never produces an unpaired one.
+ */
+export function clampSearchText(text: string, max = 100): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const last = cut.charCodeAt(cut.length - 1)
+  const endsOnHighSurrogate = last >= 0xd800 && last <= 0xdbff
+  return endsOnHighSurrogate ? cut.slice(0, -1) : cut
+}
+
 export function buildMemoryQuery(
   filters: MemoryQuery,
 ): Record<string, string> {
   const query: Record<string, string> = {}
   if (filters.kind) query.kind = filters.kind
   if (filters.status) query.status = filters.status
+  if (filters.text) query.text = clampSearchText(filters.text)
   if (filters.page && filters.page > 1) query.current = String(filters.page)
   return query
+}
+
+export function watchDebouncedMemorySearch(search: Ref<string>, onSearch: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stop = watch(search, () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = undefined
+      onSearch()
+    }, 300)
+  })
+  onScopeDispose(() => {
+    stop()
+    if (timer) clearTimeout(timer)
+  })
 }
 
 export function useMemory(slug: string) {
@@ -49,6 +84,7 @@ export function useMemory(slug: string) {
 
   const kindFilter = ref<string>('')
   const statusFilter = ref<string>('')
+  const textFilter = ref<string>('')
 
   const hasMore = computed(() => hasNext.value)
 
@@ -60,6 +96,7 @@ export function useMemory(slug: string) {
       const query = buildMemoryQuery({
         kind: kindFilter.value || undefined,
         status: statusFilter.value || undefined,
+        text: textFilter.value.trim() || undefined,
         page: page.value || undefined,
       })
       const res = await $api.get<MemoryResponse>(
@@ -121,6 +158,7 @@ export function useMemory(slug: string) {
     hasMore,
     kindFilter,
     statusFilter,
+    textFilter,
     loadMemory,
     applyFilters,
     loadMore,

@@ -3832,6 +3832,203 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // US-001 Memory notes: POST /api/memory with kind NOTE
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-001 memory notes', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-replay-budget-${++serial}`;
+
+    const postNote = (body: Record<string, unknown>) =>
+      request(httpServer).post('/api/memory').set('Authorization', `Bearer ${userAccessToken}`).send(body);
+
+    it('AC-12: POST /api/memory — 201 stores a NOTE with its index line', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const slug = uniqueSlug();
+
+      const res = await postNote({
+        projectId: project.id, kind: 'NOTE', subject: slug, predicate: 'project',
+        object: 'Budget stays 2,048 MiB.', description: 'replay budget',
+      }).expect(201);
+
+      expect(body<{ id: string; description?: string }>(res)).toMatchObject({ description: 'replay budget' });
+      expect(await db.memoryItem.findFirstOrThrow({ where: { projectId: project.id, subject: slug } })).toMatchObject({
+        kind: 'NOTE', predicate: 'project', description: 'replay budget', activeKey: `NOTE:${slug}`, status: 'active',
+      });
+    });
+
+    it('AC-17: POST /api/memory — 400 when a triple write carries a description', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const slug = uniqueSlug();
+
+      const res = await postNote({
+        projectId: project.id, kind: 'FACT', subject: slug, predicate: 'stays', object: '2048 MiB', description: 'not a note',
+      }).expect(400);
+
+      refusal(res, 'memory.-2', { field: 'description' });
+      expect(await db.memoryItem.count({ where: { projectId: project.id, subject: slug } })).toBe(0);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-003 Memory full-text search: GET /api/projects/:slug/memory?text=
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-003 full-text search', () => {
+    /** One stored row of `projectSlug` written straight to Postgres, so its texts are exactly as stated. */
+    const insertItem = async (over: Record<string, unknown>) => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      return db.memoryItem.create({
+        data: {
+          projectId: project.id, kind: 'FACT', subject: 'e2e-fts-subject', predicate: 'state',
+          object: 'a value', status: 'active', confidence: 0.8, ...over,
+        },
+      });
+    };
+
+    it('AC-17: GET /api/projects/:slug/memory?text= answers the stemmed, multi-word match', async () => {
+      const item = await insertItem({ subject: 'e2e-fts-pipeline', object: 'the runner deploys nightly' });
+      await insertItem({ subject: 'e2e-fts-decoy', object: 'nothing to see here' });
+
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ text: 'deployed' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const page = body<{ total: number; records: Array<{ id: string; object?: string }> }>(res);
+      expect(page.records.map((record) => record.id)).toContain(item.id);
+      expect(page.records.map((record) => record.object)).not.toContain('nothing to see here');
+    });
+
+    it('AC-15: GET /api/projects/:slug/memory — 400 for a text longer than 100 characters', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ text: 'a'.repeat(101) })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-005 User scope reads: GET /api/projects/:slug/memory?scope=
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-005 user scope reads', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-scope-note-${++serial}`;
+
+    /** A user-scoped note written by the current human caller, answering its id. */
+    const writeUserNote = async (subject: string, over: Record<string, unknown> = {}): Promise<string> => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const res = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          projectId: project.id, scope: 'user', kind: 'NOTE', subject, predicate: 'user',
+          object: 'Prefers small commits with a test each.', description: 'small commits', ...over,
+        })
+        .expect(201);
+      return body<{ id: string }>(res).id;
+    };
+
+    const list = () => request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .set('Authorization', `Bearer ${userAccessToken}`);
+
+    it('AC-1 (US-005): the default list answers the caller\'s user note with scope user', async () => {
+      const subject = uniqueSlug();
+      const id = await writeUserNote(subject);
+
+      const res = await list().expect(200);
+
+      const page = body<{ records: Array<{ id: string; scope: string; projectId: string | null; ownerKey?: string }> }>(res);
+      expect(page.records.find((record) => record.id === id)).toMatchObject({ scope: 'user', projectId: null });
+      expect(page.records.every((record) => record.scope === 'project' || record.scope === 'user')).toBe(true);
+    });
+
+    it('AC-3 (US-005): ?scope=user answers only user rows, and ?scope=project none of them', async () => {
+      const id = await writeUserNote(uniqueSlug());
+
+      const userPage = body<{ records: Array<{ id: string; scope: string }> }>(await list().query({ scope: 'user' }).expect(200));
+      expect(userPage.records.map((record) => record.id)).toContain(id);
+      expect(userPage.records.every((record) => record.scope === 'user')).toBe(true);
+
+      const projectPage = body<{ records: Array<{ id: string; scope: string }> }>(await list().query({ scope: 'project' }).expect(200));
+      expect(projectPage.records.map((record) => record.id)).not.toContain(id);
+      expect(projectPage.records.every((record) => record.scope === 'project')).toBe(true);
+    });
+
+    it('AC-4 (US-005): GET /api/projects/:slug/memory — 400 for an unknown scope', async () => {
+      await list().query({ scope: 'org' }).expect(400);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // memory-notes US-011 Note retirement: POST /api/memory/notes/:id/retire
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('memory-notes US-011 note retirement', () => {
+    let serial = 0;
+    const uniqueSlug = () => `e2e-retire-note-${++serial}`;
+
+    /** `POST /api/memory` of the standard note, answering the stored row's id. */
+    const postNote = async (): Promise<{ id: string; projectId: string }> => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const res = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          projectId: project.id, kind: 'NOTE', subject: uniqueSlug(), predicate: 'project',
+          object: 'Budget stays 2,048 MiB.', description: 'replay budget',
+        })
+        .expect(201);
+      return { id: body<{ id: string }>(res).id, projectId: project.id };
+    };
+
+    const retireNote = (id: string) => request(httpServer)
+      .post(`/api/memory/notes/${id}/retire`)
+      .set('Authorization', `Bearer ${userAccessToken}`)
+      .send({});
+
+    it('AC-1: POST /api/memory/notes/:id/retire — 201 retires the note', async () => {
+      const note = await postNote();
+
+      const res = await retireNote(note.id).expect(201);
+
+      expect(body<{ id: string; status: string }>(res)).toMatchObject({ id: note.id, status: 'rejected' });
+      const db = fixtureDb(app);
+      expect(await db.memoryItem.findUniqueOrThrow({ where: { id: note.id } }))
+        .toMatchObject({ status: 'rejected', activeKey: null });
+    });
+
+    it('AC-6: POST /api/memory/notes/:id/retire — 404 for an unknown id', async () => {
+      const res = await retireNote('e2e-unknown-note-id').expect(404);
+
+      refusal(res, 'memory.notFound.404');
+    });
+
+    it('AC-4: POST /api/memory/notes/:id/retire — 422 for a FACT id, which is left active', async () => {
+      const db = fixtureDb(app);
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const subject = uniqueSlug();
+      const created = await request(httpServer).post('/api/memory')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ projectId: project.id, kind: 'FACT', subject, predicate: 'stays', object: '2048 MiB' })
+        .expect(201);
+      const factId = body<{ id: string }>(created).id;
+
+      const res = await retireNote(factId).expect(422);
+
+      refusal(res, 'memory.retireNotDecision.422');
+      expect(await db.memoryItem.findUniqueOrThrow({ where: { id: factId } })).toMatchObject({ status: 'active' });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // US-003 Thread create, list, get and messages routes
   // ─────────────────────────────────────────────────────────────────
 

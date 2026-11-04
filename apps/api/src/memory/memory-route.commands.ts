@@ -9,6 +9,7 @@ import { ExtractEventDto } from './dto/extract-event.dto';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { MemoryWriteService } from './memory-write.service';
 import { RetireDecisionDto } from './dto/retire-decision.dto';
+import { RetireNoteDto } from './dto/retire-note.dto';
 
 function routeBody(input: unknown, key: string): unknown {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return {};
@@ -21,11 +22,15 @@ export const MEMORY_ROUTE_VARIANTS = {
   recordDecision: 'rest:memory.decisions.record',
   extract: 'rest:memory.extract',
   retire: 'rest:memory.decision.retire',
+  // memory-notes US-011: a note retire is a `memory.create` write, so the key serves two routes. The variant is
+  // what keeps them apart — in the registry, in a pending request's identity and in the inbox.
+  retireNote: 'rest:memory.note.retire',
 } as const;
 
 interface CreateInput { memory: CreateMemoryDto }
 interface DecisionInput { decision: RecordDecisionDto }
 interface ExtractInput { event: ExtractEventDto }
+interface RetireNoteInput { id: string; body: RetireNoteDto }
 
 @Injectable()
 export class MemoryRouteCommands implements OnModuleInit {
@@ -46,6 +51,12 @@ export class MemoryRouteCommands implements OnModuleInit {
       key: 'memory.create', variant: MEMORY_ROUTE_VARIANTS.create,
       parse: (input) => ({ memory: parseBody(CreateMemoryDto, routeBody(input, 'memory')) }),
       run: (principal, input) => this.memoryWrites.create(principal, input.memory),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<RetireNoteInput, Awaited<ReturnType<MemoryWriteService['retireNote']>>>({
+      key: 'memory.create', variant: MEMORY_ROUTE_VARIANTS.retireNote,
+      parse: (input) => ({ ...parseRouteInput(input, ['id']), body: parseBody(RetireNoteDto, routeBody(input, 'body')) }),
+      run: (principal, input) => this.memoryWrites.retireNote(principal, input.id, input.body.projectId, input.body.reason),
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<DecisionInput, Awaited<ReturnType<MemoryWriteService['recordDecision']>>>({

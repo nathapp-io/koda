@@ -11,6 +11,8 @@ const makeModelRow = (overrides: Record<string, unknown> = {}) => ({
   subject: 'ticket:1',
   predicate: 'status',
   object: 'active',
+  // US-001: a triple row stores no index line, exactly as `db push` leaves the column for every old row.
+  description: null,
   activeKey: 'FACT:ticket:1:status',
   ownerId: 'user-1',
   sourceType: 'ticket_event',
@@ -49,6 +51,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   const mockPrismaClient = {
     memoryItem: mockMemoryItem,
     $transaction: mockTransaction,
+    // memory-notes US-003: the lexeme probe in front of the ranked full-text path answers "no lexeme" by
+    // default, so a text here keeps taking the pre-feature `contains` path.
+    $queryRaw: vi.fn().mockResolvedValue([{ lexemes: 0 }]),
   };
 
   const mockPrismaService = {
@@ -165,15 +170,29 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
       expect(result).not.toBeNull();
       expect(result?.id).toBe('mem-1');
+      // US-001: the lookup is the active key, so a note (whose key is its slug alone) is found the same way.
       expect(mockMemoryItem.findFirst).toHaveBeenCalledWith({
-        where: expect.objectContaining({
+        where: {
           projectId: 'project-123',
-          kind: 'FACT',
-          subject: 'ticket:1',
-          predicate: 'status',
+          activeKey: 'FACT:ticket:1:status',
           status: 'active',
           deletedAt: null,
-        }),
+        },
+      });
+    });
+
+    it('looks a NOTE up by its slug key alone', async () => {
+      mockMemoryItem.findFirst.mockResolvedValue(makeModelRow({ kind: 'NOTE', activeKey: 'NOTE:replay-budget' }));
+
+      await repository.findActive('project-123', 'NOTE', 'replay-budget', 'project');
+
+      expect(mockMemoryItem.findFirst).toHaveBeenCalledWith({
+        where: {
+          projectId: 'project-123',
+          activeKey: 'NOTE:replay-budget',
+          status: 'active',
+          deletedAt: null,
+        },
       });
     });
   });
@@ -317,6 +336,42 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
           }),
         }),
       );
+    });
+
+    it('AC-14: a note restated with no sourceId matches the stored null and writes no row', async () => {
+      // The REST route leaves `sourceId` out entirely, so the stored row carries `null` while the replay
+      // carries `undefined`: the two name the same source, so this is the no-op, not a supersede.
+      const existingRow = makeModelRow({
+        id: 'note-1',
+        kind: 'NOTE',
+        subject: 'replay-budget',
+        predicate: 'project',
+        object: 'Budget stays 2,048 MiB.',
+        description: 'replay budget',
+        activeKey: 'NOTE:replay-budget',
+        sourceType: 'manual',
+        sourceId: null,
+      });
+      const client = {
+        findFirst: vi.fn().mockResolvedValue(existingRow),
+        create: vi.fn(),
+        update: vi.fn(),
+      };
+      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+
+      const result = await repository.upsert({
+        projectId: 'project-123',
+        kind: MemoryKind.NOTE,
+        subject: 'replay-budget',
+        predicate: 'project',
+        object: 'Budget stays 2,048 MiB.',
+        description: 'replay budget',
+        sourceType: 'manual',
+      });
+
+      expect(result.id).toBe('note-1');
+      expect(client.create).not.toHaveBeenCalled();
+      expect(client.update).not.toHaveBeenCalled();
     });
   });
 

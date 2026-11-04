@@ -1,6 +1,7 @@
 import { MemoryKind } from '../../../common/enums';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import { noteFieldError } from '../../../memory/memory-note';
 import { memoryAuditHook } from '../../../memory/memory-audit';
 import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import {
@@ -20,17 +21,19 @@ import { asRecord } from './tool-input';
  * preview reads the item it would replace, so the user sees what the approval changes; a preview never writes.
  */
 
-/** 2b1-D5: the four memory kinds this tool accepts, in the descriptor's order. DECISION is not one of them. */
+/** 2b1-D5: the memory kinds this tool accepts, in the descriptor's order — the four triples, plus the note
+ * memory-notes US-002 added. DECISION is not one of them. */
 const MEMORY_WRITE_KINDS = [
   MemoryKind.FACT,
   MemoryKind.PREFERENCE,
   MemoryKind.CONSTRAINT,
   MemoryKind.INCIDENT_PATTERN,
+  MemoryKind.NOTE,
 ] as const;
 export type MemoryWriteKind = (typeof MEMORY_WRITE_KINDS)[number];
 
 /** 2b1-D5: `subject` and `predicate` are judged on their trimmed length; `object` only on its own. The descriptor
- * carries the same numbers. */
+ * carries the same numbers. A note is judged by the note limits instead (`memory-note.ts`), not these. */
 const MAX_KEY_CHARS = 200;
 const MAX_OBJECT_CHARS = 4_000;
 
@@ -43,10 +46,15 @@ export interface AddMemoryInput {
   subject: string;
   predicate: string;
   object?: string;
+  /** memory-notes US-002: a note's index line; a triple carries none. */
+  description?: string;
 }
 
 const isMemoryWriteKind = (value: unknown): value is MemoryWriteKind =>
   typeof value === 'string' && (MEMORY_WRITE_KINDS as readonly string[]).includes(value);
+
+/** Whether an item of this kind is a note, so the note limits replace the triple ones (US-002). */
+const isNote = (kind: MemoryWriteKind): boolean => kind === MemoryKind.NOTE;
 
 /**
  * `koda_add_memory` (2b1-D3): the memory item to remember in the thread's project. `execute` is what an approve runs:
@@ -68,21 +76,38 @@ export function addMemoryTool(deps: {
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
     kind: 'write',
     /**
-     * 2b1-D5, 2b-R5: only the four fields of the item are returned — a caller-supplied `ownerId` (or any other
+     * 2b1-D5, 2b-R5: only the fields of the item are returned — a caller-supplied `ownerId` (or any other
      * key) is dropped here, before the value can reach a proposal, so the item can only ever be written as the
      * requester.
+     *
+     * memory-notes US-002: a note (slug, type, body, index line) is judged by `noteFieldError` — the one note
+     * validator `POST /memory` also calls — so both write paths refuse the same field for the same bad input. Its
+     * body is capped in UTF-8 bytes by the note limit, never by the triple tool's 4000-character one; a triple can
+     * never carry an index line.
      */
     parse(input: unknown): AddMemoryInput {
       const raw = asRecord(input);
       const kind = raw['kind'];
       if (!isMemoryWriteKind(kind)) throw new ToolInputError('kind');
+      const note = isNote(kind);
       const subject = raw['subject'];
-      if (typeof subject !== 'string' || !withinChars(subject, 1, MAX_KEY_CHARS)) throw new ToolInputError('subject');
+      if (typeof subject !== 'string' || (!note && !withinChars(subject, 1, MAX_KEY_CHARS))) {
+        throw new ToolInputError('subject');
+      }
       const predicate = raw['predicate'];
-      if (typeof predicate !== 'string' || !withinChars(predicate, 1, MAX_KEY_CHARS)) {
+      if (typeof predicate !== 'string' || (!note && !withinChars(predicate, 1, MAX_KEY_CHARS))) {
         throw new ToolInputError('predicate');
       }
-      const object = optionalObject(raw['object']);
+      const object = optionalObject(raw['object'], note);
+      const description = optionalDescription(raw['description']);
+      const candidate = { kind, subject, predicate, object, description };
+      if (note) {
+        const problem = noteFieldError(candidate);
+        if (problem !== null) throw new ToolInputError(problem);
+        return { kind, subject, predicate, ...(object === undefined ? {} : { object }), description };
+      }
+      // The index line is a note's alone: any supplied description is refused, exactly as the REST write refuses it.
+      if (noteFieldError(candidate) !== null) throw new ToolInputError('description');
       return { kind, subject, predicate, ...(object === undefined ? {} : { object }) };
     },
     /**
@@ -106,12 +131,11 @@ export function addMemoryTool(deps: {
         throw error;
       }
       const lines = [`Remember in ${ctx.projectSlug}: ${input.kind} ${input.subject} / ${input.predicate}`];
+      // A note's index line comes before its body, the order the note itself is written in (US-002).
+      if (input.description !== undefined) lines.push(input.description);
       if (input.object !== undefined) lines.push(input.object);
       const active = await deps.memory.findActive(ctx.projectId, input.kind, input.subject, input.predicate);
-      if (active) {
-        // An item with no object is named alone; an empty string is no object (the read tool reads it the same way).
-        lines.push(active.object ? `Replaces memory:${active.id}: ${active.object}` : `Replaces memory:${active.id}`);
-      }
+      if (active) lines.push(replacedLine(active));
       return maskSecrets(lines.join('\n'));
     },
     /**
@@ -132,6 +156,7 @@ export function addMemoryTool(deps: {
           subject: input.subject,
           predicate: input.predicate,
           ...(input.object === undefined ? {} : { object: input.object }),
+          ...(input.description === undefined ? {} : { description: input.description }),
           sourceType: ctx.threadId === null ? 'mcp' : 'thread',
           sourceId: ctx.threadId ?? ctx.actor.id,
           confidence: THREAD_CONFIDENCE,
@@ -154,10 +179,34 @@ export function addMemoryTool(deps: {
   };
 }
 
-/** An absent object, or a string judged after trim; anything else is the named refusal (2b1-D5). */
-function optionalObject(value: unknown): string | undefined {
+/**
+ * The last line of a preview: the item this approval replaces. A triple shows its value, because that is what the
+ * user compares; a note is named by its id alone, because its body is Markdown the approval text does not need to
+ * repeat (US-002).
+ */
+function replacedLine(active: MemoryItem): string {
+  // An item with no object is named alone; an empty string is no object (the read tool reads it the same way).
+  return active.kind === MemoryKind.NOTE || !active.object
+    ? `Replaces memory:${active.id}`
+    : `Replaces memory:${active.id}: ${active.object}`;
+}
+
+/**
+ * An absent object, or a string judged after trim; anything else is the named refusal (2b1-D5). A triple's value is
+ * capped here; a note's body is judged in UTF-8 bytes by `noteFieldError` instead (US-002).
+ */
+function optionalObject(value: unknown, note: boolean): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || !withinChars(value, 0, MAX_OBJECT_CHARS)) throw new ToolInputError('object');
+  if (typeof value !== 'string' || (!note && !withinChars(value, 0, MAX_OBJECT_CHARS))) {
+    throw new ToolInputError('object');
+  }
+  return value;
+}
+
+/** An absent description, or the string a note's index line is judged from; `null` is how JSON spells "no value". */
+function optionalDescription(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw new ToolInputError('description');
   return value;
 }
 

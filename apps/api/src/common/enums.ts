@@ -96,8 +96,26 @@ export const MemoryKind = {
   PREFERENCE: 'PREFERENCE',
   CONSTRAINT: 'CONSTRAINT',
   INCIDENT_PATTERN: 'INCIDENT_PATTERN',
+  /**
+   * US-001: a Markdown note, not a fact: `subject` is the slug, `predicate` the note type, `object` the body
+   * and `description` the index line (see `src/memory/memory-note.ts`).
+   */
+  NOTE: 'NOTE',
 } as const;
 export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
+
+/**
+ * US-004: whose memory a row is.
+ *
+ * `project` is a row of one project (every row before this story). `user` is a principal-owned note: stored
+ * once with a null `projectId` and an `ownerKey` of `<ownerType>:<ownerId>`, so it is read in every project
+ * that passes the owner. Only a `NOTE` may be `user` — a triple always belongs to a project.
+ */
+export const MemoryScope = {
+  PROJECT: 'project',
+  USER: 'user',
+} as const;
+export type MemoryScope = (typeof MemoryScope)[keyof typeof MemoryScope];
 
 export const EntityNodeType = {
   TICKET: 'ticket',

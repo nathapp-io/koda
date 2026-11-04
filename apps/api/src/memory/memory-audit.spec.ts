@@ -15,6 +15,7 @@ const OBJECT = 'Private fact object';
 const makeItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-1',
+  scope: 'project',
   kind: 'FACT',
   subject: SUBJECT,
   predicate: PREDICATE,

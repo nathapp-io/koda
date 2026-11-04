@@ -70,6 +70,7 @@ const makeScoreBreakdown = (): ScoreBreakdown => ({
 const makeMemoryItem = (overrides?: Partial<MemoryItem>): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-1',
+  scope: 'project',
   kind: 'fact',
   subject: 'auth',
   predicate: 'uses',

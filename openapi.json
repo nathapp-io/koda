@@ -1605,6 +1605,78 @@
         ]
       }
     },
+    "/api/memory/notes/{id}/retire": {
+      "post": {
+        "operationId": "MemoryController_retireNote",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireNoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Note retired"
+          },
+          "202": {
+            "description": "The project holds agent memory writes for approval; the request is pending\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A user note was named without a projectId"
+          },
+          "403": {
+            "description": "Permission refused, or the note may not be replaced by this caller"
+          },
+          "404": {
+            "description": "Memory item not found"
+          },
+          "409": {
+            "description": "Note is not active"
+          },
+          "422": {
+            "description": "Memory item is not a note"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retire a note (memory.create)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/memory": {
       "post": {
         "operationId": "MemoryController_createMemory",
@@ -1656,6 +1728,100 @@
         ]
       }
     },
+    "/api/projects/{slug}/memory/write-mode": {
+      "get": {
+        "operationId": "MemoryReadController_writeMode",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns { mode: 'direct' | 'proposal', policyId: string | null, source: 'policy' | 'default' | 'not-approvable', agentPolicy: { id, mode } | null }"
+          },
+          "403": {
+            "description": "memory.read is missing, or the caller is not a member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the caller's effective memory.create write mode (memory.read)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/projects/{slug}/memory/export": {
+      "get": {
+        "operationId": "MemoryReadController_exportMemory",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "required": false,
+            "in": "query",
+            "description": "Cursor of the last row already held",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "required": false,
+            "in": "query",
+            "description": "Rows to answer (1..500, default 100)",
+            "schema": {
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of changed rows: { items, nextCursor, hasMore }, every status and soft-deleted row included"
+          },
+          "400": {
+            "description": "An unreadable since cursor, or a take outside 1..500"
+          },
+          "403": {
+            "description": "memory.read is missing, or the caller is not a member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export memory changed after a cursor (memory.read)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/projects/{slug}/memory": {
       "get": {
         "operationId": "MemoryReadController_getMemory",
@@ -1702,7 +1868,8 @@
                 "DECISION",
                 "PREFERENCE",
                 "CONSTRAINT",
-                "INCIDENT_PATTERN"
+                "INCIDENT_PATTERN",
+                "NOTE"
               ]
             }
           },
@@ -1712,6 +1879,17 @@
             "in": "query",
             "description": "Subject prefix",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "text",
+            "required": false,
+            "in": "query",
+            "description": "Full-text search text (1-100 characters)",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 100,
               "type": "string"
             }
           },
@@ -1733,13 +1911,27 @@
             "name": "orderBy",
             "required": false,
             "in": "query",
+            "description": "Defaults to rank when text is given, confidence otherwise",
             "schema": {
-              "default": "confidence",
               "type": "string",
               "enum": [
                 "confidence",
                 "updatedAt",
                 "createdAt"
+              ]
+            }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "project, user (the caller's own notes) or all (default)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "user",
+                "all"
               ]
             }
           }
@@ -15607,6 +15799,20 @@
           }
         }
       },
+      "RetireNoteDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project the caller is a member of. Required for a user-scoped note (which has no project of its own); ignored for a project note."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Why the note is being retired"
+          }
+        }
+      },
       "CreateMemoryDto": {
         "type": "object",
         "properties": {
@@ -15615,13 +15821,22 @@
             "minLength": 1,
             "description": "Project ID the memory item belongs to"
           },
+          "scope": {
+            "enum": [
+              "project",
+              "user"
+            ],
+            "type": "string",
+            "description": "Whose memory the item is: \"project\" (default) stores it in the named project, \"user\" stores it once for the caller, which only a NOTE may be"
+          },
           "kind": {
             "enum": [
               "FACT",
               "DECISION",
               "PREFERENCE",
               "CONSTRAINT",
-              "INCIDENT_PATTERN"
+              "INCIDENT_PATTERN",
+              "NOTE"
             ],
             "type": "string",
             "description": "Kind of memory item"
@@ -15639,6 +15854,11 @@
           "object": {
             "type": "string",
             "description": "Object — the value/target of the predicate"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Index line of a NOTE memory item (required for kind NOTE, rejected for every other kind)"
           },
           "sourceType": {
             "type": "string",

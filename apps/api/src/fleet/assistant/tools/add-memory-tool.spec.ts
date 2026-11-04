@@ -106,7 +106,7 @@ describe('koda_add_memory parse (US-006)', () => {
     for (const kind of ['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN']) {
       expect(tool.parse({ kind, subject: 's', predicate: 'p' }).kind).toBe(kind);
     }
-    for (const kind of ['decision', 'NOTE', 7, undefined, null]) {
+    for (const kind of ['decision', 'MEMO', 7, undefined, null]) {
       expect(reasonOf(() => tool.parse({ kind, subject: 's', predicate: 'p' }))).toBe('kind');
     }
   });
@@ -317,6 +317,102 @@ describe('koda_add_memory execute (US-006)', () => {
     await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
       text: 'forbidden: memory:m1 needs memory.update',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// memory-notes US-002 — a NOTE through the same parser, preview and upsert
+// ---------------------------------------------------------------------------
+
+/** A valid note input, with the fields each test overrides. */
+const note = (over: Record<string, unknown> = {}): Record<string, unknown> =>
+  ({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'b', description: 'd', ...over });
+
+describe('koda_add_memory notes (US-002)', () => {
+  it('AC-1: a note input is returned with its description', () => {
+    const parsed = toolDeps().tool.parse(note());
+
+    expect(parsed).toEqual({
+      kind: 'NOTE', subject: 'replay-budget', predicate: 'project', object: 'b', description: 'd',
+    });
+  });
+
+  it('AC-2: the note validator judges the slug and the type, naming each field', () => {
+    expect(reasonOf(() => toolDeps().tool.parse(note({ subject: 'Bad Slug' })))).toBe('subject');
+    expect(reasonOf(() => toolDeps().tool.parse(note({ predicate: 'misc' })))).toBe('predicate');
+  });
+
+  it('AC-3: a note without a description is refused for description', () => {
+    const { kind: _kind, subject, predicate, object } = note();
+
+    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'NOTE', subject, predicate, object }))).toBe('description');
+  });
+
+  it('AC-4: a triple carrying a description is refused for description', () => {
+    expect(reasonOf(() => toolDeps().tool.parse({ kind: 'FACT', subject: 's', predicate: 'p', description: 'd' })))
+      .toBe('description');
+    // The same input without one is accepted, so the refusal is the description and nothing else.
+    expect(toolDeps().tool.parse({ kind: 'FACT', subject: 's', predicate: 'p' })).toEqual({
+      kind: 'FACT', subject: 's', predicate: 'p',
+    });
+  });
+
+  it('AC-5: a note body is capped by the note limit, a triple object by the tool limit', () => {
+    const body = 'a'.repeat(8_000);
+
+    expect(toolDeps().tool.parse(note({ object: body })).object).toBe(body);
+    expect(reasonOf(() => toolDeps().tool.parse(draft({ object: 'a'.repeat(4_001) })))).toBe('object');
+    // The 8192-byte cap is still the note's own: 4097 two-byte characters are 8194 bytes.
+    expect(reasonOf(() => toolDeps().tool.parse(note({ object: 'é'.repeat(4_097) })))).toBe('object');
+  });
+
+  it('AC-18: a body or description the note validator refuses names that field', () => {
+    expect(reasonOf(() => toolDeps().tool.parse(note({ object: '   ' })))).toBe('object');
+    expect(reasonOf(() => toolDeps().tool.parse(note({ description: 'd'.repeat(201) })))).toBe('description');
+    expect(reasonOf(() => toolDeps().tool.parse(note({ description: 7 })))).toBe('description');
+  });
+
+  it('AC-9: the preview names the note in its first line and carries the description', async () => {
+    const { tool } = toolDeps();
+
+    const preview = await previewOf(tool, tool.parse(note({ description: 'replay budget' })));
+
+    expect(preview.split('\n')[0]).toBe('Remember in web: NOTE replay-budget / project');
+    expect(preview).toContain('replay budget');
+  });
+
+  it('AC-6: while another type of the same slug is active, the preview ends with the note it replaces', async () => {
+    const { findActive, tool } = toolDeps({
+      active: item({
+        id: 'm9', kind: 'NOTE', subject: 'replay-budget', predicate: 'project',
+        object: 'the old body', description: 'old budget',
+      }),
+    });
+
+    const preview = await previewOf(tool, tool.parse(note({ predicate: 'feedback', description: 'new budget' })));
+
+    // The slug is what keys a note (US-001), so a changed type still names the active note.
+    expect(findActive.mock.calls).toEqual([['project-1', 'NOTE', 'replay-budget', 'feedback']]);
+    expect(preview.split('\n').at(-1)).toBe('Replaces memory:m9');
+  });
+
+  it('AC-8: execute stores the note with its description and answers memory:<id> saved', async () => {
+    const { upsert, tool } = toolDeps({ saved: item({ id: 'm4', kind: 'NOTE' }) });
+
+    expect(await tool.execute(ctx, tool.parse(note()))).toBe('memory:m4 saved');
+
+    const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
+    expect(input).toMatchObject({ kind: 'NOTE', subject: 'replay-budget', predicate: 'project', description: 'd' });
+    expect(input.description).toBe('d');
+  });
+
+  it('never stores a note without the index line the parser required', async () => {
+    const { upsert, tool } = toolDeps();
+
+    await tool.execute(ctx, tool.parse(note({ description: 'replay budget' })));
+
+    const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
+    expect(input.description).toBe('replay budget');
   });
 });
 
