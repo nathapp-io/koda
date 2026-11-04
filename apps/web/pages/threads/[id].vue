@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import type { ThreadActionResult } from '~/lib/thread-controller'
+import type { ThreadApprovalDecision } from '~/lib/thread-types'
 import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
 
 /**
@@ -32,6 +33,12 @@ const toast = useAppToast()
 
 /** The creator is the only possible viewer of a WORKSPACE thread, so a loaded thread is theirs. */
 const isCreator = computed(() => controller.thread.value !== null)
+/**
+ * thread-agents-modes US-012: the session approvals the thread waits on. A WORKSPACE thread has no mode control — it
+ * has no worktree to publish, so it is always `read`, and the API has no workspace mode route — but the same approval
+ * cards apply, decided through the same controller over the personal `/threads/:id/approvals/:requestId` route.
+ */
+const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])
 
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',
@@ -54,6 +61,8 @@ const onSend = (text: string): Promise<void> => runAction(() => controller.send(
 const onStop = (): Promise<void> => runAction(() => controller.stopTurn())
 const onEndSession = (): Promise<void> => runAction(() => controller.endSession())
 const onAnswer = (requestId: string, text: string): Promise<void> => runAction(() => controller.answer(requestId, text))
+const onDecideApproval = (requestId: string, decision: ThreadApprovalDecision): Promise<ThreadActionResult> =>
+  controller.decideApproval(requestId, decision)
 const onRaiseCap = (value: number): Promise<void> => runAction(() => controller.raiseCap(value))
 const onArchive = (): Promise<void> => runAction(() => controller.archive())
 </script>
@@ -79,6 +88,15 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         :slug="controller.thread.value.homeProject?.slug ?? ''"
         @answer="onAnswer"
       />
+      <div v-if="pendingApprovals.length > 0" class="space-y-3" data-testid="thread-approvals">
+        <FleetThreadsThreadApprovalCard
+          v-for="pending in pendingApprovals"
+          :key="pending.requestId"
+          :approval="pending"
+          :can-decide="isCreator"
+          :decide="onDecideApproval"
+        />
+      </div>
       <FleetThreadsThreadComposer
         :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
         :turn-running="isTurnRunning(controller.messages.value)"

@@ -999,6 +999,21 @@
         "placeholder": "Answer the question…",
         "send": "Send"
       },
+      "mode": {
+        "label": "Mode",
+        "read": "Read",
+        "ask": "Ask",
+        "full": "Full",
+        "noPermission": "You do not have permission to switch to this mode."
+      },
+      "approval": {
+        "unsandboxed": "Unsandboxed",
+        "command": "Command",
+        "reason": "Why",
+        "approve": "Approve",
+        "deny": "Deny",
+        "awaiting": "Waiting for the thread's creator to decide."
+      },
       "message": {
         "required": "Message cannot be empty.",
         "tooLong": "Message must be 32768 bytes or fewer.",

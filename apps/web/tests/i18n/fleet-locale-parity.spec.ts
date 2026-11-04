@@ -191,4 +191,27 @@ describe('Fleet locale parity (en and zh)', () => {
       expect(String(at(locale, 'fleet.threads.new.mode.label') ?? '').trim()).not.toBe('')
     }
   })
+
+  // thread-agents-modes US-012: the thread page's mode control renders `fleet.threads.mode.<mode>` and the approval
+  // card names its two decisions, all through dynamic or two-letter keys a source scan cannot pin. The mode labels must
+  // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render.
+  test('the thread page mode and approval keys cover exactly what the controls render (US-012)', () => {
+    const modeKeys = ['read', 'ask', 'full']
+    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting']
+    for (const locale of [en, zh]) {
+      const modes = at(locale, 'fleet.threads.mode') as Tree | undefined
+      expect(Object.keys(modes ?? {}).sort()).toEqual(['label', 'noPermission', ...modeKeys].sort())
+      for (const key of ['label', 'noPermission', ...modeKeys]) {
+        expect(String(at(locale, `fleet.threads.mode.${key}`) ?? '').trim()).not.toBe('')
+      }
+      const approvals = at(locale, 'fleet.threads.approval') as Tree | undefined
+      expect(Object.keys(approvals ?? {}).sort()).toEqual([...approvalKeys].sort())
+      for (const key of approvalKeys) {
+        expect(String(at(locale, `fleet.threads.approval.${key}`) ?? '').trim()).not.toBe('')
+      }
+    }
+    // AC-12: the two decisions are worded per locale, never left as the English source in zh.
+    expect(String(at(en, 'fleet.threads.approval.approve'))).toBe('Approve')
+    expect(String(at(zh, 'fleet.threads.approval.approve'))).toBe('批准')
+  })
 })

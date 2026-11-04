@@ -11,7 +11,7 @@ import { ref, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
 import type { ThreadHandoffBody } from '~/lib/thread-handoff-form'
-import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
+import type { ChatMessageDto, ThreadApprovalDecision, ThreadDetailDto, ThreadMode } from '~/lib/thread-types'
 import { applyDelta, isTurnRunning, mergeMessages, newClientMessageId, refetchAfterSeq } from '~/lib/thread-view'
 
 /** Messages per GET page (the API page size); a shorter page ends the load loop. */
@@ -60,6 +60,13 @@ export interface ThreadController {
   stopTurn: () => Promise<ThreadActionResult>
   endSession: () => Promise<ThreadActionResult>
   answer: (requestId: string, text: string) => Promise<ThreadActionResult>
+  /**
+   * Change the thread's execution profile (thread-agents-modes US-005). REPO threads only: a PROJECT or WORKSPACE
+   * thread is always `read` and has no mode route.
+   */
+  changeMode: (mode: ThreadMode) => Promise<ThreadActionResult>
+  /** Decide one pending session approval (US-008): Approve is `allow`, Deny is `deny`. */
+  decideApproval: (requestId: string, decision: ThreadApprovalDecision) => Promise<ThreadActionResult>
   raiseCap: (maxCostUsd: number) => Promise<ThreadActionResult>
   archive: () => Promise<ThreadActionResult>
   publish: () => Promise<ThreadActionResult>
@@ -287,6 +294,27 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   const answer = (requestId: string, text: string): Promise<ThreadActionResult> =>
     postAction(`${threadPath}/answer`, { requestId, text })
 
+  /**
+   * The mode change is its own `PATCH`: the API writes a system message with the old and new mode and, when a session is
+   * idle, queues one THREAD_CLOSE, so the reload picks the new mode and that note up together (US-005).
+   */
+  const changeMode = async (mode: ThreadMode): Promise<ThreadActionResult> => {
+    try {
+      await deps.api.patch(`${threadPath}/mode`, { mode })
+      await reloadThread()
+      return { ok: true }
+    } catch (error: unknown) {
+      return { ok: false, error }
+    }
+  }
+
+  /**
+   * One decision for one pending approval (US-008). The request id comes from the thread payload, so it is encoded into
+   * its single path segment; the thread reload keeps the list honest if another viewer decided first.
+   */
+  const decideApproval = (requestId: string, decision: ThreadApprovalDecision): Promise<ThreadActionResult> =>
+    postAction(`${threadPath}/approvals/${encodeURIComponent(requestId)}`, { decision })
+
   const raiseCap = async (maxCostUsd: number): Promise<ThreadActionResult> => {
     try {
       await deps.api.patch(threadPath, { maxCostUsd })
@@ -316,6 +344,8 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     stopTurn,
     endSession,
     answer,
+    changeMode,
+    decideApproval,
     raiseCap,
     archive,
     publish,

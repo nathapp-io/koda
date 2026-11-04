@@ -66,6 +66,7 @@ const workspaceThread = (over: Record<string, unknown> = {}): ThreadDetailDto =>
   tokens: null,
   specPath: null,
   pendingQuestion: null,
+  pendingApprovals: [],
   session: null,
   lastActivityAt: '2026-10-14T00:00:00.000Z',
   createdAt: '2026-10-14T00:00:00.000Z',
@@ -160,8 +161,12 @@ function realComponents(): Record<string, Component> {
   const timeline = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadTimeline.vue'), globals)
   const controls = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadControls.vue'), globals)
   const composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), globals)
+  // thread-agents-modes US-012: the session approval cards are the page's own children.
+  const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), globals)
   return {
     ...MARKERS,
+    ThreadApprovalCard: approvalCard,
+    FleetThreadsThreadApprovalCard: approvalCard,
     ThreadHeader: header,
     FleetThreadsThreadHeader: header,
     ThreadTimeline: timeline,
@@ -608,6 +613,76 @@ describe('US-006 AC-10, AC-12, AC-13: pages/threads/[id].vue — load failure, t
 
     expect(m.paths).toContain('/projects/acme/fleet/runners')
     expect(byTestId(m.app, 'page-thread-header')).toBeDefined()
+    m.app.unmount()
+  })
+})
+
+/**
+ * thread-agents-modes US-012 AC-11: the WORKSPACE thread page's session approvals.
+ *
+ * A WORKSPACE thread is not project-scoped, so its approval decisions go to the personal
+ * `/threads/:id/approvals/:requestId` route — the same card component the project page renders, over
+ * the shared controller (whose `threadPath` is what differs). There is no mode control here: a
+ * WORKSPACE thread has no worktree to publish and is always `read`, and the API has no workspace
+ * mode route.
+ */
+const pendingApproval = (over: Record<string, unknown> = {}) => ({
+  requestId: 'req1',
+  tool: 'bash',
+  summary: 'Run the migration',
+  command: 'bun run db:migrate',
+  reason: 'The schema changed',
+  expiresAt: '2026-10-14T10:10:00.000Z',
+  ...over,
+})
+
+describe('US-012 AC-11: pages/threads/[id].vue — session approvals', () => {
+  test('AC-11: the thread pendingApprovals render as cards and Approve posts to the workspace approval endpoint', async () => {
+    const m = mountPage({
+      real: true,
+      thread: workspaceThread({ pendingApprovals: [pendingApproval({ requestId: 'req-7' })] }),
+    })
+    await m.settle()
+
+    const approve = byTestId(m.app, 'thread-approval-approve')
+    expect(approve).toBeDefined()
+    expect(m.app.text()).toContain('bun run db:migrate')
+    if (approve !== undefined) click(approve)
+    await m.settle()
+
+    expect(m.posts).toEqual([{ path: '/threads/t1/approvals/req-7', body: { decision: 'allow' } }])
+    m.app.unmount()
+  })
+
+  test('AC-11 (deny): Deny posts decision deny to the same workspace route', async () => {
+    const m = mountPage({
+      real: true,
+      thread: workspaceThread({ pendingApprovals: [pendingApproval({ requestId: 'req-8' })] }),
+    })
+    await m.settle()
+
+    const deny = byTestId(m.app, 'thread-approval-deny')
+    expect(deny).toBeDefined()
+    if (deny !== undefined) click(deny)
+    await m.settle()
+
+    expect(m.posts).toEqual([{ path: '/threads/t1/approvals/req-8', body: { decision: 'deny' } }])
+    m.app.unmount()
+  })
+
+  test('AC-11 (empty): a thread with no pending approval renders no card', async () => {
+    const m = mountPage({ real: true, thread: workspaceThread({ pendingApprovals: [] }) })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('the workspace page renders no mode control (no workspace mode route)', async () => {
+    const m = mountPage({ real: true })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-mode')).toBeUndefined()
     m.app.unmount()
   })
 })

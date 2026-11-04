@@ -74,6 +74,29 @@ export interface ThreadSession {
 }
 
 /**
+ * One answerable session approval the thread waits on (mirrors the API's `ThreadPendingApprovalDto`, thread-agents-modes
+ * US-007): oldest first, at most 20. `command`, `reason` and `unsandboxed` are absent when the runner's request did not
+ * carry them. Every field is runner/agent text, so the card renders it through `{{ }}` interpolation only (B4-D1).
+ */
+export interface ThreadPendingApprovalDto {
+  /** The request id the decision route takes. */
+  requestId: string
+  tool: string
+  summary: string
+  /** The command the tool would run, when it runs one. */
+  command?: string
+  /** Why the runner is asking. */
+  reason?: string
+  /** When the runner stops waiting for the decision. */
+  expiresAt: string
+  /** Set when the request would leave the session sandbox. */
+  unsandboxed?: true
+}
+
+/** A decision a person sends for one pending approval (US-008: Approve maps to `allow`, Deny to `deny`). */
+export type ThreadApprovalDecision = 'allow' | 'deny'
+
+/**
  * The thread's last Publish or Discard result (chat-thread.domain.ts `ThreadWriteResult`, also the
  * `lastWrite` wire shape). Publish writes `published` or `publish_failed`; Discard writes `discarded`
  * or `discard_failed`.
@@ -100,6 +123,11 @@ export interface ThreadHandoff {
 export interface ThreadDto {
   id: string
   kind: ChatThreadKind
+  /**
+   * The execution profile the thread's turns run with (thread-agents-modes US-004). The API always sends it; optional
+   * here so a payload written before the feature still type-checks, and a thread with no mode reads as `read`.
+   */
+  mode?: ThreadMode
   repoId: string | null
   baseRef: string | null
   feature: string | null
@@ -117,6 +145,11 @@ export interface ThreadDto {
   tokens: ThreadTokens | null
   specPath: string | null
   pendingQuestion: ThreadPendingQuestion | null
+  /**
+   * The answerable session approvals the thread waits on, oldest first (thread-agents-modes US-007). Optional here for
+   * the same reason as `pendingActions`: a payload written before the feature renders no approval card.
+   */
+  pendingApprovals?: ThreadPendingApprovalDto[]
   session: ThreadSession | null
   lastActivityAt: string
   createdAt: string

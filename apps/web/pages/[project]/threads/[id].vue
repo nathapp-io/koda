@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import type { ThreadActionResult } from '~/lib/thread-controller'
+import type { ThreadApprovalDecision, ThreadMode } from '~/lib/thread-types'
 import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
 
 /**
@@ -13,8 +14,24 @@ import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
  * prefix while a turn runs (`isTurnRunning`). Every action emit binds to the matching
  * `useThread()` method and toasts `extractApiError(error)` for each `{ ok: false, error }`
  * result; state reloads on the next event.
+ *
+ * thread-agents-modes US-012: a REPO thread also shows its mode control (the execution profile
+ * its turns run with) and one approval card per pending session approval. The mode control is
+ * limited to the modes the caller holds the key for, and the cards decide through the same
+ * controller, so both land on the project-scoped routes.
  */
 definePageMeta({ layout: 'default' })
+
+/**
+ * The permission key each mode change needs, mirroring the API's route gate (US-005): switching
+ * to `read` re-reads under `thread.cap.update`, while `ask` and `full` have their own keys.
+ */
+const MODE_PERMISSION_KEYS: Record<ThreadMode, string> = {
+  read: 'thread.cap.update',
+  ask: 'thread.mode.ask',
+  full: 'thread.mode.full',
+}
+const ALL_MODES: ThreadMode[] = ['read', 'ask', 'full']
 
 const route = useRoute()
 const slug = route.params.project as string
@@ -40,6 +57,17 @@ const toast = useAppToast()
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
 const canManage = computed(() => permissions.value.has('thread.archive'))
 
+/** US-012: `read` re-reads under `thread.cap.update`; `ask`/`full` have their own keys (US-005's route gate). */
+const allowedModes = computed<ThreadMode[]>(() => ALL_MODES.filter(mode => permissions.value.has(MODE_PERMISSION_KEYS[mode])))
+/** Only a REPO thread has a worktree to publish, so only it can run in a mode other than `read`. */
+const showModeControl = computed(() => controller.thread.value?.kind === 'REPO')
+const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])
+/**
+ * Deciding a session approval needs `thread.answer` on a thread the caller created (US-008 gates the route with that key
+ * and the service with the creator), so the gate is the creator plus the own-or-any row form — never a role name.
+ */
+const canDecideApprovals = computed(() => isCreator.value && permissions.value.hasOwn('thread.answer'))
+
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',
 }))
@@ -62,6 +90,9 @@ const onSend = (text: string): Promise<void> => runAction(() => controller.send(
 const onStop = (): Promise<void> => runAction(() => controller.stopTurn())
 const onEndSession = (): Promise<void> => runAction(() => controller.endSession())
 const onAnswer = (requestId: string, text: string): Promise<void> => runAction(() => controller.answer(requestId, text))
+const onChangeMode = (mode: ThreadMode): Promise<ThreadActionResult> => controller.changeMode(mode)
+const onDecideApproval = (requestId: string, decision: ThreadApprovalDecision): Promise<ThreadActionResult> =>
+  controller.decideApproval(requestId, decision)
 const onRaiseCap = (value: number): Promise<void> => runAction(() => controller.raiseCap(value))
 const onArchive = (): Promise<void> => runAction(() => controller.archive())
 const onPublish = (): Promise<void> => runAction(() => controller.publish())
@@ -89,6 +120,12 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :is-creator="isCreator"
         @discard="onDiscard"
       />
+      <FleetThreadsThreadModeControl
+        v-if="showModeControl"
+        :thread="controller.thread.value"
+        :allowed="allowedModes"
+        :change-mode="onChangeMode"
+      />
       <FleetThreadsThreadKodaToolsNotice
         :thread="controller.thread.value"
       />
@@ -111,6 +148,15 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :slug="slug"
         @answer="onAnswer"
       />
+      <div v-if="pendingApprovals.length > 0" class="space-y-3" data-testid="thread-approvals">
+        <FleetThreadsThreadApprovalCard
+          v-for="pending in pendingApprovals"
+          :key="pending.requestId"
+          :approval="pending"
+          :can-decide="canDecideApprovals"
+          :decide="onDecideApproval"
+        />
+      </div>
       <FleetThreadsThreadComposer
         :composer-state="composerState(controller.thread.value, controller.messages.value, { isCreator })"
         :turn-running="isTurnRunning(controller.messages.value)"

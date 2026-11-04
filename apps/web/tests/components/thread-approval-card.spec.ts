@@ -1,0 +1,232 @@
+import { describe, expect, jest, test } from '@jest/globals'
+import * as Vue from 'vue'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { uiStubs } from '../helpers/fleet-harness'
+import { createThreadController } from '~/lib/thread-controller'
+import type { ThreadDetailDto, ThreadPendingApprovalDto } from '~/lib/thread-types'
+
+/**
+ * thread-agents-modes US-012 AC-6..AC-9, AC-12: components/fleet/threads/ThreadApprovalCard.vue — one answerable
+ * session approval.
+ *
+ * The card is handed the shared thread controller's `decideApproval`, so the transport under assertion is the real one:
+ * `POST /projects/<slug>/threads/<id>/approvals/<requestId>` with `{ decision }`, where Approve maps to `allow` and Deny
+ * to `deny` (US-008). Every textual field is runner/agent text and renders through `{{ }}` interpolation only.
+ */
+
+const cardFile = webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue')
+
+const enLocale = require('../../i18n/locales/en.json') as Record<string, unknown>
+const zhLocale = require('../../i18n/locales/zh.json') as Record<string, unknown>
+
+/** An i18n stub resolving against a real locale tree, interpolating `{name}` placeholders. */
+function localeI18n(tree: Record<string, unknown>) {
+  const lookup = (key: string): unknown =>
+    key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], tree)
+  return {
+    t: (key: string, named: Record<string, unknown> = {}): string => {
+      const value = lookup(key)
+      if (typeof value !== 'string') return key
+      return value.replace(/\{(\w+)\}/g, (match, name: string) => (name in named ? String(named[name]) : match))
+    },
+    te: (key: string): boolean => lookup(key) !== undefined,
+  }
+}
+
+const approval = (over: Partial<ThreadPendingApprovalDto> = {}): ThreadPendingApprovalDto => ({
+  requestId: 'req1',
+  tool: 'bash',
+  summary: 'Run the migration against the dev database',
+  command: 'bun run db:migrate',
+  reason: 'The schema changed in this turn',
+  expiresAt: '2026-10-14T10:10:00.000Z',
+  ...over,
+})
+
+const thread = (over: Partial<ThreadDetailDto> = {}): ThreadDetailDto => ({
+  id: 'th1',
+  kind: 'REPO',
+  repoId: 'r1',
+  baseRef: 'main',
+  feature: 'add-auth',
+  title: 'Auth spec',
+  createdById: 'u1',
+  runnerId: 'rn1',
+  backend: { kind: 'native', model: 'gpt-5' },
+  status: 'ACTIVE',
+  archivedAt: null,
+  skills: [],
+  maxCostUsd: '5',
+  costUsd: '0',
+  tokens: null,
+  specPath: null,
+  pendingQuestion: null,
+  session: null,
+  lastActivityAt: '2026-10-14T00:00:00.000Z',
+  createdAt: '2026-10-14T00:00:00.000Z',
+  activeJob: null,
+  sendRefusal: null,
+  writtenPaths: [],
+  publishedSha: null,
+  specPublished: false,
+  lastWrite: null,
+  handoff: { plan: null, run: null },
+  mode: 'ask',
+  pendingApprovals: [approval()],
+  ...over,
+})
+
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise((resolve) => { setImmediate(resolve) })
+    await Vue.nextTick()
+  }
+}
+
+/** Mounts the card over the REAL thread controller (fake `$api`), so a click reaches the path and body a browser sends. */
+function mountCard(over: {
+  approval?: ThreadPendingApprovalDto
+  canDecide?: boolean
+  locale?: 'en' | 'zh'
+  postError?: unknown
+} = {}) {
+  const get = jest.fn(async () => thread())
+  const post = jest.fn(async () => {
+    if (over.postError !== undefined) throw over.postError
+    return {}
+  })
+  const patch = jest.fn(async () => ({}))
+  const controller = createThreadController({
+    api: { get, post, patch },
+    slug: 'acme',
+    threadId: 'th1',
+    openStream: () => ({ close: () => undefined }),
+    setTimer: () => 0,
+    clearTimer: () => undefined,
+    now: () => 0,
+  })
+  const app = mountSfc(cardFile, {
+    props: {
+      approval: over.approval ?? approval(),
+      canDecide: over.canDecide ?? true,
+      decide: controller.decideApproval,
+    },
+    components: uiStubs,
+    globals: { useI18n: () => localeI18n(over.locale === 'zh' ? zhLocale : enLocale) },
+  })
+  const byId = (id: string): ReturnType<typeof app.one> => app.one(`[data-testid="${id}"]`)
+  return {
+    app,
+    post,
+    byId,
+    textOf: (id: string): string => {
+      const found = byId(id)
+      return found === undefined ? '' : app.textOf(found)
+    },
+    click: (id: string): void => {
+      const found = byId(id)
+      const onClick = found?.props.onClick
+      if (typeof onClick === 'function') (onClick as () => void)()
+    },
+    disabled: (id: string): unknown => byId(id)?.props.disabled,
+  }
+}
+
+describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
+  test('AC-6: renders the request tool, summary, command and reason', async () => {
+    const m = mountCard()
+    await settle()
+
+    expect(m.textOf('thread-approval-tool')).toBe('bash')
+    expect(m.textOf('thread-approval-summary')).toBe('Run the migration against the dev database')
+    expect(m.textOf('thread-approval-command')).toContain('bun run db:migrate')
+    expect(m.textOf('thread-approval-reason')).toContain('The schema changed in this turn')
+    m.app.unmount()
+  })
+
+  test('AC-6 (text only): a summary carrying <img src=x> renders as literal text and creates no element', async () => {
+    const m = mountCard({ approval: approval({ summary: 'Delete <img src=x onerror="boom()"> now' }) })
+    await settle()
+
+    expect(m.textOf('thread-approval-summary')).toBe('Delete <img src=x onerror="boom()"> now')
+    expect(m.app.find('img')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('AC-7: unsandboxed true renders the Unsandboxed badge', async () => {
+    const m = mountCard({ approval: approval({ unsandboxed: true }) })
+    await settle()
+
+    expect(m.textOf('thread-approval-unsandboxed')).toBe('Unsandboxed')
+    m.app.unmount()
+  })
+
+  test('AC-7 (control): a request without unsandboxed renders no badge', async () => {
+    const m = mountCard()
+    await settle()
+
+    expect(m.byId('thread-approval-unsandboxed')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test("AC-8: Approve posts { decision: allow } to the approval endpoint of its own request id", async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-42' }) })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledTimes(1)
+    expect(m.post).toHaveBeenCalledWith('/projects/acme/threads/th1/approvals/req-42', { decision: 'allow' })
+    m.app.unmount()
+  })
+
+  test("AC-9: Deny posts { decision: deny } to the approval endpoint of its own request id", async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-42' }) })
+    await settle()
+
+    m.click('thread-approval-deny')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledTimes(1)
+    expect(m.post).toHaveBeenCalledWith('/projects/acme/threads/th1/approvals/req-42', { decision: 'deny' })
+    m.app.unmount()
+  })
+
+  test('a non-creator sees the request but no decision controls', async () => {
+    const m = mountCard({ canDecide: false })
+    await settle()
+
+    expect(m.textOf('thread-approval-tool')).toBe('bash')
+    expect(m.byId('thread-approval-approve')).toBeUndefined()
+    expect(m.byId('thread-approval-deny')).toBeUndefined()
+    expect(m.textOf('thread-approval-awaiting')).toBe("Waiting for the thread's creator to decide.")
+    m.app.unmount()
+  })
+
+  test('a refused decision renders the API message and keeps both controls usable', async () => {
+    const m = mountCard({ postError: { data: { message: 'This request is no longer pending.' } } })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+
+    expect(m.textOf('thread-approval-error')).toBe('This request is no longer pending.')
+    expect(m.disabled('thread-approval-approve')).toBe(false)
+    expect(m.disabled('thread-approval-deny')).toBe(false)
+    m.app.unmount()
+  })
+
+  test('AC-12: the Approve label is English with the English locale and Chinese with the Chinese locale', async () => {
+    const en = mountCard()
+    await settle()
+    expect(en.textOf('thread-approval-approve')).toBe('Approve')
+    en.app.unmount()
+
+    const zh = mountCard({ locale: 'zh' })
+    await settle()
+    expect(zh.textOf('thread-approval-approve')).toBe('批准')
+    expect(zh.textOf('thread-approval-deny')).toBe('拒绝')
+    zh.app.unmount()
+  })
+})
