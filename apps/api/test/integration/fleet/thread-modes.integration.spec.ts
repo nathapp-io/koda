@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
-import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
+import { grantKeys, seedWaitPolicy } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -19,6 +19,7 @@ describeDb('thread modes persistence and authorization', () => {
   let db: ReturnType<typeof fixtureDb>;
   let world: FleetHttpWorld;
   let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  let noModesAgent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
   let n = 0;
   const path = '/api/projects/web/threads';
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -33,6 +34,9 @@ describeDb('thread modes persistence and authorization', () => {
     await grantRole(db, { type: 'USER', id: world.ids.viewer }, 'project-admin', world.projectId);
     agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read', 'thread.create', 'thread.mode.ask'], world.projectId);
+    noModesAgent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: noModesAgent.id }, ['project.read', 'thread.create'], world.projectId);
+    await grantKeys(db, { type: 'AGENT', id: noModesAgent.id }, ['thread.workspace.create'], null);
     await app.get(PermissionCache).invalidate();
   }, 60_000);
   afterAll(async () => { await app?.close(); });
@@ -61,6 +65,20 @@ describeDb('thread modes persistence and authorization', () => {
     const input = body('full');
     await create(input).expect(403);
     expect(await db.chatThread.count({ where: { feature: input.feature } })).toBe(0);
+  });
+  it.each(['ask', 'full'])('F1: agent without mode keys cannot request REPO %s approval', async (mode) => {
+    const input = body(mode);
+    const approvalsBefore = await db.approvalRequest.count();
+    await create(input, noModesAgent.apiKey).expect(403);
+    expect(await db.chatThread.count({ where: { feature: input.feature } })).toBe(0);
+    expect(await db.approvalRequest.count()).toBe(approvalsBefore);
+  });
+  it('F1: ask-capable developer agent cannot request full approval', async () => {
+    const input = body('full');
+    const approvalsBefore = await db.approvalRequest.count();
+    await create(input, agent.apiKey).expect(403);
+    expect(await db.chatThread.count({ where: { feature: input.feature } })).toBe(0);
+    expect(await db.approvalRequest.count()).toBe(approvalsBefore);
   });
   it('AC-10: project admin creates full', async () => {
     const row = data<{ id: string; mode: string }>(await create(body('full'), world.tokens.viewer).expect(201));
@@ -98,6 +116,22 @@ describeDb('thread modes persistence and authorization', () => {
       ? await create({ kind, mode: 'ask', title: 'No worktree', backend: { kind: 'native' } }).expect(400)
       : await request(app.getHttpServer()).post('/api/threads').set(auth(world.tokens.dev)).send({ kind, mode: 'ask', title: 'No worktree', backend: { kind: 'native' } }).expect(400);
     expect(JSON.stringify(res.body)).toContain('mode');
+  });
+  it.each([
+    ['PROJECT', 'ask'], ['PROJECT', 'full'], ['WORKSPACE', 'ask'], ['WORKSPACE', 'full'],
+  ] as const)('F2: approval-gated agent gets mode validation for %s %s before opening a request', async (kind, mode) => {
+    const policy = await seedWaitPolicy(db, kind === 'WORKSPACE' ? 'thread.workspace.create' : 'thread.create', kind === 'WORKSPACE' ? null : world.projectId);
+    try {
+      const approvalsBefore = await db.approvalRequest.count();
+      const threadsBefore = await db.chatThread.count();
+      const res = await request(app.getHttpServer()).post(kind === 'WORKSPACE' ? '/api/threads' : path)
+        .set(auth(noModesAgent.apiKey)).send({ kind, mode, title: 'Invalid mode', backend: { kind: 'native' } }).expect(400);
+      expect(JSON.stringify(res.body)).toContain('mode');
+      expect(await db.approvalRequest.count()).toBe(approvalsBefore);
+      expect(await db.chatThread.count()).toBe(threadsBefore);
+    } finally {
+      await db.approvalPolicy.delete({ where: { id: policy.id } });
+    }
   });
   it('messages retain full after creator revocation, and any-row send needs no mode grant', async () => {
     const ownerThread = data<{ id: string }>(await create(body('full'), world.tokens.viewer).expect(201));

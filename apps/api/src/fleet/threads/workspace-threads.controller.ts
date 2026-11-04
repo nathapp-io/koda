@@ -13,6 +13,7 @@ import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { WORKSPACE_THREAD_ROUTE_VARIANTS } from './workspace-thread-route.commands';
 import type { ChatThreadRecord, ChatThreadDetail } from './domain/chat-thread.domain';
+import { validateCreateWorkspaceThread } from './thread-input';
 
 /** A query integer (same rules as the project route): only digits, so `Number('1e3')` or `Number('')` never pass. */
 function intParam(raw: string | undefined, min: number, max: number): number | null {
@@ -47,6 +48,7 @@ export class WorkspaceThreadsController {
   @ApiResponse({ status: 403, description: 'thread.workspace.create is missing, or thread.create is refused in the home project' })
   @ApprovalGated()
   async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    validateCreateWorkspaceThread(dto);
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: 'thread.workspace.create', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.create, projectId: null,
       input: { thread: dto },

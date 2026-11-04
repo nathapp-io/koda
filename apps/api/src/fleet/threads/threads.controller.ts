@@ -49,6 +49,9 @@ export class ThreadsController {
   @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     const normalized = validateCreateThread(dto, dto.baseRef ?? 'main');
+    if (normalized.kind === 'REPO' && normalized.mode !== 'read') {
+      await this.threads.assertModeAllowed(ctx.project.id, principal, normalized.mode);
+    }
     const alsoKeys = normalized.kind === 'REPO' && normalized.mode !== 'read' ? [`thread.mode.${normalized.mode}`] : [];
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       ...(alsoKeys.length ? { alsoKeys } : {}),

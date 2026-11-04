@@ -17,6 +17,7 @@ import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import type { ThreadMode } from '../common/thread-jobs';
 
 @Injectable()
 export class ThreadsService {
@@ -33,12 +34,17 @@ export class ThreadsService {
     private readonly permissions: PermissionService,
   ) {}
 
+  /** Check before opening approval and again at execution: approval never substitutes for possession of the mode key. */
+  async assertModeAllowed(projectId: string, principal: KodaPrincipal, mode: ThreadMode): Promise<void> {
+    if (mode !== 'read' && !(await this.permissions.can(principal, `thread.mode.${mode}`, { projectId })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+  }
+
   async create(projectId: string, principal: KodaPrincipal, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     const normalized = validateCreateThread(input, input.baseRef ?? 'main');
-    if (normalized.kind === 'REPO' && normalized.mode !== 'read' && !(await this.permissions.can(principal, `thread.mode.${normalized.mode}`, { projectId })).allowed) {
-      throw new ForbiddenAppException({}, 'permissions');
-    }
+    if (normalized.kind === 'REPO') await this.assertModeAllowed(projectId, principal, normalized.mode);
     const userId = principal.id;
     // S5b-R3: a PROJECT thread has no repo, worktree or feature. The anchor repo is bookkeeping only (S5b-R13).
     if (normalized.kind === 'PROJECT') {
