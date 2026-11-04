@@ -8,17 +8,22 @@
  * keys, so the two forms read identically.
  */
 import * as z from 'zod'
+import { backendFieldIssues, toThreadBackend } from '~/lib/thread-create'
+import type { AgentChoiceKey } from '~/lib/thread-create'
+import type { ThreadBackend } from '~/lib/thread-types'
 
 type Translate = (key: string) => string
 
 /**
  * The form's parsed field values (the shape `buildWorkspaceThreadCreateSchema` produces):
  * `maxCostUsd` is already a number, and `homeProject` is the empty string for "Automatic"
- * (the API then picks the host project).
+ * (the API then picks the host project). `agent` is `native` or one ACP agent (US-011);
+ * a WORKSPACE thread has no worktree, so it carries no mode.
  */
 export interface WorkspaceThreadCreateValues {
   homeProject: string
   title: string
+  agent: AgentChoiceKey
   model: string
   effort: string
   maxCostUsd: number
@@ -28,13 +33,12 @@ export interface WorkspaceThreadCreateValues {
 export interface CreateWorkspaceThreadBody {
   title: string
   maxCostUsd: number
-  backend: { kind: 'native'; model: string; effort?: string }
+  backend: ThreadBackend
   /** Absent for "Automatic": the API requires a reachable project for an explicit one. */
   homeProject?: string
 }
 
 export function buildWorkspaceThreadCreateSchema(t: Translate) {
-  const required = t('fleet.threads.new.validation.required')
   const invalid = t('fleet.threads.new.validation.invalid')
   return z.object({
     // The API's home project is 1..100 characters, and empty means "let the API choose".
@@ -46,27 +50,31 @@ export function buildWorkspaceThreadCreateSchema(t: Translate) {
       }), t('fleet.threads.new.validation.title')),
     maxCostUsd: z.coerce.number().gt(0, invalid).max(10_000, invalid)
       .refine(value => Math.abs(value * 10_000 - Math.round(value * 10_000)) < 1e-6, invalid),
-    model: z.string().min(1, required),
-    effort: z.enum(['', 'low', 'medium', 'high', 'xhigh']),
+    // The chosen agent decides which backend the body carries and which model/effort rules apply.
+    agent: z.enum(['native', 'claude', 'codex', 'cursor']).default('native'),
+    model: z.string().max(128).default(''),
+    effort: z.string().max(32).default(''),
+  }).superRefine((values, ctx) => {
+    for (const issue of backendFieldIssues(values, t)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [issue.path], message: issue.message })
+    }
   })
 }
 
 export type WorkspaceThreadCreateFormValues = z.infer<ReturnType<typeof buildWorkspaceThreadCreateSchema>>
 
-/** The POST /threads body: no repository keys, and an empty home project or effort is left out. */
+/** The POST /threads body: no repository keys and no mode, and an empty home project or effort is left out. */
 export function toCreateWorkspaceThreadBody(values: WorkspaceThreadCreateValues): CreateWorkspaceThreadBody {
   const homeProject = values.homeProject.trim()
-  const effort = values.effort.trim()
-  const backend: { kind: 'native'; model: string; effort?: string } = {
-    kind: 'native',
-    model: values.model,
-    ...(effort ? { effort } : {}),
-  }
   return {
     title: values.title,
     // The schema already coerced the cap; Number() also tolerates a raw field value from a JS caller.
     maxCostUsd: Number(values.maxCostUsd),
-    backend,
+    backend: toThreadBackend({
+      agent: values.agent,
+      model: values.model ?? '',
+      effort: values.effort ?? '',
+    }),
     // 'Automatic' is the empty string: an absent key lets the API choose the host project.
     ...(homeProject ? { homeProject } : {}),
   }

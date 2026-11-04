@@ -923,12 +923,29 @@
         "feature": "功能标识",
         "threadTitle": "标题",
         "maxCost": "费用上限（美元）",
-        "backend": "原生模型",
+        "backend": "后端",
+        "agent": {
+          "label": "代理",
+          "native": "原生",
+          "claude": "Claude Code",
+          "codex": "Codex",
+          "cursor": "Cursor",
+          "reason": {
+            "notInstalled": "未安装",
+            "notLoggedIn": "未登录"
+          }
+        },
+        "mode": {
+          "label": "模式",
+          "read": "只读",
+          "ask": "询问",
+          "full": "完全"
+        },
         "model": "模型",
         "effortLabel": "推理强度",
         "effortDefault": "默认",
         "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
-        "noBackend": "没有在线且启用的执行机提供原生线程模型。",
+        "noBackend": "没有在线且启用的执行机提供此代理的模型。",
         "noPermission": "你没有在此项目中创建线程的权限。",
         "skills": "已启用的项目技能",
         "create": "创建线程",

@@ -4,7 +4,7 @@ import { defineComponent, h, ref } from 'vue'
 import { useField } from 'vee-validate'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
-import { i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import { enI18n, i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { projectPermissionsStub } from '../helpers/permission-nav'
 import { ApiError } from '../../composables/useApi'
@@ -31,10 +31,16 @@ const repo = (over: Record<string, unknown> = {}) => ({
   defaultBranch: 'main', githubInstallationId: '7', createdAt: '2026-10-01T00:00:00.000Z', ...over,
 })
 
-/** A native-capable runner summary (SEAM-4: threadBackends feeds eligibleModels). */
-const runnerWithModels = (models: string[], over: Record<string, unknown> = {}) => ({
+/** A runner summary: native models plus, when given, the ACP agents and discovery offers the agent select reads. */
+const runnerWithModels = (
+  models: string[],
+  over: Record<string, unknown> = {},
+  acp: { acp?: string[]; acpOffers?: Record<string, unknown>[] } = {},
+) => ({
   id: 'rn1', name: 'mac-1', os: 'linux', arch: 'x64', labels: [], enabled: true, online: true,
-  profiles: [], threadBackends: { native: models, acp: [] }, projectThreads: false, ...over,
+  profiles: [],
+  threadBackends: { native: models, acp: acp.acp ?? [], ...(acp.acpOffers ? { acpOffers: acp.acpOffers } : {}) },
+  projectThreads: false, ...over,
 })
 
 const skill = (over: Record<string, unknown> = {}) => ({
@@ -75,30 +81,42 @@ type PageOver = {
   models?: string[]
   /** Whether that runner advertises projectThreads (S5b): only then does it offer PROJECT models. */
   projectThreads?: boolean
+  /** The ACP agents and discovery offers that runner reports (thread-agents-modes US-011). */
+  acp?: { acp?: string[]; acpOffers?: Record<string, unknown>[] }
+  /** The project keys the caller holds; the default is the create key alone. */
+  permissions?: string[]
+  /** Mount with the real English copy instead of the key-echo stub (label assertions). */
+  englishCopy?: boolean
   skills?: Record<string, unknown>[]
   post?: jest.Mock
 }
+
+/** One runner summary as the workspace/project form reads it (threadBackends carries the agents). */
+const acpOffer = (agent: string, over: Record<string, unknown> = {}) => ({
+  agent, launchable: true, loggedIn: true, models: [], efforts: [], ...over,
+})
 
 function mountPage(over: PageOver = {}) {
   const post = over.post ?? jest.fn(async () => ({ id: 'th9' }))
   const get = jest.fn(async () => ({}))
   const nav = jest.fn(async () => undefined)
   const push = jest.fn(async () => undefined)
-  const runners = over.models ? [runnerWithModels(over.models, { projectThreads: over.projectThreads ?? false })] : []
+  const runners = over.models ? [runnerWithModels(over.models, { projectThreads: over.projectThreads ?? false }, over.acp ?? {})] : []
   const app = mountSfc(pageFile, {
     components: { ...stubs, FormField, Input, FleetThreadsBackendPicker: backendPicker },
     fleetComponents: ['FleetNativeSelect'],
     alias: { '~/composables/useApi': apiModule },
     globals: {
       definePageMeta: () => undefined,
-      useI18n: () => i18nStub(),
+      useI18n: () => (over.englishCopy === true ? enI18n() : i18nStub()),
       useAppToast: () => toastRecorder(),
       useApi: () => ({ $api: { get, post } }),
       useRoute: () => ({ params: { project: 'web' } }),
       useRouter: () => ({ push, replace: jest.fn(async () => undefined) }),
       navigateTo: nav,
-      // Permissions P1 US-007: the create form follows the project `thread.create` key.
-      useProjectPermissions: () => projectPermissionsStub(['thread.create']),
+      // Permissions P1 US-007: the create form follows the project `thread.create` key, and the
+      // REPO mode select follows the two `thread.mode.*` keys (thread-agents-modes US-011).
+      useProjectPermissions: () => projectPermissionsStub(over.permissions ?? ['thread.create']),
       useFleetDispatchOptions: () => ({
         repos: ref([repo()]),
         runners: ref(runners),
@@ -191,7 +209,10 @@ describe('US-005 AC11-AC15: pages/[project]/threads/new.vue', () => {
     await fillAndSubmit(m.app)
 
     expect(m.post).toHaveBeenCalledWith('/projects/web/threads', {
-      kind: 'REPO', repoId: 'r1', feature: 'add-auth', title: 'Auth spec', maxCostUsd: 5, backend: { kind: 'native', model: 'm1' },
+      kind: 'REPO', repoId: 'r1', feature: 'add-auth', title: 'Auth spec', maxCostUsd: 5,
+      backend: { kind: 'native', model: 'm1' },
+      // thread-agents-modes US-011: a REPO create body always carries the mode, native unchanged.
+      mode: 'read',
     })
     m.app.unmount()
   })
@@ -313,6 +334,149 @@ describe('US-007 AC7-AC9: pages/[project]/threads/new.vue scope picker', () => {
       maxCostUsd: 5,
       backend: { kind: 'native', model: 'm1' },
     })
+    m.app.unmount()
+  })
+})
+// ── US-011: agent and mode on the project new-thread form ──────────────────────────────────────
+
+/** The agent select the picker renders (a raw <select>, so its options are readable directly). */
+const agentSelect = (app: Mounted): FakeNode | undefined => app.one('[data-testid="thread-new-agent"]')
+
+/** The mode select lives in the FormField named mode, like the scope and repo fields. */
+const modeSelect = (app: Mounted): FakeNode | undefined => selectIn(app, 'mode')
+
+/** Picks an agent through the picker's own select, the way a person does. */
+function chooseAgent(app: Mounted, agent: string): void {
+  const select = must(agentSelect(app), 'agent select')
+  ;(select.props.onChange as (e: unknown) => void)({ target: { value: agent } })
+}
+
+/** The codex offer the ACP tests use: launchable, logged in, with its own model list. */
+const codexAcp = {
+  acp: ['codex'],
+  acpOffers: [acpOffer('codex', { models: ['gpt-5-codex', 'gpt-5-codex-mini'], efforts: ['low', 'high'] })],
+}
+
+/** Fills the REPO fields (repo, feature, title, cap) without touching agent, model or mode. */
+async function fillRepoFields(app: Mounted): Promise<void> {
+  const change = (select: FakeNode, value: string): void => {
+    const onChange = select.props.onChange as (e: unknown) => void
+    onChange({ target: { value } })
+  }
+  change(must(selectIn(app, 'repoId'), 'repo select'), 'r1')
+  typeInto(app, 'feature', 'add-auth')
+  typeInto(app, 'title', 'Auth spec')
+  typeInto(app, 'maxCostUsd', '5')
+  await Vue.nextTick()
+}
+
+async function submitForm(app: Mounted): Promise<void> {
+  const form = must(app.one('form'), 'thread create form')
+  await (form.props.onSubmit as (e: { preventDefault: () => void }) => Promise<void>)({ preventDefault: jest.fn() })
+}
+
+describe('US-011 AC-6..AC-8: the REPO mode select follows the caller’s project keys', () => {
+  test('AC-6: Read and Ask, not Full, when the caller holds thread.mode.ask but not thread.mode.full', async () => {
+    const m = mountPage({ models: ['m1'], permissions: ['thread.create', 'thread.mode.ask'], englishCopy: true })
+    await m.settle()
+
+    const select = must(modeSelect(m.app), 'mode select')
+    expect(optionValues(m.app, select)).toEqual(['read', 'ask'])
+    expect(m.app.find('option', select).map((option) => m.app.textOf(option))).toEqual(['Read', 'Ask'])
+    m.app.unmount()
+  })
+
+  test('AC-7: Read, Ask and Full when the caller holds both thread.mode keys', async () => {
+    const m = mountPage({ models: ['m1'], permissions: ['thread.create', 'thread.mode.ask', 'thread.mode.full'], englishCopy: true })
+    await m.settle()
+
+    const select = must(modeSelect(m.app), 'mode select')
+    expect(optionValues(m.app, select)).toEqual(['read', 'ask', 'full'])
+    expect(m.app.find('option', select).map((option) => m.app.textOf(option))).toEqual(['Read', 'Ask', 'Full'])
+    m.app.unmount()
+  })
+
+  test('AC-6 (edge): Read alone when the caller holds no mode key', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+
+    expect(optionValues(m.app, must(modeSelect(m.app), 'mode select'))).toEqual(['read'])
+    m.app.unmount()
+  })
+
+  test('AC-7 (edge): choosing a mode the caller may not use is impossible — the select offers only permitted ones', async () => {
+    const m = mountPage({ models: ['m1'], permissions: ['thread.create', 'thread.mode.ask'] })
+    await m.settle()
+
+    expect(optionValues(m.app, must(modeSelect(m.app), 'mode select'))).not.toContain('full')
+    m.app.unmount()
+  })
+
+  test('AC-8: the PROJECT scope shows no mode select', async () => {
+    const m = mountPage({ models: ['m1'], projectThreads: true, permissions: ['thread.create', 'thread.mode.ask', 'thread.mode.full'] })
+    await m.settle()
+
+    expect(modeSelect(m.app)).toBeDefined()
+
+    setScope(m.app, 'PROJECT')
+    await Vue.nextTick()
+
+    expect(modeSelect(m.app)).toBeUndefined()
+    m.app.unmount()
+  })
+})
+
+describe('US-011 AC-9, AC-10: the submitted body carries the chosen agent and mode', () => {
+  test('AC-9: Codex with gpt-5-codex and mode Ask posts an acp backend and mode ask', async () => {
+    const m = mountPage({ models: ['m1'], permissions: ['thread.create', 'thread.mode.ask'], acp: codexAcp })
+    await m.settle()
+
+    chooseAgent(m.app, 'codex')
+    await Vue.nextTick()
+    await fillRepoFields(m.app)
+    await Vue.nextTick()
+
+    // The model select now lists Codex's models; pick gpt-5-codex.
+    ;(must(selectsWith(m.app, 'gpt-5-codex')[0], 'codex model select').props.onChange as (e: unknown) => void)({ target: { value: 'gpt-5-codex' } })
+    ;(must(modeSelect(m.app), 'mode select').props.onChange as (e: unknown) => void)({ target: { value: 'ask' } })
+    await Vue.nextTick()
+
+    await submitForm(m.app)
+
+    expect(m.post).toHaveBeenCalledWith('/projects/web/threads', {
+      kind: 'REPO',
+      repoId: 'r1',
+      feature: 'add-auth',
+      title: 'Auth spec',
+      maxCostUsd: 5,
+      backend: { kind: 'acp', agent: 'codex', model: 'gpt-5-codex' },
+      mode: 'ask',
+    })
+    m.app.unmount()
+  })
+
+  test('AC-10: Native with an unchanged mode posts backend.kind native and mode read', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+
+    await fillAndSubmit(m.app)
+
+    const [, body] = m.post.mock.calls[0] as [string, { backend: { kind: string }; mode: string }]
+    expect(body.backend.kind).toBe('native')
+    expect(body.mode).toBe('read')
+    m.app.unmount()
+  })
+
+  test('AC-9 (edge): switching agent resets the model to the new agent’s first model and clears the effort', async () => {
+    const m = mountPage({ models: ['m1'], acp: codexAcp })
+    await m.settle()
+
+    ;(must(selectsWith(m.app, 'm1')[0], 'native model select').props.onChange as (e: unknown) => void)({ target: { value: 'm1' } })
+    chooseAgent(m.app, 'codex')
+    await Vue.nextTick()
+
+    expect(must(selectsWith(m.app, 'gpt-5-codex')[0], 'codex model select').props.value).toBe('gpt-5-codex')
+    expect(must(selectsWith(m.app, 'high')[0], 'codex effort select').props.value).toBe('')
     m.app.unmount()
   })
 })

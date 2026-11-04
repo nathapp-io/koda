@@ -923,12 +923,29 @@
         "feature": "Feature",
         "threadTitle": "Title",
         "maxCost": "Cost cap in USD",
-        "backend": "Native model",
+        "backend": "Backend",
+        "agent": {
+          "label": "Agent",
+          "native": "Native",
+          "claude": "Claude Code",
+          "codex": "Codex",
+          "cursor": "Cursor",
+          "reason": {
+            "notInstalled": "Not installed",
+            "notLoggedIn": "Not logged in"
+          }
+        },
+        "mode": {
+          "label": "Mode",
+          "read": "Read",
+          "ask": "Ask",
+          "full": "Full"
+        },
         "model": "Model",
         "effortLabel": "Effort",
         "effortDefault": "Default",
         "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
-        "noBackend": "No online enabled runner offers a native thread model.",
+        "noBackend": "No online enabled runner offers a model for this agent.",
         "noPermission": "You do not have permission to create threads in this project.",
         "skills": "Enabled project skills",
         "create": "Create thread",

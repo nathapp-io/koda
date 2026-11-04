@@ -18,6 +18,13 @@ export type ChatThreadKind = 'REPO' | 'PROJECT' | 'WORKSPACE'
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadAgent`): the ACP backends a runner can host. */
 export type ThreadAgent = 'claude' | 'codex' | 'cursor'
 
+/**
+ * Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadMode`), thread-agents-modes: the execution
+ * profile a thread's turns run with. Only a REPO thread can be created with a mode other than `read`; PROJECT and
+ * WORKSPACE threads have no worktree or publish and stay `read`.
+ */
+export type ThreadMode = 'read' | 'ask' | 'full'
+
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadBackend`). */
 export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }

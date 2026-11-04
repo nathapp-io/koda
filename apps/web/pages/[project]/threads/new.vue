@@ -4,8 +4,9 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { extractApiError } from '~/composables/useApi'
 import type { ProjectSkillDto } from '~/composables/useProjectSkills'
-import { buildThreadCreateSchema, eligibleModels, toCreateThreadBody } from '~/lib/thread-create'
+import { buildThreadCreateSchema, eligibleAgents, isAgentChoiceKey, threadModeChoices, toCreateThreadBody } from '~/lib/thread-create'
 import type { ThreadCreateFormValues } from '~/lib/thread-create'
+import type { ChatThreadKind } from '~/lib/thread-types'
 import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
@@ -24,7 +25,22 @@ const skills = ref<ProjectSkillDto[]>([])
 const loadFailed = ref(false)
 const submitError = ref('')
 const skillsError = ref('')
-const models = computed(() => eligibleModels(options.runners.value, values.kind === 'PROJECT' ? 'PROJECT' : 'REPO'))
+/** A PROJECT thread offers PROJECT-capable runners only; a REPO thread any of them (S5b). */
+const scopeKind = computed<ChatThreadKind>(() => (values.kind === 'PROJECT' ? 'PROJECT' : 'REPO'))
+/**
+ * US-011: the agent select's options, each with the models and efforts it offers. An agent no
+ * eligible runner can start stays in the list but is disabled with its reason.
+ */
+const agents = computed(() => eligibleAgents(options.runners.value, scopeKind.value))
+/** The chosen agent's entry; the first available one stands in until the form has picked. */
+const chosenAgent = computed(() => agents.value.find(choice => choice.agent === values.agent)
+  ?? agents.value.find(choice => choice.available)
+  ?? agents.value[0])
+const models = computed(() => chosenAgent.value?.models ?? [])
+const efforts = computed(() => chosenAgent.value?.efforts ?? [])
+/** US-011: the REPO mode select offers only the modes the caller's project keys allow. */
+const modeOptions = computed(() => threadModeChoices(key => permissions.value.has(key))
+  .map(mode => ({ value: mode, label: t(`fleet.threads.new.mode.${mode}`) })))
 const repoOptions = computed(() => options.repos.value.map(repo => ({ value: repo.id, label: `${repo.owner}/${repo.name}` })))
 const selectedRepo = computed(() => options.repos.value.find(repo => repo.id === values.repoId) ?? null)
 /** The scope picker (S5b 1a-R5): Repo is the default, so today's behaviour survives. */
@@ -36,15 +52,40 @@ const scopeOptions = computed(() => [
 const isProject = computed(() => values.kind === 'PROJECT')
 const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
   validationSchema: toTypedSchema(buildThreadCreateSchema(t)),
-  initialValues: { kind: 'REPO', repoId: '', baseRef: '', feature: '', title: '', maxCostUsd: 5, model: '', effort: '' },
+  initialValues: {
+    kind: 'REPO', repoId: '', baseRef: '', feature: '', title: '', maxCostUsd: 5,
+    agent: 'native', mode: 'read', model: '', effort: '',
+  },
   keepValuesOnUnmount: true,
 })
 
-watch(models, (available) => {
-  if (!values.model || !available.includes(values.model)) {
-    setFieldValue('model', available[0] ?? '')
-  }
+/** Keeps the form on a usable agent when the eligible runners change (one goes offline, say). */
+watch(agents, (choices) => {
+  if (choices.some(choice => choice.agent === values.agent && choice.available)) return
+  setFieldValue('agent', choices.find(choice => choice.available)?.agent ?? 'native')
 }, { immediate: true })
+
+/** A model or effort the chosen agent does not offer would fail at the API, so follow the agent. */
+watch([models, efforts], () => {
+  if (!values.model || !models.value.includes(values.model)) setFieldValue('model', models.value[0] ?? '')
+  if (values.effort && !efforts.value.includes(values.effort)) setFieldValue('effort', '')
+}, { immediate: true })
+
+/** A key the caller lost (a role change) must not stay selected in a select that no longer offers it. */
+watch(modeOptions, (available) => {
+  if (available.some(option => option.value === values.mode)) return
+  setFieldValue('mode', 'read')
+}, { immediate: true })
+
+/** Switching agent switches the model and effort lists with it. */
+function chooseAgent(agent: string): void {
+  // The select's value is a plain string; anything the form cannot submit is ignored.
+  if (!isAgentChoiceKey(agent)) return
+  setFieldValue('agent', agent)
+  const choice = agents.value.find(option => option.agent === agent)
+  setFieldValue('model', choice?.models[0] ?? '')
+  setFieldValue('effort', '')
+}
 
 onMounted(async () => {
   void skillsApi.list(slug).then((result) => {
@@ -128,12 +169,21 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.backend') }}</FormLabel>
           <FleetThreadsBackendPicker
-            :models="models"
+            :agents="agents"
+            :agent="values.agent ?? 'native'"
             :model="values.model ?? ''"
             :effort="values.effort ?? ''"
+            @update:agent="chooseAgent"
             @update:model="setFieldValue('model', $event)"
-            @update:effort="setFieldValue('effort', $event as '' | 'low' | 'medium' | 'high' | 'xhigh')"
+            @update:effort="setFieldValue('effort', $event)"
           />
+          <FormMessage />
+        </FormItem>
+      </FormField>
+      <FormField v-if="!isProject" v-slot="{ componentField }" name="mode">
+        <FormItem>
+          <FormLabel>{{ t('fleet.threads.new.mode.label') }}</FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="modeOptions" testid="thread-new-mode" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>

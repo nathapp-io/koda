@@ -171,4 +171,24 @@ describe('Fleet locale parity (en and zh)', () => {
       expect(Object.keys(controls ?? {}).length).toBeGreaterThan(0)
     }
   })
+
+  // thread-agents-modes US-011: the agent select and the REPO mode select render their labels through
+  // dynamic keys (`fleet.threads.new.agent.<agent>`, `...mode.<mode>`, `...agent.reason.<reason>`),
+  // which used-keys-exist.spec cannot see. This pin locks the key sets to the values the forms render.
+  test('the new-thread agent and mode keys cover exactly the values the forms render (US-011)', () => {
+    const agentKeys = ['native', 'claude', 'codex', 'cursor']
+    const modeKeys = ['read', 'ask', 'full']
+    const reasonKeys = ['notInstalled', 'notLoggedIn']
+    for (const locale of [en, zh]) {
+      for (const key of ['label', ...agentKeys]) {
+        expect(String(at(locale, `fleet.threads.new.agent.${key}`) ?? '').trim()).not.toBe('')
+      }
+      const reasons = at(locale, 'fleet.threads.new.agent.reason') as Tree | undefined
+      expect(Object.keys(reasons ?? {}).sort()).toEqual([...reasonKeys].sort())
+      for (const key of modeKeys) {
+        expect(String(at(locale, `fleet.threads.new.mode.${key}`) ?? '').trim()).not.toBe('')
+      }
+      expect(String(at(locale, 'fleet.threads.new.mode.label') ?? '').trim()).not.toBe('')
+    }
+  })
 })

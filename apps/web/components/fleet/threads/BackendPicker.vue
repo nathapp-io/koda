@@ -1,32 +1,69 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { agentLabelKey, agentReasonKey, effortLabel } from '~/lib/thread-create'
+import type { AgentChoice } from '~/lib/thread-create'
 
-const props = defineProps<{ models: string[]; model: string; effort: string }>()
+/**
+ * The agent/model/effort picker of the new-thread forms (thread-agents-modes US-011).
+ *
+ * The agent select lists Native, Claude Code, Codex and Cursor from `eligibleAgents`; an agent no
+ * eligible runner can start is disabled and says why ("Not installed", "Not logged in"). The model
+ * and effort selects list the *chosen* agent's own values, so switching agent switches them.
+ */
+const props = defineProps<{
+  agents: AgentChoice[]
+  agent: string
+  model: string
+  effort: string
+}>()
 const emit = defineEmits<{
+  (event: 'update:agent', value: string): void
   (event: 'update:model', value: string): void
   (event: 'update:effort', value: string): void
 }>()
 const { t } = useI18n()
-const modelOptions = computed(() => props.models.map(model => ({ value: model, label: model })))
+
+/** The chosen agent's entry; the first available one stands in until the form has picked. */
+const chosen = computed<AgentChoice | undefined>(() =>
+  props.agents.find(choice => choice.agent === props.agent)
+  ?? props.agents.find(choice => choice.available)
+  ?? props.agents[0])
+
+const agentOptions = computed(() => props.agents.map(choice => ({
+  value: choice.agent,
+  // The reason rides in the option's own label: a disabled <option> cannot be hovered or focused.
+  label: choice.reason === null
+    ? t(agentLabelKey(choice.agent))
+    : `${t(agentLabelKey(choice.agent))} — ${t(agentReasonKey(choice.reason))}`,
+  disabled: !choice.available,
+})))
+
+const modelOptions = computed(() => (chosen.value?.models ?? []).map(model => ({ value: model, label: model })))
 const effortOptions = computed(() => [
   { value: '', label: t('fleet.threads.new.effortDefault') },
-  ...(['low', 'medium', 'high', 'xhigh'] as const).map(value => ({ value, label: t(`fleet.threads.new.effort.${value}`) })),
+  ...(chosen.value?.efforts ?? []).map(value => ({ value, label: effortLabel(value, t) })),
 ])
 </script>
 
 <template>
   <div class="space-y-3">
-    <div v-if="models.length === 0" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noBackend') }}</div>
+    <div v-if="agents.length > 0" class="space-y-2">
+      <Label for="thread-backend-agent">{{ t('fleet.threads.new.agent.label') }}</Label>
+      <select id="thread-backend-agent" :value="agent" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-agent" @change="emit('update:agent', ($event.target as HTMLSelectElement).value)">
+        <option v-for="option in agentOptions" :key="option.value" :value="option.value" :disabled="option.disabled">{{ option.label }}</option>
+      </select>
+    </div>
+    <div v-if="modelOptions.length === 0" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noBackend') }}</div>
     <div v-else class="grid gap-4 sm:grid-cols-2">
       <div class="space-y-2">
-        <Label :for="'thread-backend-model'">{{ t('fleet.threads.new.model') }}</Label>
-        <select :id="'thread-backend-model'" :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-model" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
+        <Label for="thread-backend-model">{{ t('fleet.threads.new.model') }}</Label>
+        <select id="thread-backend-model" :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-model" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in modelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
       <div class="space-y-2">
-        <Label :for="'thread-backend-effort'">{{ t('fleet.threads.new.effortLabel') }}</Label>
-        <select :id="'thread-backend-effort'" :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-effort" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
+        <Label for="thread-backend-effort">{{ t('fleet.threads.new.effortLabel') }}</Label>
+        <select id="thread-backend-effort" :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-effort" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in effortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>

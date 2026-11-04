@@ -15,6 +15,7 @@ const schema = buildWorkspaceThreadCreateSchema(t)
 const valid = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   homeProject: '',
   title: 'Plan the rollout',
+  agent: 'native',
   model: 'm1',
   effort: '',
   maxCostUsd: '5',
@@ -43,7 +44,7 @@ describe('buildWorkspaceThreadCreateSchema (US-004 AC-14)', () => {
 
 describe('toCreateWorkspaceThreadBody (US-004 AC-12-AC-13)', () => {
   test('AC-12: an empty home project and an empty effort are absent, not empty keys', () => {
-    const body = toCreateWorkspaceThreadBody({ homeProject: '', title: 't', model: 'm1', effort: '', maxCostUsd: 5 })
+    const body = toCreateWorkspaceThreadBody({ homeProject: '', title: 't', agent: 'native', model: 'm1', effort: '', maxCostUsd: 5 })
 
     expect(body).toEqual({ title: 't', maxCostUsd: 5, backend: { kind: 'native', model: 'm1' } })
     expect(body).not.toHaveProperty('homeProject')
@@ -51,7 +52,7 @@ describe('toCreateWorkspaceThreadBody (US-004 AC-12-AC-13)', () => {
   })
 
   test('AC-13: a home project of web travels as homeProject', () => {
-    const body = toCreateWorkspaceThreadBody({ homeProject: 'web', title: 't', model: 'm1', effort: '', maxCostUsd: 5 })
+    const body = toCreateWorkspaceThreadBody({ homeProject: 'web', title: 't', agent: 'native', model: 'm1', effort: '', maxCostUsd: 5 })
 
     expect(body.homeProject).toBe('web')
     // The body still carries no repository keys: a WORKSPACE thread has none.
