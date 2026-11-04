@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T04:36:48.627Z",
+  "updatedAt": "2026-11-04T04:53:37.655Z",
   "userStories": [
     {
       "id": "US-001",
@@ -207,14 +207,17 @@
         "persistence"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Introduces a new repository/domain/module and transactional replacement plus audit, with shared grammar and real persistence behavior; authorization is added separately in US-004."
+        "reasoning": "Introduces a new repository/domain/module and transactional replacement plus audit, with shared grammar and real persistence behavior; authorization is added separately in US-004.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/memory/prisma-memory-item.repository.ts",
@@ -253,7 +256,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5229db25ec0adca2b02448ca8ac1a67a5c128784"
     },
     {
       "id": "US-004",
