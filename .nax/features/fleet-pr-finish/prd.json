@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T06:09:20.392Z",
+  "updatedAt": "2026-11-04T06:26:27.574Z",
   "userStories": [
     {
       "id": "US-001",
@@ -827,14 +827,17 @@
         "US-005",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module reconciliation maps untrusted artifacts to conditional durable transitions and exactly-once-visible ticket comments inside the existing ingest transaction."
+        "reasoning": "Cross-module reconciliation maps untrusted artifacts to conditional durable transitions and exactly-once-visible ticket comments inside the existing ingest transaction.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/ingest/parsers/bot-review.parser.ts",
@@ -879,7 +882,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "467c2ec36e9a7f095017087eaafa58b5042fecca"
     },
     {
       "id": "US-010",
