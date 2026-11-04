@@ -534,7 +534,8 @@
       "GENERAL": "General",
       "VERIFICATION": "Verification",
       "FIX_REPORT": "Fix Report",
-      "REVIEW": "Review"
+      "REVIEW": "Review",
+      "RULING": "Ruling"
     },
     "add": "Add Comment",
     "toast": {
@@ -1095,6 +1096,12 @@
     "fixOutcome": {
       "pushed": "Fix pushed",
       "nothing": "Nothing to fix"
+    },
+    "fixReady": {
+      "markedReady": "PR marked ready",
+      "held": "PR not ready: {reason}",
+      "replies": "{count} replies",
+      "resolved": "{count} resolved"
     },
     "misfit": {
       "disabled": "Runner is disabled",

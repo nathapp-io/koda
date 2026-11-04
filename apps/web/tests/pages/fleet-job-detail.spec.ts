@@ -201,6 +201,7 @@ describe('config jobs (S3 §6)', () => {
 const g = globalThis as Record<string, unknown>
 
 const jobFixture = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
+  fixReady: null,
   id: 'j1',
   projectId: 'p1',
   repoId: 'r1',
@@ -399,6 +400,45 @@ describe('review and config job headers', () => {
 })
 
 describe('FIX outcomes', () => {
+  test('AC-1: a ready FIX shows the translated ready result with reply counts', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixReady: { markedReady: true, replied: 2, resolved: 1 } }), records: [] })
+    await m.settle()
+    expect(m.byId('fleet-job-fix-ready')).toHaveLength(1)
+    expect(m.app.textOf(m.byId('fleet-job-fix-ready')[0])).toContain('PR marked ready')
+    expect(m.app.textOf(m.byId('fleet-job-fix-ready')[0])).toContain('2 replies')
+    expect(m.app.textOf(m.byId('fleet-job-fix-ready')[0])).toContain('1 resolved')
+    m.app.unmount()
+  })
+
+  test('AC-2: a held FIX shows the translated result and runner reason as text', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixReady: { markedReady: false, readyHeld: 'CI failure: check:e2e' } }), records: [] })
+    await m.settle()
+    expect(m.byId('fleet-job-fix-ready')).toHaveLength(1)
+    expect(m.app.textOf(m.byId('fleet-job-fix-ready')[0])).toContain('PR not ready: CI failure: check:e2e')
+    m.app.unmount()
+  })
+
+  test('AC-3: a FIX with no ready result renders no ready line', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixReady: null }), records: [] })
+    await m.settle()
+    expect(m.byId('fleet-job-fix-ready')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('AC-4: a RUN does not show a ready result even when one is present', async () => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'RUN', fixReady: { markedReady: true, replied: 2, resolved: 1 } }), records: [] })
+    await m.settle()
+    expect(m.byId('fleet-job-fix-ready')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test.each([['pushed', 'Fix pushed'], ['nothing', 'Nothing to fix']] as const)('AC-7: null fixReady preserves %s outcome text', async (outcome, label) => {
+    const m = mountEnginePage({ job: jobFixture({ command: 'FIX', fixOutcome: outcome, fixReady: null }), records: [] })
+    await m.settle()
+    expect(m.app.text()).toContain(label)
+    m.app.unmount()
+  })
+
   test.each([
     ['pushed', 'Fix pushed'],
     ['nothing', 'Nothing to fix'],

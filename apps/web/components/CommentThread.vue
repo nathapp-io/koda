@@ -10,7 +10,7 @@ import { splitMentions } from '~/lib/mentions'
 interface Comment {
   id: string
   body: string
-  type: 'GENERAL' | 'VERIFICATION' | 'FIX_REPORT' | 'REVIEW'
+  type: 'GENERAL' | 'VERIFICATION' | 'FIX_REPORT' | 'REVIEW' | 'RULING'
   createdAt: string
   [key: string]: unknown
 }
@@ -44,6 +44,7 @@ const typePillClass: Record<Comment['type'], string> = {
   VERIFICATION: 'bg-blue-100 text-blue-800',
   FIX_REPORT: 'bg-orange-100 text-orange-800',
   REVIEW: 'bg-green-100 text-green-800',
+  RULING: 'bg-muted text-muted-foreground',
   GENERAL: 'bg-muted text-muted-foreground',
 }
 

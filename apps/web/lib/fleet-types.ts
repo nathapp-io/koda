@@ -289,6 +289,8 @@ export interface FleetJobDto {
   resultPrUrl: string | null
   /** US-013: outcome reported by the FIX runner step; absent on older DTO fixtures. */
   fixOutcome?: 'pushed' | 'nothing' | null
+  /** US-011: readiness result reported by a FIX runner; null when unavailable. */
+  fixReady?: { markedReady: boolean; readyHeld?: string; replied?: number; resolved?: number } | null
   wipPush: string | null
   stories: FleetJobStoryDto[] | null
   storiesTruncated: boolean

@@ -534,7 +534,8 @@
       "GENERAL": "普通",
       "VERIFICATION": "验证",
       "FIX_REPORT": "修复报告",
-      "REVIEW": "审核"
+      "REVIEW": "审核",
+      "RULING": "裁定"
     },
     "add": "添加评论",
     "toast": {
@@ -1095,6 +1096,12 @@
     "fixOutcome": {
       "pushed": "修复已推送",
       "nothing": "没有需要修复的内容"
+    },
+    "fixReady": {
+      "markedReady": "PR 已标记为可合并",
+      "held": "PR 尚未就绪：{reason}",
+      "replies": "已回复 {count} 条",
+      "resolved": "已解决 {count} 条"
     },
     "misfit": {
       "disabled": "执行机已停用",
