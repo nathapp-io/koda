@@ -6,7 +6,6 @@ import { findContractViolations, type ContractViolation, type PermissionDeclarat
 describe('permission contract checker', () => {
   const expectedPending = new Set([
     'member.remove',
-    'fleet.job.rule', // Core audit key; the route arrives in US-004.
     'fleet.job.shell.escalate',
     'fleet.budget.override',
   ]);

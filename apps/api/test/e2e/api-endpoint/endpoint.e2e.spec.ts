@@ -6255,3 +6255,40 @@ describeIntegration('fleet ingest and knowledge approval endpoints', () => {
     }
   });
 });
+
+
+describeIntegration('Fleet ruling endpoint lifecycle', () => {
+  let app: NathApplication;
+  let db: ReturnType<typeof fixtureDb>;
+  let world: FleetHttpWorld;
+  let jobId: string;
+  const server = () => app.getHttpServer();
+  const auth = () => ({ Authorization: `Bearer ${world.tokens.root}` });
+  const url = () => `/api/projects/web/fleet/jobs/${jobId}/rulings`;
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, command: 'RUN', feature: 'ruling-endpoint', ref: 'main', profiles: [], selectorLabels: [], maxCostUsd: '1', requestedById: world.ids.root,
+      resultPrUrl: 'https://github.com/acme/app/pull/42', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'review' }] },
+    } });
+    jobId = job.id;
+  }, 60000);
+  afterAll(async () => { await app?.close(); });
+  it('creates, replaces and lists rulings including history', async () => {
+    const first = body<{ id: string }>(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'confirm: test green' }).expect(201));
+    await db.fleetPrRuling.update({ where: { id: first.id }, data: { createdAt: new Date(0) } });
+    const second = body<{ id: string }>(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'waive: scope' }).expect(201));
+    const listed = body<{ id: string; state: string }[]>(await request(server()).get(url()).set(auth()).expect(200));
+    expect(listed.map(({ id, state }) => ({ id, state }))).toEqual([{ id: second.id, state: 'pending' }, { id: first.id, state: 'replaced' }]);
+  });
+  it('rejects invalid text and malformed item ids', async () => {
+    refusal(await request(server()).post(url()).set(auth()).send({ itemId: 'D-1', text: 'looks fine' }).expect(400), 'fleet.rulings.invalidText.-2', { property: 'text' });
+    await request(server()).post(url()).set(auth()).send({ itemId: '../bad', text: 'verified' }).expect(400);
+  });
+  it('refuses listing an unknown job', async () => {
+    refusal(await request(server()).get('/api/projects/web/fleet/jobs/unknown/rulings').set(auth()).expect(404), 'fleet.jobs.404');
+  });
+});

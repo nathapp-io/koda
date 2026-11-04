@@ -33,6 +33,10 @@ export interface RulingJobTarget {
 export interface IFleetPrRulingRepository {
   /** Lock the RUN before replacing its rulings. Must be called inside the write transaction. */
   lockTarget(slug: string, jobId: string): Promise<RulingJobTarget | null>;
+  findTarget(projectId: string, jobId: string): Promise<(RulingJobTarget & { command: string; outcome: string | null }) | null>;
+  latestRunForPr(repoId: string, prNumber: number): Promise<string | null>;
+  latestRuling(jobId: string, itemId: string): Promise<FleetPrRuling | null>;
+  list(jobId: string): Promise<FleetPrRuling[]>;
   replacePending(jobId: string, itemId: string): Promise<void>;
   insert(data: NewFleetPrRuling): Promise<FleetPrRuling>;
 }

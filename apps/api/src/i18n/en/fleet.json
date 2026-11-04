@@ -11,7 +11,10 @@
   "autoReview": { "422": "Auto-review cannot be configured: {reason}." },
   "fixChecks": { "422": "Detected checks cannot be trusted: {reason}." },
   "rulings": {
-    "invalidText": { "400": "Text must start with a supported ruling and the required evidence" },
+    "notDraft": { "409": "Only draft RUN jobs with a GitHub pull request can be ruled" },
+    "notLatest": { "409": "Only the latest RUN of this pull request can be ruled" },
+    "settled": { "409": "This item has already been applied" },
+    "invalidText": { "-2": "{property}: Text must start with a supported ruling and the required evidence" },
     "unknownItem": { "404": "Workflow item not found" },
     "invalidPr": { "400": "The job must identify a GitHub pull request" }
   },

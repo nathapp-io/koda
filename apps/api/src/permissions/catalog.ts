@@ -63,7 +63,6 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
-  'fleet.job.rule',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
 ]);

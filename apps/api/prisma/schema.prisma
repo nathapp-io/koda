@@ -1068,6 +1068,7 @@ model FleetJob {
   stateReason        String?
   requestedById      String // a User or an Agent id (permissions P1d US-002: no foreign key, requestedByType says which)
   requestedByType    String    @default("USER") // USER | AGENT
+  createdAt          DateTime  @default(now()) // Immutable RUN recency for PR rulings
   queuedAt           DateTime  @default(now())
   assignedAt         DateTime?
   startedAt          DateTime?
@@ -1137,6 +1138,7 @@ model FleetJob {
   @@index([projectId, queuedAt])
   @@index([projectId, firstStartedAt])
   @@index([repoId, firstStartedAt])
+  @@index([repoId, command, createdAt])
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
   @@index([threadId])

@@ -6320,6 +6320,141 @@
         ]
       }
     },
+    "/api/projects/{slug}/fleet/jobs/{id}/rulings": {
+      "post": {
+        "operationId": "FleetRulingsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRulingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetPrRulingDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Awaiting approval\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ruling text or item id"
+          },
+          "403": {
+            "description": "fleet.job.rule is missing"
+          },
+          "404": {
+            "description": "Job or item not found"
+          },
+          "409": {
+            "description": "Not a latest draft RUN, or item already applied"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rule on an open draft RUN item (fleet.job.rule)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "get": {
+        "operationId": "FleetRulingsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FleetPrRulingDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all rulings of a RUN, newest first (fleet.job.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/activity": {
       "get": {
         "operationId": "FleetActivityController_list",
@@ -17730,6 +17865,128 @@
         "required": [
           "watching",
           "count"
+        ]
+      },
+      "CreateRulingDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "itemId",
+          "text"
+        ]
+      },
+      "FleetPrRulingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "prNumber": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "itemKind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "fixed",
+              "waived",
+              "overridden",
+              "confirmed",
+              "verified"
+            ],
+            "type": "string"
+          },
+          "actorType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "replaced"
+            ],
+            "type": "string"
+          },
+          "skipReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "appliedJobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "commentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvalRequestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "prNumber",
+          "jobId",
+          "itemId",
+          "itemKind",
+          "text",
+          "disposition",
+          "actorType",
+          "actorId",
+          "state",
+          "skipReason",
+          "appliedJobId",
+          "commentId",
+          "approvalRequestId",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "BudgetPolicyDto": {

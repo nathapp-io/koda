@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { actorKind, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -7,7 +8,7 @@ import { currentContext, runWithActionContext } from '../../action-context/actio
 import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling } from './fleet-pr-ruling.domain';
 import { parseRulingText } from './ruling-keyword';
 
-/** Sole ruling creation writer. Route eligibility and approval checks join this core in US-004. */
+/** Sole ruling writer and eligibility boundary shared by REST and approved execution. */
 @Injectable()
 export class FleetPrRulingsService {
   constructor(
@@ -15,6 +16,24 @@ export class FleetPrRulingsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
   ) {}
+
+  async ruleTarget(projectId: string, jobId: string, dto: CreateRulingInput) {
+    const target = await this.repo.findTarget(projectId, jobId);
+    if (!target) throw new NotFoundAppException({}, 'fleet.jobs');
+    if (target.command !== 'RUN' || target.outcome !== 'draft' || target.prNumber === null) throw new ConflictAppException({}, 'fleet.rulings.notDraft');
+    if (await this.latestRunForPr(target.repoId, target.prNumber) !== jobId) throw new ConflictAppException({}, 'fleet.rulings.notLatest');
+    if (!target.openItems.some((item) => item.id === dto.itemId)) throw new NotFoundAppException({}, 'fleet.rulings.unknownItem');
+    if (!parseRulingText(dto.text)) throw new ValidationAppException({ property: 'text' }, 'fleet.rulings.invalidText');
+    if ((await this.repo.latestRuling(jobId, dto.itemId))?.state === 'applied') throw new ConflictAppException({}, 'fleet.rulings.settled');
+    return target;
+  }
+
+  latestRunForPr(repoId: string, prNumber: number) { return this.repo.latestRunForPr(repoId, prNumber); }
+
+  async list(projectId: string, jobId: string): Promise<FleetPrRuling[]> {
+    if (!await this.repo.findTarget(projectId, jobId)) throw new NotFoundAppException({}, 'fleet.jobs');
+    return this.repo.list(jobId);
+  }
 
   async create(principal: KodaPrincipal, slug: string, jobId: string, dto: CreateRulingInput): Promise<FleetPrRuling> {
     const actorType = actorKind(principal) === 'agent' ? 'AGENT' : 'USER';

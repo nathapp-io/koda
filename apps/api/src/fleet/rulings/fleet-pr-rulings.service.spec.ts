@@ -9,6 +9,7 @@ describe('FleetPrRulingsService', () => {
   const setup = () => {
     const order: string[] = [];
     const repo: IFleetPrRulingRepository = {
+      findTarget: vi.fn(), latestRunForPr: vi.fn(), latestRuling: vi.fn(), list: vi.fn(),
       lockTarget: vi.fn(async () => { order.push('lock'); return { projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
       replacePending: vi.fn(async () => { order.push('replace'); }),
       insert: vi.fn(async (data: NewFleetPrRuling) => { order.push('insert'); return { ...data, id: 'ruling', createdAt: new Date(), updatedAt: new Date() }; }),
