@@ -1,7 +1,7 @@
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
 import {
   ACTION_TOOL_DESCRIPTORS, FLEET_TOOL_DESCRIPTORS, FLEET_WRITE_TOOL_DESCRIPTORS, KODA_ADD_COMMENT, KODA_ADD_MEMORY,
-  KODA_CANCEL_JOB, KODA_CREATE_TICKETS, KODA_DISPATCH_JOB, KODA_GET_ACTION, KODA_GET_TICKET, KODA_LINK_TICKETS,
+  KODA_CANCEL_JOB, KODA_RULE_PR_ITEM, KODA_CREATE_TICKETS, KODA_DISPATCH_JOB, KODA_GET_ACTION, KODA_GET_TICKET, KODA_LINK_TICKETS,
   KODA_MY_PROJECTS, KODA_RECORD_DECISION, KODA_REQUEUE_JOB, KODA_SEARCH_TICKETS, KODA_TOOL_DESCRIPTORS,
   KODA_UPDATE_TICKET, KNOWLEDGE_TOOL_DESCRIPTORS, TICKET_TOOL_DESCRIPTORS, WRITE_TOOL_DESCRIPTORS,
   kodaToolDescriptorsFor,
@@ -180,11 +180,11 @@ describe('US-003 (2a-D15): the action group is appended, never woven in', () => 
     ]);
   });
 
-  it('gives REPO and PROJECT 23 descriptors and WORKSPACE 24, all under the runner limit', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
-    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(23);
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
-    expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_cancel_job');
+  it('gives REPO and PROJECT 25 descriptors and WORKSPACE 26, all under the runner limit', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(25);
+    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(25);
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(26);
+    expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_rule_pr_item');
     for (const kind of ['REPO', 'PROJECT', 'WORKSPACE'] as const) {
       expect(kodaToolDescriptorsFor(kind).length).toBeLessThan(KODA_TOOL_LIMITS.maxTools);
     }
@@ -222,12 +222,12 @@ describe('US-002 (2b1-D3): the five write descriptors form the last group', () =
     expect(before.map((descriptor) => descriptor.name)).toEqual(['koda_get_action', 'koda_add_comment']);
   });
 
-  it('AC-4: REPO answers 23 descriptors', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
+  it('AC-4: REPO answers 25 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(25);
   });
 
-  it('AC-5: WORKSPACE answers 24 descriptors', () => {
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
+  it('AC-5: WORKSPACE answers 26 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(26);
   });
 
   it('AC-6: every write description says the change happens only after the user approves', () => {
@@ -346,12 +346,12 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
   });
 });
 
-describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appended last', () => {
-  it('AC-1: FLEET_WRITE_TOOL_DESCRIPTORS names the three fleet write tools in their fixed order', () => {
+describe('US-001 (2b2-D1, 2b2-D3): the fleet write descriptors are appended last', () => {
+  it('AC-1: FLEET_WRITE_TOOL_DESCRIPTORS names the fleet write tools in their fixed order', () => {
     expect(FLEET_WRITE_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name)).toEqual([
-      'koda_dispatch_job', 'koda_requeue_job', 'koda_cancel_job',
+      'koda_dispatch_job', 'koda_requeue_job', 'koda_cancel_job', 'koda_rule_pr_item',
     ]);
-    expect(FLEET_WRITE_TOOL_DESCRIPTORS).toEqual([KODA_DISPATCH_JOB, KODA_REQUEUE_JOB, KODA_CANCEL_JOB]);
+    expect(FLEET_WRITE_TOOL_DESCRIPTORS).toEqual([KODA_DISPATCH_JOB, KODA_REQUEUE_JOB, KODA_CANCEL_JOB, KODA_RULE_PR_ITEM]);
   });
 
   it.each(['REPO', 'PROJECT'] as const)('AC-2: %s ends with the FLEET_WRITE_TOOL_DESCRIPTORS entries, in order', (kind) => {
@@ -369,12 +369,12 @@ describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appende
     for (const [index, original] of WRITE_TOOL_DESCRIPTORS.entries()) expect(before[index]).toBe(original);
   });
 
-  it('AC-4: REPO answers 23 descriptors', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(23);
+  it('AC-4: REPO answers 25 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(25);
   });
 
-  it('AC-5: WORKSPACE answers 24 descriptors', () => {
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(24);
+  it('AC-5: WORKSPACE answers 26 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(26);
   });
 
   it('AC-6: every fleet write description says the job acts only after the user approves', () => {

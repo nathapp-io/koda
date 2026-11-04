@@ -11,10 +11,10 @@ const MCP_SENTENCE = 'Name the project with `project` (a slug koda_my_projects l
 const WORKSPACE_SENTENCE = 'In a workspace thread, name the project with `project` (a slug koda_my_projects lists).';
 /** The runner refuses a whole tool list when one description is longer (the same cap the ASSIGN catalog keeps). */
 const MCP_DESCRIPTION_MAX_CHARS = 2_000;
-/** The nine write tools (3-D16): every one of them is proposed in a thread and executed at once over MCP. */
+/** The ten write tools (3-D16): every one of them is proposed in a thread and executed at once over MCP. */
 const WRITE_TOOLS = [
   'koda_add_comment', 'koda_create_tickets', 'koda_update_ticket', 'koda_link_tickets', 'koda_add_memory',
-  'koda_record_decision', 'koda_dispatch_job', 'koda_requeue_job', 'koda_cancel_job',
+  'koda_record_decision', 'koda_dispatch_job', 'koda_requeue_job', 'koda_cancel_job', 'koda_rule_pr_item',
 ] as const;
 /** 3-D16: the one read tool whose thread wording is false over MCP, so it carries an MCP description too. */
 const MCP_DESCRIPTION_TOOLS = ['koda_get_action', ...WRITE_TOOLS];
@@ -86,8 +86,8 @@ describe('US-006 AC-3, AC-4: the input schemas are the WORKSPACE ones, unchanged
   });
 });
 
-describe('US-006 AC-5: MCP_DESCRIPTIONS names koda_get_action and the nine write tools', () => {
-  it('AC-5: keys exactly koda_get_action and the nine write tools', () => {
+describe('US-006 AC-5: MCP_DESCRIPTIONS names koda_get_action and the ten write tools', () => {
+  it('AC-5: keys exactly koda_get_action and the ten write tools', () => {
     expect(new Set(Object.keys(MCP_DESCRIPTIONS))).toEqual(new Set(MCP_DESCRIPTION_TOOLS));
     expect(Object.keys(MCP_DESCRIPTIONS)).toHaveLength(MCP_DESCRIPTION_TOOLS.length);
   });

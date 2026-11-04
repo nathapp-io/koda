@@ -1,3 +1,4 @@
+import { PrRulingTools } from '../tools/pr-ruling-tools';
 import { ActionTools } from '../tools/action-tools';
 import { TicketWriteTools } from '../tools/ticket-write-tools';
 import { FleetWriteTools } from '../tools/fleet-write-tools';
@@ -20,11 +21,12 @@ export class AssistantToolCommands implements OnModuleInit {
     private readonly access: ProjectAccessService,
     private readonly permissions: PermissionService,
     // Nest 12 orders lifecycle hooks by dependency level, not just provider-array position.
-    // These dependencies ensure all four write-tool groups have registered before this hook runs.
+    // These dependencies ensure all five write-tool groups have registered before this hook runs.
     _actionTools: ActionTools,
     _ticketTools: TicketWriteTools,
     _fleetTools: FleetWriteTools,
     _memoryTools: MemoryWriteTools,
+    _rulingTools: PrRulingTools,
   ) {}
   onModuleInit(): void {
     for (const tool of this.tools.list()) {

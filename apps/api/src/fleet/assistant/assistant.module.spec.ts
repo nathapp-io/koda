@@ -25,6 +25,7 @@ const commandSamples: Record<string, unknown> = {
   'fleet.job.dispatch': { repo: 'owner/repo', command: 'RUN', feature: 'feature', maxCostUsd: 1 },
   'fleet.job.cancel': { jobId: 'j1' },
   'fleet.job.requeue': { jobId: 'j1' },
+  'fleet.job.rule': { jobId: 'j1', itemId: 'D-1', text: 'confirm: ok' },
 };
 
 describe('AssistantModule', () => {
@@ -38,7 +39,7 @@ describe('AssistantModule', () => {
     await module.close();
   });
 
-  it('AC-1 / AC-7: registers exactly nine write commands whose parsers accept their own outputs', async () => {
+  it('AC-1 / AC-7: registers exactly ten write commands whose parsers accept their own outputs', async () => {
     await module.init();
     const registry = module.get(ApprovalCommandRegistry);
     const tools = module.get(AssistantToolRegistry).list().filter((tool) => tool.kind === 'write');
