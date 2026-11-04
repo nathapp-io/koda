@@ -7,8 +7,20 @@ import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 /**
+ * B3: the runner's outcome for the last decision sent for one pending request. The decision route answers `200` as soon
+ * as the command is queued, so this is the only place the page learns whether the session actually took the decision.
+ */
+export class ThreadApprovalDeliveryDto {
+  @ApiProperty({ enum: ['allow', 'deny'], description: 'Which way the last decision went' }) decision: 'allow' | 'deny';
+  @ApiProperty({ enum: ['ok', 'rejected'], description: 'ok = the session accepted it; rejected = the runner refused it and the request is still pending' }) result: 'ok' | 'rejected';
+  @ApiProperty({ nullable: true, type: String, description: "The runner's own reason for a rejection" }) detail: string | null;
+  @ApiProperty({ description: 'When the runner acknowledged the decision' }) at: string;
+}
+
+/**
  * thread-agents-modes US-007: one answerable session approval the thread waits on. `command` and `unsandboxed` are
- * absent when the request did not carry them; `reason` is the runner's own explanation of why it asks.
+ * absent when the request did not carry them; `reason` is the runner's own explanation of why it asks; `delivery` is
+ * absent until a decision for it has been acknowledged (B3).
  */
 export class ThreadPendingApprovalDto {
   @ApiProperty({ description: 'The request id the decision route takes' }) requestId: string;
@@ -18,6 +30,7 @@ export class ThreadPendingApprovalDto {
   @ApiProperty({ required: false, description: 'Why the runner is asking' }) reason?: string;
   @ApiProperty({ description: 'When the runner stops waiting for the decision' }) expiresAt: string;
   @ApiProperty({ required: false, description: 'Set when the request would leave the session sandbox' }) unsandboxed?: true;
+  @ApiProperty({ required: false, type: ThreadApprovalDeliveryDto, description: 'The runner\'s outcome for the last decision sent for this request' }) delivery?: ThreadApprovalDeliveryDto;
 }
 
 export class ThreadDto {

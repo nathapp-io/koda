@@ -139,6 +139,39 @@ describe('THREAD_PUBLISH acks (US-004)', () => {
     expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'ok', '');
     expect(result).toEqual({ live: [] });
   });
+
+  /**
+   * B3 (whole-branch review): a decision's delivery outcome is a thread change the open page must see. The ack moves no
+   * job state, so the event it returns carries the thread event and nothing else changes for job consumers.
+   */
+  it('B3: a THREAD_ANSWER ack whose thread events exist returns an event carrying them', async () => {
+    const answerCommandRecord: FleetCommandRecord = {
+      ...threadPublishCommand(), id: 'cmd-a', type: 'THREAD_ANSWER', payload: { requestId: 'r1', decision: 'allow' },
+    };
+    const { repo } = makeProcessor(answerCommandRecord);
+    const threadEvent = { id: 'te1', type: 'thread' as const, threadId: 'th1', at: NOW.toISOString() };
+    const threadEffects = { onInputAck: vi.fn(async () => threadEvent) };
+    const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
+
+    const result = await withThreads.process('r1', 'boot-1', [publishAck('cmd-a', 'rejected', 'expired')], NOW);
+
+    expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_ANSWER' }), 'rejected', 'expired');
+    expect(result.live).toEqual([expect.objectContaining({ type: 'fleet_job', jobId: 'job-1', state: 'RUNNING', threadEvents: [threadEvent] })]);
+  });
+
+  it('B3 (control): a thread ack with no thread event returns no live events and does not move the job', async () => {
+    const answerCommandRecord: FleetCommandRecord = {
+      ...threadPublishCommand(), id: 'cmd-a', type: 'THREAD_ANSWER', payload: { requestId: 'r1', decision: 'allow' },
+    };
+    const { repo, transitions } = makeProcessor(answerCommandRecord);
+    const threadEffects = { onInputAck: vi.fn(async () => null) };
+    const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
+
+    await expect(withThreads.process('r1', 'boot-1', [publishAck('cmd-a', 'rejected', 'expired')], NOW)).resolves.toEqual({ live: [] });
+    expect(transitions.apply).not.toHaveBeenCalled();
+  });
 });
 
 describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {

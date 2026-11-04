@@ -1014,6 +1014,8 @@
         "deny": "Deny",
         "awaiting": "Waiting for the thread's creator to decide.",
         "queued": "Decision sent. Waiting for the session to apply it.",
+        "rejected": "The runner did not apply the decision: {detail}",
+        "rejectedNoDetail": "The runner did not apply the decision.",
         "retry": "Send again"
       },
       "message": {

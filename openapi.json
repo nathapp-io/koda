@@ -22197,6 +22197,42 @@
           "backend"
         ]
       },
+      "ThreadApprovalDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "type": "string",
+            "description": "Which way the last decision went"
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "rejected"
+            ],
+            "type": "string",
+            "description": "ok = the session accepted it; rejected = the runner refused it and the request is still pending"
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "The runner's own reason for a rejection"
+          },
+          "at": {
+            "type": "string",
+            "description": "When the runner acknowledged the decision"
+          }
+        },
+        "required": [
+          "decision",
+          "result",
+          "detail",
+          "at"
+        ]
+      },
       "ThreadPendingApprovalDto": {
         "type": "object",
         "properties": {
@@ -22227,6 +22263,14 @@
           "unsandboxed": {
             "type": "boolean",
             "description": "Set when the request would leave the session sandbox"
+          },
+          "delivery": {
+            "description": "The runner's outcome for the last decision sent for this request",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ThreadApprovalDeliveryDto"
+              }
+            ]
           }
         },
         "required": [

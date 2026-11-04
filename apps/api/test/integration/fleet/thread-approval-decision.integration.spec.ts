@@ -313,4 +313,57 @@ describeIntegration('fleet thread approval decisions (PG, US-008)', () => {
     expect(res.body.message).toBe('Thread not found');
     expect(await commandsOf(s)).toEqual([]);
   });
+
+  /**
+   * B3 (whole-branch review): the decision route answers 200 as soon as the command is queued, so the runner's ack is
+   * the only place the page can learn that its decision was refused. The rejection is stored on the request it decided —
+   * the entry itself stays, because the session is still waiting — and the thread GET the page reloads carries it.
+   */
+  const ackDecision = async (s: ThreadJobSeed, result: 'ok' | 'rejected', detail?: string) => {
+    const [command] = await commandsOf(s);
+    if (!command) throw new Error('Missing decision command');
+    await request(server).post('/api/fleet/runner/sync').set(auth(s.runnerKey))
+      .send(syncBody({ protocolVersion: 4, commandAcks: [{ commandId: command.id, leaseEpoch: 1, result, ...(detail === undefined ? {} : { detail }) }] }))
+      .expect(200);
+  };
+
+  it('B3: a rejected decision ack keeps the request pending and records the runner rejection on it', async () => {
+    const s = await fresh('decide-ack-rejected');
+    await pending(s, ['r1']);
+    await decide(s, 'r1', { decision: 'deny' }).expect(200);
+
+    await ackDecision(s, 'rejected', 'expired');
+
+    const delivery = { decision: 'deny', result: 'rejected', detail: 'expired', at: expect.any(String) };
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } })).pendingApprovals)
+      .toEqual([{ ...approval('r1'), delivery }]);
+    // The same outcome on the route the page reloads, which is what lets the card stop waiting and say why.
+    const thread = data<{ pendingApprovals: Array<{ delivery?: unknown }> }>(
+      await request(server).get(`${projectPath}/${s.threadId}`).set(auth(world.tokens.dev)).expect(200),
+    );
+    expect(thread.pendingApprovals).toEqual([expect.objectContaining({ requestId: 'r1', delivery })]);
+  });
+
+  it('B3: an ok decision ack records the accepted delivery on the pending request', async () => {
+    const s = await fresh('decide-ack-ok');
+    await pending(s, ['r1']);
+    await decide(s, 'r1', { decision: 'allow' }).expect(200);
+
+    await ackDecision(s, 'ok');
+
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } })).pendingApprovals)
+      .toEqual([{ ...approval('r1'), delivery: { decision: 'allow', result: 'ok', detail: null, at: expect.any(String) } }]);
+  });
+
+  it('B3: a text answer ack still records no delivery on the pending approvals', async () => {
+    const s = await fresh('decide-ack-text');
+    await pending(s, ['r1']);
+    await prisma.chatThread.update({ where: { id: s.threadId }, data: { pendingQuestion: { requestId: 'q1', text: 'Which?', expiresAt: EXPIRES_AT } } });
+    await request(server).post(`${projectPath}/${s.threadId}/answer`).set(auth(world.tokens.dev))
+      .send({ requestId: 'q1', text: 'postgres' }).expect(200);
+
+    await ackDecision(s, 'rejected', 'not_pending');
+
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } })).pendingApprovals).toEqual([approval('r1')]);
+  });
 });

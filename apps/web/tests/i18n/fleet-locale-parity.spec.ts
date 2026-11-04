@@ -194,10 +194,11 @@ describe('Fleet locale parity (en and zh)', () => {
 
   // thread-agents-modes US-012: the thread page's mode control renders `fleet.threads.mode.<mode>` and the approval
   // card names its two decisions, all through dynamic or two-letter keys a source scan cannot pin. The mode labels must
-  // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render.
+  // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render. B3 adds the two
+  // wordings of a runner-refused decision.
   test('the thread page mode and approval keys cover exactly what the controls render (US-012)', () => {
     const modeKeys = ['read', 'ask', 'full']
-    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry']
+    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry', 'rejected', 'rejectedNoDetail']
     for (const locale of [en, zh]) {
       const modes = at(locale, 'fleet.threads.mode') as Tree | undefined
       expect(Object.keys(modes ?? {}).sort()).toEqual(['label', 'noPermission', ...modeKeys].sort())

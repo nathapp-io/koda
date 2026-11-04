@@ -1014,6 +1014,8 @@
         "deny": "拒绝",
         "awaiting": "等待线程创建者决定。",
         "queued": "决定已发送，等待会话应用。",
+        "rejected": "运行器未应用该决定：{detail}",
+        "rejectedNoDetail": "运行器未应用该决定。",
         "retry": "再次发送"
       },
       "message": {

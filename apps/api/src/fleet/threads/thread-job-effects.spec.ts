@@ -81,6 +81,84 @@ describe('ThreadJobEffects.onInputAck for an approval decision (US-008 F2)', () 
   });
 });
 
+/**
+ * B3 (whole-branch review): the decision route answers 200 as soon as the command is queued, so only the runner's ack
+ * says whether the session took the decision. The effects record that outcome on the pending request it decided, and
+ * answer a thread live event so the open page refetches instead of displaying "queued" forever.
+ */
+const pendingApproval = { requestId: 'q1', tool: 'bash', summary: 'Run the migration', expiresAt: '2026-11-24T01:00:00.000Z' };
+
+function decisionPrisma(opts: { pendingApprovals?: unknown } = {}) {
+  const thread = { id: 'T', pendingApprovals: (opts.pendingApprovals ?? null) as unknown, pendingQuestion: null as unknown };
+  const fleetJob = { findUnique: vi.fn(async () => ({ id: 'J', threadId: thread.id })) };
+  const chatThread = {
+    findUnique: vi.fn(async () => thread),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(thread, data)),
+  };
+  const client = {
+    fleetJob, chatThread,
+    fleetCommand: { update: vi.fn(async () => ({})) },
+    chatMessage: { updateMany: vi.fn(async () => ({ count: 0 })) },
+  };
+  return { prisma: { client } as never, thread, chatThread };
+}
+
+const decisionCommand = (payload: Record<string, unknown> = { requestId: 'q1', decision: 'allow' }): FleetCommandRecord =>
+  answerCommand({ payload });
+
+describe('ThreadJobEffects.onInputAck for a decision delivery (B3)', () => {
+  it('B3: a rejected decision ack records the rejection on its pending request and returns a thread event', async () => {
+    const { prisma, thread } = decisionPrisma({ pendingApprovals: [pendingApproval] });
+
+    const event = await new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'rejected', 'expired');
+
+    expect(thread.pendingApprovals).toEqual([
+      { ...pendingApproval, delivery: { decision: 'allow', result: 'rejected', detail: 'expired', at: expect.any(String) } },
+    ]);
+    expect(event).toMatchObject({ type: 'thread', threadId: 'T' });
+  });
+
+  it('B3: an ok decision ack records the ok delivery too, so a reopened page shows it was delivered', async () => {
+    const { prisma, thread } = decisionPrisma({ pendingApprovals: [pendingApproval] });
+
+    const event = await new ThreadJobEffects(prisma).onInputAck(decisionCommand({ requestId: 'q1', decision: 'deny' }), 'ok', '');
+
+    expect(thread.pendingApprovals).toEqual([
+      { ...pendingApproval, delivery: { decision: 'deny', result: 'ok', detail: null, at: expect.any(String) } },
+    ]);
+    expect(event).toMatchObject({ type: 'thread', threadId: 'T' });
+  });
+
+  it('B3: a decision for a request the session already resolved writes nothing and returns no event', async () => {
+    const { prisma, chatThread } = decisionPrisma({ pendingApprovals: [{ ...pendingApproval, requestId: 'other' }] });
+
+    await expect(new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'rejected', 'expired')).resolves.toBeNull();
+    expect(chatThread.update).not.toHaveBeenCalled();
+  });
+
+  it('B3: a thread with no pending list writes nothing and returns no event', async () => {
+    const { prisma, chatThread } = decisionPrisma();
+
+    await expect(new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'rejected', 'expired')).resolves.toBeNull();
+    expect(chatThread.update).not.toHaveBeenCalled();
+  });
+
+  it('B3: bounds the stored detail to 200 characters', async () => {
+    const { prisma, thread } = decisionPrisma({ pendingApprovals: [pendingApproval] });
+
+    await new ThreadJobEffects(prisma).onInputAck(decisionCommand(), 'rejected', 'x'.repeat(300));
+
+    expect((thread.pendingApprovals as Array<{ delivery: { detail: string } }>)[0]?.delivery.detail).toBe('x'.repeat(200));
+  });
+
+  it('B3 (control): a text answer ack records no delivery and returns no thread event', async () => {
+    const { prisma, chatThread } = decisionPrisma({ pendingApprovals: [pendingApproval] });
+
+    await expect(new ThreadJobEffects(prisma).onInputAck(answerCommand(), 'ok', '')).resolves.toBeNull();
+    expect(chatThread.update).not.toHaveBeenCalled();
+  });
+});
+
 const publishCommand = (over: Partial<FleetCommandRecord> = {}): FleetCommandRecord => ({
   id: 'cmdP', runnerId: 'R', jobId: 'JP', type: FleetCommandType.THREAD_PUBLISH, leaseEpoch: 1,
   payload: {}, createdAt: new Date(0), deliveredAt: null, ackedAt: null, ackResult: null,

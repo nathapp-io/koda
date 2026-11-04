@@ -74,6 +74,22 @@ export interface ThreadSession {
 }
 
 /**
+ * B3 (whole-branch review): the runner's outcome for the last decision sent for one pending request. The decision route
+ * answers `200` as soon as the command is queued, so this is the only thing that says whether the session took it; a
+ * rejection leaves the request pending (the runner refused the decision, not the request).
+ */
+export interface ThreadApprovalDelivery {
+  /** Which way the last decision went. */
+  decision: 'allow' | 'deny'
+  /** `ok` = the session accepted it; `rejected` = the runner refused it and the request is still pending. */
+  result: 'ok' | 'rejected'
+  /** The runner's own reason for a rejection; null when it gave none. Never trusted as markup (B4-D1). */
+  detail: string | null
+  /** When the runner acknowledged the decision. */
+  at: string
+}
+
+/**
  * One answerable session approval the thread waits on (mirrors the API's `ThreadPendingApprovalDto`, thread-agents-modes
  * US-007): oldest first, at most 20. `command`, `reason` and `unsandboxed` are absent when the runner's request did not
  * carry them. Every field is runner/agent text, so the card renders it through `{{ }}` interpolation only (B4-D1).
@@ -91,6 +107,8 @@ export interface ThreadPendingApprovalDto {
   expiresAt: string
   /** Set when the request would leave the session sandbox. */
   unsandboxed?: true
+  /** Absent until a decision for this request has been acknowledged (B3). */
+  delivery?: ThreadApprovalDelivery
 }
 
 /** A decision a person sends for one pending approval (US-008: Approve maps to `allow`, Deny to `deny`). */

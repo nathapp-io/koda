@@ -7,6 +7,7 @@ import type { ThreadLiveEvent } from '../../live/thread-event-bus';
 import { isThreadKind } from '../common/thread-jobs';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { ThreadSession, ThreadWriteResult } from './domain/chat-thread.domain';
+import { APPROVAL_DELIVERY_DETAIL_MAX, readPendingApprovals, setApprovalDelivery } from './domain/pending-approvals';
 import { readApprovalDecision } from './thread-decision';
 
 /** Job ends that mean the runner died or failed; the session snapshot shows them as `failed`, the rest as `closed`. */
@@ -21,23 +22,34 @@ const FAILED_END_STATES: readonly string[] = [FleetJobState.CRASHED, FleetJobSta
 export class ThreadJobEffects {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
-  async onInputAck(command: FleetCommandRecord, result: string, detail: string): Promise<void> {
+  async onInputAck(command: FleetCommandRecord, result: string, detail: string): Promise<ThreadLiveEvent | null> {
     if (command.type === FleetCommandType.THREAD_PUBLISH) {
       await this.onPublishAck(command, result, detail);
-    } else if (command.type === FleetCommandType.THREAD_INPUT) {
+      return null;
+    }
+    if (command.type === FleetCommandType.THREAD_INPUT) {
       const { messageId } = command.payload as { messageId?: unknown };
       if (typeof messageId === 'string' && result === 'rejected') await this.prisma.client.chatMessage.updateMany({ where: { id: messageId }, data: { status: 'errored', errorReason: detail.slice(0, 200) } });
       if (typeof messageId === 'string') await this.replaceCommandPayload(command.id, { messageId });
-    } else if (command.type === FleetCommandType.THREAD_ANSWER) {
-      const { requestId, decision } = command.payload as { requestId?: unknown; decision?: unknown };
-      // US-008 F2: only a text answer answers the pending question. A decision shares the command type but not the
-      // pending list — the two are written by independent ingest paths, so they can hold the same request id, and an
-      // accepted decision must not delete a question nobody answered.
-      if (result === 'ok' && typeof requestId === 'string' && readApprovalDecision(decision) === null) {
-        await this.clearAnsweredQuestion(command.jobId, requestId);
-      }
-      await this.replaceCommandPayload(command.id, { requestId });
+      return null;
     }
+    const { requestId, decision } = command.payload as { requestId?: unknown; decision?: unknown };
+    const decided = readApprovalDecision(decision);
+    // B3: a decision carries its own outcome back to the page. `command()` answers 200 as soon as the command is queued,
+    // so only the runner's ack says whether the session took it; a rejection leaves the request pending and is stored on
+    // it, which is what lets the card stop waiting and say why.
+    const decidedThreadId = typeof requestId === 'string' && decided !== null
+      ? await this.recordDecisionDelivery(command.jobId, requestId, decided, result, detail)
+      : null;
+    // US-008 F2: only a text answer answers the pending question. A decision shares the command type but not the
+    // pending list — the two are written by independent ingest paths, so they can hold the same request id, and an
+    // accepted decision must not delete a question nobody answered.
+    if (decidedThreadId === null && result === 'ok' && typeof requestId === 'string' && decided === null) {
+      await this.clearAnsweredQuestion(command.jobId, requestId);
+    }
+    await this.replaceCommandPayload(command.id, { requestId });
+    // The pending list changed, so the page's own stream is told to refetch it (published after this transaction commits).
+    return decidedThreadId === null ? null : { id: randomUUID(), type: 'thread', threadId: decidedThreadId, at: new Date().toISOString() };
   }
 
   /**
@@ -90,6 +102,33 @@ export class ThreadJobEffects {
     if (!job?.threadId) return;
     const lastWrite: ThreadWriteResult = { kind: 'publish_failed', jobId: command.jobId, at: new Date().toISOString(), reason: detail.slice(0, 64) };
     await this.prisma.client.chatThread.update({ where: { id: job.threadId }, data: { lastWrite: lastWrite as unknown as Prisma.InputJsonValue } });
+  }
+
+  /**
+   * B3: records the runner's acknowledgement of a decision on the request it decided, and answers the thread id when the
+   * thread row changed (so the caller can publish its live event).
+   *
+   * A rejection is the case this exists for — the `POST` returned 200 the moment the command was queued, and the page
+   * was left saying "queued" with both buttons disabled while the session still waited. The entry stays: the runner
+   * refused the decision, not the request. An ok ack is recorded too, so a later page load shows the decision was
+   * delivered rather than still in flight. A request the session already resolved is gone from the list and nothing is
+   * written. Caller holds the job lock, like the ingest fold that appends and removes these entries.
+   */
+  private async recordDecisionDelivery(
+    jobId: string, requestId: string, decision: 'allow' | 'deny', result: string, detail: string,
+  ): Promise<string | null> {
+    // `stale` and `withdrawn` never reach here (the ack processor settles them before the thread effects), and any other
+    // value is not something this version can word, so it stores nothing rather than a delivery the page cannot show.
+    if (result !== 'ok' && result !== 'rejected') return null;
+    const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, select: { id: true, threadId: true } });
+    if (!job?.threadId) return null;
+    const thread = await this.prisma.client.chatThread.findUnique({ where: { id: job.threadId }, select: { pendingApprovals: true } });
+    const next = setApprovalDelivery(readPendingApprovals(thread?.pendingApprovals ?? null), requestId, {
+      decision, result, detail: detail === '' ? null : detail.slice(0, APPROVAL_DELIVERY_DETAIL_MAX), at: new Date().toISOString(),
+    });
+    if (next === null) return null;
+    await this.prisma.client.chatThread.update({ where: { id: job.threadId }, data: { pendingApprovals: next as unknown as Prisma.InputJsonValue } });
+    return job.threadId;
   }
 
   /** Clears the thread's `pendingQuestion` when the runner accepted an answer to that question (B2-D3). Caller holds the job lock. */

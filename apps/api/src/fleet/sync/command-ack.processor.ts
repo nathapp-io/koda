@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../common/enums';
@@ -10,11 +11,12 @@ import type { CommandAck } from '../common/protocol';
 import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
+import type { FleetJobLiveEvent } from '../jobs/fleet-job-live.publisher';
 import { FenceService } from './fence.service';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /** An ack either changed the job (a job live event) or did nothing (plan D263). */
-interface Applied { live: LiveFleetJobEvent | null }
+interface Applied { live: FleetJobLiveEvent | null }
 const NO_CHANGE: Applied = { live: null };
 
 /** Command acks (spec §3.2, plan D8) and the boot-id reconcile (spec §5.3, C3). */
@@ -34,8 +36,8 @@ export class CommandAckProcessor {
   ) {}
 
   /** One transaction per ack, and a failing ack is logged and skipped, so one bad ack never blocks the rest. */
-  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<{ live: LiveFleetJobEvent[] }> {
-    const live: LiveFleetJobEvent[] = [];
+  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<{ live: FleetJobLiveEvent[] }> {
+    const live: FleetJobLiveEvent[] = [];
     for (const ack of acks) {
       try {
         const applied = await this.txManager.run(() => this.processOne(runnerId, bootId, ack, now));
@@ -69,8 +71,13 @@ export class CommandAckProcessor {
     if (!acknowledged) return NO_CHANGE;
     if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER || command.type === FleetCommandType.THREAD_PUBLISH) {
       const threadEffects = this.threadEffects;
-      if (threadEffects) await bookkeeping('thread.input-ack', () => threadEffects.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));
-      return NO_CHANGE;
+      if (!threadEffects) return NO_CHANGE;
+      const threadEvent = await bookkeeping('thread.input-ack', () => threadEffects.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));
+      // B3: an answer or publish ack can change thread state the open page must see (a decision's delivery outcome is
+      // one). The job itself does not move, so the event carries the thread event and the page refetches the thread
+      // instead of waiting for a poll that a live stream has stopped.
+      if (!threadEvent) return NO_CHANGE;
+      return { live: { ...this.jobLive(job, now), threadEvents: [threadEvent] } };
     }
     const actor = { type: 'RUNNER' as const, id: runnerId };
     const detail = (ack.detail ?? '').slice(0, 200);
@@ -108,6 +115,15 @@ export class CommandAckProcessor {
       return { live: r.live };
     }
     return NO_CHANGE;
+  }
+
+  /**
+   * The fleet_job live event of an ack that left the job where it was: its only purpose is to carry the thread event
+   * this ack produced (a decision's delivery outcome, B3), which the thread bus routes after the commit. Reusing the
+   * job's current state keeps every other consumer's reload harmless.
+   */
+  private jobLive(job: { id: string; projectId: string; state: string }, now: Date): FleetJobLiveEvent {
+    return { id: randomUUID(), type: 'fleet_job', projectId: job.projectId, jobId: job.id, state: job.state, at: now.toISOString() };
   }
 
   private recordTransition(before: { id: string; projectId: string; state: FleetJobState }, after: { state: FleetJobState }): Promise<void> {

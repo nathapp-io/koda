@@ -3,7 +3,7 @@ import * as Vue from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs } from '../helpers/fleet-harness'
 import { createThreadController } from '~/lib/thread-controller'
-import type { ThreadDetailDto, ThreadPendingApprovalDto } from '~/lib/thread-types'
+import type { ThreadApprovalDelivery, ThreadDetailDto, ThreadPendingApprovalDto } from '~/lib/thread-types'
 
 /**
  * thread-agents-modes US-012 AC-6..AC-9, AC-12: components/fleet/threads/ThreadApprovalCard.vue — one answerable
@@ -261,6 +261,95 @@ describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
     expect(m.byId('thread-approval-queued')).toBeUndefined()
     expect(m.textOf('thread-approval-error')).toBe('The session already closed.')
     expect(m.disabled('thread-approval-approve')).toBe(false)
+    m.app.unmount()
+  })
+
+  // Branch fix B3 (review round 2): a 200 only means the command was QUEUED. When the runner then rejects the
+  // acknowledgement, the thread keeps the request pending and its `delivery` says so; the card must stop claiming the
+  // decision is queued, word the rejection, and let the person decide again.
+  const rejectedDelivery = (over: Partial<ThreadApprovalDelivery> = {}): ThreadApprovalDelivery => ({
+    decision: 'allow', result: 'rejected', detail: 'expired', at: '2026-10-14T10:00:00.000Z', ...over,
+  })
+
+  test('B3: an enqueue followed by a rejected acknowledgement clears the queued mark and shows the runner detail', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7' }) })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+    expect(m.textOf('thread-approval-queued')).toBe('Decision sent. Waiting for the session to apply it.')
+    expect(m.disabled('thread-approval-approve')).toBe(true)
+
+    // The runner's ack arrives on the thread (the page reloads it), and the request is still pending with a rejection.
+    m.app.setProps({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery() }) })
+    await settle()
+
+    expect(m.byId('thread-approval-queued')).toBeUndefined()
+    expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: expired')
+    expect(m.disabled('thread-approval-approve')).toBe(false)
+    expect(m.disabled('thread-approval-deny')).toBe(false)
+    expect(m.byId('thread-approval')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B3: a rejection the runner gives without a detail is worded without one', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery({ detail: null }) }) })
+    await settle()
+
+    expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision.')
+    expect(m.disabled('thread-approval-approve')).toBe(false)
+    m.app.unmount()
+  })
+
+  test('B3: a rejection detail is runner text and renders as literal text only', async () => {
+    const m = mountCard({ approval: approval({ delivery: rejectedDelivery({ detail: '<img src=x onerror="boom()">' }) }) })
+    await settle()
+
+    expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: <img src=x onerror="boom()">')
+    expect(m.app.find('img')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('B3: an ok acknowledgement keeps the card queued until the session resolves the request', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7' }) })
+    await settle()
+
+    m.click('thread-approval-deny')
+    await settle()
+    m.app.setProps({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery({ decision: 'deny', result: 'ok', detail: null }) }) })
+    await settle()
+
+    expect(m.byId('thread-approval-rejected')).toBeUndefined()
+    expect(m.textOf('thread-approval-queued')).toBe('Decision sent. Waiting for the session to apply it.')
+    expect(m.disabled('thread-approval-deny')).toBe(true)
+    m.app.unmount()
+  })
+
+  test('B3: a resend after a rejection is queued again instead of showing the previous attempt\'s outcome', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery() }) })
+    await settle()
+    expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: expired')
+
+    m.click('thread-approval-deny')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledWith('/projects/acme/threads/th1/approvals/req-7', { decision: 'deny' })
+    expect(m.byId('thread-approval-rejected')).toBeUndefined()
+    expect(m.textOf('thread-approval-queued')).toBe('Decision sent. Waiting for the session to apply it.')
+    m.app.unmount()
+  })
+
+  test('B3: a different rejection after a resend is shown as the new attempt\'s outcome', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery() }) })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+    m.app.setProps({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery({ detail: 'session_closed', at: '2026-10-14T10:05:00.000Z' }) }) })
+    await settle()
+
+    expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: session_closed')
+    expect(m.byId('thread-approval-queued')).toBeUndefined()
     m.app.unmount()
   })
 

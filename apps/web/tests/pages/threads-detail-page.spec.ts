@@ -525,6 +525,25 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
     m.app.unmount()
   })
 
+  // Branch fix B3 (review round 2): the reloaded thread carries the runner's outcome for the decision, so the page shows
+  // the refusal and keeps the request decidable instead of leaving it marked queued with both buttons disabled.
+  test('B3: a pending request whose decision the runner rejected renders the rejection and stays decidable', async () => {
+    const m = mountPage({
+      thread: threadDetail({
+        pendingApprovals: [approval({ delivery: { decision: 'allow', result: 'rejected', detail: 'expired', at: '2026-10-14T10:00:00.000Z' } })],
+      }),
+      permissions: MODE_KEYS,
+    })
+    await m.settle()
+
+    const rejected = m.app.one('[data-testid="thread-approval-rejected"]')
+    expect(rejected).toBeDefined()
+    expect(rejected === undefined ? '' : m.app.textOf(rejected)).toBe('The runner did not apply the decision: expired')
+    expect(m.app.one('[data-testid="thread-approval-queued"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')?.props.disabled).toBe(false)
+    m.app.unmount()
+  })
+
   test('US-012 wiring: choosing Ask reaches the controller mode action', async () => {
     const m = mountPage({ thread: threadDetail({ kind: 'REPO', mode: 'read' }), permissions: MODE_KEYS })
     await m.settle()

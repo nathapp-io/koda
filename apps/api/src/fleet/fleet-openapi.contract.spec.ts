@@ -114,8 +114,13 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['ThreadDto']?.properties ?? {})).toContain('pendingApprovals');
     expect(Object.keys(spec.components.schemas['WorkspaceThreadDto']?.properties ?? {})).toContain('pendingApprovals');
     expect(Object.keys(spec.components.schemas['ThreadPendingApprovalDto']?.properties ?? {}).sort())
-      .toEqual(['command', 'expiresAt', 'reason', 'requestId', 'summary', 'tool', 'unsandboxed']);
+      .toEqual(['command', 'delivery', 'expiresAt', 'reason', 'requestId', 'summary', 'tool', 'unsandboxed']);
     expect(spec.components.schemas['ThreadPendingApprovalDto']?.required).toEqual(['requestId', 'tool', 'summary', 'expiresAt']);
+    // B3: the decision's delivery outcome is a nested schema, and it is what tells the card a decision was refused.
+    expect(JSON.stringify(spec.components.schemas['ThreadPendingApprovalDto']?.properties?.['delivery']))
+      .toContain('#/components/schemas/ThreadApprovalDeliveryDto');
+    expect(Object.keys(spec.components.schemas['ThreadApprovalDeliveryDto']?.properties ?? {}).sort())
+      .toEqual(['at', 'decision', 'detail', 'result']);
   });
 
   it('exposes the budget routes on both prefixes and the budget_paused misfit (S1b §2.3, §2.4)', () => {
