@@ -19,9 +19,23 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
 
   /** Own job read avoids importing FleetJobsModule, even when Jobs later imports Rulings. */
   async lockTarget(slug: string, jobId: string): Promise<RulingJobTarget | null> {
-    await this.prisma.client.$queryRaw`SELECT id FROM "FleetJob" WHERE id = ${jobId} FOR UPDATE`;
+    const identity = await this.prisma.client.fleetJob.findFirst({
+      where: { id: jobId, project: { slug, deletedAt: null } }, select: { repoId: true },
+    });
+    if (!identity) return null;
+    // FOR UPDATE (not NO KEY UPDATE) fences new jobs through their repo foreign key.
+    // Lock the existing repo jobs too: any one can gain/change a PR URL or become a RUN.
+    // All ruling writers take this repo-first order; no caller needs to cooperate with an advisory lock.
+    await this.prisma.client.$queryRaw`SELECT id FROM "FleetRepo" WHERE id = ${identity.repoId} FOR UPDATE`;
+    await this.prisma.client.$queryRaw`SELECT COUNT(*) FROM (
+      SELECT id FROM "FleetJob" WHERE "repoId" = ${identity.repoId} ORDER BY id FOR UPDATE
+    ) AS locked_jobs`;
+    // Job locks fence ruling inserts via their FK, but existing applied-state writers need row locks.
+    await this.prisma.client.$queryRaw`SELECT COUNT(*) FROM (
+      SELECT id FROM "FleetPrRuling" WHERE "jobId" = ${jobId} ORDER BY id FOR UPDATE
+    ) AS locked_rulings`;
     const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, include: { project: true, repo: true } });
-    if (!job || job.project.slug !== slug || job.project.deletedAt !== null || job.command !== 'RUN') return null;
+    if (!job || job.repoId !== identity.repoId || job.project.slug !== slug || job.project.deletedAt !== null) return null;
     const workflow = job.workflow;
     const items = workflow && typeof workflow === 'object' && !Array.isArray(workflow) && Array.isArray(workflow.openItems) ? workflow.openItems : [];
     const openItems: { id: string; kind: string }[] = [];

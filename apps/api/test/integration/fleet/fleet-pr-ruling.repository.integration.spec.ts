@@ -8,6 +8,8 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { createTestPrismaClient, testDatabaseUrl } from '../../helpers/test-prisma';
+import { PrismaFleetPrRulingRepository } from '../../../src/fleet/rulings/prisma-fleet-pr-ruling.repository';
 
 (canRunDbTests() ? describe : describe.skip)('fleet PR rulings (PG)', () => {
   let app: NathApplication;
@@ -65,7 +67,8 @@ import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
     const job = await newJob('applied');
     const first = await create(job.id);
     await db.fleetPrRuling.update({ where: { id: first.id }, data: { state: 'applied' } });
-    await create(job.id);
+    await expect(create(job.id)).rejects.toMatchObject({ prefix: 'fleet.rulings.settled' });
+    expect(await db.fleetPrRuling.count({ where: { jobId: job.id } })).toBe(1);
     expect((await db.fleetPrRuling.findUniqueOrThrow({ where: { id: first.id } })).state).toBe('applied');
   });
   it('rejects a cross-project or unknown target without inserting', async () => {
@@ -73,6 +76,45 @@ import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
     await expect(app.get(FleetPrRulingsService).create(principal, 'other-project', job.id, { itemId: 'D-1', text: 'verified' })).rejects.toThrow();
     await expect(create('missing')).rejects.toThrow();
     expect(await db.fleetPrRuling.count({ where: { jobId: job.id } })).toBe(0);
+  });
+  it.each(['ready', 'newer', 'applied'])('F1: refuses %s committed after the preflight check', async (change) => {
+    const job = await newJob(`stale-${change}`);
+    const first = await create(job.id);
+    await app.get(FleetPrRulingsService).ruleTarget(projectId, job.id, { itemId: 'D-1', text: 'verified' });
+    if (change === 'ready') await db.fleetJob.update({ where: { id: job.id }, data: { workflow: { outcome: 'ready', openItems: [{ id: 'D-1', kind: 'review' }] } } });
+    if (change === 'newer') await newJob('superseding-run');
+    if (change === 'applied') await db.fleetPrRuling.update({ where: { id: first.id }, data: { state: 'applied' } });
+    const prefix = { ready: 'notDraft', newer: 'notLatest', applied: 'settled' }[change];
+    await expect(create(job.id)).rejects.toMatchObject({ prefix: `fleet.rulings.${prefix}` });
+    expect(await db.fleetPrRuling.findMany({ where: { jobId: job.id } })).toEqual([expect.objectContaining({ id: first.id, state: change === 'applied' ? 'applied' : 'pending' })]);
+    expect(await db.auditEntry.count({ where: { resourceId: job.id, key: 'fleet.job.rule' } })).toBe(1);
+  });
+  it.each(['insert', 'sibling', 'applied'])('F1: locks eligibility against concurrent %s writes until commit', async (change) => {
+    const sibling = await newJob(`lock-sibling-${change}`);
+    const job = await newJob(`lock-target-${change}`);
+    const first = await create(job.id);
+    const url = new URL(testDatabaseUrl());
+    url.searchParams.set('options', '-c lock_timeout=150ms');
+    const connection = createTestPrismaClient(url.toString());
+    const repo = app.get(PrismaFleetPrRulingRepository);
+    const lock = repo.lockTarget.bind(repo);
+    const write = () => change === 'applied'
+      ? connection.$executeRawUnsafe('UPDATE "FleetPrRuling" SET state = $1 WHERE id = $2', 'applied', first.id)
+      : change === 'sibling'
+        ? connection.$executeRawUnsafe('UPDATE "FleetJob" SET "resultPrUrl" = NULL WHERE id = $1', sibling.id)
+        : connection.$executeRawUnsafe(`INSERT INTO "FleetJob" (id, "projectId", "repoId", ref, command, feature, profiles, "maxCostUsd", "selectorLabels", "requestedById", "updatedAt")
+            SELECT id || '-new', "projectId", "repoId", ref, command, feature || '-new', profiles, "maxCostUsd", "selectorLabels", "requestedById", NOW() FROM "FleetJob" WHERE id = $1`, job.id);
+    const spy = vi.spyOn(repo, 'lockTarget').mockImplementationOnce(async (slug, jobId) => {
+      const target = await lock(slug, jobId);
+      await expect(write()).rejects.toMatchObject({ code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: '55P03' } } } });
+      return target;
+    });
+    try {
+      await create(job.id);
+      // The identical statement on the independent connection succeeds once the ruling commits.
+      await expect(write()).resolves.toBe(1);
+    } finally { spy.mockRestore(); await connection.$disconnect(); }
+    expect(await db.fleetPrRuling.count({ where: { jobId: job.id } })).toBe(2);
   });
   it('rolls back replacement and insertion when audit fails', async () => {
     const job = await newJob('rollback');

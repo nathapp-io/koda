@@ -9,7 +9,8 @@ describe('FleetPrRulingsService', () => {
   const setup = () => {
     const order: string[] = [];
     const repo: IFleetPrRulingRepository = {
-      findTarget: vi.fn(), latestRunForPr: vi.fn(), latestRuling: vi.fn(), list: vi.fn(),
+      findTarget: vi.fn(async () => { order.push('validate'); return { projectId: 'project', repoId: 'repo', command: 'RUN', outcome: 'draft', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
+      latestRunForPr: vi.fn(async () => 'run'), latestRuling: vi.fn(async () => null), list: vi.fn(),
       lockTarget: vi.fn(async () => { order.push('lock'); return { projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
       replacePending: vi.fn(async () => { order.push('replace'); }),
       insert: vi.fn(async (data: NewFleetPrRuling) => { order.push('insert'); return { ...data, id: 'ruling', createdAt: new Date(), updatedAt: new Date() }; }),
@@ -23,7 +24,7 @@ describe('FleetPrRulingsService', () => {
     const row = await service.create(agent, 'slug', 'run', { itemId: 'D-1', text: '\n\nconfirm: ok\nmore evidence' });
     expect(row).toMatchObject({ text: 'confirm: ok\nmore evidence', disposition: 'confirmed', state: 'pending', actorType: 'AGENT', actorId: 'agent', repoId: 'repo', prNumber: 42 });
     expect(repo.replacePending).toHaveBeenCalledExactlyOnceWith('run', 'D-1');
-    expect(order).toEqual(['tx', 'lock', 'replace', 'insert', 'audit']);
+    expect(order).toEqual(['tx', 'lock', 'validate', 'replace', 'insert', 'audit']);
     expect(audit.record).toHaveBeenCalledExactlyOnceWith({ key: 'fleet.job.rule', resourceType: 'fleet_job', resourceId: 'run', projectId: 'project', summary: 'ruled D-1: confirmed' });
   });
   it('preserves enclosing approval context', async () => {

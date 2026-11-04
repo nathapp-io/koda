@@ -43,6 +43,9 @@ export class FleetPrRulingsService {
     return runWithActionContext({ ...context, actor: { type: actorType, id: principal.id }, origin: context?.origin ?? 'rest' }, () => this.txManager.run(async () => {
       const target = await this.repo.lockTarget(slug, jobId);
       if (!target) throw new NotFoundAppException({}, 'fleet.jobs');
+      // Preflight and approval replay checks are advisory until these transaction locks are held.
+      // Re-read eligibility after waiting for any in-flight RUN/result/applied-state writer.
+      await this.ruleTarget(target.projectId, jobId, dto);
       const item = target.openItems.find((item) => item.id === dto.itemId);
       if (!item) throw new NotFoundAppException({}, 'fleet.rulings.unknownItem');
       if (target.prNumber === null) throw new ValidationAppException({ property: 'jobId' }, 'fleet.rulings.invalidPr');

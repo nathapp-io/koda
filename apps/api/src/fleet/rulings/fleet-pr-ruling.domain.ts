@@ -31,7 +31,8 @@ export interface RulingJobTarget {
   openItems: { id: string; kind: string }[];
 }
 export interface IFleetPrRulingRepository {
-  /** Lock the RUN before replacing its rulings. Must be called inside the write transaction. */
+  /** Lock repo (fences job inserts), existing repo jobs and target rulings before revalidation.
+   * Must be called inside the write transaction; locks last through replacement, insertion and audit. */
   lockTarget(slug: string, jobId: string): Promise<RulingJobTarget | null>;
   findTarget(projectId: string, jobId: string): Promise<(RulingJobTarget & { command: string; outcome: string | null }) | null>;
   latestRunForPr(repoId: string, prNumber: number): Promise<string | null>;
