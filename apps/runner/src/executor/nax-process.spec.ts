@@ -147,3 +147,16 @@ describe('spawnNax and signalGroup', () => {
     expect((await readFile(join(dir, 'env.txt'), 'utf8')).trim()).toBe('yes:');
   });
 });
+
+describe('US-008 rulings argv', () => {
+  const fix = assign({ command: 'FIX', review: { prNumber: 4, botLogin: 'fleet[bot]' } });
+  test('AC-5 appends rulings after decisions on FIX review', () => {
+    expect(buildNaxArgv(['nax'], fix, { decisionsPath: '/decisions', rulingsPath: '/rulings' })).toEqual(['nax', 'bot', 'review', '4', '--full', '--profile', 'fast,strict,koda-job-cj1', '--decisions', '/decisions', '--rulings', '/rulings']);
+  });
+  test('AC-6 REVIEW ignores rulingsPath', () => {
+    expect(buildNaxArgv(['nax'], { ...fix, command: 'REVIEW' }, { rulingsPath: '/rulings' })).toEqual(['nax', 'bot', 'review', '4', '--profile', 'fast,strict,koda-job-cj1']);
+  });
+  test('AC-7 FIX decision-only argv remains unchanged', () => {
+    expect(buildNaxArgv(['nax'], fix, { decisionsPath: '/decisions' })).toEqual(['nax', 'bot', 'review', '4', '--full', '--profile', 'fast,strict,koda-job-cj1', '--decisions', '/decisions']);
+  });
+});

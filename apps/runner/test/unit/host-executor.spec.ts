@@ -720,6 +720,33 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     return { ...w, calls, freshCalls, ex, tokenPath };
   }
 
+  test('US-008 AC-8: FIX spawn hands caller rulings to review only', async () => {
+    const rulings = { headSha: 'a'.repeat(40), rulings: [{ item: 'D-1', ruling: 'confirm: checked', by: 'koda:agent:dev', at: '2026-01-01T00:00:00Z' }] };
+    const w = await injectedWorld('FIX', { review: { prNumber: 4, botLogin: BOT, decisions: [{ id: 'm1', statement: 's' }], rulings } });
+    await w.ex.spawn(w.row);
+    const path = join(w.row.jobDir, 'review-rulings.json');
+    expect(w.calls[0]?.argv.slice(-4)).toEqual(['--decisions', join(w.row.jobDir, REVIEW_DECISIONS_FILE), '--rulings', path]);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 1, ...rulings });
+    await w.ex.spawnFixStep(w.row);
+    expect(w.calls[1]?.argv).not.toContain('--rulings');
+  });
+
+  test('US-008 AC-9: FIX without rulings writes no file or option', async () => {
+    const w = await injectedWorld('FIX');
+    await w.ex.spawn(w.row);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.argv).not.toContain('--rulings');
+    await expect(stat(join(w.row.jobDir, 'review-rulings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('US-008 AC-10: attempt wipe removes stale rulings', async () => {
+    const w = await injectedWorld('REVIEW');
+    const path = join(w.row.jobDir, 'review-rulings.json');
+    await writeFile(path, '{}');
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   test('AC-7: the forge token minimum is 50 minutes', () => {
     expect(FORGE_TOKEN_MIN_REMAINING_MS).toBe(3_000_000);
   });
