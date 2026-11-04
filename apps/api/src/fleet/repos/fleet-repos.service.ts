@@ -6,6 +6,7 @@ import { PROFILE_NAME_RE } from '../common/capabilities';
 import { RESERVED_PROFILE_PREFIX } from '../jobs/dispatch-input';
 import { AutoReviewException } from './auto-review.exception';
 import { FixChecksException } from './fix-checks.exception';
+import { FixUnprotectedException } from './fix-unprotected.exception';
 import type { AutoReviewPatch } from './domain/fleet-repo.domain';
 import { PermissionService } from '../../permissions/permission.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -24,6 +25,7 @@ import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
+import type { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
@@ -128,6 +130,28 @@ export class FleetReposService {
       await this.audit.record({
         key: 'fleet.repo.review.configure', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
         summary: dto.trustDetectedChecks ? 'fix detected checks enabled' : 'fix detected checks disabled',
+      });
+      return FleetRepoDto.from(updated);
+    });
+  }
+
+  /**
+   * The FIX unprotected-branch override (default off): when on, the git token broker mints FIX write
+   * credentials without checking the default branch's protection. Enabling needs a GitHub App
+   * installation, the only way a FIX gets credentials; disabling is always allowed. The write and its
+   * audit share one transaction, and the principal is in the signature for the approval engine.
+   */
+  async configureFixUnprotected(principal: UserPrincipal | AgentPrincipal, id: string, dto: UpdateFixUnprotectedDto): Promise<FleetRepoDto> {
+    return this.txManager.run(async () => {
+      const row = await this.repo.findById(id);
+      if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      if (dto.allowUnprotected && (row.provider !== 'github' || row.githubInstallationId === null)) {
+        throw new FixUnprotectedException('github app required');
+      }
+      const updated = await this.repo.updateFixUnprotected(id, dto.allowUnprotected);
+      await this.audit.record({
+        key: 'fleet.repo.fix.unprotected', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId,
+        summary: dto.allowUnprotected ? 'fix on unprotected default branch allowed' : 'fix on unprotected default branch disallowed',
       });
       return FleetRepoDto.from(updated);
     });

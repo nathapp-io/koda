@@ -54,7 +54,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findRepo(repoId: string): Promise<FleetRepoRef | null> {
     const r = await this.db.fleetRepo.findUnique({
       where: { id: repoId },
-      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, fixTrustDetectedChecks: true },
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true, fixTrustDetectedChecks: true, fixAllowUnprotected: true },
     });
     return r ? { ...r, provider: r.provider as FleetRepoRef['provider'] } : null;
   }

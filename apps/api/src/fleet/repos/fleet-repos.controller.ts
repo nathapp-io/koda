@@ -15,6 +15,7 @@ import { ListFleetReposQuery } from './dto/list-fleet-repos.query';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 import { UpdateAutoReviewDto } from './dto/update-auto-review.dto';
 import { UpdateFixChecksDto } from './dto/update-fix-checks.dto';
+import { UpdateFixUnprotectedDto } from './dto/update-fix-unprotected.dto';
 
 /**
  * Fleet S1: the repo admin routes, migrated onto permission keys by permissions P1d (US-008). Each key
@@ -117,6 +118,27 @@ export class FleetReposController {
     const outcome = await this.routeGate.run<FleetRepoDto>({
       key: 'fleet.repo.review.configure',
       variant: FLEET_REPO_ROUTE_VARIANTS.fixChecks,
+      projectId: null,
+      input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Patch(':id/fix-unprotected')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.repo.fix.unprotected')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Allow FIX on an unprotected default branch for a registered repo (fleet.repo.fix.unprotected, global)' })
+  @ApiResponse({ status: 200, type: FleetRepoDto })
+  @ApiResponse({ status: 403, description: 'fleet.repo.fix.unprotected is missing globally' })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  @ApiResponse({ status: 422, description: 'The override cannot be enabled for this repo: { reason }' })
+  async configureFixUnprotected(@Param('id') id: string, @Body() dto: UpdateFixUnprotectedDto) {
+    const outcome = await this.routeGate.run<FleetRepoDto>({
+      key: 'fleet.repo.fix.unprotected',
+      variant: FLEET_REPO_ROUTE_VARIANTS.fixUnprotected,
       projectId: null,
       input: { id, patch: dto },
     });

@@ -33,3 +33,20 @@ describe('FleetRepoDto fix-checks field (US-001)', () => {
     expect(FleetRepoDto.from(record({ fixTrustDetectedChecks: true })).fixTrustDetectedChecks).toBe(true);
   });
 });
+
+describe('FleetRepoDto fix-unprotected field', () => {
+  const record = (over: Partial<FleetRepoRecord> = {}): FleetRepoRecord => ({
+    id: 'r', projectId: 'p', provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main',
+    githubInstallationId: null, createdById: 'u', createdAt: new Date(0), autoReview: false,
+    autoReviewProfiles: [], autoReviewMaxCostUsd: '1', autoReviewEnabledById: null,
+    autoReviewEnabledByType: null, autoReviewEnabledAt: null, ...over,
+  });
+
+  it('a record without the field serializes as false', () => {
+    expect(FleetRepoDto.from(record()).fixAllowUnprotected).toBe(false);
+  });
+
+  it('a record with the field true serializes as true', () => {
+    expect(FleetRepoDto.from(record({ fixAllowUnprotected: true })).fixAllowUnprotected).toBe(true);
+  });
+});

@@ -8506,6 +8506,79 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/fix-unprotected": {
+      "patch": {
+        "operationId": "FleetReposController_configureFixUnprotected",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFixUnprotectedDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.repo.fix.unprotected is missing globally"
+          },
+          "404": {
+            "description": "No such repo"
+          },
+          "422": {
+            "description": "The override cannot be enabled for this repo: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Allow FIX on an unprotected default branch for a registered repo (fleet.repo.fix.unprotected, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -19452,6 +19525,10 @@
           "fixTrustDetectedChecks": {
             "type": "boolean",
             "description": "Allow FIX to run the check commands it detects for a base branch without nax check commands"
+          },
+          "fixAllowUnprotected": {
+            "type": "boolean",
+            "description": "Allow FIX to push although the default branch is unprotected (override, default off)"
           }
         },
         "required": [
@@ -19465,7 +19542,8 @@
           "autoReview",
           "autoReviewProfiles",
           "autoReviewMaxCostUsd",
-          "fixTrustDetectedChecks"
+          "fixTrustDetectedChecks",
+          "fixAllowUnprotected"
         ]
       },
       "RepoCheckResultDto": {
@@ -19542,6 +19620,18 @@
         },
         "required": [
           "trustDetectedChecks"
+        ]
+      },
+      "UpdateFixUnprotectedDto": {
+        "type": "object",
+        "properties": {
+          "allowUnprotected": {
+            "type": "boolean",
+            "description": "Allow FIX to push although the default branch is unprotected"
+          }
+        },
+        "required": [
+          "allowUnprotected"
         ]
       },
       "NaxFileEntryDto": {

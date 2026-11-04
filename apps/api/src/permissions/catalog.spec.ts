@@ -95,6 +95,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'memory.update': 'any',
   'fleet.job.shell.escalate': 'project',
   'fleet.budget.override': 'any',
+  'fleet.repo.fix.unprotected': 'global',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 

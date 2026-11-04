@@ -10,6 +10,8 @@ describe('FleetRepoRouteCommands', () => {
   const patch = { enabled: true };
   /** The fix-checks route's `{ id, patch }` frozen input (US-001). */
   const fixPatch = { trustDetectedChecks: true };
+  /** The fix-unprotected route's `{ id, patch }` frozen input. */
+  const unprotectedPatch = { allowUnprotected: true };
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { id: 'r1', repoId: 'r1', reachable: true };
@@ -19,6 +21,7 @@ describe('FleetRepoRouteCommands', () => {
       check: vi.fn().mockResolvedValue(result),
       configureAutoReview: vi.fn().mockResolvedValue(result),
       configureFixChecks: vi.fn().mockResolvedValue(result),
+      configureFixUnprotected: vi.fn().mockResolvedValue(result),
     };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new FleetRepoRouteCommands(registry, repos as unknown as FleetReposService, loader as unknown as ActorPrincipalLoader).onModuleInit();
@@ -41,17 +44,22 @@ describe('FleetRepoRouteCommands', () => {
       action: 'fixChecks', key: 'fleet.repo.review.configure', variant: 'rest:fleet-repos.fix-checks',
       raw: { id: 'r1', patch: { ...fixPatch, extra: 1 } }, parsed: { id: 'r1', patch: fixPatch },
     },
+    {
+      action: 'fixUnprotected', key: 'fleet.repo.fix.unprotected', variant: 'rest:fleet-repos.fix-unprotected',
+      raw: { id: 'r1', patch: { ...unprotectedPatch, extra: 1 } }, parsed: { id: 'r1', patch: unprotectedPatch },
+    },
   ] as const;
   /** Inputs every variant must refuse: no object, no id, an empty id, a non-string id. */
   const invalidFor = (action: string) => [
     null, [], {}, { id: '' }, { id: 7 },
     ...(action === 'autoReview' ? [{ id: 'r1' }, { id: 'r1', patch: { enabled: 'yes' } }] : []),
     ...(action === 'fixChecks' ? [{ id: 'r1' }, { id: 'r1', patch: { trustDetectedChecks: 'yes' } }] : []),
+    ...(action === 'fixUnprotected' ? [{ id: 'r1' }, { id: 'r1', patch: { allowUnprotected: 'yes' } }] : []),
   ];
 
-  it('AC-12: registers the five matching variants', () => {
+  it('AC-12: registers the six matching variants', () => {
     const { registry } = build();
-    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(5);
+    expect(Object.values(FLEET_REPO_ROUTE_VARIANTS)).toHaveLength(6);
     for (const { action, key, variant } of cases) {
       expect(registry.get(key, FLEET_REPO_ROUTE_VARIANTS[action])).toMatchObject({ key, variant });
     }
@@ -70,6 +78,7 @@ describe('FleetRepoRouteCommands', () => {
       if (action === 'check') expect(repos.check).toHaveBeenCalledExactlyOnceWith('r1');
       if (action === 'autoReview') expect(repos.configureAutoReview).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', patch);
       if (action === 'fixChecks') expect(repos.configureFixChecks).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', fixPatch);
+      if (action === 'fixUnprotected') expect(repos.configureFixUnprotected).toHaveBeenCalledExactlyOnceWith({ id: 'a1' }, 'r1', unprotectedPatch);
       if (action === 'delete') {
         expect(repos.remove).toHaveBeenCalledExactlyOnceWith('a1', 'r1');
         expect(out).toBeNull();

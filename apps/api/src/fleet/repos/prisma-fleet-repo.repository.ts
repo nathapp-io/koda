@@ -24,7 +24,7 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
       autoReviewEnabledByType: row.autoReviewEnabledByType === 'USER' || row.autoReviewEnabledByType === 'AGENT' ? row.autoReviewEnabledByType : null };
   }
 
-  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks'>): Promise<FleetRepoRecord> {
+  async create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected'>): Promise<FleetRepoRecord> {
     try {
       return this.toDomain(await this.db.fleetRepo.create({ data }));
     } catch (error) {
@@ -42,6 +42,11 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
   /** Fleet FIX US-001: the one-column write behind `PATCH /fleet/repos/:id/fix-checks`. */
   async updateFixChecks(id: string, value: boolean): Promise<FleetRepoRecord> {
     return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixTrustDetectedChecks: value } }));
+  }
+
+  /** The one-column write behind `PATCH /fleet/repos/:id/fix-unprotected`. */
+  async updateFixUnprotected(id: string, value: boolean): Promise<FleetRepoRecord> {
+    return this.toDomain(await this.db.fleetRepo.update({ where: { id }, data: { fixAllowUnprotected: value } }));
   }
 
   async findById(id: string): Promise<FleetRepoRecord | null> {

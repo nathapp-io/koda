@@ -72,7 +72,8 @@ export class GitTokenBroker {
         const { token, expiresAt } = await this.github.mintReviewToken(repo.githubInstallationId, repo.name);
         return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString() };
       }
-      if (purpose === 'fix') {
+      // A repo-level, audited override (fixAllowUnprotected) skips the protection check for FIX only.
+      if (purpose === 'fix' && repo.fixAllowUnprotected !== true) {
         const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
         if (!await this.github.isBranchProtected(token, repo.owner, repo.name, repo.defaultBranch)) {
           throw new RepoCheckException('default_branch_unprotected');
