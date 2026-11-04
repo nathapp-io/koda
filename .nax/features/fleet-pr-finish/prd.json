@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T05:54:25.311Z",
+  "updatedAt": "2026-11-04T06:01:40.839Z",
   "userStories": [
     {
       "id": "US-001",
@@ -642,14 +642,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module protocol, capability and placement changes must preserve ordinary job shapes and recoverable queuing without a new authorization policy."
+        "reasoning": "Cross-module protocol, capability and placement changes must preserve ordinary job shapes and recoverable queuing without a new authorization policy.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/assign-payload.ts",
@@ -698,7 +701,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "543fcae56e0d5aa3b5b926736ea633d27722a645"
     },
     {
       "id": "US-008",
