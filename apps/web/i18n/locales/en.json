@@ -934,7 +934,7 @@
           "reason": {
             "notInstalled": "Not installed",
             "notLoggedIn": "Not logged in",
-            "notVerified": "Login not verified"
+            "notReady": "Not ready"
           }
         },
         "mode": {

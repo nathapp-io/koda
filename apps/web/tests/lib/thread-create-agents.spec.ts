@@ -67,14 +67,28 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     expect(claude.efforts).toEqual(['high', 'low'])
   })
 
-  test('AC-1 (offers only): a launchable, logged-in offer is enough even when acp was not mirrored', () => {
+  // F1 (round 2): placement admits an ACP thread only on a runner whose `acp` lists the agent, so an
+  // offer alone — even a logged-in one — must not enable an agent every eligible runner omits from `acp`.
+  test('AC-1 (offers only): a launchable, logged-in offer without an acp listing is not available', () => {
     const choices = eligibleAgents([
       runner({ threadBackends: { native: [], acp: [], acpOffers: [offer('claude', { models: ['claude-opus-4'] })] } }),
     ], 'REPO')
 
     const claude = agentOf(choices, 'claude')
-    expect(claude.available).toBe(true)
-    expect(claude.models).toEqual(['claude-opus-4'])
+    expect(claude.available).toBe(false)
+    // Launchable and logged in, so neither "not installed" nor "not logged in": the runner just does
+    // not report the agent ready.
+    expect(claude.reason).toBe('notReady')
+    expect(claude.models).toEqual([])
+  })
+
+  test('AC-1 (offers only, edge): one runner that does list it in acp is still enough', () => {
+    const choices = eligibleAgents([
+      runner({ id: 'offers-only', threadBackends: { native: [], acp: [], acpOffers: [offer('claude', { models: ['claude-opus-4'] })] } }),
+      runner({ id: 'ready', threadBackends: { native: [], acp: ['claude'], acpOffers: [offer('claude', { models: ['claude-opus-4'] })] } }),
+    ], 'REPO')
+
+    expect(agentOf(choices, 'claude')).toMatchObject({ available: true, reason: null, models: ['claude-opus-4'] })
   })
 
   test('AC-2: codex launchable but logged out on every eligible runner is unavailable with reason notLoggedIn', () => {
@@ -150,7 +164,7 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     const claude = agentOf(choices, 'claude')
     expect(claude.available).toBe(false)
     // Launchable, so not "not installed"; login unknown, so not "not logged in" either.
-    expect(claude.reason).toBe('notVerified')
+    expect(claude.reason).toBe('notReady')
     expect(claude.models).toEqual([])
   })
 

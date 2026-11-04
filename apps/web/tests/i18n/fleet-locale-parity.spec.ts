@@ -178,7 +178,7 @@ describe('Fleet locale parity (en and zh)', () => {
   test('the new-thread agent and mode keys cover exactly the values the forms render (US-011)', () => {
     const agentKeys = ['native', 'claude', 'codex', 'cursor']
     const modeKeys = ['read', 'ask', 'full']
-    const reasonKeys = ['notInstalled', 'notLoggedIn', 'notVerified']
+    const reasonKeys = ['notInstalled', 'notLoggedIn', 'notReady']
     for (const locale of [en, zh]) {
       for (const key of ['label', 'defaultModel', ...agentKeys]) {
         expect(String(at(locale, `fleet.threads.new.agent.${key}`) ?? '').trim()).not.toBe('')

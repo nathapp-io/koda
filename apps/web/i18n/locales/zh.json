@@ -934,7 +934,7 @@
           "reason": {
             "notInstalled": "未安装",
             "notLoggedIn": "未登录",
-            "notVerified": "无法确认登录状态"
+            "notReady": "未就绪"
           }
         },
         "mode": {
