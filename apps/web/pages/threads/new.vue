@@ -51,6 +51,11 @@ const chosenAgent = computed(() => agents.value.find(choice => choice.agent === 
   ?? agents.value[0])
 const models = computed(() => chosenAgent.value?.models ?? [])
 const efforts = computed(() => chosenAgent.value?.efforts ?? [])
+/**
+ * Create needs a ready agent, not a model: a native backend always has one (readiness means a runner
+ * offers a native model), while a ready ACP agent may advertise none and run on its own default.
+ */
+const canSubmit = computed(() => chosenAgent.value?.available === true)
 
 /** The project whose runners offer the models: the picked home project, else the first listed one. */
 const runnerSlug = computed(() => values.homeProject || projects.value[0]?.slug || '')
@@ -165,7 +170,7 @@ const submit = handleSubmit(async (formValues: WorkspaceThreadCreateFormValues) 
         </FormItem>
       </FormField>
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
-      <Button type="submit" :disabled="isSubmitting || models.length === 0">{{ t('fleet.threads.new.create') }}</Button>
+      <Button type="submit" :disabled="isSubmitting || !canSubmit">{{ t('fleet.threads.new.create') }}</Button>
     </form>
   </div>
 </template>

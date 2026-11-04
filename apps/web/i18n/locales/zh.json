@@ -930,9 +930,11 @@
           "claude": "Claude Code",
           "codex": "Codex",
           "cursor": "Cursor",
+          "defaultModel": "代理默认",
           "reason": {
             "notInstalled": "未安装",
-            "notLoggedIn": "未登录"
+            "notLoggedIn": "未登录",
+            "notVerified": "无法确认登录状态"
           }
         },
         "mode": {

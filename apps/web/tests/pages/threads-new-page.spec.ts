@@ -467,6 +467,31 @@ describe('US-011 AC-9, AC-10: the submitted body carries the chosen agent and mo
     m.app.unmount()
   })
 
+  // F2: a ready ACP agent may advertise no model, and the API's acp backend takes none. The form must
+  // still create the thread (the agent then uses its own default model).
+  test('F2: a model-less ready ACP agent can be submitted, posting an acp backend without a model', async () => {
+    const m = mountPage({ models: [], acp: { acp: ['claude'], acpOffers: [acpOffer('claude', { models: [], efforts: ['high'] })] } })
+    await m.settle()
+
+    // Native can start nothing here, so the form picks the ready ACP agent by itself.
+    expect(must(agentSelect(m.app), 'agent select').props.value).toBe('claude')
+    expect(must(submitButton(m.app), 'submit button').props.disabled).toBe(false)
+
+    await fillRepoFields(m.app)
+    await submitForm(m.app)
+
+    expect(m.post).toHaveBeenCalledWith('/projects/web/threads', {
+      kind: 'REPO',
+      repoId: 'r1',
+      feature: 'add-auth',
+      title: 'Auth spec',
+      maxCostUsd: 5,
+      backend: { kind: 'acp', agent: 'claude' },
+      mode: 'read',
+    })
+    m.app.unmount()
+  })
+
   test('AC-9 (edge): switching agent resets the model to the new agent’s first model and clears the effort', async () => {
     const m = mountPage({ models: ['m1'], acp: codexAcp })
     await m.settle()

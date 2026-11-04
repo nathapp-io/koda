@@ -67,6 +67,16 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     expect(claude.efforts).toEqual(['high', 'low'])
   })
 
+  test('AC-1 (offers only): a launchable, logged-in offer is enough even when acp was not mirrored', () => {
+    const choices = eligibleAgents([
+      runner({ threadBackends: { native: [], acp: [], acpOffers: [offer('claude', { models: ['claude-opus-4'] })] } }),
+    ], 'REPO')
+
+    const claude = agentOf(choices, 'claude')
+    expect(claude.available).toBe(true)
+    expect(claude.models).toEqual(['claude-opus-4'])
+  })
+
   test('AC-2: codex launchable but logged out on every eligible runner is unavailable with reason notLoggedIn', () => {
     const choices = eligibleAgents([
       runner({ id: 'a', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: false })] } }),
@@ -108,14 +118,52 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     expect(codex.models).toEqual(['gpt-5-codex', 'gpt-5-codex-mini'])
   })
 
-  test('AC-2 (edge): loggedIn null is "not probed", never read as not logged in', () => {
+  // F1: placement admits an ACP thread only when some runner's `acp` lists the agent, so readiness
+  // follows the eligible runners' `acp` lists — never the presence or absence of discovery detail.
+  test('F1: a ready runner without offers keeps the agent available even when another reports it logged out', () => {
+    const choices = eligibleAgents([
+      runner({ id: 'ready', threadBackends: { native: [], acp: ['codex'] } }),
+      runner({ id: 'logged-out', threadBackends: { native: [], acp: [], acpOffers: [offer('codex', { loggedIn: false, models: ['gpt-5-codex'] })] } }),
+    ], 'REPO')
+
+    const codex = agentOf(choices, 'codex')
+    expect(codex.available).toBe(true)
+    expect(codex.reason).toBeNull()
+    // A logged-out offer validates nothing, so it contributes no model.
+    expect(codex.models).toEqual([])
+  })
+
+  test('F1: a runner whose offer is not launchable still cannot make the agent unavailable when another is ready', () => {
+    const choices = eligibleAgents([
+      runner({ id: 'ready', threadBackends: { native: [], acp: ['cursor'] } }),
+      runner({ id: 'absent', threadBackends: { native: [], acp: [], acpOffers: [offer('cursor', { launchable: false })] } }),
+    ], 'REPO')
+
+    expect(agentOf(choices, 'cursor')).toMatchObject({ available: true, reason: null })
+  })
+
+  test('F1: loggedIn null is never confirmed readiness, and its reason is never "not logged in"', () => {
     const choices = eligibleAgents([
       runner({ threadBackends: { native: [], acp: [], acpOffers: [offer('claude', { loggedIn: null })] } }),
     ], 'REPO')
 
     const claude = agentOf(choices, 'claude')
-    expect(claude.reason).not.toBe('notLoggedIn')
+    expect(claude.available).toBe(false)
+    // Launchable, so not "not installed"; login unknown, so not "not logged in" either.
+    expect(claude.reason).toBe('notVerified')
+    expect(claude.models).toEqual([])
+  })
+
+  test('F1: an unknown-login agent that a runner does list in acp is available', () => {
+    const choices = eligibleAgents([
+      runner({ id: 'ready', threadBackends: { native: [], acp: ['claude'], acpOffers: [offer('claude', { loggedIn: true, models: ['claude-opus-4'] })] } }),
+      runner({ id: 'unknown', threadBackends: { native: [], acp: [], acpOffers: [offer('claude', { loggedIn: null, models: ['claude-sonnet-4-5'] })] } }),
+    ], 'REPO')
+
+    const claude = agentOf(choices, 'claude')
     expect(claude.available).toBe(true)
+    expect(claude.reason).toBeNull()
+    expect(claude.models).toEqual(['claude-opus-4'])
   })
 
   test('AC-1 (scope): an offline or disabled runner contributes no agent, model or effort', () => {
@@ -130,7 +178,7 @@ describe('eligibleAgents (US-011 AC-1..AC-3)', () => {
     expect(agentOf(choices, 'native')).toMatchObject({ available: false, reason: 'notInstalled', models: [] })
   })
 
-  test('AC-1 (legacy): without acpOffers the runner acp list is the readiness answer', () => {
+  test('AC-1: a runner that sends no acpOffers still answers through its acp list', () => {
     const choices = eligibleAgents([
       runner({ workspaceThreads: true, threadBackends: { native: ['m1'], acp: ['cursor'] } }),
     ], 'WORKSPACE')

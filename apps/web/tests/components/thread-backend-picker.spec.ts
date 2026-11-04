@@ -118,23 +118,60 @@ describe('BackendPicker agent select (US-011 AC-4, AC-5)', () => {
     app.setProps({ agent: 'claude' })
     await Vue.nextTick()
 
+    // The empty entry is the agent's own default (F2), then Claude Code's advertised models.
     expect(optionValues(app, must(selectNamed(app, 'thread-new-model'), 'model select')))
-      .toEqual(['claude-sonnet-4-5', 'claude-opus-4'])
+      .toEqual(['', 'claude-sonnet-4-5', 'claude-opus-4'])
     expect(optionValues(app, must(selectNamed(app, 'thread-new-effort'), 'effort select')))
       .toEqual(['', 'low', 'high'])
     app.unmount()
   })
 
-  test('AC-5 (edge): an agent offering no model shows the noBackend message instead of an empty select', () => {
+  test('AC-5 (edge): a native agent that offers no model shows the noBackend message instead of an empty select', () => {
     const app = mountPicker({
-      agents: [choice('native', { models: ['m1'] }), choice('claude', { models: [] })],
-      agent: 'claude',
+      agents: [choice('native', { models: [] }), choice('claude', { models: ['claude-opus-4'] })],
+      agent: 'native',
       model: '',
       effort: '',
     })
 
     expect(app.text()).toContain('No online enabled runner offers a model for this agent.')
     expect(selectNamed(app, 'thread-new-model')).toBeUndefined()
+    app.unmount()
+  })
+
+  // F2: an agent can be ready and still advertise no model (a successful probe may return an empty
+  // list, and the API's acp backend takes no model at all). The form must stay usable there.
+  test('F2: a ready ACP agent with no models offers the agent default and keeps its efforts', () => {
+    const app = mountPicker({
+      agents: [choice('native', { models: ['m1'] }), choice('claude', { models: [], efforts: ['low', 'high'] })],
+      agent: 'claude',
+      model: '',
+      effort: '',
+    })
+
+    expect(app.text()).not.toContain('No online enabled runner offers a model for this agent.')
+
+    const model = must(selectNamed(app, 'thread-new-model'), 'model select')
+    expect(optionValues(app, model)).toEqual([''])
+    expect(app.textOf(must(optionsOf(app, model)[0], 'default model option'))).toBe('Agent default')
+
+    const effort = must(selectNamed(app, 'thread-new-effort'), 'effort select')
+    expect(optionValues(app, effort)).toEqual(['', 'low', 'high'])
+    app.unmount()
+  })
+
+  test('F2: a ready ACP agent with models lists the default entry first, then its models', () => {
+    const app = mountPicker({
+      agents: [choice('claude', { models: ['claude-opus-4'], efforts: ['high'] })],
+      agent: 'claude',
+      model: 'claude-opus-4',
+      effort: '',
+    })
+
+    const model = must(selectNamed(app, 'thread-new-model'), 'model select')
+    expect(optionValues(app, model)).toEqual(['', 'claude-opus-4'])
+    // The effort list is offered for an ACP agent even when it advertises no models.
+    expect(optionValues(app, must(selectNamed(app, 'thread-new-effort'), 'effort select'))).toEqual(['', 'high'])
     app.unmount()
   })
 })

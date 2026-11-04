@@ -930,9 +930,11 @@
           "claude": "Claude Code",
           "codex": "Codex",
           "cursor": "Cursor",
+          "defaultModel": "Agent default",
           "reason": {
             "notInstalled": "Not installed",
-            "notLoggedIn": "Not logged in"
+            "notLoggedIn": "Not logged in",
+            "notVerified": "Login not verified"
           }
         },
         "mode": {

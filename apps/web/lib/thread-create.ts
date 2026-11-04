@@ -35,7 +35,7 @@ export type CreateThreadBody =
 export type AgentChoiceKey = 'native' | ThreadAgent
 
 /** Why an agent cannot be picked; each one has its own `fleet.threads.new.agent.reason.*` copy. */
-export type AgentUnavailableReason = 'notInstalled' | 'notLoggedIn'
+export type AgentUnavailableReason = 'notInstalled' | 'notLoggedIn' | 'notVerified'
 
 /** One option of the agent select, with the models and efforts the chosen agent offers. */
 export interface AgentChoice {
@@ -98,19 +98,28 @@ const sortedUnion = (lists: ReadonlyArray<readonly string[]>): string[] =>
 /**
  * The agents the new-thread form can offer for one scope, each with the models and efforts it adds to
  * the picker. Eligibility keeps the online/enabled/scope-capability filters the model list has always
- * used, and an agent is disabled only when no eligible runner can start it:
+ * used.
  *
- * - `notInstalled` — no eligible runner reports it launchable,
- * - `notLoggedIn` — every launchable offer reports `loggedIn: false` (`null` means "not probed", so it
- *   never counts as a logged-out runner).
+ * Readiness is the eligible runners' `acp` list and nothing else: that list is what placement admits an
+ * ACP thread against (`threadBackends.acp`), and a runner puts an agent in it only when the agent is both
+ * launchable and logged in. The `acpOffers` discovery detail therefore never decides *whether* an agent
+ * can be started — it supplies the models and efforts of a ready agent, and the reason an agent that is
+ * not ready cannot be:
  *
- * A runner that sends no `acpOffers` falls back to its `acp` list, which is its own "launchable and
- * logged in" answer (protocol US-001); its models are then unknown and the form shows none.
+ * - `notInstalled` — no eligible runner reports the agent launchable,
+ * - `notLoggedIn` — it is launchable, but every launchable offer says `loggedIn: false`,
+ * - `notVerified` — it is launchable, but no offer confirms a login (`loggedIn: null` means the probe
+ *   did not run or failed, which is never read as either a yes or a no).
+ *
+ * A runner that sends no `acpOffers` is still authoritative through its `acp` list; its models are then
+ * unknown and the form offers the agent's own default.
  */
 export function eligibleAgents(runners: readonly FleetRunnerSummary[], kind: ChatThreadKind): AgentChoice[] {
   const eligible = runners.filter(runner => runner.online && runner.enabled && scopeCapability(runner, kind))
   const offersFor = (agent: ThreadAgent): ThreadAcpOffer[] =>
     eligible.flatMap(runner => runner.threadBackends?.acpOffers?.filter(offer => offer.agent === agent) ?? [])
+  const ready = (agent: ThreadAgent): boolean =>
+    eligible.some(runner => (runner.threadBackends?.acp ?? []).includes(agent))
 
   return AGENT_CHOICE_KEYS.map((agent) => {
     if (agent === 'native') {
@@ -123,22 +132,25 @@ export function eligibleAgents(runners: readonly FleetRunnerSummary[], kind: Cha
         efforts: [...NATIVE_EFFORT_VALUES].filter(effort => effort !== ''),
       }
     }
+    // Readiness is the `acp` list (what placement admits), or an offer that confirms both launchability and
+    // a login — a runner derives that list from exactly such an offer, so the two never disagree in practice.
     const offers = offersFor(agent)
     const launchable = offers.filter(offer => offer.launchable)
-    // Legacy report (no discovery detail): `acp` lists exactly the agents a runner can start and is logged in for.
-    const ready = launchable.length === 0 && offers.length === 0
-      && eligible.some(runner => (runner.threadBackends?.acp ?? []).includes(agent))
-    const usable = launchable.filter(offer => offer.loggedIn !== false)
-    const available = launchable.length === 0 ? ready : usable.length > 0
+    // Only a confirmed login validates the model/effort list a probe reported; a logged-out or
+    // unprobed offer contributes none of it.
+    const confirmed = launchable.filter(offer => offer.loggedIn === true)
+    const available = ready(agent) || confirmed.length > 0
     const reason: AgentUnavailableReason | null = available
       ? null
-      : launchable.length > 0 ? 'notLoggedIn' : 'notInstalled'
+      : launchable.length === 0
+        ? 'notInstalled'
+        : launchable.every(offer => offer.loggedIn === false) ? 'notLoggedIn' : 'notVerified'
     return {
       agent,
       available,
       reason,
-      models: available ? sortedUnion(usable.map(offer => offer.models)) : [],
-      efforts: available ? sortedUnion(usable.map(offer => offer.efforts)) : [],
+      models: available ? sortedUnion(confirmed.map(offer => offer.models)) : [],
+      efforts: available ? sortedUnion(confirmed.map(offer => offer.efforts)) : [],
     }
   })
 }

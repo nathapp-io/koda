@@ -7,8 +7,10 @@ import type { AgentChoice } from '~/lib/thread-create'
  * The agent/model/effort picker of the new-thread forms (thread-agents-modes US-011).
  *
  * The agent select lists Native, Claude Code, Codex and Cursor from `eligibleAgents`; an agent no
- * eligible runner can start is disabled and says why ("Not installed", "Not logged in"). The model
- * and effort selects list the *chosen* agent's own values, so switching agent switches them.
+ * eligible runner can start is disabled and says why ("Not installed", "Not logged in", "Login not
+ * verified"). The model and effort selects list the *chosen* agent's own values, so switching agent
+ * switches them. An ACP agent may offer no model at all: its empty entry is the agent's default, which
+ * the create body then omits (the API takes an acp backend without a model).
  */
 const props = defineProps<{
   agents: AgentChoice[]
@@ -38,11 +40,19 @@ const agentOptions = computed(() => props.agents.map(choice => ({
   disabled: !choice.available,
 })))
 
-const modelOptions = computed(() => (chosen.value?.models ?? []).map(model => ({ value: model, label: model })))
+const modelOptions = computed(() => {
+  const models = (chosen.value?.models ?? []).map(model => ({ value: model, label: model }))
+  // An ACP agent may advertise no model at all (a successful probe can return an empty list, and the
+  // API's acp backend takes no model): the empty entry is the agent's own default.
+  if (chosen.value === undefined || chosen.value.agent === 'native') return models
+  return [{ value: '', label: t('fleet.threads.new.agent.defaultModel') }, ...models]
+})
 const effortOptions = computed(() => [
   { value: '', label: t('fleet.threads.new.effortDefault') },
   ...(chosen.value?.efforts ?? []).map(value => ({ value, label: effortLabel(value, t) })),
 ])
+/** Native needs a model id to offer anything; an ACP agent is usable on its default. */
+const hasBackendControls = computed(() => modelOptions.value.length > 0)
 </script>
 
 <template>
@@ -53,7 +63,7 @@ const effortOptions = computed(() => [
         <option v-for="option in agentOptions" :key="option.value" :value="option.value" :disabled="option.disabled">{{ option.label }}</option>
       </select>
     </div>
-    <div v-if="modelOptions.length === 0" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noBackend') }}</div>
+    <div v-if="!hasBackendControls" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noBackend') }}</div>
     <div v-else class="grid gap-4 sm:grid-cols-2">
       <div class="space-y-2">
         <Label for="thread-backend-model">{{ t('fleet.threads.new.model') }}</Label>
