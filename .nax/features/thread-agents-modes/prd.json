@@ -3,7 +3,7 @@
   "feature": "thread-agents-modes",
   "branchName": "feat/thread-agents-modes",
   "createdAt": "2026-11-24T00:00:00Z",
-  "updatedAt": "2026-11-04T15:26:10.111Z",
+  "updatedAt": "2026-11-04T16:14:10.645Z",
   "userStories": [
     {
       "id": "US-001",
@@ -530,14 +530,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New approval-gated routes authorize mutating session actions and must preserve principal, pending-request and lease fencing invariants."
+        "reasoning": "New approval-gated routes authorize mutating session actions and must preserve principal, pending-request and lease fencing invariants.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -568,7 +571,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5118927695b64b5363d8f24ea47ee3dd2934cee4"
     },
     {
       "id": "US-009",
