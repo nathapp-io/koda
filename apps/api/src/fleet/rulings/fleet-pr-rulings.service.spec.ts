@@ -10,6 +10,7 @@ describe('FleetPrRulingsService', () => {
     const order: string[] = [];
     const repo: IFleetPrRulingRepository = {
       findTarget: vi.fn(async () => { order.push('validate'); return { projectId: 'project', repoId: 'repo', command: 'RUN', outcome: 'draft', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
+      pendingForFix: vi.fn(async () => []), replaceOlderRuns: vi.fn(async () => undefined),
       latestRunForPr: vi.fn(async () => 'run'), latestRuling: vi.fn(async () => null), list: vi.fn(),
       lockTarget: vi.fn(async () => { order.push('lock'); return { projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
       replacePending: vi.fn(async () => { order.push('replace'); }),
@@ -17,7 +18,7 @@ describe('FleetPrRulingsService', () => {
     };
     const tx = { run: vi.fn(async <T>(fn: () => Promise<T>) => { order.push('tx'); return fn(); }), getClient: vi.fn(), isInTransaction: () => true };
     const audit = { record: vi.fn(async () => { order.push('audit'); expect(currentActor()).toEqual({ type: 'AGENT', id: agent.id }); }) };
-    return { repo, tx, audit, order, service: new FleetPrRulingsService(repo, tx, audit as unknown as AuditRecorder, { ensureFinishTicket: vi.fn(async () => 'ticket'), createRulingComment: vi.fn(async () => ({ id: 'comment' })) } as never) };
+    return { repo, tx, audit, order, service: new FleetPrRulingsService(repo, tx, audit as unknown as AuditRecorder, { ensureFinishTicket: vi.fn(async () => 'ticket'), createRulingComment: vi.fn(async () => ({ id: 'comment' })) } as never, {} as never) };
   };
   it('AC-10/11/12/13: normalizes, attributes, replaces and audits within the transaction', async () => {
     const { service, repo, audit, order } = setup();

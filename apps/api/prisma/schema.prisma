@@ -1055,6 +1055,7 @@ model FleetJob {
   feature            String
   planFrom           String? // repo-relative spec path, PLAN only
   reviewDecisions    Json? // Immutable dispatch-time REVIEW input
+  prRulings          Json? // Immutable FIX ruling snapshot, retained across requeue
   profiles           String[]
   maxCostUsd         Decimal   @db.Decimal(12, 4)
   bashMode           String    @default("raw") // raw | gated | escalate (S1.5 §1.6); PLAN is always raw
@@ -1130,7 +1131,7 @@ model FleetJob {
   configEdit          FleetConfigEdit?
   assistantToolCalls  AssistantToolCall[]
   runOutcomes         FleetRunOutcome[]
-  prRulings           FleetPrRuling[]
+  rulings             FleetPrRuling[]
 
   @@index([state])
   @@index([runnerId, state])

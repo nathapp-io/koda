@@ -47,7 +47,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       {} as never,
       configEdits as never,
       mockAuditRecorder,
-      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
     );
   });
 
@@ -125,7 +125,7 @@ describe('fleet jobs service dispatch audit key', () => {
     {} as never,
     {} as never,
     mockAuditRecorder,
-    { selectForReview: vi.fn().mockResolvedValue([]) } as never,
+    { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
   );
 
   const dto = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
@@ -173,7 +173,7 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
       {} as never,
       { findByJobId: vi.fn() } as never,
       mockAuditRecorder,
-      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
     );
   };
 
@@ -215,14 +215,15 @@ describe('review decisions dispatch snapshot', () => {
       appendEvent: vi.fn(), findById: vi.fn().mockResolvedValue(null),
     };
     const selector = { selectForReview: vi.fn().mockResolvedValue(decisions) };
+    const rulings = { snapshotForFix: vi.fn().mockResolvedValue({ notSent: 'head-unreadable' }) };
     const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
     const service = new FleetJobsService(repo as never,
       { placeJob: vi.fn().mockResolvedValue({ assigned: false, runnerId: null, misfits: [] }) } as never,
       { record: vi.fn() } as never, { publish: vi.fn(), event: vi.fn() } as never,
       {} as never, {} as never, { assertNotPaused: vi.fn() } as never, tx as never,
       {} as never, { resolveForDispatch: vi.fn().mockResolvedValue([]), link: vi.fn() } as never,
-      {} as never, {} as never, mockAuditRecorder, selector as never);
-    return { service, repo, selector, tx };
+      {} as never, {} as never, mockAuditRecorder, selector as never, rulings as never);
+    return { service, repo, selector, tx, rulings };
   };
   const review = { repoId: 'r', command: 'REVIEW' as const, prNumber: 42, maxCostUsd: 1 };
   it('AC-7 selects once before insertion and stores the exact snapshot', async () => {
@@ -239,14 +240,17 @@ describe('review decisions dispatch snapshot', () => {
     expect(repo.createJob.mock.calls[0][0]).not.toHaveProperty('reviewDecisions');
   });
   it('US-002 AC-2/3: FIX selects and stores the decision snapshot', async () => {
-    const { service, repo, selector, tx } = setup();
+    const { service, repo, selector, tx, rulings } = setup();
     const fix = { repoId: 'r', command: 'FIX' as const, prNumber: 42, maxCostUsd: 1 };
     await service.dispatch('u', 'p', fix);
     expect(selector.selectForReview).toHaveBeenCalledExactlyOnceWith('p', 'r');
     expect(selector.selectForReview.mock.invocationCallOrder[0]).toBeLessThan(tx.run.mock.invocationCallOrder[0]);
     expect(repo.createJob).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'FIX', feature: 'review-pr-42', reviewDecisions: decisions,
+      command: 'FIX', feature: 'review-pr-42', reviewDecisions: decisions, prRulings: { notSent: 'head-unreadable' },
     }));
+    expect(rulings.snapshotForFix).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r', provider: 'github' }), 42);
+    expect(selector.selectForReview.mock.invocationCallOrder[0]).toBeLessThan(rulings.snapshotForFix.mock.invocationCallOrder[0]);
+    expect(rulings.snapshotForFix.mock.invocationCallOrder[0]).toBeLessThan(tx.run.mock.invocationCallOrder[0]);
   });
 
   it('US-002 AC-1/8: FIX and REVIEW retain command-specific GitHub-only rejection', async () => {

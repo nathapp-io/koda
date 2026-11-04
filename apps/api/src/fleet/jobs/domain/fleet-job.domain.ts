@@ -13,6 +13,9 @@ export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 /** S6 K3 (US-004): the outcome a FIX job's snapshot may report. */
 export type FixOutcome = 'pushed' | 'nothing';
 
+export type FleetJobPrRulings = { headSha: string; rulings: { rulingId: string; item: string; ruling: string; by: string; at: string }[] }
+  | { notSent: 'head-unreadable' | 'pr-not-open' };
+
 export interface FixReady {
   markedReady: boolean;
   readyHeld?: string;
@@ -77,6 +80,7 @@ export interface FleetJobRecord {
   feature: string;
   planFrom: string | null;
   reviewDecisions?: ReviewDecision[] | null;
+  prRulings?: FleetJobPrRulings | null;
   profiles: string[];
   /** Decimal as string. */
   maxCostUsd: string;
@@ -150,6 +154,7 @@ export interface NewFleetJob {
   feature: string;
   planFrom: string | null;
   reviewDecisions?: ReviewDecision[] | null;
+  prRulings?: FleetJobPrRulings | null;
   profiles: string[];
   maxCostUsd: string;
   bashMode: BashMode;
@@ -169,7 +174,7 @@ type Mutable =
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
   | 'finishResult' | 'escalationReason' | 'exitCode' | 'workflow'
   | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq'
-  | 'configResult' | 'fixOutcome' | 'fixReady';
+  | 'configResult' | 'fixOutcome' | 'fixReady' | 'prRulings';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };

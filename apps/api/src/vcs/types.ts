@@ -37,6 +37,7 @@ export interface CreatePrParams {
  * Represents a VCS pull request status from any provider
  */
 export interface VcsPrStatus {
+  headSha?: string;
   number: number;
   state: string;
   draft: boolean;

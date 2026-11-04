@@ -16,12 +16,13 @@ import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
-  FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
+  FleetJobPrRulings, FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
   QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
 
 const toJob = (r: JobRow): FleetJobRecord => ({
   ...r,
+  prRulings: r.prRulings as unknown as FleetJobPrRulings | null,
   reviewDecisions: r.reviewDecisions as unknown as ReviewDecision[] | null,
   command: r.command as FleetJobKind,
   state: r.state as FleetJobState,
@@ -73,12 +74,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
-    const { reviewDecisions, ...rest } = data;
+    const { reviewDecisions, prRulings, ...rest } = data;
     try {
       // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
       return toJob(await this.db.fleetJob.create({
         data: {
           ...rest, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd),
+          ...(prRulings !== undefined ? { prRulings: prRulings === null ? Prisma.DbNull : (prRulings as unknown as Prisma.InputJsonValue) } : {}),
           ...(reviewDecisions !== undefined ? { reviewDecisions: reviewDecisions === null ? Prisma.DbNull : (reviewDecisions as unknown as Prisma.InputJsonValue) } : {}),
         },
       }));
@@ -148,7 +150,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord> {
-    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, fixReady, ...rest } = patch;
+    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, fixReady, prRulings, ...rest } = patch;
     const data: Prisma.FleetJobUpdateInput = {
       ...rest,
       ...(costSpentUsd !== undefined ? { costSpentUsd: new Prisma.Decimal(costSpentUsd) } : {}),
@@ -158,6 +160,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       ...(postRun !== undefined ? { postRun: postRun === null ? Prisma.DbNull : (postRun as unknown as Prisma.InputJsonValue) } : {}),
       ...(workflow !== undefined ? { workflow: workflow === null ? Prisma.DbNull : (workflow as unknown as Prisma.InputJsonValue) } : {}),
       ...(configResult !== undefined ? { configResult: configResult === null ? Prisma.DbNull : (configResult as unknown as Prisma.InputJsonValue) } : {}),
+      ...(prRulings !== undefined ? { prRulings: prRulings === null ? Prisma.DbNull : (prRulings as unknown as Prisma.InputJsonValue) } : {}),
       ...(fixReady !== undefined ? { fixReady: fixReady === null ? Prisma.DbNull : (fixReady as unknown as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };

@@ -30,7 +30,10 @@ export interface RulingJobTarget {
   prNumber: number | null;
   openItems: { id: string; kind: string }[];
 }
+export type PendingFixRuling = Pick<FleetPrRuling, 'id' | 'itemId' | 'text' | 'actorType' | 'createdAt'> & { actorName: string };
 export interface IFleetPrRulingRepository {
+  replaceOlderRuns(jobId: string): Promise<void>;
+  pendingForFix(jobId: string): Promise<PendingFixRuling[]>;
   /** Lock repo (fences job inserts), existing repo jobs and target rulings before revalidation.
    * Must be called inside the write transaction; locks last through replacement, insertion and audit. */
   lockTarget(slug: string, jobId: string): Promise<RulingJobTarget | null>;

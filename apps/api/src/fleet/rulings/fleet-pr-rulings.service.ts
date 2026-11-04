@@ -7,6 +7,8 @@ import { actorKind, type KodaPrincipal } from '../../auth/principal/koda-princip
 import { currentContext, runWithActionContext } from '../../action-context/action-context';
 import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling } from './fleet-pr-ruling.domain';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
+import { GitHubAppClient } from '../git-broker/github-app-client';
+import type { FleetRepoRef, FleetJobPrRulings } from '../jobs/domain/fleet-job.domain';
 import { parseRulingText } from './ruling-keyword';
 
 /** Sole ruling writer and eligibility boundary shared by REST and approved execution. */
@@ -17,7 +19,33 @@ export class FleetPrRulingsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly ticketEffects: FleetJobTicketEffects,
+    private readonly github: GitHubAppClient,
   ) {}
+
+  /** Dispatch-only, outside the insert transaction; forge failures never reject the FIX. */
+  async snapshotForFix(repo: FleetRepoRef, prNumber: number): Promise<FleetJobPrRulings | undefined> {
+    const runId = await this.latestRunForPr(repo.id, prNumber);
+    if (!runId) return undefined;
+    const pending = await this.repo.pendingForFix(runId);
+    if (!pending.length) return undefined;
+    try {
+      if (repo.githubInstallationId === null) return { notSent: 'head-unreadable' };
+      const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
+      const pr = await this.github.getPullRequest(token, repo.owner, repo.name, prNumber);
+      if (!pr || pr.state !== 'open') return { notSent: 'pr-not-open' };
+      if (!pr.headSha) return { notSent: 'head-unreadable' };
+      return { headSha: pr.headSha, rulings: [...pending].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, 100).map((r) => ({
+        rulingId: r.id, item: r.itemId, ruling: r.text,
+        by: `koda:${r.actorType === 'AGENT' ? 'agent' : 'user'}:${r.actorName}`.replace(/[\r\n\u2028\u2029]/g, '').slice(0, 100),
+        at: r.createdAt.toISOString(),
+      })) };
+    } catch {
+      // Deliberately do not log provider errors: they may contain the ephemeral credential.
+      return { notSent: 'head-unreadable' };
+    }
+  }
+
+  replaceOlderRuns(runJob: { id: string }): Promise<void> { return this.repo.replaceOlderRuns(runJob.id); }
 
   async ruleTarget(projectId: string, jobId: string, dto: CreateRulingInput) {
     const target = await this.repo.findTarget(projectId, jobId);

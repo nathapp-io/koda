@@ -1,3 +1,4 @@
+import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { ReviewDecisionsService } from '../../memory/review-decisions.service';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -87,6 +88,7 @@ export class FleetJobsService {
     @Inject(CONFIG_EDIT_REPOSITORY) private readonly configEdits: Pick<IConfigEditRepository, 'findByJobId'>,
     private readonly audit: AuditRecorder,
     private readonly reviewDecisions: ReviewDecisionsService,
+    private readonly prRulings: FleetPrRulingsService,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -124,11 +126,15 @@ export class FleetJobsService {
       ? await this.reviewDecisions.selectForReview(projectId, repo.id)
       : undefined;
 
+    const prRulings = input.command === FleetJobKind.FIX && dto.prNumber !== undefined
+      ? await this.prRulings.snapshotForFix(repo, dto.prNumber) : undefined;
+
     let job: FleetJobRecord;
     try {
       job = await this.txManager.run(async () => {
         if (opts.threadId && !(await this.repo.lockIdleThread(opts.threadId))) throw new ConflictAppException({}, 'threads.busy');
         const created = await this.repo.createJob({
+          ...(prRulings !== undefined ? { prRulings } : {}),
           ...(reviewDecisions !== undefined ? { reviewDecisions } : {}),
           ...input, projectId, requestedById: actorId, requestedByType: actorTypeFor(actorId),
           ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),

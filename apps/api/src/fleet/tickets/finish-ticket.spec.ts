@@ -45,7 +45,7 @@ describe('finish ticket transaction effects', () => {
     tickets.create.mockRejectedValue(conflict);
     const target = { projectId: 'p', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'advisor' }], command: 'RUN', outcome: 'draft' };
     const repo = { lockTarget: vi.fn(async () => target), findTarget: vi.fn(async () => target), latestRunForPr: vi.fn(async () => 'run'), latestRuling: vi.fn(async () => null), replacePending: vi.fn(), insert: vi.fn() };
-    const service = new FleetPrRulingsService(repo as unknown as IFleetPrRulingRepository, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, effects);
+    const service = new FleetPrRulingsService(repo as unknown as IFleetPrRulingRepository, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, effects, {} as never);
     await expect(service.create(principal, 'web', 'run', { itemId: 'D-1', text: 'confirm: test green' })).rejects.toBe(conflict);
     expect(conflict.getStatus()).toBe(409); expect(repo.insert).not.toHaveBeenCalled();
     expect(tickets.create).toHaveBeenCalledOnce();

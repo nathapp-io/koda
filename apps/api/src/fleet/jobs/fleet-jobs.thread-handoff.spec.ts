@@ -18,7 +18,7 @@ describe('FleetJobsService thread handoff dispatch', () => {
       {} as never,
       {} as never,
       mockAuditRecorder,
-      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
     );
 
     await expect(service.dispatch('u1', 'p1', {

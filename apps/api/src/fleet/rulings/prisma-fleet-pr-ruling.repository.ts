@@ -3,7 +3,7 @@ import { AbstractPrismaRepository, PrismaService, type PrismaModelDelegate } fro
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { FleetPrRuling as RulingRow, PrismaClient } from '../../generated/prisma/client';
 import { prNumberFor } from '../sync/pr-attribution.service';
-import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, RulingJobTarget } from './fleet-pr-ruling.domain';
+import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget } from './fleet-pr-ruling.domain';
 
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
@@ -88,6 +88,33 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
       if (rows.length < pageSize) return result;
     }
     throw new Error('Fleet ruling list exceeded page limit');
+  }
+
+  async pendingForFix(jobId: string): Promise<PendingFixRuling[]> {
+    const rows = await this.prisma.client.fleetPrRuling.findMany({
+      where: { jobId, state: 'pending' }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 100,
+    });
+    const agentIds = rows.filter((r) => r.actorType === 'AGENT').map((r) => r.actorId);
+    const userIds = rows.filter((r) => r.actorType === 'USER').map((r) => r.actorId);
+    const [agents, users] = await Promise.all([
+      this.prisma.client.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, slug: true }, take: 100 }),
+      this.prisma.client.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true }, take: 100 }),
+    ]);
+    return rows.map((r) => ({ ...this.toDomain(r), actorName: (r.actorType === 'AGENT'
+      ? agents.find((a) => a.id === r.actorId)?.slug : users.find((u) => u.id === r.actorId)?.name) ?? r.actorId }));
+  }
+
+  /** Called in ingest's transaction. Re-read identity here, without a JobsModule dependency. */
+  async replaceOlderRuns(jobId: string): Promise<void> {
+    const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, include: { repo: true } });
+    if (!job || job.command !== 'RUN' || !job.workflow || !job.resultPrUrl || job.repo.provider !== 'github') return;
+    const prNumber = prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl);
+    if (prNumber === null) return;
+    await this.prisma.client.fleetPrRuling.updateMany({
+      where: { repoId: job.repoId, prNumber, state: 'pending', job: { command: 'RUN', OR: [
+        { createdAt: { lt: job.createdAt } }, { createdAt: job.createdAt, id: { lt: job.id } },
+      ] } }, data: { state: 'replaced' },
+    });
   }
 
   async replacePending(jobId: string, itemId: string): Promise<void> {

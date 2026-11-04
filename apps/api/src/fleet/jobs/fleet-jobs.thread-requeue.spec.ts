@@ -29,7 +29,7 @@ describe('fleet jobs service requeue refuses a THREAD job (S5a)', () => {
       repo as never, placement as never, {} as never, { publish: vi.fn() } as never, transitions as never, {} as never,
       budgets as never, txManager as never, { countPendingByJob: vi.fn().mockResolvedValue(new Map()) } as never, { forJob: vi.fn().mockResolvedValue([]) } as never, {} as never, { findByJobId: vi.fn() } as never,
       mockAuditRecorder,
-      { selectForReview: vi.fn().mockResolvedValue([]) } as never,
+      { selectForReview: vi.fn().mockResolvedValue([]) } as never, { snapshotForFix: vi.fn().mockResolvedValue(undefined) } as never,
     );
     return { service, repo, transitions, budgets, placement };
   };

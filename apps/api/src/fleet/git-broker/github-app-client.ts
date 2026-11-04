@@ -236,6 +236,7 @@ export class GitHubAppClient {
       draft: b.draft === true,
       merged: b.merged === true,
       mergedAt: typeof b.merged_at === 'string' ? new Date(b.merged_at) : null,
+      ...(typeof obj(b.head).sha === 'string' ? { headSha: obj(b.head).sha as string } : {}),
       mergedBy: typeof mergedBy === 'string' ? mergedBy : null,
       mergeSha: typeof b.merge_commit_sha === 'string' ? b.merge_commit_sha : null,
       url: b.html_url,
