@@ -16,6 +16,7 @@ import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
+import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import type { ThreadMode } from '../common/thread-jobs';
@@ -117,6 +118,13 @@ export class ThreadsService {
   async answer(projectId: string, threadId: string, userId: string, input: AnswerQuestionDto, canOperate = false): Promise<void> {
     if (typeof input.requestId !== 'string' || input.requestId.length < 1 || input.requestId.length > 128 || typeof input.text !== 'string' || input.text.length < 1 || Buffer.byteLength(input.text, 'utf8') > 32768) throw new ValidationAppException({ reason: 'answer' }, 'threads.input');
     return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_ANSWER, input, canOperate);
+  }
+
+  /** US-008: the same `THREAD_ANSWER` command as the text answer, carrying the decision for a pending approval. */
+  async decide(projectId: string, threadId: string, userId: string, requestId: unknown, decision: unknown, canOperate = false): Promise<void> {
+    const request = validateAnswerRequestId(requestId);
+    const payload = decisionPayload(request, validateApprovalDecision(decision));
+    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_ANSWER, payload, canOperate);
   }
 
   async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {

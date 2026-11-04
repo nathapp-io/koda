@@ -18,6 +18,7 @@
   "nothingToDiscard": { "409": "Thread has nothing to discard" },
   "noSession": { "409": "Thread has no active session" },
   "noQuestion": { "409": "Thread has no pending question" },
+  "noApproval": { "409": "Thread has no pending approval for that request" },
   "sessionOtherPrincipal": { "409": "This thread's live session was started by someone else; end the session first" },
   "notRepoThread": { "409": "This action needs a repository thread" },
   "noFleetRepo": { "409": "This project has no repository, so a project thread cannot run" },

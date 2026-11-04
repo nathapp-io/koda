@@ -121,6 +121,14 @@ export class AnswerQuestionDto {
   @Allow() @ApiProperty({ minLength: 1, maxLength: 32768 }) text: string;
 }
 
+/**
+ * thread-agents-modes US-008: the body of an approval decision. The request id comes from the route, and the
+ * decision is validated by the service so an unknown value is a 400 naming `decision` rather than a whitelist 400.
+ */
+export class DecideThreadApprovalDto {
+  @Allow() @ApiProperty({ enum: ['allow', 'deny'], description: 'allow runs the pending tool, deny refuses it' }) decision: string;
+}
+
 export class CreateThreadDto {
   @Allow() @ApiProperty({ required: false, enum: ['read', 'ask', 'full'], default: 'read' }) mode?: ThreadMode;
   @Allow() @ApiProperty({ required: false, enum: ['REPO', 'PROJECT'] }) kind?: ChatThreadKind;

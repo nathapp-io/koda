@@ -37,6 +37,7 @@ import type { ChatThreadKind, ThreadAction, ThreadMode, ThreadBackend } from '..
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { threadAuditKey } from './thread-audit';
+import { readApprovalDecision } from './thread-decision';
 
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
@@ -277,10 +278,19 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (!canOperate && thread.createdById !== userId) throw new ForbiddenAppException({}, 'permissions');
+      // US-008: an answer carries either a text or a decision, and each is checked against its own pending list —
+      // a decision never satisfies a pending question, and a text answer never satisfies a pending approval.
+      const answer = payload as { requestId?: unknown; decision?: unknown };
+      const decision = type === FleetCommandType.THREAD_ANSWER ? readApprovalDecision(answer.decision) : null;
       if (type === FleetCommandType.THREAD_ANSWER) {
-        const question = thread.pendingQuestion as { requestId?: unknown } | null;
-        const requestId = (payload as { requestId?: unknown }).requestId;
-        if (!question || question.requestId !== requestId) throw new ConflictAppException({}, 'threads.noQuestion');
+        if (decision !== null) {
+          if (!readPendingApprovals(thread.pendingApprovals).some((row) => row.requestId === answer.requestId)) {
+            throw new ConflictAppException({}, 'threads.noApproval');
+          }
+        } else {
+          const question = thread.pendingQuestion as { requestId?: unknown } | null;
+          if (!question || question.requestId !== answer.requestId) throw new ConflictAppException({}, 'threads.noQuestion');
+        }
       }
       const job = await this.currentThreadJob(threadId);
       if (!current || current.id !== job?.id || job.state !== 'RUNNING' || !job.runnerId) throw new ConflictAppException({}, 'threads.noSession');
@@ -296,10 +306,14 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       await this.jobs.createCommand({ runnerId: job.runnerId, jobId: job.id, type: type as FleetCommandType, leaseEpoch: job.leaseEpoch, payload });
       const action = type === FleetCommandType.THREAD_STOP_TURN ? 'stop'
         : type === FleetCommandType.THREAD_CLOSE ? 'end-session'
-          : type === FleetCommandType.THREAD_ANSWER ? 'answer' : null;
+          : type === FleetCommandType.THREAD_ANSWER ? (decision === null ? 'answer' : 'approve') : null;
       if (action) await this.audit.record({
         key: threadAuditKey(action, scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id,
-        projectId: thread.projectId, summary: action === 'stop' ? 'stop requested' : action === 'end-session' ? 'end requested' : 'answered',
+        projectId: thread.projectId,
+        // US-008: the decision's audit entry names which way it went, so the transcript says allow or deny.
+        summary: action === 'stop' ? 'stop requested'
+          : action === 'end-session' ? 'end requested'
+            : action === 'approve' ? `decision ${decision} for ${String(answer.requestId)}` : 'answered',
       });
       runnerId = job.runnerId;
     });

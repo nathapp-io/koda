@@ -11602,6 +11602,83 @@
         ]
       }
     },
+    "/api/threads/{id}/approvals/{requestId}": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_decideApproval",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideThreadApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The decision is not allow or deny"
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
+          },
+          "404": {
+            "description": "threads.notFound when the thread is not the caller’s WORKSPACE thread"
+          },
+          "409": {
+            "description": "threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending session approval of a workspace chat thread (thread.answer: the creator, or the any-row key)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads": {
       "post": {
         "operationId": "ThreadsController_create",
@@ -12239,6 +12316,88 @@
           }
         ],
         "summary": "Answer a pending question of a chat thread (thread.answer: the creator, or the any-row key)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/approvals/{requestId}": {
+      "post": {
+        "operationId": "ThreadsController_decideApproval",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideThreadApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The decision is not allow or deny"
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
+          },
+          "409": {
+            "description": "threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending session approval of a chat thread (thread.answer: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -22764,6 +22923,22 @@
         "required": [
           "requestId",
           "text"
+        ]
+      },
+      "DecideThreadApprovalDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "description": "allow runs the pending tool, deny refuses it"
+          }
+        },
+        "required": [
+          "decision"
         ]
       },
       "CreateThreadDto": {

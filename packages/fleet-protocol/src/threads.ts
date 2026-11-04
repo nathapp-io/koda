@@ -128,7 +128,8 @@ export interface ThreadAssign {
 }
 
 export interface ThreadInputPayload { messageId: string; text: string }
-export interface ThreadAnswerPayload { requestId: string; text: string }
+/** thread-agents-modes US-008: a text answer to a pending question, or a decision on a pending approval. */
+export type ThreadAnswerPayload = { requestId: string; text: string } | { requestId: string; decision: 'allow' | 'deny' };
 
 export const THREAD_LIMITS = { messageMaxBytes: 32_768, maxNativeModels: 32, maxAcpAgents: 8, maxArchivedThreadIds: 100 } as const;
 

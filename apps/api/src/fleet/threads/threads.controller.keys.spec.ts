@@ -36,6 +36,7 @@ describe('ThreadsController route keys (US-002)', () => {
     { handler: 'stop', keys: ['thread.stop'] },
     { handler: 'endSession', keys: ['thread.end-session'] },
     { handler: 'answer', keys: ['thread.answer'] },
+    { handler: 'decideApproval', keys: ['thread.answer'] },
     { handler: 'archive', keys: ['thread.archive'] },
     { handler: 'publish', keys: ['thread.publish'] },
     { handler: 'discard', keys: ['thread.discard'] },

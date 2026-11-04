@@ -17,7 +17,7 @@ import { CurrentProject } from '../../projects/current-project.decorator';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import type { ProjectContext } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, DecideThreadApprovalDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 
@@ -213,6 +213,25 @@ export class ThreadsController {
     const outcome = await this.routeGate.run<void>({
       key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.answer, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, id, answer: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Post(':id/approvals/:requestId')
+  @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.answer')
+  @ApiOperation({ summary: 'Decide a pending session approval of a chat thread (thread.answer: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'The decision is not allow or deny' })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  @ApiResponse({ status: 409, description: 'threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal' })
+  @ApprovalGated()
+  async decideApproval(@Param('id') id: string, @Param('requestId') requestId: string, @Body() dto: DecideThreadApprovalDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const outcome = await this.routeGate.run<void>({
+      key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.approve, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, requestId, approval: dto },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

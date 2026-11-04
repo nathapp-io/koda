@@ -6,7 +6,7 @@ import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { CreateWorkspaceThreadDto } from './dto/workspace-thread.dto';
-import { AnswerQuestionDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, DecideThreadApprovalDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
 
 export const WORKSPACE_THREAD_ROUTE_VARIANTS = {
   create: 'rest:workspace-threads.create',
@@ -15,6 +15,7 @@ export const WORKSPACE_THREAD_ROUTE_VARIANTS = {
   stop: 'rest:workspace-threads.stop',
   endSession: 'rest:workspace-threads.end-session',
   answer: 'rest:workspace-threads.answer',
+  approve: 'rest:workspace-threads.approve',
   message: 'rest:workspace-threads.message',
 } as const;
 
@@ -71,6 +72,18 @@ export class WorkspaceThreadRouteCommands implements OnModuleInit {
         return { id: parseRouteInput(value, ['id']).id, answer: parseBody(AnswerQuestionDto, value.answer ?? {}) };
       },
       run: async (principal, input) => { await this.workspace.answer(principal, input.id, input.answer); return {}; },
+      toResult: (result) => result,
+      skipKeyRecheck: true,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ id: string; requestId: string; approval: DecideThreadApprovalDto }, Record<string, never>>({
+      key: 'thread.answer', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.approve,
+      parse: (input) => {
+        const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        const route = parseRouteInput(value, ['id', 'requestId']);
+        return { ...route, approval: parseBody(DecideThreadApprovalDto, value.approval ?? {}) };
+      },
+      run: async (principal, input) => { await this.workspace.decide(principal, input.id, input.requestId, input.approval.decision); return {}; },
       toResult: (result) => result,
       skipKeyRecheck: true,
     }, this.loader));

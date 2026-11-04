@@ -1,4 +1,4 @@
-export type ThreadAuditAction = 'create' | 'message' | 'archive' | 'cap' | 'stop' | 'end-session' | 'answer' | 'publish' | 'discard';
+export type ThreadAuditAction = 'create' | 'message' | 'archive' | 'cap' | 'stop' | 'end-session' | 'answer' | 'approve' | 'publish' | 'discard';
 
 /** The catalog key a thread write records under; a workspace thread's create, message and archive have their own keys. */
 export function threadAuditKey(action: ThreadAuditAction, workspace: boolean): string {
@@ -14,6 +14,8 @@ export function threadAuditKey(action: ThreadAuditAction, workspace: boolean): s
     case 'stop': return 'thread.stop';
     case 'end-session': return 'thread.end-session';
     case 'answer': return 'thread.answer';
+    // US-008: a decision is the same key's write, recorded apart from a text answer.
+    case 'approve': return 'thread.answer';
     case 'publish': return 'thread.publish';
     case 'discard': return 'thread.discard';
   }

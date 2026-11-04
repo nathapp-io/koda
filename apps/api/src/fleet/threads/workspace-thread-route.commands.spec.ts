@@ -6,7 +6,7 @@ import { WorkspaceThreadRouteCommands, WORKSPACE_THREAD_ROUTE_VARIANTS } from '.
 describe('WorkspaceThreadRouteCommands', () => {
   it('AC-7: registers the four home-scoped route commands with execution key rechecks skipped', () => {
     const registry = new ApprovalCommandRegistry();
-    const service = { create: vi.fn(), archive: vi.fn(), get: vi.fn(), updateCap: vi.fn(), stop: vi.fn(), endSession: vi.fn(), answer: vi.fn() } as unknown as WorkspaceThreadsService;
+    const service = { create: vi.fn(), archive: vi.fn(), get: vi.fn(), updateCap: vi.fn(), stop: vi.fn(), endSession: vi.fn(), answer: vi.fn(), decide: vi.fn() } as unknown as WorkspaceThreadsService;
     const commands = new WorkspaceThreadRouteCommands(registry, service, {} as ActorPrincipalLoader);
     commands.onModuleInit();
 
@@ -15,9 +15,25 @@ describe('WorkspaceThreadRouteCommands', () => {
       ['thread.stop', 'rest:workspace-threads.stop'],
       ['thread.end-session', 'rest:workspace-threads.end-session'],
       ['thread.answer', 'rest:workspace-threads.answer'],
+      ['thread.answer', 'rest:workspace-threads.approve'],
     ]) {
       expect(registry.get(key, variant)).toMatchObject({ key, variant, skipKeyRecheck: true });
     }
+  });
+
+  it('US-008: the workspace decision command parses the route ids and the body and calls decide', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'u1', actorType: 'user' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const service = { decide: vi.fn().mockResolvedValue(undefined) } as unknown as WorkspaceThreadsService;
+    new WorkspaceThreadRouteCommands(registry, service, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    const command = registry.get('thread.answer', WORKSPACE_THREAD_ROUTE_VARIANTS.approve);
+    if (!command) throw new Error('Missing workspace approve command');
+
+    await command.execute(command.parse({ id: 't1', requestId: 'r1', approval: { decision: 'deny' } }));
+
+    expect(service.decide).toHaveBeenCalledExactlyOnceWith(principal, 't1', 'r1', 'deny');
+    expect(command.toResult?.({})).toEqual({});
   });
 
   it('AC-5: registers the global workspace message command without prepare', () => {

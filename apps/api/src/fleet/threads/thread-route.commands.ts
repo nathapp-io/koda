@@ -9,7 +9,7 @@ import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
 import { PermissionService } from '../../permissions/permission.service';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, CreateThreadDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, CreateThreadDto, DecideThreadApprovalDto, SendMessageDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 
 export const THREAD_ROUTE_VARIANTS = {
@@ -22,6 +22,7 @@ export const THREAD_ROUTE_VARIANTS = {
   stop: 'rest:threads.stop',
   endSession: 'rest:threads.end-session',
   answer: 'rest:threads.answer',
+  approve: 'rest:threads.approve',
   publish: 'rest:threads.publish',
   discard: 'rest:threads.discard',
   message: 'rest:threads.message',
@@ -192,6 +193,22 @@ export class ThreadRouteCommands implements OnModuleInit {
       run: async (principal, input) => {
         const canOperate = (await this.permissions.can(principal, 'thread.answer', { projectId: input.projectId })).allowed;
         await this.threads.answer(input.projectId, input.id, principal.id, input.answer, canOperate);
+        return {};
+      },
+      toResult: (result) => result,
+    }, this.loader));
+
+    this.commands.register(routeCommand<{ slug: string; projectId: string; id: string; requestId: string; approval: DecideThreadApprovalDto }, Record<string, never>>({
+      key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.approve,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['slug', 'projectId', 'id', 'requestId']);
+        const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+        return { ...route, approval: parseBody(DecideThreadApprovalDto, value.approval ?? {}) };
+      },
+      // The same key and authority as the text answer: an approval decision steers the live turn too.
+      run: async (principal, input) => {
+        const canOperate = (await this.permissions.can(principal, 'thread.answer', { projectId: input.projectId })).allowed;
+        await this.threads.decide(input.projectId, input.id, principal.id, input.requestId, input.approval.decision, canOperate);
         return {};
       },
       toResult: (result) => result,

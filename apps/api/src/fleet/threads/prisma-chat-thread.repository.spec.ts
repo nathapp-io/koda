@@ -21,9 +21,10 @@ const row = {
  * `txManager.run` calls through; `createCommand` records what it queues. `requester` is the job's requester, which
  * permissions P1 US-002 compares against the caller before it steers a live session.
  */
-function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQuestion?: unknown; requester?: { id: string; type: string } }) {
+function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQuestion?: unknown; pendingApprovals?: unknown; requester?: { id: string; type: string } }) {
   const threadRow = {
-    id: 'T', projectId: 'P', createdById: 'U', pendingQuestion: opts.pendingQuestion ?? null, status: 'ACTIVE',
+    id: 'T', projectId: 'P', createdById: 'U', pendingQuestion: opts.pendingQuestion ?? null,
+    pendingApprovals: opts.pendingApprovals ?? null, status: 'ACTIVE',
   };
   const requester = opts.requester ?? { id: 'U', type: 'USER' };
   const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', requestedById: requester.id, requestedByType: requester.type };
@@ -120,6 +121,82 @@ describe('PrismaChatThreadRepository.command session ownership (US-002)', () => 
       await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', type, {}, true);
       expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type }));
     }
+  });
+});
+
+/**
+ * thread-agents-modes US-008: a decision payload is checked against `pendingApprovals` and a text payload against
+ * `pendingQuestion`, so neither form can answer the other's request. Both keep every other check of the command.
+ */
+describe('PrismaChatThreadRepository.command approval decisions (US-008)', () => {
+  const pendingApproval = { requestId: 'r1', tool: 'bash', summary: 'Run the test suite', expiresAt: '2026-11-24T01:00:00.000Z' };
+  const command = (repo: PrismaChatThreadRepository, payload: object, canOperate = false) =>
+    repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', payload, canOperate);
+
+  it('AC-1: queues the decision command for a pending request', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingApprovals: [pendingApproval] });
+
+    await command(repo, { requestId: 'r1', decision: 'allow' });
+
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'THREAD_ANSWER', payload: { requestId: 'r1', decision: 'allow' },
+    }));
+  });
+
+  it('AC-4: answers threads.noApproval for a request that is not pending and queues nothing', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingApprovals: [pendingApproval] });
+
+    await expect(command(repo, { requestId: 'r2', decision: 'allow' }))
+      .rejects.toMatchObject({ prefix: 'threads.noApproval', httpStatus: 409 });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-3: a decision needs no pending question and leaves one pending', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' }, pendingApprovals: [pendingApproval] });
+
+    await command(repo, { requestId: 'r1', decision: 'deny' });
+
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ payload: { requestId: 'r1', decision: 'deny' } }));
+  });
+
+  it('AC-8: a text answer for a request that is only pending approval answers threads.noQuestion', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingApprovals: [pendingApproval] });
+
+    await expect(command(repo, { requestId: 'r1', text: 'yes' }))
+      .rejects.toMatchObject({ prefix: 'threads.noQuestion', httpStatus: 409 });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: records the decision as an approve audit entry naming the decision', async () => {
+    const { repo } = commandRepo({ action: 'SESSION', pendingApprovals: [pendingApproval] });
+    const record = vi.mocked(mockAuditRecorder.record);
+    record.mockClear();
+
+    await command(repo, { requestId: 'r1', decision: 'deny' });
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'thread.answer', resourceType: 'thread', resourceId: 'T', summary: expect.stringContaining('deny'),
+    }));
+  });
+
+  it('a text answer still records the plain answer summary', async () => {
+    const { repo } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' } });
+    const record = vi.mocked(mockAuditRecorder.record);
+    record.mockClear();
+
+    await command(repo, { requestId: 'q1', text: 'yes' });
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ key: 'thread.answer', summary: 'answered' }));
+  });
+
+  it('a decision into another principal\'s live session is refused like a text answer', async () => {
+    const { repo, jobs } = commandRepo({
+      action: 'SESSION', pendingApprovals: [pendingApproval], requester: { id: 'other', type: 'USER' },
+    });
+
+    await expect(command(repo, { requestId: 'r1', decision: 'allow' }, true))
+      .rejects.toMatchObject({ prefix: 'threads.sessionOtherPrincipal', httpStatus: 409 });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
   });
 });
 
