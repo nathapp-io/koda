@@ -44,7 +44,7 @@ const onSubmit = handleSubmit(async (values) => {
     <Label :for="`ruling-reason-${itemId}`">{{ t('fleet.rulings.reason') }}</Label>
     <Input :id="`ruling-reason-${itemId}`" v-model="reason" v-bind="reasonAttrs" :disabled="isSubmitting" :aria-invalid="!!errors.reason" :aria-describedby="`ruling-error-${itemId}`" :data-testid="`ruling-reason-${itemId}`" />
     <p class="text-xs text-muted-foreground">{{ t('fleet.rulings.hint') }}</p>
-    <p v-if="errors.reason" :id="`ruling-error-${itemId}`" class="text-sm text-destructive" role="alert">{{ errors.reason }}</p>
+    <p v-if="errors.reason" :id="`ruling-error-${itemId}`" class="text-sm text-status-rejected" role="alert">{{ errors.reason }}</p>
     <Button type="submit" :disabled="isSubmitting">{{ t('fleet.rulings.submit') }}</Button>
   </form>
 </template>
