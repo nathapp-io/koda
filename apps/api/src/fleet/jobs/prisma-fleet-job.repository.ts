@@ -15,7 +15,7 @@ import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assi
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
-  ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
+  ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
   FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
   QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
@@ -36,6 +36,7 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   configResult: r.configResult as unknown as ConfigJobResult | null,
   // US-004: a `String?` column, mapped to the two outcomes the runner may report.
   fixOutcome: fixOutcomeOf(r.fixOutcome),
+  fixReady: r.fixReady as unknown as FixReady | null,
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });
@@ -147,7 +148,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord> {
-    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, ...rest } = patch;
+    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, fixReady, ...rest } = patch;
     const data: Prisma.FleetJobUpdateInput = {
       ...rest,
       ...(costSpentUsd !== undefined ? { costSpentUsd: new Prisma.Decimal(costSpentUsd) } : {}),
@@ -157,6 +158,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       ...(postRun !== undefined ? { postRun: postRun === null ? Prisma.DbNull : (postRun as unknown as Prisma.InputJsonValue) } : {}),
       ...(workflow !== undefined ? { workflow: workflow === null ? Prisma.DbNull : (workflow as unknown as Prisma.InputJsonValue) } : {}),
       ...(configResult !== undefined ? { configResult: configResult === null ? Prisma.DbNull : (configResult as unknown as Prisma.InputJsonValue) } : {}),
+      ...(fixReady !== undefined ? { fixReady: fixReady === null ? Prisma.DbNull : (fixReady as unknown as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };
     try {

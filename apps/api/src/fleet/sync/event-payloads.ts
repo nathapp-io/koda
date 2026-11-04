@@ -66,6 +66,18 @@ export function postRunStages(v: unknown): FleetJobPostRun | undefined {
 const str = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined);
 const strOrNull = (v: unknown, max: number): string | null | undefined => (v === null ? null : str(v, max));
 
+function fixReady(v: unknown): FleetJobPatch['fixReady'] | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const o = v as Obj;
+  if (typeof o.markedReady !== 'boolean') return undefined;
+  return {
+    markedReady: o.markedReady,
+    ...(typeof o.readyHeld === 'string' ? { readyHeld: o.readyHeld.slice(0, 500) } : {}),
+    ...(typeof o.replied === 'number' && Number.isInteger(o.replied) && o.replied >= 0 ? { replied: o.replied } : {}),
+    ...(typeof o.resolved === 'number' && Number.isInteger(o.resolved) && o.resolved >= 0 ? { resolved: o.resolved } : {}),
+  };
+}
+
 function httpUrl(v: unknown): string | undefined {
   const s = str(v, 500);
   if (!s) return undefined;
@@ -104,6 +116,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['postRun', postRunStages(p.postRun)],
     // US-004: a FIX job's outcome; any other value is dropped like every other bounded snapshot field.
     ['fixOutcome', p.fixOutcome === 'pushed' || p.fixOutcome === 'nothing' ? p.fixOutcome : undefined],
+    ['fixReady', fixReady(p.fixReady)],
     // D495: dormant for nax jobs (configEditFor gates on isConfigKind) — mirror() never sees the command to guard with.
     ['configResult', configResult],
   ];

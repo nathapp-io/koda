@@ -18456,6 +18456,11 @@
             "type": "string",
             "description": "A FIX job's outcome, mirrored from its snapshots (US-004)"
           },
+          "fixReady": {
+            "type": "object",
+            "nullable": true,
+            "description": "A FIX job’s ready result; null until reported."
+          },
           "stories": {
             "nullable": true,
             "description": "PRD stories in PRD order (S1b §1.2). Null on list pages (D149).",

@@ -1059,6 +1059,7 @@ model FleetJob {
   resultPrUrl        String?
   wipPush            String? // S1b §1.1: pushed | none | failed:<reason>
   fixOutcome         String? // US-004: a FIX job's outcome as the runner reported it: pushed | nothing
+  fixReady           Json? // US-001: a FIX job's PR-ready result
   stories            Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
   storiesTruncated   Boolean   @default(false)
   postRun            Json? // S2b (j) §1.3: nax post-run stage statuses {acceptance?, regression?, finish?}; null = unknown

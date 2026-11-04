@@ -159,6 +159,8 @@ export interface SnapshotEventPayload {
   resultPrUrl?: string;
   /** S6 K3: outcome of a FIX job. */
   fixOutcome?: 'pushed' | 'nothing';
+  /** Result of a FIX job's PR-ready action. */
+  fixReady?: { markedReady: boolean; readyHeld?: string; replied?: number; resolved?: number };
   /** S1b §1.1: outcome of the runner's work-in-progress push after an unfinished RUN.
    *  `pushed` | `none` | `failed:<reason>` (printable ASCII, at most 200 chars of reason). */
   wipPush?: string;

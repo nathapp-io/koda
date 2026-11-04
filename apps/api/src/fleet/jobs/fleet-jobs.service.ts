@@ -352,7 +352,7 @@ export class FleetJobsService {
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null,
             // D475, US-004: every attempt reports its own result — the config edit's, and the FIX outcome's.
-            configResult: null, fixOutcome: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            configResult: null, fixOutcome: null, fixReady: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
         await this.audit.record({ key: 'fleet.job.requeue', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `requeued from ${current.state}` });
