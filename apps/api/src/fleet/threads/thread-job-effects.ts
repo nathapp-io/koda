@@ -44,7 +44,7 @@ export class ThreadJobEffects {
     // US-008 F2: only a text answer answers the pending question. A decision shares the command type but not the
     // pending list — the two are written by independent ingest paths, so they can hold the same request id, and an
     // accepted decision must not delete a question nobody answered.
-    if (decidedThreadId === null && result === 'ok' && typeof requestId === 'string' && decided === null) {
+    if (decided === null && result === 'ok' && typeof requestId === 'string') {
       await this.clearAnsweredQuestion(command.jobId, requestId);
     }
     await this.replaceCommandPayload(command.id, { requestId });
