@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { configureCredentials as defaultConfigureCredentials, type CredentialsConfig } from '@nathapp/nax-agent';
 import { uploadWithRetry } from '../bundle/upload-bundle';
 import { ApprovalRelay } from '../approvals/approval-relay';
+import type { AcpAgentProbe } from '../capabilities/acp-agent-probe';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
@@ -57,6 +58,11 @@ export interface DaemonOptions {
   readonly selfCommand?: readonly string[];
   /** D96: tests inject a scripted nax; otherwise `createNaxCli(config.naxCommand, config.naxHome)`. */
   readonly nax?: NaxCli;
+  /**
+   * thread-agents-modes US-002: the ACP agent probe the capability report advertises. The `run` command supplies
+   * `probeAcpAgents`; every other caller gets none, and its report says `acp: []` with no `acpOffers`.
+   */
+  readonly acpProbe?: AcpAgentProbe;
   /** Fleet S5a §3: the thread session factory's `open`; tests inject a fake. Default: `ThreadSessionFactory`. */
   readonly threadSessions?: Pick<ThreadSessionFactory, 'open'>;
   /** Fleet S5a §3: nax-agent's process-wide credential config; tests inject a spy. Default: nax-agent's own. */
@@ -132,7 +138,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   (options.configureCredentials ?? defaultConfigureCredentials)(naxCredentialsConfig(config.naxHome));
   const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
   const naxMode = config.capabilities === null;   // D95: this runner asks nax; runner.json carries no capabilities block
-  const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax), journal, log);
+  const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax, options.acpProbe), journal, log);
   try {
     await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
     if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103

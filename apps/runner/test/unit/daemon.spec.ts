@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
@@ -362,10 +362,18 @@ describe('startDaemon', () => {
 });
 
 describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
-  async function probed(server: FakeServer, nax: FakeNaxCli) {
-    const s = await setup(server);
+  /** A socket dir short enough for a unix socket path wherever $TMPDIR is; removed with the file's other temps. */
+  const shortDirs: string[] = [];
+  const shortSocketDir = async (): Promise<string> => {
+    const dir = await mkdtemp(join(tmpdir(), 'x'));
+    shortDirs.push(dir);
+    return dir;
+  };
+  afterAll(async () => { await Promise.all(shortDirs.map((dir) => rm(dir, { recursive: true, force: true }))); });
+  async function probed(server: FakeServer, nax: FakeNaxCli, dirs: { socketDir?: string } = {}) {
+    const s = await setup(server, dirs);
     const config = parseRunnerConfig({
-      serverUrl: server.url, workspaceRoot: join(s.base, 'ws'), naxHome: join(s.base, 'naxhome'), jobRetentionDays: 1, socketDir: join(s.base, 's'),
+      serverUrl: server.url, workspaceRoot: join(s.base, 'ws'), naxHome: join(s.base, 'naxhome'), jobRetentionDays: 1, socketDir: dirs.socketDir ?? join(s.base, 's'),
     }, {});
     const start = (over: Partial<Parameters<typeof startDaemon>[0]> = {}) =>
       startDaemon({ fetchFn: server.fetch, home: s.home, config, identity: s.identity, tuning, nax, executorFactory: () => s.ex, ...over });
@@ -382,6 +390,8 @@ describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
     try {
       await waitFor(() => server.syncs.length >= 1);
       expect(server.syncs[0].capabilities).toMatchObject({ nax: { version: '0.83.1' }, profiles: {}, sandbox: { available: true }, executors: ['host'] });
+      // US-002: no injected ACP probe, so this report carries no offers at all.
+      expect(server.syncs[0].capabilities?.threadBackends).toEqual({ native: [], acp: [] });
       expect(nax.calls.some((c) => c.args[0] === 'trust' && c.args[c.args.length - 1] === p.config.workspaceRoot)).toBe(true);
       expect(log.lines.some((l) => l.message.includes('nax is not probed'))).toBe(false);
     } finally {
@@ -455,6 +465,26 @@ describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
     const daemon = await p.start({ tuning: { ...tuning, capabilityProbeMs: 30 } });
     try {
       await waitFor(() => nax.calls.filter((c) => c.args[0] === '--version').length >= 3);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  // thread-agents-modes US-002: the one seam the daemon adds — an ACP probe the production `run` command supplies,
+  // so a real sync advertises its agents without this host having any of them installed.
+  test('US-002 AC-14: an injected acpProbe puts its logged-in agents in the synced threadBackends, with no host login', async () => {
+    const server = fakeServer();
+    // A unix socket path is at most 100 bytes, so the socket dir sits directly in $TMPDIR: a deep TMPDIR still fits.
+    const p = await probed(server, new FakeNaxCli({ version: '0.83.1' }), { socketDir: await shortSocketDir() });
+    const offers = [
+      { agent: 'claude' as const, launchable: true, loggedIn: true, models: ['claude-sonnet-4-5'], efforts: ['high'] },
+      { agent: 'codex' as const, launchable: true, loggedIn: false, models: [], efforts: [] },
+    ];
+    const daemon = await p.start({ acpProbe: async () => offers });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      expect(server.syncs[0].capabilities?.threadBackends).toEqual({ native: [], acp: ['claude'], acpOffers: offers });
     } finally {
       await daemon.stop();
       server.stop();

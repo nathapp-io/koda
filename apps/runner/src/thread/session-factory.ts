@@ -48,7 +48,7 @@ const MAX_APPROVAL_TIMEOUT_MS = 3_600_000;
  * misses an `AgentSessionError` built from a second copy of nax-agent (a compiled bundle or a
  * duplicated install), so the code — the contract — is read structurally as well.
  */
-function agentSessionCode(error: unknown): string | undefined {
+export function agentSessionCode(error: unknown): string | undefined {
   if (error instanceof AgentSessionError) return error.code;
   if (typeof error !== 'object' || error === null) return undefined;
   const code = (error as { code?: unknown }).code;

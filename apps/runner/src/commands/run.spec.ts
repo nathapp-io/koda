@@ -7,7 +7,8 @@ import { createMemoryLogger } from '../logger';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { runCommand, type RunDeps } from './run';
 import { NaxUnavailableError } from '../nax/nax-cli';
-import type { DaemonHandle } from '../daemon/daemon';
+import { probeAcpAgents } from '../capabilities/acp-agent-probe';
+import type { DaemonHandle, DaemonOptions } from '../daemon/daemon';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -30,9 +31,11 @@ function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth';
   let reprobes = 0;
   let stoppedOnce = false;
   const log = createMemoryLogger();
+  const started: DaemonOptions[] = [];
   const deps: RunDeps = {
     env, log,
-    start: async () => {
+    start: async (options) => {
+      started.push(options);
       let resolveStopped: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void = () => undefined;
       const stoppedPromise = new Promise<'stopped' | { kind: 'protocol' | 'auth'; message: string }>((r) => { resolveStopped = r; });
       stopper(resolveStopped);
@@ -45,7 +48,7 @@ function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth';
     },
     onSignal: (signal, handler) => { handlers.push(handler); signals.set(signal, handler); },
   };
-  return { deps, handlers, signals, log, get stopped() { return stopped; }, get reprobes() { return reprobes; } };
+  return { deps, handlers, signals, log, started, get stopped() { return stopped; }, get reprobes() { return reprobes; } };
 }
 
 describe('runCommand', () => {
@@ -118,5 +121,17 @@ describe('runCommand', () => {
     const deps: RunDeps = { ...h.deps, start: async () => { throw new NaxUnavailableError('koda-runner needs nax 0.83.1 or newer (found 0.80.0)'); } };
     expect(await runCommand(home.dir, deps)).toBe(1);
     expect(h.log.lines.some((l) => l.level === 'error' && l.message === 'koda-runner needs nax 0.83.1 or newer (found 0.80.0)')).toBe(true);
+  });
+  // thread-agents-modes US-002: the production runner is the only caller that probes ACP agents, and it hands the
+  // daemon the real probe — never a stub — so a sync can advertise claude, codex and cursor.
+  test('US-002 AC-13: the run command starts the daemon with probeAcpAgents itself as its acpProbe', async () => {
+    const home = await enrolledHome();
+    const h = harness(() => undefined);
+    const finished = runCommand(home.dir, h.deps);
+    await Bun.sleep(20);
+    expect(h.started).toHaveLength(1);
+    expect(h.started[0]?.acpProbe).toBe(probeAcpAgents);
+    h.signals.get('SIGTERM')?.();
+    expect(await finished).toBe(0);
   });
 });

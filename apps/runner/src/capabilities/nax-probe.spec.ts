@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { NaxUnavailableError } from '../nax/nax-cli';
 import { FakeNaxCli, TIMED_OUT, naxError, type FakeRequirements } from '../../test/helpers/fake-nax-cli';
 import { makeTempDirs } from '../../test/helpers/tmp';
+import type { AcpAgentProbe } from './acp-agent-probe';
 import { NaxCapabilityProbe, listProfileNames } from './nax-probe';
 
 const tmp = makeTempDirs();
@@ -19,11 +20,12 @@ async function naxHome(profiles: readonly string[]): Promise<string> {
   return home;
 }
 
-function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['git', 'gh']) {
+function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['git', 'gh'], acpProbe?: AcpAgentProbe) {
   const removed: string[] = [];
   const empty = join(home, 'empty');
   const prober = new NaxCapabilityProbe({
     nax, naxHome: home, now: clock, toolWorks: async (command) => have.includes(command),
+    ...(acpProbe === undefined ? {} : { acpProbe }),
     makeEmptyDir: async () => {
       await mkdir(empty, { recursive: true });
       return { dir: empty, remove: async () => { removed.push(empty); } };
@@ -287,6 +289,60 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
     const kept = Object.keys(capabilities.profiles);
     expect(kept.length).toBeLessThan(64);
     expect(names.slice(0, kept.length)).toEqual(kept);
+  });
+});
+
+describe('NaxCapabilityProbe ACP agents (thread-agents-modes US-002)', () => {
+  const OFFERS = [
+    { agent: 'claude' as const, launchable: true, loggedIn: true, models: ['claude-sonnet-4-5'], efforts: ['high'] },
+    { agent: 'codex' as const, launchable: true, loggedIn: false, models: [], efforts: [] },
+  ];
+
+  test('AC-10: an injected probe reports its logged-in agents in acp and keeps every offer', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => OFFERS).run();
+    expect(capabilities.threadBackends).toEqual({ native: [], acp: ['claude'], acpOffers: OFFERS });
+  });
+
+  test('AC-10: an agent that is not launchable is never in acp, however logged in it claims to be', async () => {
+    const home = await naxHome([]);
+    const offers = [
+      { agent: 'cursor' as const, launchable: false, loggedIn: true, models: [], efforts: [] },
+      { agent: 'codex' as const, launchable: true, loggedIn: null, models: [], efforts: [] },
+    ];
+    const { capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], async () => offers).run();
+    expect(capabilities.threadBackends?.acp).toEqual([]);
+    expect(capabilities.threadBackends?.acpOffers).toEqual(offers);
+  });
+
+  test('AC-11: without an injected probe acp stays empty and no acpOffers key is reported', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli()).run();
+    expect(capabilities.threadBackends).toEqual({ native: [], acp: [] });
+    expect('acpOffers' in (capabilities.threadBackends ?? {})).toBe(false);
+  });
+
+  test('AC-12: a probe that throws reports no ACP agents, no acpOffers and a warning', async () => {
+    const home = await naxHome([]);
+    const failing: AcpAgentProbe = async () => {
+      throw new Error('the agent probe exploded');
+    };
+    const { capabilities, warnings } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], failing).run();
+    expect(capabilities.threadBackends).toEqual({ native: [], acp: [] });
+    expect('acpOffers' in (capabilities.threadBackends ?? {})).toBe(false);
+    expect(warnings).toEqual(['ACP agent probe failed (the agent probe exploded); no ACP agents reported']);
+  });
+
+  test('the probe and the nax scans overlap, so a slow agent does not serialise the report', async () => {
+    const home = await naxHome([]);
+    const nax = new FakeNaxCli();
+    let probedWhileNaxRan = false;
+    const { capabilities } = await probeWith(home, nax, ['git', 'gh'], async () => {
+      probedWhileNaxRan = nax.calls.length > 0;
+      return OFFERS;
+    }).run();
+    expect(probedWhileNaxRan).toBe(true);
+    expect(capabilities.threadBackends?.acp).toEqual(['claude']);
   });
 });
 
