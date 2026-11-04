@@ -97,6 +97,22 @@ test('full mode with docs only keeps docs commit message', async () => {
   expect(await git(repoDir, 'show', '-s', '--format=%s', result.sha)).toStartWith('docs(divide): spec from koda thread');
 });
 
+test('ask mode treats wildcard filenames literally and cannot commit ignored symlinks or deletions', async () => {
+  await write('src/deleted.ts', 'before\n');
+  await git(repoDir, 'add', '--', 'src/deleted.ts');
+  await git(repoDir, 'commit', '-q', '-m', 'add deleted candidate');
+  await rm(join(repoDir, 'src/deleted.ts'));
+  await write('src/*.ts', 'literal wildcard file\n');
+  await symlink('README.md', join(repoDir, 'src/link.ts'));
+
+  const result = await publish({ mode: 'ask' });
+  expect(result).toMatchObject({ ok: true, paths: ['src/*.ts'], ignored: ['src/deleted.ts', 'src/link.ts'] });
+  if (!result.ok) throw new Error('publish failed');
+  expect(await git(repoDir, 'diff-tree', '--no-commit-id', '--name-status', '-r', result.sha)).toBe('A\tsrc/*.ts');
+  expect(await git(repoDir, 'status', '--porcelain')).toContain('D src/deleted.ts');
+  expect(await git(repoDir, 'status', '--porcelain')).toContain('?? src/link.ts');
+});
+
 test('full mode reports changed symlinks as ignored', async () => {
   await symlink('README.md', join(repoDir, 'src-link.ts'));
   expect(await publish({ mode: 'full' })).toMatchObject({ ok: true, paths: [], ignored: ['src-link.ts'] });

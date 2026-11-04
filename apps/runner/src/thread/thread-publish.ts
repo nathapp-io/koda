@@ -86,14 +86,15 @@ export async function publishThreadDocs(input: PublishThreadDocsInput): Promise<
         if (updated.code !== 0) throw new Error(updated.stderr || `git update-ref failed (exit ${updated.code})`);
       }
     } else {
-      await git.ok(['add', '--', ...paths], options);
+      const literalPaths = paths.map((path) => `:(literal)${path}`);
+      await git.ok(['add', '--', ...literalPaths], options);
       const { name, email } = input.identity;
       const title = input.title.replace(/[\r\n]/g, ' ').slice(0, 200);
       const hasCodePath = paths.some((path) => !isAllowedThreadDocPath(path, input.feature));
       const message = hasCodePath
         ? `feat(${input.feature}): changes from koda thread "${title}"\n\nKoda-Thread: ${input.threadId}`
         : `docs(${input.feature}): spec from koda thread "${title}"\n\nKoda-Thread: ${input.threadId}`;
-      await git.ok(['-c', `user.name=${name}`, '-c', `user.email=${email}`, '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-q', '-m', message, '--', ...paths], {
+      await git.ok(['-c', `user.name=${name}`, '-c', `user.email=${email}`, '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-q', '-m', message, '--', ...literalPaths], {
         ...options,
         env: { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email },
       });
