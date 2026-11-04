@@ -1,3 +1,4 @@
+import { ThreadEventBus } from '../../live/thread-event-bus';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { Prisma } from '../../generated/prisma/client';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
@@ -41,7 +42,7 @@ function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQ
   const repo = new PrismaChatThreadRepository(
     prisma as never, jobs as never, txManager as never, {} as never, {} as never, notifier as never, {} as never,
     { threadsEnabled: true } as never,
-    mockAuditRecorder,
+    mockAuditRecorder, new ThreadEventBus(),
   );
   return { repo, jobs, notifier };
 }
@@ -127,7 +128,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const prisma = { client: { chatMessage: { findMany: vi.fn(findMany) } } } as never;
     return new PrismaChatThreadRepository(
       prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      mockAuditRecorder,
+      mockAuditRecorder, new ThreadEventBus(),
     );
   }
 
@@ -139,7 +140,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
         fleetJob: { findFirst: vi.fn(async () => null) },
       },
     } as never;
-    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
   }
 
   const threadRow = (over: Record<string, unknown> = {}) => ({
@@ -179,7 +180,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
         fleetJob: { findFirst: vi.fn(async () => null) },
       },
     } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
     const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
     expect(thread?.session).toEqual(session);
   });
@@ -217,7 +218,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
         fleetJob: { findFirst: vi.fn(async () => null) },
       },
     } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
     const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
     expect(thread).toMatchObject({ writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite });
   });
@@ -231,7 +232,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
       lastActivityAt: new Date(0), createdAt: new Date(0),
     };
     const prisma = { client: { chatThread: { create: vi.fn(async () => createdRow) } } } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
     const thread = await repo.create({ kind: 'REPO', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
     expect(thread).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
   });
@@ -246,7 +247,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     };
     const create = vi.fn(async () => createdRow);
     const prisma = { client: { chatThread: { create } } } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
 
     await repo.create({ kind: 'PROJECT', projectId: 'P', repoId: null, baseRef: null, feature: null, title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
     expect(create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }) });
@@ -287,7 +288,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {
     const findMany = vi.fn(async () => []);
     const prisma = { client: { chatMessage: { findMany } } } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
     await repo.messages('T', 4, 25);
     expect(findMany).toHaveBeenCalledWith({ where: { threadId: 'T', seq: { gt: 4 } }, orderBy: { seq: 'asc' }, take: 25 });
   });
@@ -311,7 +312,7 @@ describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
     const linkedFindMany = vi.fn(async () => rows);
     const projectFindMany = vi.fn(async () => projects);
     const prisma = { client: { assistantActionRequest: { findMany: linkedFindMany }, project: { findMany: projectFindMany } } } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
     return { repo, linkedFindMany, projectFindMany };
   }
 
@@ -346,7 +347,7 @@ describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
     const linkedFindMany = vi.fn(async ({ where }: { where: { thread: { projectId?: string } } }) =>
       where.thread.projectId === 'P-other' ? [actionRow()] : []);
     const prisma = { client: { assistantActionRequest: { findMany: linkedFindMany } } } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
 
     expect(await repo.pendingActions({ kind: 'project', projectId: 'P-mine' }, 'T')).toEqual([]);
   });
@@ -400,7 +401,7 @@ describe('PrismaChatThreadRepository.create on a WORKSPACE row (US-001)', () => 
 
   function repoOfCreatedRow(row: Record<string, unknown>): PrismaChatThreadRepository {
     const prisma = { client: { chatThread: { create: vi.fn(async () => row) } } } as never;
-    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
+    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder, new ThreadEventBus());
   }
 
   const createWorkspace = (repo: PrismaChatThreadRepository) => repo.create({
@@ -458,7 +459,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
     const repo = new PrismaChatThreadRepository(
       prisma as never, jobs as never, txManager as never, { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
       { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: true } as never,
-      mockAuditRecorder,
+      mockAuditRecorder, new ThreadEventBus(),
     );
     return { repo, turnCreate, projectFindUnique, repoFindUnique, anchorFindFirst, jobs };
   }
@@ -652,7 +653,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
       prisma as never, jobs as never, { run: txRun } as never,
       { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
       { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: opts.threads ?? true, runnerOfflineSec: 90 } as never,
-      mockAuditRecorder,
+      mockAuditRecorder, new ThreadEventBus(),
     );
     return { repo, store, jobs, messageCreate, commandCreate, jobCreate };
   }

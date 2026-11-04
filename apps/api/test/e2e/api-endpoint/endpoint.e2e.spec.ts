@@ -6199,6 +6199,17 @@ describeIntegration('project thread approval lifecycle', () => {
   }, 60_000);
   afterAll(async () => { await app?.close(); });
 
+  it('thread mode PATCH stores ask for its creator and rejects an invalid target', async () => {
+    const thread = data<{ id: string }>(await request(server()).post(path).set(auth(world.tokens.dev))
+      .send({ kind: 'REPO', repoId: world.repoId, feature: 'mode-change-e2e', title: 'Mode change', backend: { kind: 'native', model: 'm1' } }).expect(201));
+    const result = data<{ mode: string }>(await request(server()).patch(`${path}/${thread.id}/mode`)
+      .set(auth(world.tokens.dev)).send({ mode: 'ask' }).expect(200));
+    expect(result.mode).toBe('ask');
+    expect((await db.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).mode).toBe('ask');
+    refusal(await request(server()).patch(`${path}/${thread.id}/mode`).set(auth(world.tokens.dev))
+      .send({ mode: 'bogus' }).expect(400), 'threads.input.-2', { reason: 'mode' });
+  });
+
   it('create, cap update and archive wait, execute on approval, and refuse a keyless actor', async () => {
     const thread = { kind: 'REPO', repoId: world.repoId, feature: 'thread-approval-e2e', title: 'Gated thread', backend: { kind: 'native', model: 'm1' } };
     const approve = async (id: string) => data<{ status: string; result: { id: string; maxCostUsd: string; status: string } }>(await request(server())

@@ -63,9 +63,6 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
-  // Create constrains approval with alsoKeys; the mode route declares these in US-005.
-  'thread.mode.ask',
-  'thread.mode.full',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
 ]);

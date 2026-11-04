@@ -62,10 +62,10 @@ describeIntegration('permission contract over the booted API (US-011)', () => {
     expect(findContractViolations(declarations)).toEqual([]);
   });
 
-  // 130 after the draft PR ruling create route (fleet-pr-finish US-004); 131 after the fix-unprotected route;
+  // 130 after the draft PR ruling create route; 131 after fix-unprotected; 132 after thread mode PATCH.
   // the OpenAPI contract pins the same gated operations.
-  it('AC-12 (US-007): collects exactly 131 gated routes over the booted app', () => {
-    expect(declarations.routes.filter((route) => route.gated).length).toBe(131);
+  it('AC-12 (US-007): collects exactly 132 gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated).length).toBe(132);
   });
 
   it('AC-2: reports no permission contract violations over the booted app', () => {

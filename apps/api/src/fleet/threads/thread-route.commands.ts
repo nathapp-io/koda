@@ -1,3 +1,5 @@
+import { validateThreadMode } from './thread-mode';
+import type { ThreadMode } from '../common/thread-jobs';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
@@ -13,6 +15,7 @@ import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 export const THREAD_ROUTE_VARIANTS = {
   create: 'rest:threads.create',
   update: 'rest:threads.update',
+  mode: 'rest:threads.mode',
   archive: 'rest:threads.archive',
   plan: 'rest:threads.plan',
   run: 'rest:threads.run',
@@ -34,6 +37,19 @@ export class ThreadRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    for (const key of ['thread.mode.ask', 'thread.mode.full', 'thread.cap.update']) {
+      this.commands.register(routeCommand<{ slug: string; projectId: string; id: string; mode: ThreadMode }, Awaited<ReturnType<ThreadsService['changeMode']>>>({
+        key, variant: THREAD_ROUTE_VARIANTS.mode,
+        parse: (input) => {
+          const route = parseRouteInput(input, ['slug', 'projectId', 'id']);
+          const value = input as Record<string, unknown>;
+          return { ...route, mode: validateThreadMode(value.mode) };
+        },
+        // Rebuild the requester and re-evaluate both target and any-row authority on replay.
+        run: (principal, input) => this.threads.changeMode(input.projectId, input.id, principal, input.mode),
+        toResult: (result) => result,
+      }, this.loader));
+    }
     this.commands.register(routeCommand<{ slug: string; projectId: string; id: string; message: SendMessageDto }, Awaited<ReturnType<ThreadsService['sendMessage']>>>({
       key: 'thread.message.send', variant: THREAD_ROUTE_VARIANTS.message,
       parse: (input) => {

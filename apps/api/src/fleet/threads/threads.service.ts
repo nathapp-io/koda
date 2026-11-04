@@ -1,3 +1,4 @@
+import { threadModeKey, validateThreadMode } from './thread-mode';
 import { PermissionService } from '../../permissions/permission.service';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -87,6 +88,22 @@ export class ThreadsService {
   async updateCap(projectId: string, threadId: string, userId: string, value: unknown, canOperate = false): Promise<ChatThreadRecord> {
     if (!isMaxCostUsd(value)) throw new ValidationAppException({ reason: 'maxCostUsd' }, 'threads.input');
     return this.threads.updateCap({ kind: 'project', projectId }, threadId, userId, String(value), canOperate);
+  }
+
+  async changeMode(projectId: string, threadId: string, principal: KodaPrincipal, value: unknown): Promise<ChatThreadRecord> {
+    const mode = validateThreadMode(value);
+    if (principal.actorType === 'runner') throw new ForbiddenAppException({}, 'permissions');
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    if (thread.kind !== 'REPO' && mode !== 'read') throw new ValidationAppException({ reason: 'mode' }, 'threads.input');
+    const [anyRow, target] = await Promise.all([
+      this.permissions.can(principal, 'thread.cap.update', { projectId }),
+      this.permissions.can(principal, threadModeKey(mode), {
+        projectId, resource: { createdBy: { id: thread.createdById, type: thread.createdByType ?? 'USER' } },
+      }),
+    ]);
+    if (!target.allowed) throw new ForbiddenAppException({}, 'permissions');
+    return this.threads.changeMode(projectId, threadId, { id: principal.id, type: principal.actorType === 'agent' ? 'AGENT' : 'USER' }, mode, anyRow.allowed);
   }
 
   stop(projectId: string, threadId: string, userId: string, canOperate = false): Promise<void> {

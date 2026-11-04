@@ -141,6 +141,7 @@ export interface ChatThreadRepository {
   publish(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
+  changeMode(projectId: string, threadId: string, actor: { id: string; type: 'USER' | 'AGENT' }, mode: ThreadMode, canOperate: boolean): Promise<ChatThreadRecord>;
   updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string, canOperate?: boolean): Promise<ChatThreadRecord>;
   command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate?: boolean): Promise<void>;
   archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;

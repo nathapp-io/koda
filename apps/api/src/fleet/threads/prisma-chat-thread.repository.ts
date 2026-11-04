@@ -1,10 +1,15 @@
+import { randomUUID } from 'node:crypto';
+import { committedEffect } from '../../common/committed-effects';
+import { ThreadEventBus } from '../../live/thread-event-bus';
+import { threadModeKey } from './thread-mode';
+import threadMessages from '../../i18n/en/threads.json';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
 import { actorTypeFor, type ActorType } from '../../action-context/action-context';
@@ -61,6 +66,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly audit: AuditRecorder,
+    private readonly threadEvents: ThreadEventBus,
   ) {}
 
   async create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
@@ -191,6 +197,71 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       return this.mapThread(row, job);
     });
     return updated;
+  }
+
+  /** Mode, transcript note, audit and idle-session close are one write, with the same lock order as send. */
+  async changeMode(projectId: string, threadId: string, actor: { id: string; type: 'USER' | 'AGENT' }, mode: ThreadMode, canOperate: boolean): Promise<ChatThreadRecord> {
+    let notification: { messageId: string; runnerId: string | null } | null = null;
+    const result = await this.txManager.run(async () => {
+      const where = { id: threadId, ...scopeWhere({ kind: 'project', projectId }) };
+      const before = await this.prisma.client.chatThread.findFirst({ where });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      const assertOwner = (thread: typeof before) => {
+        if (!canOperate && (thread.createdById !== actor.id || thread.createdByType !== actor.type)) {
+          throw new ForbiddenAppException({}, 'permissions');
+        }
+      };
+      assertOwner(before);
+      const current = await this.activeThreadJob(threadId);
+      if (current) await this.jobs.lockById(current.id);
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const thread = await this.prisma.client.chatThread.findFirst({ where });
+      if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+      assertOwner(thread);
+      if (mapThreadKind(thread.kind) !== 'REPO' && mode !== 'read') throw new ValidationAppException({ reason: 'mode' }, 'threads.input');
+      const active = await this.activeThreadJob(threadId);
+      if ((current?.id ?? null) !== (active?.id ?? null)) throw new ConflictAppException({}, 'threads.busy');
+      // A no-op is harmless even during a turn; it never closes or annotates the session.
+      if (thread.mode === mode) return this.mapThread(thread, active);
+      if (active && (active.command !== 'THREAD' || active.action !== 'SESSION')) throw new ConflictAppException({}, 'threads.busy');
+      const { refusal } = await this.sendRefusalFor(thread, active);
+      if (refusal === 'turnRunning') throw new ConflictAppException({}, 'threads.turnRunning');
+      const close = active ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch }, select: { id: true } }) : null;
+      // Mode changes do not need send budget/runner eligibility, but those earlier send refusals must
+      // not hide a queued/running turn. UPLOADING and a close already sent are closing, not new turns.
+      const closing = active?.state === 'UPLOADING' || (active?.state === 'RUNNING' && close !== null);
+      if (!closing && (active?.state === 'QUEUED' || active?.state === 'ASSIGNED' || await this.prisma.client.chatMessage.findFirst({ where: { threadId, status: { in: ['pending', 'streaming'] } }, select: { id: true } }))) {
+        throw new ConflictAppException({}, 'threads.turnRunning');
+      }
+      let runnerId: string | null = null;
+      if (active?.state === 'RUNNING' && active.runnerId && !close) {
+        await this.jobs.createCommand({ runnerId: active.runnerId, jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch, payload: {} });
+        runnerId = active.runnerId;
+      }
+      const from = thread.mode;
+      const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { mode, lastActivityAt: new Date() } });
+      const displayName = actor.type === 'AGENT'
+        ? (await this.prisma.client.agent.findUnique({ where: { id: actor.id }, select: { name: true, slug: true } }))
+        : (await this.prisma.client.user.findUnique({ where: { id: actor.id }, select: { name: true, email: true } }));
+      const name = displayName?.name ?? (displayName && ('email' in displayName ? displayName.email : displayName.slug)) ?? actor.id;
+      // Persist English transcript text (also consumed by agents), resolving the actor's name at write time.
+      const content = threadMessages.modeChanged.replace('{from}', () => from).replace('{to}', () => mode).replace('{name}', () => name);
+      const seq = await allocateThreadSeq(this.prisma.client, threadId);
+      const message = await this.prisma.client.chatMessage.create({ data: { threadId, seq, role: 'system', status: 'complete', content } });
+      await this.audit.record({ key: threadModeKey(mode), resourceType: 'thread', resourceId: threadId, projectId, summary: `mode changed from ${from} to ${mode}` });
+      notification = { messageId: message.id, runnerId };
+      return this.mapThread(row, active);
+    });
+    if (notification) {
+      const { messageId, runnerId } = notification;
+      if (runnerId) this.notifier.notify(runnerId);
+      committedEffect(() => {
+        const at = new Date().toISOString();
+        this.threadEvents.publish({ id: randomUUID(), type: 'message', threadId, messageId, at });
+        this.threadEvents.publish({ id: randomUUID(), type: 'thread', threadId, at });
+      });
+    }
+    return result;
   }
 
   async command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate = false): Promise<void> {

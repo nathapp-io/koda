@@ -11826,6 +11826,87 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/mode": {
+      "patch": {
+        "operationId": "ThreadsController_changeMode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeThreadModeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mode; ask and full require a REPO thread"
+          },
+          "403": {
+            "description": "Target mode key or creator/any-row thread.cap.update authority is missing"
+          },
+          "409": {
+            "description": "threads.turnRunning or threads.busy"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a repository thread mode between turns",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads/{id}/plan": {
       "post": {
         "operationId": "ThreadsController_plan",
@@ -23115,6 +23196,22 @@
           "sendRefusal",
           "handoff",
           "pendingActions"
+        ]
+      },
+      "ChangeThreadModeDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
         ]
       },
       "PlanThreadDto": {

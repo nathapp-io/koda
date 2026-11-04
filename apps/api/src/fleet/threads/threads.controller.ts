@@ -1,3 +1,5 @@
+import { threadModeKey, validateThreadMode } from './thread-mode';
+import { ChangeThreadModeDto } from './dto/thread.dto';
 import { validateCreateThread } from './thread-input';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
@@ -106,6 +108,25 @@ export class ThreadsController {
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: 'thread.cap.update', variant: THREAD_ROUTE_VARIANTS.update, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Patch(':id/mode')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Change a repository thread mode between turns' })
+  @ApiResponse({ status: 200, type: ThreadDto })
+  @ApiResponse({ status: 400, description: 'Invalid mode; ask and full require a REPO thread' })
+  @ApiResponse({ status: 403, description: 'Target mode key or creator/any-row thread.cap.update authority is missing' })
+  @ApiResponse({ status: 409, description: 'threads.turnRunning or threads.busy' })
+  @ApprovalGated()
+  async changeMode(@Param('id') id: string, @Body() dto: ChangeThreadModeDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const mode = validateThreadMode(dto.mode);
+    const outcome = await this.routeGate.run<ChatThreadRecord>({
+      key: threadModeKey(mode), variant: THREAD_ROUTE_VARIANTS.mode, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, mode },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

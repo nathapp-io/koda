@@ -93,6 +93,10 @@ export class SendMessageResultDto {
   @ApiProperty({ nullable: true }) jobId: string | null;
 }
 
+export class ChangeThreadModeDto {
+  @Allow() @ApiProperty({ enum: ['read', 'ask', 'full'] }) mode: ThreadMode;
+}
+
 export class UpdateThreadDto {
   @Allow() @ApiProperty() maxCostUsd: number;
 }
