@@ -9,7 +9,8 @@ export function isThreadKind(command: string): command is typeof THREAD_JOB_KIND
 export const THREAD_COMMAND_TYPES = ['THREAD_INPUT', 'THREAD_ANSWER', 'THREAD_STOP_TURN', 'THREAD_CLOSE', 'THREAD_PUBLISH'] as const;
 export type ThreadCommandType = (typeof THREAD_COMMAND_TYPES)[number];
 
-export type ThreadAgent = 'claude' | 'codex';
+/** The ACP backends a runner can host a thread on (thread-agents-modes). nax-agent-acp knows more; the API admits these three. */
+export type ThreadAgent = 'claude' | 'codex' | 'cursor';
 
 /**
  * Fleet S5b §2: where a thread runs. `REPO` owns a repo checkout; `PROJECT` belongs to the project with no checkout;
@@ -22,8 +23,36 @@ export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
   | { kind: 'acp'; agent: ThreadAgent; model?: string; effort?: string };
 
-/** Runner capability report: native model ids it can serve, ACP agents it can launch. */
-export interface ThreadBackends { native: string[]; acp: ThreadAgent[] }
+/** Runner capability report: native model ids it can serve, and an offer per ACP agent it can launch (thread-agents-modes). */
+export interface ThreadBackends {
+  native: string[];
+  /** The agents that are launchable AND logged in: placement admits an `acp` thread only when this lists its agent. */
+  acp: ThreadAgent[];
+  /** Bounded discovery detail per probed agent; absent on a runner that probes none (or whose offer list is malformed). */
+  acpOffers?: ThreadAcpOffer[];
+}
+
+/**
+ * thread-agents-modes §1: what a runner found for one ACP agent. `loggedIn` is `null` when the agent was not probed
+ * or the probe failed, which is why an offer can exist for an agent that is not in `acp`.
+ */
+export interface ThreadAcpOffer {
+  agent: ThreadAgent;
+  launchable: boolean;
+  loggedIn: boolean | null;
+  models: string[];
+  efforts: string[];
+}
+
+/**
+ * An ACP model id: a native id may also carry the `[...]` option suffix nax names models with
+ * (`gpt-5.5[context=272k,reasoning=medium]`). The API mirrors this regex in thread-jobs.ts.
+ */
+export const ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@=,[\]-]{0,127}$/;
+/** An ACP effort id; the API mirrors it in thread-jobs.ts. */
+export const ACP_EFFORT_RE = /^[a-z0-9_-]{1,32}$/;
+/** Caps for one agent's discovery offer; the API mirrors them in thread-jobs.ts. */
+export const ACP_OFFER_LIMITS = { maxEfforts: 8 } as const;
 
 /** Fleet S5b §1: one koda API tool the API attaches to a THREAD ASSIGN so the runner can proxy it into the session. */
 export interface KodaToolDescriptor {

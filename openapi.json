@@ -20093,6 +20093,7 @@
           },
           "threadBackends": {
             "type": "object",
+            "description": "Thread backends: `native` model ids, `acp` agents a thread can start, and `acpOffers` discovery detail (thread-agents-modes)",
             "properties": {
               "native": {
                 "type": "array",
@@ -20103,7 +20104,49 @@
               "acp": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "cursor"
+                  ]
+                }
+              },
+              "acpOffers": {
+                "type": "array",
+                "description": "One bounded offer per probeable ACP agent; absent when the runner reports none",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "type": "string",
+                      "enum": [
+                        "claude",
+                        "codex",
+                        "cursor"
+                      ]
+                    },
+                    "launchable": {
+                      "type": "boolean"
+                    },
+                    "loggedIn": {
+                      "type": "boolean",
+                      "nullable": true,
+                      "description": "null when not probed or the probe failed"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "efforts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }

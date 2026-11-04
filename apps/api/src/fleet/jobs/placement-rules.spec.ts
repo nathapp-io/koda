@@ -1,4 +1,5 @@
 import type { ProfileNeeds, RunnerCapabilities } from '../common/protocol';
+import { parseCapabilitiesCore } from '../common/capabilities-core';
 import { MISFIT_REASONS } from '../dashboard/dashboard.types';
 import {
   EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
@@ -271,6 +272,43 @@ describe('PROJECT thread placement (US-005)', () => {
 
   it('AC-12: project_threads is a waiting reason, never permanent', () => {
     expect(PERMANENT_MISFITS.has('project_threads')).toBe(false);
+  });
+});
+
+describe('ACP thread placement on every kind (thread-agents-modes US-001)', () => {
+  // The runner's capabilities are built through the real parser, so these cases exercise the admitted agent set and
+  // the placement rule together: a runner can only advertise an agent the API accepts.
+  const report = (acp: string[]): RunnerCapabilities => parseCapabilitiesCore({
+    nax: { version: '0.83.0', protocols: ['native', 'acp'] },
+    sandbox: { available: true, probedAt: NOW.toISOString() },
+    profiles: {},
+    credentials: [cred()],
+    tools: { git: true, gh: true, glab: false },
+    executors: ['host'],
+    projectThreads: true,
+    threadBackends: { native: [], acp },
+  });
+  const acpRunner = (acp: string[]): PlacementRunner => runner({ protocolVersion: 4, threadCapacity: 2, capabilities: report(acp) });
+  const session = (agent: 'cursor' | 'claude'): PlacementJob => job({
+    command: 'THREAD', profiles: [], selectorLabels: [],
+    thread: { kind: 'PROJECT', enabled: true, action: 'SESSION', backend: { kind: 'acp', agent } },
+  });
+
+  it('AC-12: answers no misfit for a PROJECT SESSION on acp cursor when the runner advertises cursor', () => {
+    expect(misfit(session('cursor'), acpRunner(['cursor']), EMPTY_LOAD)).toBeNull();
+  });
+
+  it('AC-13: answers thread_backend for the same job on a runner advertising claude only', () => {
+    expect(misfit(session('cursor'), acpRunner(['claude']), EMPTY_LOAD)).toBe('thread_backend');
+  });
+
+  it('AC-13: answers thread_backend when the runner advertises no ACP agent at all', () => {
+    expect(misfit(session('cursor'), acpRunner([]), EMPTY_LOAD)).toBe('thread_backend');
+  });
+
+  it('AC-12 control: the same runner fits the agent it does advertise', () => {
+    // Without this control the two cases above would also pass on a rule that refused every ACP job.
+    expect(misfit(session('claude'), acpRunner(['claude']), EMPTY_LOAD)).toBeNull();
   });
 });
 

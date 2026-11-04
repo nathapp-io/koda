@@ -1,9 +1,9 @@
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (fleet S5a); thread-jobs.spec.ts pins them equal. */
-import type { ChatThreadKind, ThreadCommandType } from '@nathapp/fleet-protocol';
+import type { ChatThreadKind, ThreadAgent, ThreadCommandType } from '@nathapp/fleet-protocol';
 
 export type {
   ChatThreadKind, ProjectRepoAssign, ProjectRepoUnavailable,
-  ThreadAction, ThreadAgent, ThreadAnswerPayload, ThreadAssign, ThreadBackend, ThreadBackends, ThreadCommandType,
+  ThreadAction, ThreadAcpOffer, ThreadAgent, ThreadAnswerPayload, ThreadAssign, ThreadBackend, ThreadBackends, ThreadCommandType,
   ThreadInputPayload, ThreadSkill, ThreadSkillSource,
 } from '@nathapp/fleet-protocol';
 
@@ -28,3 +28,13 @@ export const PROJECT_CODE_LIMITS = { maxRepos: 10, maxUnavailable: 50 } as const
 
 /** A native model id: starts alphanumeric, then letters, digits and `._:/@-`, at most 128 characters. */
 export const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
+
+/** Mirror of the package's ACP_MODEL_ID_RE (thread-agents-modes); thread-jobs.spec.ts pins them equal. */
+export const ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@=,[\]-]{0,127}$/;
+/** Mirror of the package's ACP_EFFORT_RE; thread-jobs.spec.ts pins them equal. */
+export const ACP_EFFORT_RE = /^[a-z0-9_-]{1,32}$/;
+/** Mirror of the package's ACP_OFFER_LIMITS; thread-jobs.spec.ts pins them equal. */
+export const ACP_OFFER_LIMITS = { maxEfforts: 8 } as const;
+
+/** The ACP agents the API admits, mirroring the package's `ThreadAgent` union (thread-agents-modes US-001). */
+export const THREAD_AGENTS: readonly ThreadAgent[] = ['claude', 'codex', 'cursor'];

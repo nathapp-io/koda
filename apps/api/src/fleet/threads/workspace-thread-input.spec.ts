@@ -5,7 +5,6 @@ describe('workspace input', () => {
   it.each([
     ['AC-1', { kind: 'PROJECT' }, 'kind'],
     ['AC-2', { repoId: 'r1' }, 'workspaceFields'],
-    ['AC-3', { backend: { kind: 'acp', agent: 'claude' } }, 'backend'],
     ['AC-4', { homeProject: 42 }, 'homeProject'],
     ['feature', { feature: '' }, 'workspaceFields'],
     ['baseRef', { baseRef: 'main' }, 'workspaceFields'],
@@ -14,6 +13,7 @@ describe('workspace input', () => {
     ['title', { title: '\n' }, 'title'],
     ['cost', { maxCostUsd: 0 }, 'maxCostUsd'],
     ['backend extras', { backend: { kind: 'native', secret: true } }, 'backend'],
+    ['unknown agent', { backend: { kind: 'acp', agent: 'gemini' } }, 'backend'],
     ['order', { kind: 'REPO', repoId: 'r', homeProject: 4, title: '' }, 'kind'],
   ])('%s rejects with the documented reason', (_name, over, reason) => {
     try { validateCreateWorkspaceThread(raw(over)); throw new Error('accepted invalid input'); }
@@ -21,5 +21,11 @@ describe('workspace input', () => {
   });
   it('normalizes null fields and defaults', () => {
     expect(validateCreateWorkspaceThread(raw({ homeProject: null, repoId: null, feature: null, baseRef: null }))).toEqual({ kind: 'WORKSPACE', title: 't', backend: { kind: 'native' }, maxCostUsd: '5' });
+  });
+  it('AC-11: accepts an ACP backend on a WORKSPACE thread', () => {
+    expect(validateCreateWorkspaceThread(raw({ backend: { kind: 'acp', agent: 'claude' } })))
+      .toMatchObject({ kind: 'WORKSPACE', backend: { kind: 'acp', agent: 'claude' } });
+    expect(validateCreateWorkspaceThread(raw({ backend: { kind: 'acp', agent: 'cursor', effort: 'high' } })))
+      .toMatchObject({ backend: { kind: 'acp', agent: 'cursor', effort: 'high' } });
   });
 });

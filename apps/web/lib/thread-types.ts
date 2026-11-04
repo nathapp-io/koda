@@ -15,10 +15,13 @@
  */
 export type ChatThreadKind = 'REPO' | 'PROJECT' | 'WORKSPACE'
 
+/** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadAgent`): the ACP backends a runner can host. */
+export type ThreadAgent = 'claude' | 'codex' | 'cursor'
+
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadBackend`). */
 export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
-  | { kind: 'acp'; agent: 'claude' | 'codex'; model?: string; effort?: string }
+  | { kind: 'acp'; agent: ThreadAgent; model?: string; effort?: string }
 
 /** The skills the thread was created with (skill-catalog.domain.ts `ThreadSkillSource`). */
 export interface ThreadSkillSource {
@@ -181,10 +184,24 @@ export type ThreadLiveEvent = { id: string; threadId: string; at: string } & (
   | { type: 'thread' }
 )
 
+/**
+ * One ACP agent's discovery offer (runner-summary.dto.ts `ThreadAcpOffer`, thread-agents-modes). `loggedIn` is null
+ * when the agent was not probed or its probe failed; a not-logged-in agent is still launchable but absent from `acp`.
+ */
+export interface ThreadAcpOffer {
+  agent: ThreadAgent
+  launchable: boolean
+  loggedIn: boolean | null
+  models: string[]
+  efforts: string[]
+}
+
 /** Runner capability report as the web sees it (runner-summary.dto.ts). */
 export interface RunnerThreadBackends {
   native: string[]
-  acp: string[]
+  acp: ThreadAgent[]
+  /** Absent when the runner reports no offers (or its offer list was malformed). */
+  acpOffers?: ThreadAcpOffer[]
 }
 
 export type SessionLabel = 'starting' | 'closing' | 'live' | 'failed' | 'closed' | 'none'

@@ -1,5 +1,5 @@
 import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
-import { MODEL_ID_RE, THREAD_LIMITS, type ThreadAgent, type ThreadBackends } from './thread-jobs';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, ACP_OFFER_LIMITS, MODEL_ID_RE, THREAD_AGENTS, THREAD_LIMITS, type ThreadAcpOffer, type ThreadAgent, type ThreadBackends } from './thread-jobs';
 
 export const MAX_CAPABILITIES_BYTES = 65_536;
 /** #161: bounded names (same rule as dispatch profiles, Task 11) and bounded collections. */
@@ -61,11 +61,49 @@ function parseProfile(name: string, v: unknown): ProfileNeeds {
   };
 }
 
-const THREAD_AGENTS: readonly ThreadAgent[] = ['claude', 'codex'];
+/** Exactly these keys on one discovery offer; anything else is a malformed entry. */
+const ACP_OFFER_KEYS = new Set(['agent', 'launchable', 'loggedIn', 'models', 'efforts']);
+const THREAD_BACKENDS_KEYS = new Set(['native', 'acp', 'acpOffers']);
 
-/** Fleet S5a §3: strict like approvals and configJobs. Exactly the keys native and acp; both arrays unique and bounded. */
+/** One offer, or null when any field is malformed (the caller drops the whole list). */
+function parseAcpOffer(v: unknown): ThreadAcpOffer | null {
+  if (!isObj(v) || Object.keys(v).some((k) => !ACP_OFFER_KEYS.has(k))) return null;
+  const offer = v as Obj;
+  if (!THREAD_AGENTS.includes(offer.agent as ThreadAgent) || !isBool(offer.launchable)) return null;
+  if (offer.loggedIn !== null && !isBool(offer.loggedIn)) return null;
+  const { models, efforts } = offer;
+  if (!Array.isArray(models) || models.length > THREAD_LIMITS.maxNativeModels) return null;
+  if (!models.every((id) => typeof id === 'string' && ACP_MODEL_ID_RE.test(id))) return null;
+  if (!Array.isArray(efforts) || efforts.length > ACP_OFFER_LIMITS.maxEfforts) return null;
+  if (!efforts.every((effort) => typeof effort === 'string' && ACP_EFFORT_RE.test(effort))) return null;
+  return {
+    agent: offer.agent as ThreadAgent,
+    launchable: offer.launchable as boolean,
+    loggedIn: offer.loggedIn as boolean | null,
+    models: [...(models as string[])],
+    efforts: [...(efforts as string[])],
+  };
+}
+
+/**
+ * thread-agents-modes §1: a malformed offer list is dropped, never the report it travels in — the runner still says
+ * which agents it can host, and the picker simply has nothing to offer for them. Answers null for "nothing usable".
+ */
+export function parseAcpOffers(v: unknown): ThreadAcpOffer[] | null {
+  if (!Array.isArray(v) || v.length > THREAD_LIMITS.maxAcpAgents) return null;
+  const offers: ThreadAcpOffer[] = [];
+  for (const entry of v) {
+    const offer = parseAcpOffer(entry);
+    if (!offer) return null;
+    offers.push(offer);
+  }
+  // Each agent appears at most once: two offers for one agent would make the picker pick arbitrarily.
+  return new Set(offers.map((offer) => offer.agent)).size === offers.length ? offers : null;
+}
+
+/** Fleet S5a §3: strict like approvals and configJobs. Exactly the keys native, acp and the optional acpOffers. */
 function parseThreadBackends(v: unknown): ThreadBackends {
-  if (!isObj(v) || Object.keys(v).length !== 2 || !Array.isArray(v.native) || !Array.isArray(v.acp)) fail('threadBackends');
+  if (!isObj(v) || Object.keys(v).some((key) => !THREAD_BACKENDS_KEYS.has(key)) || !Array.isArray(v.native) || !Array.isArray(v.acp)) fail('threadBackends');
   const native = v.native as unknown[];
   const acp = v.acp as unknown[];
   if (
@@ -76,7 +114,12 @@ function parseThreadBackends(v: unknown): ThreadBackends {
     acp.length > THREAD_LIMITS.maxAcpAgents || new Set(acp).size !== acp.length ||
     !acp.every((agent) => THREAD_AGENTS.includes(agent as ThreadAgent))
   ) fail('threadBackends');
-  return { native: [...(native as string[])], acp: [...(acp as ThreadAgent[])] };
+  const acpOffers = v.acpOffers === undefined ? null : parseAcpOffers(v.acpOffers);
+  return {
+    native: [...(native as string[])],
+    acp: [...(acp as ThreadAgent[])],
+    ...(acpOffers ? { acpOffers } : {}),
+  };
 }
 
 const CREDENTIAL_KEYS = new Set(['providerId', 'available', 'stored', 'exec', 'ambient']);
