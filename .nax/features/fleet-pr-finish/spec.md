@@ -165,7 +165,7 @@ jobId, dto)`, which in one transaction marks the `pending` ruling of the same
 `FLEET_RULING_ROUTE_VARIANTS = { create: 'rest:fleet.job.rule' } as const` in `fleet-ruling-route.commands.ts`.
 `latestRunForPr(repoId, prNumber)` loads the repo's RUN jobs whose `resultPrUrl` ends with `/pull/<prNumber>`,
 newest `createdAt` first, and answers the first whose `resultPrUrl` gives that PR number through `prNumberFor`.
-A fifth pre-gate check refuses an item whose latest ruling is `applied` (409 `fleet.rulings.settled`): nax already
+After the text-parse check, one more pre-gate check refuses an item whose latest ruling is `applied` (409 `fleet.rulings.settled`): nax already
 settled it.
 `fleet.job.rule` is a new catalog key (scope project, inventory row `['project']`); the `fleet.job.*` glob grants it
 to developer, `*` to project-admin, admin and owner. Its derived approval is approvable, floor `none`, default `none`.
@@ -189,7 +189,8 @@ rulingId, item: itemId, ruling: text, by, at: createdAt ISO }`, at most 100 (the
 wait for the next FIX, since nax refuses a file of more than 100); a closed or missing PR gives `{ notSent:
 'pr-not-open' }`; a thrown read gives `{ notSent: 'head-unreadable' }`. `by` is `koda:agent:<agent slug>` or
 `koda:user:<user name>`, newlines removed, clipped to 100 characters. When a RUN job's ingest writes a `workflow`
-with a PR, every `pending` ruling of an older RUN for the same `(repoId, prNumber)` becomes `replaced`.
+with a PR, every `pending` ruling of an older RUN for the same `(repoId, prNumber)` becomes `replaced`
+(`FleetPrRulingsService.replaceOlderRuns(runJob)`, called from `BundleIngestService.write`).
 `buildAssignPayload` copies `prRulings` without `rulingId` into `review.rulings` for a FIX. Placement:
 `toPlacementJob` sets `needsBotRulings` and `firstMisfit` answers `bot_rulings` for it on a runner whose
 capabilities lack `botRulings`. Module wiring: `FleetRulingsModule` reads FIX and RUN jobs through its own
@@ -634,6 +635,7 @@ rulings <jobId>` lists rulings; `koda fleet job rule <jobId> <itemId> <text>` re
 - `apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts` — the catalog lengths 23 (REPO, PROJECT) and 24 (WORKSPACE) become 25 and 26; the WORKSPACE `.at(-1)` check changes from `koda_cancel_job` to `koda_rule_pr_item` (the new write descriptor is appended last to `FLEET_WRITE_TOOL_DESCRIPTORS`, the new read descriptor last to `FLEET_TOOL_DESCRIPTORS`); the slice before the write descriptors keeps `['koda_get_action','koda_add_comment']`; the fleet-write description phrase checks apply to `koda_rule_pr_item` unchanged.
 - `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts` — `MCP_DESCRIPTIONS` gains `koda_rule_pr_item`.
 - `apps/api/src/fleet/assistant/assistant.module.ts` — imports `FleetRulingsModule` and lists the new tool group class.
+- `apps/api/src/fleet/assistant/commands/assistant-tool-commands.ts` — constructor gains the new ruling tool group as an ordering dependency, like the four existing write-tool groups; behaviour unchanged.
 - `apps/api/src/fleet/assistant/assistant.module.spec.ts` — "registers exactly nine write commands": `commandSamples` gains a `fleet.job.rule` sample (`{ jobId: 'j1', itemId: 'D-1', text: 'confirm: ok' }`) and the write-command set becomes ten; the descriptor-name check against `KODA_TOOL_DESCRIPTORS` gains both new names.
 - `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts` — `WRITE_TOOLS` and `MCP_DESCRIPTION_TOOLS` gain `koda_rule_pr_item`, so the `MCP_DESCRIPTIONS` key-set equality holds at ten write tools.
 
@@ -668,7 +670,7 @@ rulings <jobId>` lists rulings; `koda fleet job rule <jobId> <itemId> <text>` re
 - US-006 -> US-007: `buildAssignPayload` reads `job.prRulings` exactly as US-006 stores it.
 - US-007 -> US-008: `review.rulings` items carry exactly `{ item, ruling, by, at }`, which the runner writes unchanged into nax's file.
 - US-006 -> US-009: `recordResults` maps items through `job.prRulings.rulings[].rulingId`, so only rulings sent with that FIX change.
-- US-004 -> US-010, US-012, US-013: the tools, the web form and the CLI reach `FleetPrRulingsService` through the ruling route or the route command; none re-implements `parseRulingText`.
+- US-004 -> US-010, US-012, US-013: the tools call `FleetPrRulingsService.ruleTarget` and `create` directly from the tool's execute path as the actor (gated once by the assistant tool command adapter); the web form and the CLI go through the ruling route; none re-implements `parseRulingText`.
 - API stories -> US-011, US-012: the web reads `fixReady`, the rulings list and the misfit reason from the API DTOs.
 
 ## Acceptance Criteria

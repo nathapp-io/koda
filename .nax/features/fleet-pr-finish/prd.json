@@ -1,0 +1,1148 @@
+{
+  "project": "koda",
+  "feature": "fleet-pr-finish",
+  "branchName": "feat/fleet-pr-finish",
+  "createdAt": "2026-11-22T00:00:00.000Z",
+  "updatedAt": "2026-11-04T04:08:43.553Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Store the fix ready result on a FIX job",
+      "description": "**Goal** — Persist and expose a FIX job's ready result without changing fixOutcome or verdict semantics.\n\n**Motivation** — A FIX job records only `fixOutcome` (`pushed` / `nothing`) and `resultSha`.\n\n**Approach** — The runner's `readFixState` reads `bot-state.json` once: `pushedSha` (40 hex), `markedReady` (boolean), `readyHeld` (string, clipped to 500 characters), `replied`, `resolved` (non-negative integers). `fixReady` is null when `markedReady` is absent; otherwise `{ markedReady, readyHeld?, replied?, resolved? }`. `judge` adds `fixReady` to the snapshot next to `fixOutcome`. The API's `mirror` keeps a `fixReady` whose `markedReady` is boolean, drops a non-string `readyHeld` and non-integer counts, clips `readyHeld` to 500.\n\n**Scope** — In: API/protocol storage half of that design: add `FleetJob.fixReady Json?` through migration `20261122090000_fleet_job_fix_ready`; map JSON and Prisma.DbNull in repository reads/updates, domain record/patch and nullable DTO, retaining fixReady on list summaries. Reset it next to fixOutcome on requeue. Add the type-only protocol field and regenerate root OpenAPI and CLI client with `bun run generate`. Out: runner state-file reading and final snapshot production (US-002), ruling records and dispatch snapshots (US-003/US-006), ticket comments (US-009), web and CLI formatting (US-011/US-013).\n\n**Interface** — `SnapshotEventPayload` target: `fixReady?: { markedReady: boolean; readyHeld?: string; replied?: number; resolved?: number }`. `FleetJobRecord` / `FleetJobPatch` target: `fixReady?: FixReady | null`. `FleetJobDto` gains `fixReady` (nullable). `mirror(p)` also maps a valid `p.fixReady` to the patch. Exercise the existing private mirror through `interpretEvent('snapshot', payload)`. Missing/invalid fixReady omits the patch field rather than clearing a prior value; optional counts are non-negative integers.\n\nUse the existing event-payload, repository, DTO and requeue tests plus the new fix-ready unit spec; integration cases must round-trip real persisted snapshots, GET and requeue outside the sandbox.",
+      "acceptanceCriteria": [
+        "[unit] mirror of a snapshot with fixReady: { markedReady: true, replied: 2, resolved: 1 } returns a patch whose fixReady equals that object.",
+        "[unit] mirror of a snapshot with fixReady: { markedReady: false, readyHeld: 'CI failure: check:e2e' } returns a patch whose fixReady keeps readyHeld.",
+        "[unit] mirror of a snapshot whose fixReady.markedReady is the string 'yes' returns a patch without fixReady.",
+        "[unit] mirror of a snapshot whose fixReady.replied is -1 returns a fixReady without replied.",
+        "[unit] mirror of a snapshot whose fixReady.readyHeld is a number returns a fixReady without readyHeld.",
+        "[unit] mirror of a fixReady whose readyHeld is 600 characters returns a readyHeld of 500 characters.",
+        "[unit] mirror of a snapshot without fixReady returns a patch without the fixReady key, so an earlier value is kept.",
+        "[integration] After a FIX job's snapshot with fixReady: { markedReady: true } is applied, GET /projects/:slug/fleet/jobs/:id answers fixReady: { markedReady: true }.",
+        "[integration] GET /projects/:slug/fleet/jobs/:id of a RUN job answers fixReady: null.",
+        "[integration] POST /projects/:slug/fleet/jobs/:id/requeue of a FIX job with a stored fixReady leaves the requeued job with fixReady: null."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "protocol",
+        "persistence"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive nullable field across established protocol, persistence, mirror and DTO seams; no new authorization or execution abstraction."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/sync/event-payloads.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261122090000_fleet_job_fix_ready/migration.sql",
+        "apps/api/src/fleet/sync/event-payloads.fix-ready.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "mirror drops a fractional or negative resolved value while retaining markedReady and any valid replied value.",
+        "FleetJobDto.summary returns the stored fixReady object rather than nulling it with workflow and other large detail fields."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "packages/fleet-protocol/src/index.ts",
+          "reason": "`SnapshotEventPayload` gains `fixReady?: { markedReady: boolean; readyHeld?: string; replied?: number; resolved?: number }`; types only."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetJob` gains `fixReady Json?`."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/event-payloads.ts",
+          "reason": "`mirror` maps a valid `fixReady` into the patch."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "`FixReady` type; `FleetJobRecord` and `FleetJobPatch` gain `fixReady`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "`toDomain` and `update` map `fixReady` (`Prisma.DbNull` for null)."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "the requeue reset adds `fixReady: null` next to `fixOutcome: null`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+          "reason": "`FleetJobDto` gains nullable `fixReady`; the list variant keeps it."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with `bun run generate` for `FleetJobDto.fixReady`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Runner reads the fix ready result",
+      "description": "**Goal** — Read nax's FIX ready result once and report it with the existing FIX snapshot.\n\n**Motivation** — A FIX job records only `fixOutcome` (`pushed` / `nothing`) and `resultSha`.\n\n**Approach** — The runner's `readFixState` reads `bot-state.json` once: `pushedSha` (40 hex), `markedReady` (boolean), `readyHeld` (string, clipped to 500 characters), `replied`, `resolved` (non-negative integers). `fixReady` is null when `markedReady` is absent; otherwise `{ markedReady, readyHeld?, replied?, resolved? }`. `judge` adds `fixReady` to the snapshot next to `fixOutcome`. The API's `mirror` keeps a `fixReady` whose `markedReady` is boolean, drops a non-string `readyHeld` and non-integer counts, clips `readyHeld` to 500.\n\n**Scope** — In: replace readPushedSha in verdict/fix-result.ts and callers with readFixState, carry fixReady in HostExecutor.readFixOutcome/job-executor and append a non-null value in JobRun.judge. Missing, unreadable, invalid JSON or symlink state is non-fatal and leaves outcome unchanged; absent markedReady yields no snapshot fixReady field. Preserve PR-specific stdout parsing, pushedSha validation, realpath containment, O_NOFOLLOW, single read and handle cleanup. Out: API persistence/reset (US-001), ruling files/argv/probe (US-008), client rendering (US-011/US-013).\n\n**Interface** — `readFixState(logPath): Promise<FixState | null>` with `FixState { pushedSha: string | null; fixReady: FixReady | null }`; `FixOutcome` gains the optional `readonly fixReady?: FixReady | null`. `readPushedSha` is replaced, not left as a second state read.\n\nMove existing readPushedSha tests to assert readFixState.pushedSha without changing their meaning. Add temp-file/symlink tests in fix-result.fix-ready.spec.ts, update the host-executor exact outcome for a state without ready fields to include fixReady:null, and extend JobRun snapshots only where the fake outcome reports ready fields. The exit code must never become the verdict source.",
+      "acceptanceCriteria": [
+        "[unit] readFixState of a bot-state.json with pushedSha of 40 hex, markedReady: true, replied: 3, resolved: 2 returns { pushedSha, fixReady: { markedReady: true, replied: 3, resolved: 2 } }.",
+        "[unit] readFixState of a state with markedReady: false and readyHeld: 'PR head changed since this execution' returns that readyHeld in fixReady.",
+        "[unit] readFixState of a state without markedReady returns fixReady: null and keeps a valid pushedSha.",
+        "[unit] readFixState of a state whose pushedSha is not 40 hex returns pushedSha: null.",
+        "[unit] readFixState of a missing bot-state.json returns null.",
+        "[unit] readFixState of a bot-state.json holding invalid JSON returns null.",
+        "[unit] readFixState of a bot-state.json that is a symlink returns null.",
+        "[unit] readFixState of a state whose readyHeld is 600 characters returns a 500-character readyHeld.",
+        "[unit] JobRun.judge for a FIX whose readFixOutcome answers kind: 'nothing' and fixReady: { markedReady: true } sends a snapshot with fixOutcome: 'nothing' and that fixReady.",
+        "[unit] JobRun.judge for a FIX whose readFixOutcome answers fixReady: null sends a snapshot without a fixReady key.",
+        "[unit] When bot-state.json is unreadable, readFixState returns null rather than failing the FIX result read.",
+        "[unit] When bot-state.json is missing, unreadable or lacks markedReady, JobRun.judge preserves the existing FIX outcome while omitting fixReady from the snapshot."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "runner",
+        "fix-ready"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends the existing defensive result-file reader and snapshot seam without new execution paths; filesystem and snapshot behavior are testable with injected outcomes."
+      },
+      "contextFiles": [
+        "apps/runner/src/verdict/fix-result.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/executor/job-executor.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/verdict/fix-result.fix-ready.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/verdict/fix-result.ts",
+          "reason": "`readPushedSha` becomes `readFixState`; `FixOutcome` gains `fixReady`."
+        },
+        {
+          "path": "apps/runner/src/verdict/fix-result.spec.ts",
+          "reason": "the `readPushedSha` cases move to `readFixState` and assert `pushedSha` on its result; every behaviour keeps its meaning."
+        },
+        {
+          "path": "apps/runner/src/executor/host-executor.ts",
+          "reason": "`readFixOutcome` calls `readFixState` and returns `fixReady`."
+        },
+        {
+          "path": "apps/runner/src/executor/job-executor.ts",
+          "reason": "the `FixOutcome` returned by `readFixOutcome` carries the optional `fixReady`."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "the `readFixOutcome` `toEqual` for a state file without ready fields expects `fixReady: null` as well."
+        },
+        {
+          "path": "apps/runner/src/supervisor/job-run.ts",
+          "reason": "`judge` adds `fixReady` to the snapshot when present."
+        },
+        {
+          "path": "apps/runner/src/supervisor/job-run.spec.ts",
+          "reason": "the FIX snapshot assertions that pin `{ fixOutcome, resultSha }` exactly gain `fixReady` where the fake outcome sets it; outcomes unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Ruling record, keyword parser and service",
+      "description": "**Goal** — Add durable, auditable ruling records and one shared nax-compatible keyword parser and creation service.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — New model `FleetPrRuling { id, projectId, repoId, prNumber, jobId, itemId, itemKind, text, disposition, actorType, actorId, state, skipReason?, appliedJobId?, commentId?, approvalRequestId?, createdAt, updatedAt }`, `state` one of `pending`, `applied`, `skipped`, `replaced`, index `[repoId, prNumber, state]` and `[jobId, itemId]`. A new `apps/api/src/fleet/rulings/` module holds it (repository extends `AbstractPrismaRepository`, behind a DI token). `parseRulingText(text): { disposition: RulingDisposition; reason: string; sha?: string } | null` in `fleet/rulings/ruling-keyword.ts` mirrors nax's grammar on the first non-empty line: `fixed <7-40 hex>[ — | - | : reason]` -> `fixed`; `waive: <reason>` / `waived: <reason>` -> `waived`; `override:` / `overridden:` -> `overridden`; `confirm[: reason]` / `confirmed` -> `confirmed`; `verify[: reason]` / `verified` -> `verified`; case-insensitive. koda's evidence rule: `waived`, `overridden` and `confirmed` need a non-empty reason, so `parseRulingText('confirm')` is null.\n\nCreation design: `FleetPrRulingsService.create(principal, slug, jobId, dto)`, which in one transaction marks the `pending` ruling of the same `(jobId, itemId)` `replaced`, inserts the new `pending` row (its `text` normalised to start at the first non-empty line, trimmed), records the audit entry (`fleet.job.rule`, summary `ruled <itemId>: <disposition>`). The ticket step is added to this transaction by US-005. For bare verified, the authoritative AC requires reason 'verified'.\n\n**Scope** — In: migration `20261122090100_fleet_pr_rulings`, model with onDelete:Cascade job/project relations and back-relations, domain/token/repository/service/parser, FleetRulingsModule registration in FleetModule, and audit/normalization/replacement behavior. The service is the sole creation writer. Module reads jobs through its own Prisma-backed repository, never imports FleetJobsModule, so future Jobs/Ingest/Assistant imports are acyclic. Out: REST/permission/approval command (US-004), ticket/comment effects (US-005), FIX snapshot (US-006), assign placement (US-007) and result reconciliation (US-009). No keyword-per-item-kind rule: any keyword may rule any item kind, as for a writer's thread reply.\n\n**Interface** — `parseRulingText(text): { disposition: RulingDisposition; reason: string; sha?: string } | null`; `FleetPrRulingsService.create(principal, slug, jobId, dto)`; the model fields and state/index contract above are the persisted interface. Keep multi-line evidence in stored text, but inspect only its first non-empty line to parse the disposition.\n\nCo-locate parser/service and DB-free module-compilation unit tests; real repository integration tests must verify normalization, replacement and audit in PostgreSQL using the shared DB gate. Do not create a route or gate in this story.",
+      "acceptanceCriteria": [
+        "[unit] parseRulingText('confirm: read 4f2e1aa store.ts:88; test green') returns { disposition: 'confirmed', reason: 'read 4f2e1aa store.ts:88; test green' }.",
+        "[unit] parseRulingText('fixed 4f2e1aa — null check added') returns { disposition: 'fixed', sha: '4f2e1aa', reason: 'null check added' }.",
+        "[unit] parseRulingText('Waive: out of scope per spec section 3') returns disposition waived.",
+        "[unit] parseRulingText('override: kept as is') returns disposition overridden.",
+        "[unit] parseRulingText('verified') returns disposition verified with reason verified.",
+        "[unit] parseRulingText('confirm') returns null (the evidence rule).",
+        "[unit] parseRulingText('looks fine') returns null.",
+        "[unit] parseRulingText('fixed xyz') returns null.",
+        "[unit] parseRulingText('\n\nconfirm: ok\nmore evidence') reads only the first non-empty line and returns disposition confirmed with reason ok.",
+        "[integration] create with text '\n\nconfirm: ok\nmore evidence' stores the text 'confirm: ok\nmore evidence'.",
+        "[integration] FleetPrRulingsService.create(agentPrincipal, projectSlug, runJobId, { itemId: 'D-1', text: 'confirm: test green' }) stores one FleetPrRuling with state pending, disposition confirmed, actor type AGENT, and the RUN's repoId and PR number.",
+        "[integration] A second create on the same job and item leaves the first ruling replaced and the second pending.",
+        "[integration] create writes one audit entry with key fleet.job.rule, the job id and the actor."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "rulings",
+        "persistence"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Introduces a new repository/domain/module and transactional replacement plus audit, with shared grammar and real persistence behavior; authorization is added separately in US-004."
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/fleet.module.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261122090100_fleet_pr_rulings/migration.sql",
+        "apps/api/src/fleet/rulings/fleet-rulings.module.ts",
+        "apps/api/src/fleet/rulings/fleet-rulings.module.spec.ts",
+        "apps/api/src/fleet/rulings/ruling-keyword.ts",
+        "apps/api/src/fleet/rulings/ruling-keyword.spec.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts",
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-ruling.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseRulingText returns null for waive or override without a non-empty reason.",
+        "When ruling insertion or its audit fails, create rolls back replacement of the previous pending ruling."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "new model `FleetPrRuling` with `onDelete: Cascade` relations to `FleetJob` and `Project`; back-relations on both."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet.module.ts",
+          "reason": "imports `FleetRulingsModule`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Ruling routes and permission",
+      "description": "**Goal** — Expose project-scoped ruling create/list routes with permission checks and replay-safe approval execution.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — `POST /projects/:slug/fleet/jobs/:id/rulings` body `CreateRulingDto { itemId: string (1..64, `^[A-Za-z0-9._:-]+$`); text: string (1..2000) }`, `@UseGuards(ProjectMembershipGuard, RequiresGuard)`, `@Requires('fleet.job.rule')` (guard level, so a caller without the key gets 403 before any job state is read), `@ApprovalGated()`. `FleetPrRulingsService.ruleTarget(projectId, jobId, dto)` runs before the gate, in this order: the job is in the project (else 404 `fleet.jobs`); it is a RUN whose `workflow.outcome` is `draft` and whose `resultPrUrl` gives a PR number through `prNumberFor` on a GitHub repo (else 409 `fleet.rulings.notDraft`); it is the latest RUN of that PR (`latestRunForPr`, below; else 409 `fleet.rulings.notLatest`); `itemId` is in `workflow.openItems` (else 404 `fleet.rulings.unknownItem`); `parseRulingText(text)` is not null (else 400 `ValidationAppException` naming `text`). Then `ApprovalRouteGate.run({ key: 'fleet.job.rule', variant: FLEET_RULING_ROUTE_VARIANTS.create, projectId, input: { slug, projectId, jobId, ruling: dto } })`; pending answers 202. The command's `run` re-runs `ruleTarget` (so an approval decided after the item's ruling was applied, the outcome changed or a newer RUN appeared fails with the same 404/409 and writes nothing), then calls `FleetPrRulingsService.create(principal, slug, jobId, dto)`, which in one transaction marks the `pending` ruling of the same `(jobId, itemId)` `replaced`, inserts the new `pending` row (its `text` normalised to start at the first non-empty line, trimmed), records the audit entry (`fleet.job.rule`, summary `ruled <itemId>: <disposition>`), and runs the ticket step (US-005). The route answers 201 with `FleetPrRulingDto`. `GET /projects/:slug/fleet/jobs/:id/rulings` (`fleet.job.read`) lists the job's rulings, newest first, every state. `FLEET_RULING_ROUTE_VARIANTS = { create: 'rest:fleet.job.rule' } as const` in `fleet-ruling-route.commands.ts`. `latestRunForPr(repoId, prNumber)` loads the repo's RUN jobs whose `resultPrUrl` ends with `/pull/<prNumber>`, newest `createdAt` first, and answers the first whose `resultPrUrl` gives that PR number through `prNumberFor`. A fifth pre-gate check refuses an item whose latest ruling is `applied` (409 `fleet.rulings.settled`): nax already settled it. `fleet.job.rule` is a new catalog key (scope project, inventory row `['project']`); the `fleet.job.*` glob grants it to developer, `*` to project-admin, admin and owner. Its derived approval is approvable, floor `none`, default `none`.\n\n**Interface** — `CreateRulingDto { itemId: string (1..64, `^[A-Za-z0-9._:-]+$`); text: string (1..2000) }`; `FleetPrRulingsService.ruleTarget(projectId, jobId, dto)`; `FLEET_RULING_ROUTE_VARIANTS = { create: 'rest:fleet.job.rule' } as const`; route input `{ slug, projectId, jobId, ruling: dto }`. Follow MemoryRouteCommands: register `routeCommand<Input, Result>({ key, variant, parse, run, toResult }, loader)` in an OnModuleInit provider, unique per (key,variant), approved execution as the requester.\n\n**Scope** — In: controller/DTOs/route command, catalog/inventory, en/zh fleet.rulings.notDraft/notLatest/settled/unknownItem/invalidText, read-list tenancy, target checks and command revalidation, direct agent default and policy-driven human approval. Update role matrix to 226 cells, guarded-operation inventories to 130, endpoint e2e happy/invalid/list cases, and regenerate OpenAPI/CLI. Out: ticket creation/comment insertion (US-005 extends the existing create transaction), dispatch head snapshot and runner (US-006–US-008), assistant/tool/client adapters (US-010/US-012/US-013). No keyword-per-item-kind policy or additional ticket/comment permissions. Rulings on PRs that no koda RUN produced; the ruling route accepts only a RUN job with a draft workflow outcome. Legacy workflow drafts (published before nax 0.91.2, no item index) and pipeline-mode escalations (`finish-audit/`).\n\nUse DB integration route tests for guard-before-state ordering, no approval request on target errors, requester attribution and stale approval failure with no writes; keep catalog derivation unit-level. Treat the applied check as the extra pre-gate check after the text-parse check, preserving the stated relative order of other checks.",
+      "acceptanceCriteria": [
+        "[integration] POST /projects/:slug/fleet/jobs/:id/rulings by a developer agent on a RUN with workflow outcome draft and open item D-1, body { itemId: 'D-1', text: 'confirm: test green' }, answers 201 with a ruling in state pending, disposition confirmed.",
+        "[integration] The same POST on a RUN whose workflow outcome is ready answers 409 fleet.rulings.notDraft and opens no approval request; the same notDraft response applies when the job is not a RUN or has no GitHub PR.",
+        "[integration] The same POST with itemId: 'Z-9' not in the open items answers 404 fleet.rulings.unknownItem and opens no approval request.",
+        "[integration] The same POST with text: 'looks fine' answers 400 naming text; waive/override/confirm without a reason produce that same validation response and write nothing.",
+        "[integration] The same POST for a job id of another project answers 404 fleet.jobs before the gate.",
+        "[integration] The same POST by a project member holding the viewer role, on a RUN whose outcome is ready, answers 403 (not 409), before the job is read.",
+        "[integration] The same POST on a RUN that is not the latest RUN of its PR answers 409 fleet.rulings.notLatest and opens no approval request.",
+        "[integration] The same POST on an item whose latest ruling is applied answers 409 fleet.rulings.settled before the gate.",
+        "[integration] With a project approval policy { permissionPattern: 'fleet.job.rule', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' }, the agent's POST answers 202 with an approval request and no ruling row exists.",
+        "[integration] After a user approves that request, one pending ruling by the agent exists.",
+        "[integration] When the RUN's workflow outcome changes to ready before a user approves that request, the approval execution fails with the same target-check 409 and no ruling row exists.",
+        "[integration] GET /projects/:slug/fleet/jobs/:id/rulings answers every ruling of the job, newest first, including replaced ones.",
+        "[unit] The permission catalog entry for fleet.job.rule has scope project, is approvable, and has floor none and default none.",
+        "[integration] The ruling POST for an unknown job answers 404 fleet.jobs before opening an approval request.",
+        "[integration] When an approved ruling executes after its item was applied, a newer RUN appeared or its target became unknown, the command re-checks ruleTarget and fails with the corresponding 409/404 without writing a ruling."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "security",
+        "permissions",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: introduces access control and approval-gated mutation, guard ordering, requester replay and race-sensitive target revalidation across permission and route registries."
+      },
+      "contextFiles": [
+        "apps/api/src/memory/memory-route.commands.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
+        "apps/api/src/fleet/jobs/fleet-job-route.commands.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/rulings/fleet-rulings.controller.ts",
+        "apps/api/src/fleet/rulings/fleet-ruling-route.commands.ts",
+        "apps/api/src/fleet/rulings/dto/create-ruling.dto.ts",
+        "apps/api/src/fleet/rulings/dto/fleet-pr-ruling.dto.ts",
+        "apps/api/test/integration/fleet/fleet-pr-rulings.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "`NEW_KEY_SCOPES` gains `'fleet.job.rule': 'project'`."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated: one new `fleet.job.rule` cell per role, granted to owner, admin, project-admin and developer."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-row cell count 225 becomes 226."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its `NEW_KEY_SCOPES` mirror gains `'fleet.job.rule': 'project'`, so the key set equals the TSV keys plus the new-key list."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+          "reason": "\"collects exactly 129 gated routes\" becomes 130 for the new `@ApprovalGated` ruling route."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "`gatedOperations` gains the POST operation of the new ruling create route; the describe title and the AC-5 length 129 become 130."
+        },
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "adds `rulings.notDraft`, `rulings.notLatest`, `rulings.settled`, `rulings.unknownItem`, `rulings.invalidText`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "the same keys in Chinese."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "adds the ruling create route happy path (201), an unparseable text case (400), and the ruling list route (200)."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the two ruling routes and their DTOs."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Post every ruling on the work's ticket",
+      "description": "**Goal** — Atomically attach every ruling to an existing eligible work ticket or one newly created finish ticket.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — Inside the create transaction, `FleetJobTicketEffects.ensureFinishTicket(job, principal)` locks the RUN job row (`SELECT ... FOR UPDATE` on `FleetJob`), then answers the oldest `FleetJobTicket` link's ticket that is not soft-deleted and not `CLOSED` or `REJECTED`, when one exists; otherwise it creates a TASK ticket titled `Finish draft PR #<n> (<feature>)` through `TicketsService.create` as the ruling's principal, moves it to `IN_PROGRESS` through `startForDispatch`, links it to the RUN with `FleetTicketsService.link`, and writes the fleet PR link with `upsertFleetPrLink`. Then `createRulingComment(ticketId, body, principal)` writes a `RULING` comment authored by the principal (`authorUserId` or `authorAgentId`), body `<itemId> (<itemKind>): <text>`, and its id is stored on the ruling. `TicketsService.create` inside the ruling transaction gets one number allocation attempt (`runWithTicketNumberRetry` does not retry inside a transaction), so a concurrent ticket creation that wins the number answers 409 and the ruling is not written; the caller retries. `fleet.job.rule` alone is enough to create the finish ticket and its comments (no `ticket.create` check), as `fleet.job.dispatch` already starts tickets through `startForDispatch`.\n\n**Interface** — `CommentType` gains `RULING: 'RULING'`. `FleetJobTicketEffects.ensureFinishTicket(job, principal)`; `createRulingComment(ticketId, body, principal)`; `lockJobRow(jobId)`; existing `TicketsService.create(projectSlug, dto: CreateTicketDto, principal)`, `TicketTransitionsService.startForDispatch(projectSlug, ticketRef, principal)`, `FleetTicketsService.link(jobId, tickets: DispatchTicket[])`, `PrismaFleetTicketsRepository.upsertFleetPrLink({ ticketId, jobId, url, provider, prNumber, externalRef, now })`.\n\n**Scope** — In: add RULING enum/response contract, extend the US-003 create transaction with ticket selection/creation/start/link/comment and commentId, add repository row lock and authored comment insertion, append TicketsService and FleetTicketsService as the last constructor arguments of FleetJobTicketEffects, update its six positional unit fixtures, and name ensureFinishTicket as the second allowed startForDispatch caller in its doc comment. Regenerate OpenAPI/CLI for comment type. Out: ruling route/permission (US-004), runner results and system summaries/ready comments (US-009), web pill/edit control (US-011). `RULING` comments are immutable against edits only; deleting one is allowed and leaves the ruling's `commentId` pointing at a deleted comment. No ticket status change when a PR is marked ready, and no new ticket transition; the existing PR-merge sync moves the ticket.\n\nNew ticket effects must not use the surrounding class's old after-commit, best-effort error swallowing: any ticket/comment failure aborts the ruling transaction. Oldest means link age, not ticket number. Lock before eligible-ticket selection to serialize concurrent first rulings. Use real DB integration rollback/concurrency/merge tests and unit conflict propagation; keep unrelated effect assertions unchanged.",
+      "acceptanceCriteria": [
+        "[unit] CommentType.RULING imported from common/enums equals 'RULING'.",
+        "[integration] The first ruling through POST /projects/:slug/fleet/jobs/:id/rulings on a RUN with no linked ticket creates one TASK ticket titled Finish draft PR #<n> (<feature>) with status IN_PROGRESS, linked to the RUN through FleetJobTicket.",
+        "[integration] That new ticket has a fleet TicketLink of type pr with the PR's number and URL.",
+        "[integration] The ruling writes one RULING comment on the ticket, authored by the ruling agent (authorAgentId), with body 'D-1 (advisor): confirm: test green', and the ruling's commentId is that comment's id.",
+        "[integration] A second ruling on the same RUN adds a comment to the same ticket and creates no second ticket.",
+        "[integration] A ruling on a RUN that already links two open tickets comments on the ticket whose link is oldest.",
+        "[integration] A ruling on a RUN whose only linked ticket is CLOSED creates a new finish ticket.",
+        "[integration] Two concurrent first rulings on one RUN leave exactly one finish ticket.",
+        "[integration] PATCH of a RULING comment answers 409 comments.workflowImmutable.",
+        "[integration] When the comment insert fails, no ruling row, no ticket and no FleetJobTicket row remain.",
+        "[unit] When TicketsService.create throws the ticket-number conflict, FleetPrRulingsService.create rethrows it as a 409 and writes no ruling.",
+        "[integration] After VcsPrSyncService.applyMergedPr is called with the finish ticket's fleet PR link and a merged PR status (the path FleetPrStateRefresher takes), the finish ticket moves from IN_PROGRESS to VERIFY_FIX.",
+        "[integration] When finish-ticket creation fails, the whole ruling transaction rolls back and no ruling row is written.",
+        "[unit] FleetJobTicketEffects.onRunDispatched continues to call startForDispatch only for linked CREATED or VERIFIED tickets, preserving the existing dispatch-start behavior after adding the finish-ticket collaborators."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "tickets",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: derived ticket/comment writes intentionally use fleet.job.rule rather than separate privileges; concurrency locks, principal attribution and transaction rollback also need strict isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-pr-ruling-ticket.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A ruling on a RUN whose linked tickets are all REJECTED or soft-deleted creates a new IN_PROGRESS finish ticket.",
+        "When a user records a ruling, its RULING comment sets authorUserId to that user and leaves authorAgentId null.",
+        "A principal granted fleet.job.rule but not ticket.create or comment.create can record a ruling and its derived finish ticket/comment."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/common/enums.ts",
+          "reason": "`CommentType` gains `RULING: 'RULING'`."
+        },
+        {
+          "path": "apps/api/src/comments/dto/comment-response.dto.ts",
+          "reason": "the `type` enum gains `RULING`."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+          "reason": "gains `ensureFinishTicket(job, principal)`; the constructor appends `TicketsService` and `FleetTicketsService` as its last arguments."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts",
+          "reason": "the six positional constructions append stubs for the two new arguments; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+          "reason": "gains `createRulingComment(ticketId, body, principal)` and a `lockJobRow(jobId)` escape hatch."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+          "reason": "the doc comment of `startForDispatch` names `FleetJobTicketEffects.ensureFinishTicket` as its second allowed caller; behaviour unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the comment type enum."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Snapshot the pending rulings at FIX dispatch",
+      "description": "**Goal** — Bind an explicitly dispatched FIX to the latest RUN's pending rulings and the PR head read at dispatch.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — At FIX dispatch, after the `reviewDecisions` snapshot and before the insert transaction, `FleetPrRulingsService.snapshotForFix(repo, prNumber)` selects the `pending` rulings of `latestRunForPr(repo.id, prNumber)`. With none it answers undefined and the job carries no `prRulings`. With some it mints a read-only token and calls `getPullRequest`; an open PR with a `headSha` gives `{ headSha, rulings: [...] }`, each ruling as `{ rulingId, item: itemId, ruling: text, by, at: createdAt ISO }`, at most 100 (the oldest `createdAt` first; the rest wait for the next FIX, since nax refuses a file of more than 100); a closed or missing PR gives `{ notSent: 'pr-not-open' }`; a thrown read gives `{ notSent: 'head-unreadable' }`. `by` is `koda:agent:<agent slug>` or `koda:user:<user name>`, newlines removed, clipped to 100 characters. When a RUN job's ingest writes a `workflow` with a PR, every `pending` ruling of an older RUN for the same `(repoId, prNumber)` becomes `replaced`.\n\nModule wiring: `FleetRulingsModule` reads FIX and RUN jobs through its own repository (Prisma escape hatch), never by importing `FleetJobsModule`, so `FleetJobsModule`, `IngestModule` and `AssistantModule` import it without a cycle.\n\n**Interface** — `VcsPrStatus` gains `headSha?: string`, which the GitHub client maps from `head.sha`. `FleetJobPrRulings` is `{ headSha: string; rulings: { rulingId: string; item: string; ruling: string; by: string; at: string }[] } | { notSent: 'head-unreadable' | 'pr-not-open' }`; `FleetJobRecord` / `FleetJobPatch` / `NewFleetJob` gain `prRulings?: FleetJobPrRulings | null`. `snapshotForFix(repo, prNumber)` and `latestRunForPr(repoId, prNumber)` use the ruling repository's job reads. `GitHubAppClient.mintReadOnlyToken(installationId, repoName)` supplies the read-only credential; never log/store the token.\n\n**Scope** — In: migration `20261122090200_fleet_job_pr_rulings` for FleetJob.prRulings Json?, domain/create/read mappings, headSha VCS/GitHub mapping, latest RUN snapshot and sanitized actor labels, FIX dispatch insertion and retention across requeue, older pending ruling replacement on RUN ingest, imports in Jobs/Ingest plus DB-free module resolution. Append the FleetPrRulingsService collaborator and compatible stubs in jobs audit/config-requeue/project-deletion/thread-handoff/thread-requeue/service fixtures and ingest workflow/outcomes/pr-links/service fixtures without weakening existing assertions. Out: payload stripping/capability placement (US-007), runner input/argv (US-008), ingest applied/skipped outcomes (US-009). No automatic Finish: only an explicit FIX dispatch carries rulings; a REVIEW (manual or the auto-review poller) never carries rulings. No PR head binding at ruling time: the head is read when the FIX is dispatched, and a push between dispatch and the review leaves the rulings `pending` (nax `head-mismatch`).\n\nHTTP stays outside the insert transaction. Snapshot failure sentinels accept the FIX with no ruling payload; do not turn a PR read failure into a job dispatch failure. Cover repository-backed dispatch and RUN-ingest invalidation with real DB tests and injected GitHub reads, and actor/limit/failure selection with service unit tests.",
+      "acceptanceCriteria": [
+        "[unit] GitHubAppClient.getPullRequest maps a response whose head.sha is a string to headSha on the result.",
+        "[unit] snapshotForFix for a PR whose latest RUN has two pending rulings and an open PR with a 40-hex head returns { headSha, rulings } with both rulings as { rulingId, item, ruling, by, at }.",
+        "[unit] snapshotForFix ignores pending rulings of an older RUN of the same PR.",
+        "[unit] snapshotForFix with no pending rulings returns undefined.",
+        "[unit] snapshotForFix when getPullRequest throws returns { notSent: 'head-unreadable' }.",
+        "[unit] snapshotForFix when getPullRequest answers a closed PR returns { notSent: 'pr-not-open' }.",
+        "[unit] The by of a ruling by agent rev-bot is 'koda:agent:rev-bot'.",
+        "[unit] The by of a ruling by a user whose name has a newline and 120 characters is one line of at most 100 characters starting with 'koda:user:'.",
+        "[integration] POST /projects/:slug/fleet/jobs with an otherwise valid dispatch body including repoId, maxCostUsd, command: 'FIX' and prNumber for a PR whose latest RUN has a pending ruling, with getPullRequest stubbed to an open PR, stores prRulings with that ruling and the stubbed headSha on the new job.",
+        "[integration] A REVIEW dispatch for the same PR stores no prRulings.",
+        "[integration] A FIX dispatch for that PR with getPullRequest stubbed to throw is accepted and stores prRulings: { notSent: 'head-unreadable' }.",
+        "[integration] When a newer RUN's bundle for the same PR is ingested with a workflow, the older RUN's pending rulings become replaced.",
+        "[integration] That ingest leaves the older RUN's applied rulings applied.",
+        "[unit] snapshotForFix when getPullRequest answers null for a missing PR returns { notSent: 'pr-not-open' }.",
+        "[integration] A FIX dispatch for a PR with pending rulings is accepted with stored prRulings: { notSent: 'pr-not-open' } when getPullRequest returns a closed PR or null for a missing PR."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "dispatch",
+        "github",
+        "security"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: reads a PR through a scoped minted credential; integrates immutable dispatch snapshots, actor sanitization, module wiring and transactional supersession across Jobs/Ingest."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261122090200_fleet_job_pr_rulings/migration.sql",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-rulings-dispatch.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When more than 100 pending rulings exist on the latest RUN, snapshotForFix returns only the oldest 100 by createdAt.",
+        "Requeue of a FIX retains its original prRulings snapshot without reading the current PR head again.",
+        "When read-only token minting throws, snapshotForFix returns { notSent: 'head-unreadable' }.",
+        "When latestRunForPr encounters a suffix-matching URL for another repository, it excludes that job from the latest RUN selection."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetJob` gains `prRulings Json?`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.module.ts",
+          "reason": "imports `FleetRulingsModule`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.module.spec.ts",
+          "reason": "module compile resolves `FleetPrRulingsService`."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/ingest.module.ts",
+          "reason": "imports `FleetRulingsModule`."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/ingest.module.spec.ts",
+          "reason": "module compile resolves `FleetPrRulingsService`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.audit.spec.ts",
+          "reason": "`FleetJobsService` gains a `FleetPrRulingsService` constructor argument; the positional construction passes a stub answering undefined; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.config-requeue.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.project-deletion.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.thread-handoff.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.thread-requeue.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts",
+          "reason": "`BundleIngestService` gains a `FleetPrRulingsService` constructor argument; the positional construction passes a stub whose `replaceOlderRuns` resolves; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.outcomes.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.pr-links.spec.ts",
+          "reason": "same constructor argument; pass a stub; assertions unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+          "reason": "`FleetJobPrRulings`; `FleetJobRecord` and `NewFleetJob` gain `prRulings`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "`createJob` and `toDomain` map `prRulings`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "FIX dispatch calls `snapshotForFix` before the insert transaction and stores `prRulings`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts",
+          "reason": "the service fixtures provide a `FleetPrRulingsService` stub that answers undefined; existing assertions keep their meaning."
+        },
+        {
+          "path": "apps/api/src/vcs/types.ts",
+          "reason": "`VcsPrStatus` gains `headSha?: string`."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.ts",
+          "reason": "`getPullRequest` maps `head.sha` to `headSha` when it is a string."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+          "reason": "the `getPullRequest` result assertion gains `headSha`."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+          "reason": "after a RUN's workflow with a PR is written, older RUN rulings of that PR become `replaced`."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.spec.ts",
+          "reason": "the service fixture gains a `FleetPrRulingsService` stub; existing assertions keep their meaning."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Carry rulings in the assign payload and placement",
+      "description": "**Goal** — Send a FIX's snapshot rulings only to runners advertising nax ruling support.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — `buildAssignPayload` copies `prRulings` without `rulingId` into `review.rulings` for a FIX. Placement: `toPlacementJob` sets `needsBotRulings` and `firstMisfit` answers `bot_rulings` for it on a runner whose capabilities lack `botRulings`.\n\n`PlacementJob`, `toPlacementJob`, `MisfitReason` and `capabilityMisfit` (`placement-rules.ts`). Target: `PlacementJob` gains `needsBotRulings?: true`, which `toPlacementJob` sets when the job's `prRulings.rulings` is non-empty and otherwise omits (so existing `toEqual` assertions on its output hold); `firstMisfit` answers `bot_rulings` for such a job on a runner without `botRulings`. The queued scan (`findQueuedPage`) has no capability filter, so the misfit is decided per job in `fillRunner` like `bot_fix`; `bot_rulings` is not permanent, so the pinned-runner check at dispatch, which runs before the snapshot, never refuses for it.\n\n**Interface** — New exported `CallerRuling { item: string; ruling: string; by: string; at: string }`. `AssignPayload.review` also has `rulings?: { headSha: string; rulings: CallerRuling[] }`. `RunnerCapabilities` gains `botRulings?: true`. `PlacementJob` gains `needsBotRulings?: true`. The capability parser accepts literal `true` or absent only.\n\n**Scope** — In: types-only protocol additions, FIX assign copy with no rulingId, conditional PlacementJob property and recoverable misfit, strict capability parsing, dashboard misfit types and job DTO enum, regenerated OpenAPI/CLI. Out: snapshot gathering/storage (US-006), runner parse/file/probe/argv (US-008), web misfit translation (US-012). US-007 only: the dashboard attention list does not surface a FIX waiting on `bot_rulings` as unplaceable (its queued rows carry no `prRulings`); the job's own misfit shows it. No automatic Finish: only an explicit FIX dispatch carries rulings; a REVIEW (manual or the auto-review poller) never carries rulings.\n\nPreserve every existing ordinary-job output shape and pin/permanent-misfit rule. Unit tests cover assign projection and capability/parser/firstMisfit behavior; a real placement integration case proves the only non-capable runner leaves the job queued.",
+      "acceptanceCriteria": [
+        "[unit] buildAssignPayload for a FIX whose prRulings has rulings returns review.rulings equal to { headSha, rulings: [{ item, ruling, by, at }] } with no rulingId.",
+        "[unit] buildAssignPayload for a FIX whose prRulings is { notSent: 'head-unreadable' } returns a review without rulings.",
+        "[unit] toPlacementJob of a FIX whose prRulings.rulings is non-empty sets needsBotRulings: true.",
+        "[unit] firstMisfit for a job with needsBotRulings on an online runner with botReview and botFix but no botRulings returns bot_rulings.",
+        "[unit] firstMisfit for the same job on a runner with botRulings: true returns null.",
+        "[unit] firstMisfit for a FIX without needsBotRulings on a runner without botRulings returns null.",
+        "[integration] PlacementService.placeJob for a queued FIX with rulings, when the only runner lacks botRulings, leaves the job QUEUED with misfit bot_rulings.",
+        "[unit] The capability parser keeps botRulings: true.",
+        "[unit] The capability parser refuses a report whose botRulings is 'yes'.",
+        "[unit] toPlacementJob omits needsBotRulings entirely when prRulings is absent, notSent or has an empty rulings array, preserving existing toEqual output shapes."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "protocol",
+        "placement"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module protocol, capability and placement changes must preserve ordinary job shapes and recoverable queuing without a new authorization policy."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/assign-payload.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/common/capabilities-core.ts",
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/jobs/assign-payload.rulings.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "buildAssignPayload does not attach review.rulings to a REVIEW even if its input record contains a prRulings snapshot."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "packages/fleet-protocol/src/index.ts",
+          "reason": "exports `CallerRuling`; `AssignPayload.review` gains `rulings?: { headSha: string; rulings: CallerRuling[] }`; `RunnerCapabilities` gains `botRulings?: true`; types only."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/assign-payload.ts",
+          "reason": "a FIX with `prRulings.rulings` adds `review.rulings` without `rulingId`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement-rules.ts",
+          "reason": "`PlacementJob` gains `needsBotRulings`; `toPlacementJob` sets it from `prRulings`; `MisfitReason` gains `bot_rulings`; `capabilityMisfit` answers it."
+        },
+        {
+          "path": "apps/api/src/fleet/common/capabilities-core.ts",
+          "reason": "parses `botRulings` (literal `true` or absent)."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/dashboard.types.ts",
+          "reason": "the misfit reason list gains `bot_rulings`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+          "reason": "the misfit enum gains `bot_rulings`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the misfit enum."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Runner passes rulings to nax",
+      "description": "**Goal** — Validate the FIX ruling payload, write nax's private caller-rulings file and advertise support only when nax can consume it.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — When `assign.review.rulings` has rulings, the runner writes `review-rulings.json` in the job dir (`{ version: 1, headSha, rulings }`, mode 0600) through `writeReviewRulings(jobDir, rulings)` and passes `rulingsPath` to `buildNaxArgv`, which appends `--rulings <path>` after `--decisions` for a FIX. The file name joins `ATTEMPT_FILES`. The probe adds `botRulings: true` when `bot review --help` lists `--rulings` and `botReview` passed.\n\n`parseAssign` target: a FIX also keeps a valid `review.rulings` (`headSha` 40 hex; 1..100 rulings; each `item` `^[A-Za-z0-9._:-]{1,64}$`, `ruling` 1..2000 chars, `by` 1..100 chars without a newline, `at` a parseable ISO datetime; items unique); a REVIEW carrying `rulings`, or a FIX with malformed `rulings`, is refused as `bad('review')`.\n\n**Interface** — `buildNaxArgv(naxCommand, assign, opts)` target opts `{ decisionsPath?: string; rulingsPath?: string }`; `--rulings <rulingsPath>` follows `--decisions` in the `bot review` argv of a FIX. `writeReviewRulings(jobDir, rulings)` writes `{ version: 1, headSha, rulings }` and returns its path. Protocol `CallerRuling { item: string; ruling: string; by: string; at: string }` is already added by US-007; preserve those four fields unchanged. nax's file contract also specifies at ISO datetime with offset, at most 5 minutes in the future; nax rejects invalid files. No optional key or internal rulingId is invented in the runner file.\n\n**Scope** — In: assign revalidation/reconstruction, review-rulings-file helper and private file mode, HostExecutor.spawn input preparation, FIX review argv option ordering, per-attempt cleanup and botRulings help probe, preserving botReview/botFix safety tests. Out: server snapshots/projection/placement (US-006/US-007), nax implementation and applied/skipped ingest (US-009). The nax change (`--rulings`) ships in nax PR #2784, not in this feature; installing a nax with `--rulings` on the runner host is a deploy step. No automatic Finish: only an explicit FIX dispatch carries rulings; a REVIEW (manual or the auto-review poller) never carries rulings.\n\nUse real temp files and injected FakeNaxCli for help variants; no installed nax dependency in units. Preserve decision-only argv exactly when rulingsPath is absent. Keep the existing credential-file lifecycle and token safety probe intact; the new file is not an environment token and the option goes on bot review, not bot fix.",
+      "acceptanceCriteria": [
+        "[unit] parseAssign of a FIX payload whose review.rulings is valid returns an assign whose review.rulings equals it.",
+        "[unit] parseAssign of a REVIEW payload carrying review.rulings answers bad('review').",
+        "[unit] parseAssign of a FIX payload with a ruling whose by contains a newline answers bad('review').",
+        "[unit] writeReviewRulings(jobDir, { headSha, rulings }) writes review-rulings.json containing { version: 1, headSha, rulings } with file mode 0600 and returns its path.",
+        "[unit] buildNaxArgv for a FIX with decisionsPath and rulingsPath returns [..., 'bot', 'review', '4', '--full', '--profile', <chain>, '--decisions', <decisions>, '--rulings', <rulings>].",
+        "[unit] buildNaxArgv for a REVIEW given a rulingsPath returns an argv without --rulings.",
+        "[unit] buildNaxArgv for a FIX without rulingsPath returns the same argv as before this feature.",
+        "[unit] HostExecutor.spawn of a FIX whose assign.review.rulings has one ruling spawns nax with --rulings pointing at the job dir's review-rulings.json.",
+        "[unit] HostExecutor.spawn of a FIX whose assign.review has no rulings writes no rulings file and passes no --rulings.",
+        "[unit] The per-attempt wipe removes review-rulings.json from the job dir.",
+        "[unit] The nax probe reports botRulings: true when bot review --help lists --rulings and botReview passed."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "runner",
+        "nax",
+        "validation"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-cuts assign validation, private JSON input, review argv, spawn cleanup and help-based capability probing; existing credential handling and its safety checks are preserved, not changed, so lite isolation is sufficient."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/nax-process.ts",
+        "apps/runner/src/executor/review-decisions-file.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/executor/review-rulings-file.ts",
+        "apps/runner/src/executor/review-rulings-file.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseAssign refuses a FIX ruling payload with duplicate item ids, an invalid headSha, an empty or greater-than-100 ruling list, an invalid item id, out-of-bounds text/by, or a non-ISO at value as invalid review.",
+        "The probe omits botRulings when review help lacks --rulings or the existing botReview safety probe fails."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/assign-parser.ts",
+          "reason": "keeps a valid `review.rulings` for a FIX; refuses `rulings` on a REVIEW and malformed `rulings` as `bad('review')`."
+        },
+        {
+          "path": "apps/runner/src/supervisor/assign-parser.spec.ts",
+          "reason": "existing FIX/REVIEW cases without `rulings` keep their results; new cases cover `rulings`."
+        },
+        {
+          "path": "apps/runner/src/executor/nax-process.ts",
+          "reason": "`buildNaxArgv` opts gain `rulingsPath`; a FIX appends `--rulings <path>` after `--decisions`."
+        },
+        {
+          "path": "apps/runner/src/executor/nax-process.spec.ts",
+          "reason": "the FIX argv `toEqual` cases keep their arrays when no `rulingsPath` is given; a new case covers `--rulings`."
+        },
+        {
+          "path": "apps/runner/src/executor/host-executor.ts",
+          "reason": "`spawn` writes the rulings file for a FIX with `review.rulings` and passes `rulingsPath`; `ATTEMPT_FILES` gains `REVIEW_RULINGS_FILE`."
+        },
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.ts",
+          "reason": "`botRulings` probe and capability entry."
+        },
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "the fake nax CLI gains a `bot review --help` output with and without `--rulings`; existing `botReview`/`botFix` assertions unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Record what nax did with the rulings",
+      "description": "**Goal** — Reconcile only the rulings sent by a FIX and report their durable outcomes and ready result on the work's tickets.\n\n**Motivation** — A FIX job records only `fixOutcome` (`pushed` / `nothing`) and `resultSha`.\n\n**Approach** — `parseBotReview` reads `callerRulings` from the selected artifact when present (each `applied` entry needs string `item` and `disposition`, each `skipped` entry string `item` and `reason`; malformed entries are dropped; `ignored` kept only when it is `untrusted-pr` or `head-mismatch`). In the FIX branch of `BundleIngestService.write`, `FleetPrRulingsService.recordResults(job, parse)` maps each item of `job.prRulings.rulings` to its ruling: an item in `applied` -> `applied`; an item in `skipped` with reason `echo-failed` or `recorder-failed` -> stays `pending`; any other `skipped` reason -> `skipped` with that `skipReason`; `ignored: 'untrusted-pr'` -> every sent ruling `skipped` with `untrusted-pr`; `ignored: 'head-mismatch'` or a missing `callerRulings` -> every sent ruling stays `pending`. Only rulings still `pending` change state. Each changed ruling gets `appliedJobId`. When at least one ruling changed, one system `RULING` comment is written on the RUN's ticket: `Finish <jobId>: applied D-1 (confirmed), B3 (waived); skipped G-1 (superseded-by-writer)`. When the FIX's `fixReady.markedReady` is true, one system comment `PR #<n> marked ready by FIX <jobId>` is written on the ticket of every RUN of the same repo whose `resultPrUrl` is that PR; ticket status does not change. Both system comments carry the FIX job id in their body, and each is skipped when the ticket already has a comment with exactly that body, so a re-delivered bundle writes neither twice. Ingest claims a bundle only after the job is terminal (`claimNext`), and the terminal transition follows the runner's final snapshot (with `fixReady`), so ingest sees `fixReady`.\n\n**Interface** — `BotReviewParse` done variant gains `callerRulings?: { applied: { item: string; disposition: string }[]; skipped: { item: string; reason: string }[]; ignored?: 'untrusted-pr' | 'head-mismatch' }`. `FleetPrRulingsService.recordResults(job, parse)`. `PrismaFleetTicketsRepository.createSystemComment(ticketId, body)` takes an optional comment type (default `GENERAL`) so the summary is a `RULING` comment.\n\n**Scope** — In: optional artifact parsing without changing old done results, conditional pending state updates through snapshot rulingId, appliedJobId/skipReason, transactional FIX ingest for COMPLETED/FAILED/CANCELLED with existing epoch fencing, exact-body deduplicated summary/marked-ready comments, optional system-comment type, fixture stub updates. Out: ruling creation/ticket bootstrap (US-003/US-005), dispatch snapshot (US-006), runner parsing/echo behavior (US-008), web and CLI displays (US-011–US-013). No sweeper for `pending` rulings on PRs readied, merged or closed outside koda. No ticket status change when a PR is marked ready, and no new ticket transition; the existing PR-merge sync moves the ticket. K3's follow-up REVIEW after a pushed FIX is unchanged; replacing it with nax's own post-push re-review is a separate decision.\n\n\nUnit-test defensive parser/state mapping, including stale re-rulings. PostgreSQL bundle integration verifies rollback/idempotence, transient no-summary behavior and ready comments. Keep existing artifact selection/trust rules and failure-comment notifiedEpoch semantics unchanged; this path deduplicates by exact body including FIX id.",
+      "acceptanceCriteria": [
+        "[unit] parseBotReview of an artifact with callerRulings: { applied: [{ item: 'D-1', disposition: 'confirmed' }], skipped: [{ item: 'G-1', reason: 'superseded-by-writer' }] } returns callerRulings with both lists.",
+        "[unit] parseBotReview drops an ignored value other than untrusted-pr or head-mismatch.",
+        "[unit] parseBotReview of an artifact without callerRulings returns a done parse without the callerRulings key.",
+        "[unit] recordResults for a FIX that sent D-1 and G-1, with D-1 applied and G-1 skipped superseded-by-writer, marks D-1 applied and G-1 skipped with that skipReason, both with appliedJobId equal to the FIX id.",
+        "[unit] recordResults with G-1 skipped echo-failed leaves G-1 pending.",
+        "[unit] recordResults with ignored: 'untrusted-pr' marks every sent ruling skipped with untrusted-pr.",
+        "[unit] recordResults with ignored: 'head-mismatch' changes no ruling.",
+        "[unit] recordResults for a parse without callerRulings changes no ruling.",
+        "[unit] recordResults with G-1 skipped recorder-failed leaves G-1 pending.",
+        "[unit] recordResults never changes a ruling that is no longer pending (re-ruled to replaced while the FIX ran).",
+        "[integration] Ingesting a COMPLETED FIX bundle whose bot-review.json applies D-1 writes one system RULING comment on the RUN's ticket reading 'Finish <jobId>: applied D-1 (confirmed)'.",
+        "[integration] Ingesting a FIX bundle whose rulings all stay pending writes no summary comment.",
+        "[integration] After a FIX of PR 12 is ingested with fixReady.markedReady: true, the ticket of the RUN whose resultPrUrl is PR 12 has one system comment 'PR #12 marked ready by FIX <jobId>' and keeps status IN_PROGRESS.",
+        "[integration] Re-ingesting the same FIX bundle writes no second marked-ready comment.",
+        "[integration] PrismaFleetTicketsRepository.createSystemComment(ticketId, body) without the optional type still creates a GENERAL comment with authorUserId and authorAgentId null, preserving existing callers."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "ingest",
+        "tickets",
+        "idempotence"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module reconciliation maps untrusted artifacts to conditional durable transitions and exactly-once-visible ticket comments inside the existing ingest transaction."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/parsers/bot-review.parser.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/reviews/fleet-review-events.service.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.results.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-rulings-ingest.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Re-ingesting the same FIX bundle writes no second identical ruling-summary comment.",
+        "parseBotReview drops malformed callerRulings entries while preserving well-typed applied and skipped entries.",
+        "recordResults never changes pending rulings whose ids were not in the FIX's prRulings snapshot.",
+        "When a ready FIX is ingested, each ticket linked to a same-repo RUN for that exact PR gets one ready comment and unrelated PR tickets get none."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/ingest/parsers/bot-review.parser.ts",
+          "reason": "the `done` variant gains `callerRulings`."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/parsers/bot-review.parser.spec.ts",
+          "reason": "existing `toEqual` assertions on a `done` parse of an artifact without `callerRulings` keep passing; new cases cover it."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+          "reason": "the FIX branch calls `recordResults` inside the ingest transaction."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.spec.ts",
+          "reason": "the FIX branch fixture stubs `recordResults`; existing assertions keep their meaning."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+          "reason": "`createSystemComment` takes an optional comment type (default `GENERAL`) so the summary is a `RULING` comment."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Assistant and MCP tools for rulings",
+      "description": "**Goal** — Let assistant and MCP callers list rulings and propose or execute an authorized ruling through the shared API-owned ruling semantics.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\nThe tools call `FleetPrRulingsService.ruleTarget` and `create` directly from the tool's execute path as the actor (gated once by the assistant tool command adapter); the web form and the CLI go through the ruling route; none re-implements `parseRulingText`. `ApprovalExecutionService` runs an approved command as the requester. `FleetRulingsModule` reads FIX and RUN jobs through its own repository (Prisma escape hatch), never by importing `FleetJobsModule`, so `FleetJobsModule`, `IngestModule` and `AssistantModule` import it without a cycle.\n\n**Interface** — List input `{ jobId }`; write input `{ jobId, itemId, text }`; tool names `koda_list_pr_rulings`, `koda_rule_pr_item`; write key `fleet.job.rule`, kind `write`, preview names the job/item/disposition; invalid text throws `ToolInputError` naming `text`. Use the existing `AssistantTool`, `AssistantToolRegistry.register` and ToolContext actor/project/data fencing conventions. The REST variant `FLEET_RULING_ROUTE_VARIANTS.create` remains REST-only. The existing AssistantToolCommands adapter registers write tools as default-variant approval commands and AssistantToolExecutor invokes ApprovalGate with `{ projectId, threadId, jobId, args }`. Reuse that adapter and call shared ruleTarget/create semantics from the tool's execute path as ctx.actor; do not nest ApprovalRouteGate.run in an already gated tool or register the REST variant twice. Recheck the target during preview and execution. Map an unknown item in preview to ToolInputError('unknown item'), and during execution to the existing ToolActionError text path.\n\n**Scope** — In: pr-ruling-tools group and module registration/import, shared parser and target recheck, actor-preserving writes, read output item/disposition/state/actor, unknown-item refusal text, descriptors and MCP descriptions, project argument injection for WORKSPACE. Extend the constructor dependency ordering in existing commands/assistant-tool-commands.ts to include the new tool group, as it already does for the four write-tool groups; registering it in the provider array alone does not order Nest 12 lifecycle hooks. Append the write descriptor last in FLEET_WRITE_TOOL_DESCRIPTORS and the read descriptor last in FLEET_TOOL_DESCRIPTORS; update 23/24 descriptor lengths to 25/26, WORKSPACE last tool to koda_rule_pr_item, keep the preceding ['koda_get_action','koda_add_comment'] slice and existing fleet-write wording checks. Assistant module command samples include fleet.job.rule with { jobId:'j1', itemId:'D-1', text:'confirm: ok' }; write-command/MCP sets become ten. Out: REST/catalog implementation (US-004), ticket step itself (US-005), web/CLI adapters (US-012/US-013) and any automatic dispatch. No koda-side LLM drafts rulings; the ruler is whoever calls the route (a person, or an agent through MCP or CLI).\n\nUse parser/preview/descriptor unit cases and integration tool execution on a draft RUN, verifying that the same ruling transaction and comment behavior as REST is reached. The binding dependency is US-004; ticket-comment assertions exercise the integrated feature once US-005's shared service extension is available, without duplicating that extension here or changing dependencies. Respect default direct policy and policy-held approval; do not impose a new hardcoded human-only ruling policy.",
+      "acceptanceCriteria": [
+        "[unit] koda_list_pr_rulings with { jobId } returns one line per ruling with item, disposition, state and actor, and its tool key is fleet.job.read.",
+        "[unit] koda_rule_pr_item parse of { jobId, itemId: 'D-1', text: 'confirm' } throws ToolInputError naming text.",
+        "[unit] koda_rule_pr_item preview of { jobId, itemId: 'D-1', text: 'confirm: test green' } names the job, the item and the disposition confirmed, and its tool key is fleet.job.rule with kind write.",
+        "[integration] Executing koda_rule_pr_item as an agent on a draft RUN creates a pending ruling and a RULING ticket comment, the same as POST /projects/:slug/fleet/jobs/:id/rulings.",
+        "[integration] Executing koda_rule_pr_item on an item that is not open answers the tool error 'unknown item' and creates no ruling.",
+        "[unit] kodaToolDescriptorsFor('PROJECT') includes koda_list_pr_rulings and koda_rule_pr_item.",
+        "[unit] kodaToolDescriptorsFor('WORKSPACE') adds the project argument to koda_rule_pr_item.",
+        "[unit] The MCP catalog description of koda_rule_pr_item ends with the MCP project sentence shared by the other write tools.",
+        "[unit] After registering the ruling tools, the descriptor slice immediately before FLEET_WRITE_TOOL_DESCRIPTORS remains ['koda_get_action', 'koda_add_comment'], preserving the existing catalog ordering."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "api",
+        "assistant",
+        "mcp",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: assistant/MCP write registration must preserve project permissions, approval policy, requester attribution and stale-target checks across tool execution."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/tools/fleet-write-tools.ts",
+        "apps/api/src/fleet/assistant/tools/dispatch-job-tool.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/pr-ruling-tools.ts",
+        "apps/api/src/fleet/assistant/tools/pr-ruling-tools.spec.ts",
+        "apps/api/test/integration/fleet/assistant-pr-ruling-tools.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "An agent without fleet.job.rule cannot execute koda_rule_pr_item or create a ruling through the assistant/MCP path.",
+        "An AGENT human-approval policy leaves koda_rule_pr_item pending until approval and executes its eventual ruling as the requesting agent."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+          "reason": "`KODA_LIST_PR_RULINGS` joins the fleet read descriptors and `KODA_RULE_PR_ITEM` the fleet write descriptors."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+          "reason": "the catalog lengths 23 (REPO, PROJECT) and 24 (WORKSPACE) become 25 and 26; the WORKSPACE `.at(-1)` check changes from `koda_cancel_job` to `koda_rule_pr_item` (the new write descriptor is appended last to `FLEET_WRITE_TOOL_DESCRIPTORS`, the new read descriptor last to `FLEET_TOOL_DESCRIPTORS`); the slice before the write descriptors keeps `['koda_get_action','koda_add_comment']`; the fleet-write description phrase checks apply to `koda_rule_pr_item` unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+          "reason": "`MCP_DESCRIPTIONS` gains `koda_rule_pr_item`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "imports `FleetRulingsModule` and lists the new tool group class."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "\"registers exactly nine write commands\": `commandSamples` gains a `fleet.job.rule` sample (`{ jobId: 'j1', itemId: 'D-1', text: 'confirm: ok' }`) and the write-command set becomes ten; the descriptor-name check against `KODA_TOOL_DESCRIPTORS` gains both new names."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts",
+          "reason": "`WRITE_TOOLS` and `MCP_DESCRIPTION_TOOLS` gain `koda_rule_pr_item`, so the `MCP_DESCRIPTIONS` key-set equality holds at ten write tools."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/commands/assistant-tool-commands.ts",
+          "reason": "constructor gains the new ruling tool group as an ordering dependency, like the four existing write-tool groups; behaviour unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Web shows the fix ready result and ruling comments",
+      "description": "**Goal** — Show FIX readiness and thread reply counts on the job page and visibly immutable ruling comments on tickets.\n\n**Motivation** — A FIX job records only `fixOutcome` (`pushed` / `nothing`) and `resultSha`.\n\n**Approach** — FIX job page ready line and reply counts; `CommentThread` renders `RULING` with a label and no edit control. `FleetJobDto` gains `fixReady` (nullable). The FIX outcome line gains the ready result and reply counts. The comment type union and pill map gain `RULING`.\n\n**Interface** — `fixReady?: { markedReady: boolean; readyHeld?: string; replied?: number; resolved?: number }` is the result shape; the web DTO exposes its nullable value. Locale keys `fleet.fixReady.*` and `comments.types.RULING` are added to both en.json and zh.json. True means translated marked-ready plus present reply/resolved counts; false means translated held followed by the raw reason. Only FIX jobs render this line, and null renders none.\n\n**Scope** — In: job-page ready display, web fleet-types.ts field, CommentThread type/pill/edit visibility, English/Chinese copy, fix-ready page spec and existing job-detail fixture fixReady:null. Out: backend snapshot/persistence (US-001/US-002), server comment immutability (US-005), ruling form/Finish action (US-012) and CLI formatting (US-013). `RULING` comments are immutable against edits only; deleting one is allowed and leaves the ruling's `commentId` pointing at a deleted comment. No ticket status change when a PR is marked ready, and no new ticket transition; the existing PR-merge sync moves the ticket.\n\nUse existing Jest SFC mount harness and job/comment fixtures. Keep pushed/nothing outcome text unchanged. Render readyHeld and other runner strings with Vue interpolation only, never v-html; use existing tokens for the new pill. This is an informational rendering change, not a new backend authorization policy.",
+      "acceptanceCriteria": [
+        "[unit] The FIX job page with fixReady: { markedReady: true, replied: 2, resolved: 1 } renders the translated fleet.fixReady.markedReady text with 2 replies and 1 resolved.",
+        "[unit] The FIX job page with fixReady: { markedReady: false, readyHeld: 'CI failure: check:e2e' } renders the translated fleet.fixReady.held text followed by 'CI failure: check:e2e'.",
+        "[unit] The FIX job page with fixReady: null renders no ready line.",
+        "[unit] A RUN job page renders no ready line even when fixReady is set.",
+        "[unit] CommentThread renders a RULING comment with the translated comments.types.RULING label.",
+        "[unit] CommentThread renders no edit control for a RULING comment authored by the viewer.",
+        "[unit] A FIX job with fixReady: null continues to render the existing fleet.fixOutcome.pushed or fleet.fixOutcome.nothing text for its fixOutcome, unchanged."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "web",
+        "fix-ready",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive result rendering and comment-type presentation using existing DTO, locale and SFC patterns; no change to backend permissions."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/tests/pages/fleet-job-detail.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-job-fix-ready.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "the FIX outcome line gains the ready result and reply counts."
+        },
+        {
+          "path": "apps/web/components/CommentThread.vue",
+          "reason": "the comment type union and pill map gain `RULING`."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`FleetJobDto` gains `fixReady`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "`fleet.fixReady.*` and `comments.types.RULING`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same keys in Chinese."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "the job fixture gains `fixReady: null`; assertions unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Web open items, rulings and Finish",
+      "description": "**Goal** — Provide a draft RUN's open-item ruling UI and an explicit Finish dispatch for its GitHub PR.\n\n**Motivation** — The user leaves most rulings to agents (\"agent also is a member, they can rule it\").\n\n**Approach** — Open items table on a draft RUN with each item's latest ruling, a ruling form per row (`fleet.job.rule`), a Finish button (`fleet.job.dispatch`) that dispatches a FIX for the PR, and the `bot_rulings` misfit label. The tools, the web form and the CLI reach `FleetPrRulingsService` through the ruling route or the route command; none re-implements `parseRulingText`. The web reads `fixReady`, the rulings list and the misfit reason from the API DTOs.\n\n**Interface** — `useFleetRulings(slug).list(jobId)` calls `GET /projects/:slug/fleet/jobs/:id/rulings`; `useFleetRulings(slug).create(jobId, { itemId, text })` calls `POST /projects/:slug/fleet/jobs/:id/rulings`. Both use `useApi()`/apiPath and existing envelope unwrapping. There is no existing web approval-pending interceptor: a 202 is a successful `{ ret: 0, data: <approval request summary> }`, and useApi returns only its data. Type create's result as the ruling-or-approval-summary union and recognize the summary's permissionKey/status before displaying success; a summary with permissionKey fleet.job.rule and status pending triggers the pending-approval toast. Keep ordinary list/create calls through useApi without direct fetch or duplicate server validation. `CreateRulingDto { itemId: string (1..64, `^[A-Za-z0-9._:-]+$`); text: string (1..2000) }`; add `FleetPrRulingDto` to lib/fleet-types.ts and `bot_rulings` to the misfit union. `useFleetJobs(slug).dispatch` receives `command: 'FIX'`, `prNumber` and the current job's repo through the existing dispatch body, including required numeric maxCostUsd from the current job's configured cap; DispatchBody and DispatchFleetJobDto require that field, so the button must not submit only command/repo/prNumber. A form choosing waive and reason out of scope sends `text: 'waive: out of scope'`; confirm without evidence shows translated validation before a call. The API remains the full grammar authority.\n\n**Scope** — In: FleetJobOpenItems.vue, useFleetRulings.ts, draft-RUN page integration, row id/kind/issue/file:line/latest ruling/ruler/state/skip reason, permission-controlled forms and Finish button, pending-approval toast, extractApiError on conflict, en/zh fleet.rulings.* and fleet.misfit.bot_rulings, workflow-page fixture updates and full new ruling state/skip-reason enum parity pins. Out: shared server validation/approval engine (US-004), snapshots/placement (US-006/US-007), runner settlement (US-008/US-009), ready result line/comment pill (US-011). US-012 only: the Finish button is not hidden after a PR is marked ready; a further FIX on a ready PR answers `nothing to fix`. GitLab: rulings and Finish are GitHub-only, like K1-K3.\n\nUse project permission hints for visibility but rely on API guards for authorization. Render a separate draft-RUN panel without modifying the existing completed-REVIEW Fix link or PLAN Dispatch run handoff pinned by fleet-job-fix-action.spec.ts. Use the API DTO/list to determine latest ruling per item, show skipped reasons, and preserve safe interpolation and SSR-compatible composables. Test form/network/status behavior with Jest component/composable mounts and use the existing locale parity conventions.",
+      "acceptanceCriteria": [
+        "[unit] useFleetRulings(slug).list(jobId) calls GET /projects/<slug>/fleet/jobs/<jobId>/rulings through useApi() and returns the unwrapped list.",
+        "[unit] useFleetRulings(slug).create(jobId, { itemId: 'D-1', text: 'confirm: ok' }) posts that body to /projects/<slug>/fleet/jobs/<jobId>/rulings.",
+        "[unit] FleetJobOpenItems for a draft workflow with items D-1 and B3 renders one row per item with its id, kind, issue and file:line.",
+        "[unit] A row whose item's latest ruling is pending shows its disposition, the ruler and the translated pending state.",
+        "[unit] A row whose item's latest ruling is skipped shows the translated skip reason.",
+        "[unit] With fleet.job.rule granted, submitting a row's form with keyword waive and reason 'out of scope' calls create with text: 'waive: out of scope'.",
+        "[unit] Submitting keyword confirm with an empty reason shows the translated validation error and calls no API.",
+        "[unit] Without fleet.job.rule, no row renders a ruling form.",
+        "[unit] A create answering 202 shows the translated pending-approval toast.",
+        "[unit] A create answering 409 shows extractApiError of the response.",
+        "[unit] With fleet.job.dispatch granted, the Finish button calls useFleetJobs(slug).dispatch with command: 'FIX', prNumber: 12 and the job's repo for a RUN whose resultPrUrl is PR 12.",
+        "[unit] Without fleet.job.dispatch, the Finish button is not rendered.",
+        "[unit] The job page renders no FleetJobOpenItems for a RUN whose workflow outcome is ready.",
+        "[unit] A queued job with misfit bot_rulings renders the translated fleet.misfit.bot_rulings text.",
+        "[unit] With fleet.job.dispatch granted, adding the draft-RUN Finish panel leaves a completed REVIEW's Fix link at /<slug>/fleet/dispatch with only its existing command: 'FIX', repoId, prNumber and copied profiles query, unchanged."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "web",
+        "rulings",
+        "security",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override for role/permission-sensitive write and dispatch controls; composes async row state, approval/error handling and explicit FIX dispatch across page, component and composable."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/components/fleet/FleetJobWorkflow.vue",
+        "apps/web/composables/useFleetJobs.ts",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/tests/pages/fleet-job-fix-action.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/FleetJobOpenItems.vue",
+        "apps/web/composables/useFleetRulings.ts",
+        "apps/web/tests/components/FleetJobOpenItems.spec.ts",
+        "apps/web/tests/composables/useFleetRulings.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "renders `FleetJobOpenItems` for a RUN with a draft workflow."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`FleetPrRulingDto`; the misfit union gains `bot_rulings`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "`fleet.rulings.*` and `fleet.misfit.bot_rulings`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same keys in Chinese."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail-workflow.spec.ts",
+          "reason": "the page now also renders the open-items component for a draft; existing assertions keep their meaning."
+        },
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the `fleet.misfit` enum list gains `bot_rulings`; any new enum group under `fleet.rulings` (states, skip reasons) is added to `ENUMS` with its full value list."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-013",
+      "title": "CLI ready result and ruling commands",
+      "description": "**Goal** — Expose FIX readiness and ruling list/create operations through thin generated-client CLI commands.\n\n**Motivation** — A FIX job records only `fixOutcome` (`pushed` / `nothing`) and `resultSha`.\n\n**Approach** — `koda fleet job show` prints the ready result; `koda fleet job rulings <jobId>` lists rulings; `koda fleet job rule <jobId> <itemId> <text>` records one. API or network error, invalid option: shared `handleApiError`: 401/403 exit 2, 400 exit 3, 404 exit 4, other exit 1, approval pending exit 5; an invalid option exits 3 before any call. The tools, the web form and the CLI reach `FleetPrRulingsService` through the ruling route or the route command; none re-implements `parseRulingText`.\n\n**Interface** — `koda fleet job rulings <jobId> [--json]` prints item/disposition/state/actor/skip reason or the unwrapped JSON list. `koda fleet job rule <jobId> <itemId> <text>` uses the generated create-ruling client with `{ itemId, text }`, prints the ruling id on success, and prints the approval request id with exit 5 on 202. FIX `showRows` adds `Ready`: `marked ready (replied 2, resolved 1)` or `kept as draft: CI failure: x` for the stated examples; RUN has no Ready row. Retain existing --project/context and JSON conventions.\n\n**Scope** — In: new fleet-job-rulings.ts registration and Jest spec, FIX-only showRows Ready output, generated client calls, existing unwrap/withContext/handleApiError usage, local empty-text/invalid-option validation before API calls, existing fleet-job.spec.ts closed-world row updates only for FIX. Out: API grammar/permissions/approval implementation (US-003/US-004), ready persistence/runner (US-001/US-002), web form/Finish (US-012). Do not add handwritten HTTP or duplicate ruling business rules, and never hand-edit generated client code.\n\nMock generated functions at command boundaries and capture stdout/stderr/process.exit. Keep API messages on stderr and successful JSON on stdout through shared helpers. Regenerated client/DTOs are produced upstream by API contract stories; use their generated operation names rather than inventing independent endpoint wiring.",
+      "acceptanceCriteria": [
+        "[cli] koda fleet job show <id> for a FIX with fixReady: { markedReady: true, replied: 2, resolved: 1 } prints a Ready row reading 'marked ready (replied 2, resolved 1)'.",
+        "[cli] koda fleet job show <id> for a FIX with fixReady: { markedReady: false, readyHeld: 'CI failure: x' } prints a Ready row reading 'kept as draft: CI failure: x'.",
+        "[cli] koda fleet job show <id> for a RUN prints no Ready row.",
+        "[cli] koda fleet job rulings <jobId> prints a table of item, disposition, state, actor and skip reason.",
+        "[cli] koda fleet job rulings <jobId> --json prints the list as JSON.",
+        "[cli] koda fleet job rule <jobId> D-1 'confirm: test green' calls the generated create-ruling client with { itemId: 'D-1', text: 'confirm: test green' }, prints the ruling id and exits 0.",
+        "[cli] koda fleet job rule answered 400 exits 3 and prints the API message to stderr.",
+        "[cli] koda fleet job rule answered 202 exits 5 and prints the approval request id.",
+        "[cli] koda fleet job rule answered 404 exits 4.",
+        "[cli] koda fleet job rule answered 403 exits 2.",
+        "[cli] koda fleet job rule <jobId> D-1 '' exits 3 before any API call.",
+        "[cli] koda fleet job rule answered 401 exits 2 through handleApiError.",
+        "[cli] koda fleet job rule encountering another API error or a network error exits 1 through handleApiError.",
+        "[cli] An invalid option for a ruling command exits 3 before any API call."
+      ],
+      "tags": [
+        "fleet-pr-finish",
+        "cli",
+        "rulings",
+        "fix-ready"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Thin generated-client commands and additive formatting follow existing context/error helpers; no new authentication, authorization or business-rule implementation."
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-job.ts",
+        "apps/cli/src/commands/fleet-job.spec.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/utils/api.ts",
+        "apps/cli/src/utils/context.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/fleet-job-rulings.ts",
+        "apps/cli/src/commands/fleet-job-rulings.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/fleet-job.ts",
+          "reason": "`showRows` adds a `Ready` row for a FIX; registers the rulings commands."
+        },
+        {
+          "path": "apps/cli/src/commands/fleet-job.spec.ts",
+          "reason": "a closed-world `showRows` assertion gains the `Ready` row for FIX fixtures only."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository investigation and authority: This is an enhancement to the existing fleet execution path, not a new service. The authoritative input is .nax/features/fleet-pr-finish/spec.md and the approved design is docs/superpowers/specs/2026-11-04-fleet-pr-finish-design.md. The binding 13-story graph is retained exactly. codebase-memory MCP is not exposed in this session, so discovery used direct Read/Grep/Glob as the repository's permitted fallback; no graph/index freshness is claimed. App contexts were read under .nax/mono/apps/{api,runner,web,cli}/context.md. The supplied automated Express/Next.js classifications are wrong: API is NestJS/Fastify, web is Nuxt/Vue, runner is Bun ESM, CLI is Commander with a generated OpenAPI client. Only the PRD is authored in this planning task; no implementation or tests were run. The nathapp-nestjs-patterns skill was not exposed or found in repository discovery; implementation agents must load it before writing API NestJS code when available. Do not edit generated AGENTS.md or generated CLI client files manually. Root package.json:20-24 defines API spec export and CLI generation through bun run generate. Protocol edits are type-only exceptions riding US-001 and US-007 even though their binding workdir remains apps/api. All paths in story metadata are repo-root relative.\n\nCurrent data flow and #373: packages/fleet-protocol/src/index.ts:64,145,265 contains RunnerCapabilities, SnapshotEventPayload and AssignPayload.review respectively; botFix is already optional at :92. apps/api/src/fleet/sync/event-payloads.ts:80-113 has a private mirror function called via interpretEvent('snapshot', ...) at :124-125. Exercise it through this public seam rather than unnecessarily exporting it. Invalid mirrored fields are omitted, not fatal; absent fields preserve prior data. fixOutcome is currently mapped at :106. apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:13-19 defines FixOutcome, :72 holds reviewDecisions, :125-129 workflow and fixOutcome, and :158-167 the Mutable/patch union. US-001 adds FixReady and nullable persistence, patch support, DTO conversion and migration; US-006 adds immutable prRulings to record/new-job/persistence (and the specified patch/domain compatibility). apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:25,35,38 maps JSON/outcome fields; :74-81 separates JSON on create and :158 maps nullable JSON with Prisma.DbNull on update. Follow these conventions, including omitting undefined. apps/api/prisma/schema.prisma:1019-1061 has FleetJob, reviewDecisions and fixOutcome. apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:94,111-131 maps fixOutcome and deliberately strips large fields in summary(); fixReady must remain in summaries, while prRulings is internal and must not leak rulingId to the runner. apps/api/src/fleet/jobs/fleet-jobs.service.ts:353-355 clears per-attempt results on requeue; add fixReady:null but retain the dispatch-time prRulings snapshot. Existing event-payloads.spec.ts:156-171, dto/fleet-job.dto.spec.ts and prisma-fleet-job.repository.fix-outcome.spec.ts:26-61 anchor omission, nullable conversion and reset behavior.\n\nRunner result seam: apps/runner/src/verdict/fix-result.ts:19-41 derives pushed/nothing from PR-specific stdout markers, not exit codes; :44-60 reads bot-state.json with O_NOFOLLOW and closes the handle. Replace readPushedSha with readFixState, reading once and retaining independent pushedSha and fixReady validation. The failure table requires unreadable state to be non-fatal, although the current reader rethrows non-ENOENT/non-ELOOP/non-JSON errors; deliberately adapt this result-reading path without altering FIX verdict semantics. apps/runner/src/executor/host-executor.ts:316-343 validates realpath containment under nax-out/bot/pr-<n> before invoking the reader; preserve that defense. JobRun.judge currently appends fixOutcome and resultSha at apps/runner/src/supervisor/job-run.ts:494-498. Carry a non-null fixReady through FixOutcome/job-executor and the final snapshot regardless of pushed versus nothing. Existing fix-result.spec.ts, supervisor/job-run.spec.ts:430-506 and test/unit/host-executor.spec.ts pin behavior; adjust closed-world equalities only for intentionally added fields.\n\nRuling architecture, approval and permission: There is no existing apps/api/src/fleet/rulings directory. US-003 creates a dedicated domain, token-backed AbstractPrismaRepository, keyword parser and transactional service, importing generated Prisma types, not @prisma/client. apps/api/src/memory/prisma-memory-item.repository.ts:1-6 and :40-56 illustrate repository and transaction callback conventions. Use local string unions/constants, never Prisma enums. FleetPrRuling cascades on job/project deletion and indexes (repoId,prNumber,state) and (jobId,itemId). Keep actor and comment/approval identifiers as specified. Ruling writes, replacement and audit belong in the same txManager.run. US-005 extends that same transaction, not an after-commit best-effort hook. Permission defaults must be direct, including agents; only a project AGENT approval policy holds the ruling. apps/api/src/fleet/jobs/fleet-jobs.controller.ts:23-29 explains why every route must declare ProjectMembershipGuard then RequiresGuard together, not duplicate class guards. Dispatch at :38-58 shows ApprovalGated/ApprovalRouteGate/ApprovalPending/envelope patterns; GET :id at :110-118 shows project scope. US-004 checks fleet.job.rule in the guard before reading the job, then validates target before the gate, and the command revalidates on execution as the requester. apps/api/src/memory/memory-route.commands.ts:21-28,35-63 shows unique route variants, OnModuleInit registration, parseBody, routeCommand and ActorPrincipalLoader. Keep FLEET_RULING_ROUTE_VARIANTS.create='rest:fleet.job.rule'. latestRunForPr must verify URL ownership with prNumberFor after a suffix query; order by createdAt, not queuedAt. The applied-item refusal is additional to the other target checks, before parsing/gating. apps/api/src/permissions/catalog.ts:116-131 defines new keys, :198-201 inventory project scope and :444-461 derived approvals. Add the inventory row as well as NEW_KEY_SCOPES; developer fleet.job.* and admin wildcards grant it. Update role matrix/catalog snapshots and guarded-route/OpenAPI operation inventories (225 to 226 role cells; 129 to 130 gated routes), en/zh API errors and endpoint e2e cases. Regenerate OpenAPI and CLI after contract changes rather than hand editing. Every approval race must fail without ruling/ticket/comment writes when the target is no longer eligible.\n\nTicket integration and concurrency: apps/api/src/fleet/tickets/fleet-tickets.module.ts:23-27 already imports TicketsModule and exports effects/repository/service, so reuse it in FleetRulingsModule rather than import FleetJobsModule. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:25-38 describes existing after-commit, best-effort effects. New ensureFinishTicket is explicitly different: synchronous transactional, error-propagating, locks the RUN row, selects the oldest eligible LINK, otherwise creates/starts/links the finish ticket. Do not wrap it in the existing swallowing failure handlers. apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:90-108 currently orders tickets by ticket number, NOT FleetJobTicket link age; add an appropriate oldest-link lookup rather than incorrectly relying on this existing order or changing unrelated consumers. :133-138 creates GENERAL system comments, :162-177 upserts fleet PR links without rewriting existing prState. Add authored RULING comments and the row-lock escape hatch, then optional comment type for system summaries in US-009. apps/api/src/tickets/tickets.service.ts:99-149 creates and audits tickets; apps/api/src/common/utils/ticket-number-retry.ts:30-49 intentionally makes one allocation attempt in an existing transaction and throws 409 after conflict. Do not retry inside an aborted outer transaction; clients retry the request. Serialize first rulings on one RUN to prevent duplicate finish tickets. The RULING immutability policy is already structurally supported: apps/api/src/comments/comments.service.ts:65-67 rejects non-GENERAL updates, but deletion stays allowed. Update common/enums.ts, response DTO enum and Prisma comment annotation as appropriate. Existing transitions.startForDispatch at apps/api/src/tickets/state-machine/ticket-transitions.service.ts:459 is the permitted derived start path, requiring no ticket.create/comment.create privilege. apps/api/src/vcs/vcs-pr-sync.service.ts:203-257 already handles merged PR links and IN_PROGRESS -> VERIFY_FIX; reuse without adding a marked-ready transition. Existing fleet-job-ticket.effects.spec.ts positional constructors need two appended collaborators without weakening assertions.\n\nDispatch, GitHub read and placement: apps/api/src/fleet/jobs/fleet-jobs.service.ts:92-124 validates repo/provider, tickets, pin and budget, then snapshots review decisions before insert; :128-158 inserts/links/audits atomically, :168-174 publishes and places. Snapshot rulings beside review decisions for FIX only, outside the insert transaction; no forge HTTP while holding a database transaction. getPullRequest at apps/api/src/fleet/git-broker/github-app-client.ts:225-246 returns null on 404 and otherwise maps PR status without head.sha; add optional headSha to it and vcs/types.ts. Mint via the existing read-only-token seam (:98), never persist/log credentials, use FleetHttpClient restrictions. snapshotForFix selects only pending rulings of the latest RUN, oldest first and at most 100; by is a sanitized, clipped agent/user identity and at is original createdAt ISO, not dispatch time. Read failures/closed PRs are recorded as notSent but do not block FIX. apps/api/src/fleet/jobs/assign-payload.ts:28-52 builds review options; copy snapshot fields without rulingId and never attach rulings to REVIEW. apps/api/src/fleet/jobs/placement-rules.ts:10-23 distinguishes recoverable misfits, :34-44 PlacementJob, :97-118 capabilityMisfit and :214-222 toPlacementJob. Add needsBotRulings only for nonempty snapshot rulings, preserving the exact shape of ordinary jobs; bot_rulings must stay out of PERMANENT_MISFITS. The pin check precedes snapshot and cannot reject this capability at dispatch. Check each candidate in fillRunner; do not add a queued SQL capability filter. Dashboard misfit types/DTO enums gain the value, but dashboard unplaceable-attention detection does not gain snapshot data. apps/api/src/fleet/common/capabilities-core.ts:24-31,125 onward is the strict, framework-free report parser, also imported by live runner compatibility tests; only literal true or absence is accepted for botRulings. Keep global capability byte/collection budgets.\n\nRunner input and nax seam: apps/runner/src/supervisor/assign-parser.ts:136-152 cleans review decisions; :197-209 currently validates review input and later reconstructs only allowlisted fields. Add complete FIX-only ruling validation and retain the cleaned field on reconstruction. Reject malformed files at the assign boundary, including duplicate items, bad head, by newlines, bounds and non-ISO timestamps; nax additionally enforces offset/future limits. apps/runner/src/executor/nax-process.ts:16-34 constructs review argv and :39-47 the separate fix argv. Add rulingsPath only to the FIX bot review command after decisions, never to REVIEW or bot fix. apps/runner/src/executor/review-decisions-file.ts:5-11 is the 0600 JSON-file precedent. host-executor.ts:63,98 and :169 own attempt-file cleanup and review input preparation; include review-rulings.json in the attempt wipe. Preserve token-file isolation and detached two-step FIX execution. apps/runner/src/capabilities/nax-probe.ts:260-273 requires decisions help plus ambient-token safety for botReview and --full/--no-rereview for botFix. botRulings is additive and requires botReview plus successful help advertising --rulings; never weaken the safety probes. Use injected FakeNaxCli, not installed host nax, in unit tests. nax PR #2784 and installation on runner hosts are deployment prerequisites, not implementation work here; capability gating keeps old runners from silently dropping rulings.\n\nIngest, idempotence and module graph: apps/api/src/fleet/ingest/parsers/bot-review.parser.ts:13-16 defines done; :44-75 selects the artifact via stdout/ambiguity rules and validates version, PR and trust. Add optional callerRulings only when present, filter malformed entries, preserve existing done-object shape otherwise. apps/api/src/fleet/ingest/bundle-ingest.service.ts:99-116 locks the job, fences lease epoch and makes FIX review ingest eligible in COMPLETED/FAILED/CANCELLED; :117-143 applies corrections/audit and :146-156 publishes after commit. Record ruling results and exact-body-deduplicated system comments inside this existing ingest transaction. Do not mutate newer/replaced rulings: map through snapshot rulingId and condition every state update on pending. Ignore head-mismatch/missing results and retain transient echo/recorder failures for retry; untrusted-pr is a durable skip. Older RUN invalidation occurs only after writing a RUN workflow with a valid PR, never for unrelated PRs or applied rulings. apps/api/src/fleet/ingest/prisma-bundle-ingest.repository.ts:31-49 only claims terminal jobs, so final fixReady snapshot is already visible. All same-PR RUN tickets get marked-ready comments but no status change. Summary and ready comment dedupe by exact body including FIX id, not the pre-existing notifiedEpoch mechanism, which is for failure comments. FleetRulingsModule reads RUN/FIX jobs with its own repository escape hatch, never imports FleetJobsModule; Jobs, Ingest, Assistant and Fleet aggregate import it without cycles. Update jobs/ingest unit module-compilation tests and all service positional fixtures (audit, config-requeue, project-deletion, thread-handoff/requeue and bundle workflow/outcomes/pr-links). Module registration tests stay DB-free and co-located, not hidden in integration suites.\n\nAssistant and UI/client impact: apps/api/src/fleet/assistant/assistant-tool.types.ts:19-49 defines project actor context, key enforcement, write previews and execute. tools/fleet-write-tools.ts:17-28 shows bootstrap registration; dispatch-job-tool.ts:58-151 illustrates parser/preview/execute/error patterns. New list/read and rule/write tools must use the shared ruling parser/target/service or route command, retain requester identity and approval policy, and never invent separate ruling semantics. Descriptors and MCP catalog/registry must agree, including WORKSPACE project injection, 23/24 -> 25/26 descriptors, ten write commands and shared description suffix. apps/web/composables/useFleetJobs.ts:39-40,66-74 uses useApi/apiPath and returns unwrapped payloads; add separate useFleetRulings with the same convention. apps/web/composables/useApi.ts:44-61,157-212 handles envelopes, SSR cookie forwarding, locale headers; preserve this instead of direct fetch. There is no web approval-pending helper in useApi: apps/web/composables/useApi.ts:202-212 unwraps successful bodies without preserving HTTP status. For US-012, type and recognize the unwrapped approval-request summary (permissionKey/status) returned by a 202 instead of treating it as a ruling. Keep the call through useApi; do not invent an existing interceptor or add direct fetch. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:45,292-306,326 already uses permissions, a completed-REVIEW Fix handoff, FIX outcome text and workflow. Add the draft-RUN open-items/Finish path without changing the existing REVIEW Fix link or PLAN handoff; tests/pages/fleet-job-fix-action.spec.ts:80-124 pins those paths. Extend web lib/fleet-types.ts, job-page fixtures, both locale files and fleet-locale-parity enum lists. New open-items form uses permission hints only; API owns authorization/target/keyword semantics. Show skip reasons/latest actor/state and surface 202/409. Render untrusted text by interpolation, no v-html; use existing design tokens rather than new raw colors. apps/web/components/CommentThread.vue:10-15,42-47 contains comment type/pill maps and already loads normal ticket comments, so no separate ticket page implementation is required. RULING gets a label and no edit control, deletion unchanged. CLI apps/cli/src/commands/fleet-job.ts:79-90 has showRows and :185-195 registers subcommands. Add FIX-only Ready output and register fleet-job-rulings.ts using generated client/withContext/unwrap; no local business grammar. apps/cli/src/utils/error.ts:104-150 and the ApprovalPendingError branch already define exits 2/3/4/1/5; preserve stderr and JSON conventions and validate empty/invalid local input before API calls.\n\nMigration/rollout/test path: Apply additive migrations 20261122090000_fleet_job_fix_ready, 20261122090100_fleet_pr_rulings, 20261122090200_fleet_job_pr_rulings, regenerate Prisma and then export OpenAPI/regenerate CLI with each contract change. Existing records read null/absent; no historical backfill, workflow file edits or legacy-item inference. Optional protocol fields preserve old traffic; API can store ready results before runner deployment, and botRulings fences new payloads until host nax supports them. Rulings are not head-bound until FIX dispatch; a push afterward leaves them pending through head-mismatch. Watch concurrency around re-ruling, approval races, first-ticket locks and ingest idempotence; do not bypass job transitions, fence checks, budgets or after-commit publishing. API tests use Vitest vi and SWC, oxlint; runner bun:test with real temp files/SQLite and injected probes; web/CLI Jest use existing mount and generated-client mocks. DB behavior must run outside NAX_SANDBOXED=1 via canRunDbTests and KODA_DB_TESTS=1, with a private database/container for a second checkout; DB resets must not run concurrently on the same database. Skips do not verify transactional/concurrency behavior. Root .nax/config.json:25-29 sets maxAcCount/maxBulletPoints=15. Preserve every declared AC within its binding story; failure-table cases are included as behavioral parameterizations/additions, not moved to new test-only stories. Approval/role enforcement and token reads use three-session-tdd. US-008 adds validation, a private ruling JSON file and a help-only capability probe without changing credential handling; three-session-tdd-lite is sufficient for that cross-module work. No generated acceptance file may be edited or copied into regular test discovery.\n\nRefine-pass adversarial audit: Enumerated all 144 acceptance bullets in spec.md: US-001 AC1-10, US-002 AC1-10, US-003 AC1-13, US-004 AC1-13, US-005 AC1-12, US-006 AC1-13, US-007 AC1-9, US-008 AC1-11, US-009 AC1-14, US-010 AC1-8, US-011 AC1-6, US-012 AC1-14 and US-013 AC1-11. Each numbered range remains, in order, as the first corresponding number of acceptanceCriteria entries of that same story; no source criterion was moved or deleted. Rephrasings retain semantic assertions and qualifiers, notably US-001 AC7 earlier-value retention, US-002 AC3 valid pushedSha, US-004 AC6 403 not 409 and AC12 including replaced rulings, US-005 AC12 the FleetPrStateRefresher merge path, US-006 AC13 applied stays applied, US-007 AC1 no rulingId, US-008 AC7 same argv as before, US-009 AC3 absent callerRulings key and AC10 re-ruled-to-replaced while FIX ran, US-010 AC4 same behavior as REST and AC8 shared MCP sentence, and US-011 AC4 even when fixReady is set. No deprecated file-check AC tags occur. Failure-table parameterizations/additions are retained; the closed/missing-PR case now also checks accepted FIX dispatch, not only snapshotForFix. All 18 feature exclusions remain verbatim at top level; there are no story-local post-AC out-of-scope blocks to hoist. All 13 binding ids, workdirs and dependency arrays remain unchanged, reference existing ids and form the specified DAG. Context files match every explicitly recommended spec context, within five entries; US-008 restores the upstream protocol seam in that list and still names assign-parser.ts in its implementation notes. New outputs remain only in expectedFiles.\n\nNegative-path audit witnesses, one per story: US-001 invalid markedReady is dropped; US-002 missing state returns null; US-003 bare confirm is rejected; US-004 viewer receives 403 before job read; US-005 comment failure rolls back; US-006 PR read failure records notSent; US-007 malformed capability report is refused; US-008 REVIEW rulings are refused; US-009 head-mismatch changes no ruling; US-010 missing evidence throws ToolInputError; US-011 null fixReady renders no ready line; US-012 missing evidence causes no API call; US-013 API 400 exits 3. Regression anchors were strengthened for conditional placement output shapes, existing ticket dispatch starts, system-comment default GENERAL behavior, catalog ordering, pushed/nothing web text and the existing completed-REVIEW Fix handoff. Existing parser/result omissions and RUN CLI output anchors remain. Revised AC counts are respectively 10,12,13,15,14,15,10,11,15,9,7,15,14; none exceeds the configured limit of 15. Assertions are observable via returned patch/DTO/tool output, thrown error, captured client request, file mode/content, rendered DOM or persisted transaction state.\n\nCodebase-fit corrections from fresh source reads: apps/web/composables/useApi.ts:202-212 does not implement approval-pending handling or retain response status; apps/api/src/approvals/route/approval-gated.decorator.ts:29-34 sends a 202 request summary in a normal ret:0 envelope. US-012 must discriminate that unwrapped summary from a ruling, not reuse an invented web helper. apps/web/lib/fleet-types.ts:331-345 and apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:6-18 require repoId and numeric maxCostUsd: dispatch AC fixtures now explicitly include valid required fields, and Finish supplies the configured cap. The ruling create integration invocation now includes projectSlug, matching the design's four-argument service signature rather than interpreting the abbreviated AC example as a different overload. apps/api/src/fleet/assistant/assistant-tool.executor.ts:281-351 gates default-variant tool commands itself; commands/assistant-tool.command.ts:25-64 reconstructs the actor and calls execute. US-010 must not nest the REST gate or duplicate the REST variant. Its new group must also become a lifecycle-ordering dependency in existing commands/assistant-tool-commands.ts:15-31, not merely another provider; that file explicitly depends on the existing tool groups before registering their commands. CLI already has the 202 response interceptor in apps/cli/src/utils/api-client.ts:19-26, unlike web. The binding US-010 integration AC includes the ticket side effect owned by sibling US-005: retain that required full-feature integration assertion, do not skip/weaken it or duplicate the ticket writer, and do not silently add a forbidden dependency. US-008 routing is reduced to lite because its help/file/validation additions preserve rather than modify the existing credential-safety checks; permission/token stories retain strict isolation. These are planning corrections only; no implementation suite or executable JSON/schema validator was available or run in this file-tools-only session.",
+  "outOfScope": [
+    "Settling workflow items any other way than nax's ruling path: no `nax workflow record` or `promote`, no writes to nax files, no koda-side GitHub thread replies.",
+    "Legacy workflow drafts (published before nax 0.91.2, no item index) and pipeline-mode escalations (`finish-audit/`).",
+    "Rulings on PRs that no koda RUN produced; the ruling route accepts only a RUN job with a draft workflow outcome.",
+    "No koda-side LLM drafts rulings; the ruler is whoever calls the route (a person, or an agent through MCP or CLI).",
+    "No automatic Finish: only an explicit FIX dispatch carries rulings; a REVIEW (manual or the auto-review poller) never carries rulings.",
+    "No keyword-per-item-kind rule: any keyword may rule any item kind, as for a writer's thread reply.",
+    "`fleet.job.rule` alone creates the finish ticket and its `RULING` comments; no `ticket.create` or `comment.create` check is added on that path.",
+    "US-007 only: the dashboard attention list does not surface a FIX waiting on `bot_rulings` as unplaceable (its queued rows carry no `prRulings`); the job's own misfit shows it.",
+    "US-012 only: the Finish button is not hidden after a PR is marked ready; a further FIX on a ready PR answers `nothing to fix`.",
+    "`RULING` comments are immutable against edits only; deleting one is allowed and leaves the ruling's `commentId` pointing at a deleted comment.",
+    "No sweeper for `pending` rulings on PRs readied, merged or closed outside koda.",
+    "No ticket status change when a PR is marked ready, and no new ticket transition; the existing PR-merge sync moves the ticket.",
+    "Red CI, merge conflicts and gate repair are not handled by Finish; they show as the fix ready hold.",
+    "GitLab: rulings and Finish are GitHub-only, like K1-K3.",
+    "K3's follow-up REVIEW after a pushed FIX is unchanged; replacing it with nax's own post-push re-review is a separate decision.",
+    "No PR head binding at ruling time: the head is read when the FIX is dispatched, and a push between dispatch and the review leaves the rulings `pending` (nax `head-mismatch`).",
+    "The nax change (`--rulings`) ships in nax PR #2784, not in this feature; installing a nax with `--rulings` on the runner host is a deploy step.",
+    "`.nax/rules/` and other `.nax/` files are not edited by this feature."
+  ],
+  "routingProfile": "native-codex"
+}
