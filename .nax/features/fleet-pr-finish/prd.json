@@ -3,7 +3,7 @@
   "feature": "fleet-pr-finish",
   "branchName": "feat/fleet-pr-finish",
   "createdAt": "2026-11-22T00:00:00.000Z",
-  "updatedAt": "2026-11-04T04:28:30.024Z",
+  "updatedAt": "2026-11-04T04:36:48.627Z",
   "userStories": [
     {
       "id": "US-001",
@@ -122,14 +122,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends the existing defensive result-file reader and snapshot seam without new execution paths; filesystem and snapshot behavior are testable with injected outcomes."
+        "reasoning": "Extends the existing defensive result-file reader and snapshot seam without new execution paths; filesystem and snapshot behavior are testable with injected outcomes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/verdict/fix-result.ts",
@@ -175,7 +178,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "42f645492e349226845feeb634f81af71d950416"
     },
     {
       "id": "US-003",
