@@ -39,6 +39,13 @@ const isCreator = computed(() => controller.thread.value !== null)
  * cards apply, decided through the same controller over the personal `/threads/:id/approvals/:requestId` route.
  */
 const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])
+/**
+ * US-012 (F2): deciding needs `thread.answer` in the thread's home project, checked with the thread as the resource, so
+ * the own-row grant counts and the any-row grant counts. That scope is only named once the thread has loaded, hence
+ * `useProjectPermissionsFor`: it fails closed until the read answers, so the buttons appear only when the key is held.
+ */
+const homePermissions = useProjectPermissionsFor(() => controller.thread.value?.homeProject?.slug ?? null)
+const canDecideApprovals = computed(() => isCreator.value && homePermissions.permissions.value.hasOwn('thread.answer'))
 
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',
@@ -93,7 +100,7 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
           v-for="pending in pendingApprovals"
           :key="pending.requestId"
           :approval="pending"
-          :can-decide="isCreator"
+          :can-decide="canDecideApprovals"
           :decide="onDecideApproval"
         />
       </div>

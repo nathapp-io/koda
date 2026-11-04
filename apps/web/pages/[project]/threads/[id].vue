@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import type { ThreadActionResult } from '~/lib/thread-controller'
+import { allowedThreadModes } from '~/lib/thread-mode-access'
 import type { ThreadApprovalDecision, ThreadMode } from '~/lib/thread-types'
 import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
 
@@ -17,21 +18,11 @@ import { composerState, isTurnRunning, sessionLabel } from '~/lib/thread-view'
  *
  * thread-agents-modes US-012: a REPO thread also shows its mode control (the execution profile
  * its turns run with) and one approval card per pending session approval. The mode control is
- * limited to the modes the caller holds the key for, and the cards decide through the same
- * controller, so both land on the project-scoped routes.
+ * limited to the modes the caller holds the key for — own-row grants included, and another
+ * creator's thread needs the any-row `thread.cap.update` authority (`allowedThreadModes`) — and the
+ * cards decide through the same controller, so both land on the project-scoped routes.
  */
 definePageMeta({ layout: 'default' })
-
-/**
- * The permission key each mode change needs, mirroring the API's route gate (US-005): switching
- * to `read` re-reads under `thread.cap.update`, while `ask` and `full` have their own keys.
- */
-const MODE_PERMISSION_KEYS: Record<ThreadMode, string> = {
-  read: 'thread.cap.update',
-  ask: 'thread.mode.ask',
-  full: 'thread.mode.full',
-}
-const ALL_MODES: ThreadMode[] = ['read', 'ask', 'full']
 
 const route = useRoute()
 const slug = route.params.project as string
@@ -57,8 +48,11 @@ const toast = useAppToast()
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
 const canManage = computed(() => permissions.value.has('thread.archive'))
 
-/** US-012: `read` re-reads under `thread.cap.update`; `ask`/`full` have their own keys (US-005's route gate). */
-const allowedModes = computed<ThreadMode[]>(() => ALL_MODES.filter(mode => permissions.value.has(MODE_PERMISSION_KEYS[mode])))
+/**
+ * US-012 (F1): the modes this viewer may switch to. Mirrors the API — the target key counts in its own-or-any-row form
+ * for the thread's creator, and another creator's thread also needs the any-row `thread.cap.update` authority.
+ */
+const allowedModes = computed<ThreadMode[]>(() => allowedThreadModes(permissions.value, isCreator.value))
 /** Only a REPO thread has a worktree to publish, so only it can run in a mode other than `read`. */
 const showModeControl = computed(() => controller.thread.value?.kind === 'REPO')
 const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])

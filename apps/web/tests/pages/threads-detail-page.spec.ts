@@ -393,6 +393,47 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
     m.app.unmount()
   })
 
+  test("F1: the default developer's own-row grants let the creator switch to Read and Ask, but not Full", async () => {
+    // thread.cap.update is granted as `.own`, so an any-row check would hide Read from the thread's own creator — the
+    // API allows it (creator + target key), and so must the control.
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u1', mode: 'ask' }),
+      permissions: ['thread.cap.update.own', 'thread.mode.ask'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode-read"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-ask"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-full"]')?.props.disabled).toBe(true)
+    m.app.unmount()
+  })
+
+  test("F1: another creator's thread offers no mode without the any-row thread.cap.update authority", async () => {
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u2' }),
+      permissions: ['thread.mode.ask', 'thread.cap.update.own'],
+    })
+    await m.settle()
+
+    for (const mode of ['read', 'ask', 'full']) {
+      expect(m.app.one(`[data-testid="thread-mode-${mode}"]`)?.props.disabled).toBe(true)
+    }
+    m.app.unmount()
+  })
+
+  test("F1: the any-row cap authority offers Read and Ask on another creator's thread", async () => {
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u2' }),
+      permissions: ['thread.cap.update', 'thread.mode.ask'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode-read"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-ask"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-full"]')?.props.disabled).toBe(true)
+    m.app.unmount()
+  })
+
   test('AC-10: the page renders one ThreadApprovalCard per pendingApprovals entry', async () => {
     const m = mountPage({
       thread: threadDetail({

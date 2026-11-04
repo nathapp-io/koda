@@ -10,6 +10,7 @@ import * as apiModule from '../../composables/useApi'
 import { ApiError, extractApiError } from '../../composables/useApi'
 import { useWorkspaceThread as createWorkspaceThread } from '~/composables/useWorkspaceThread'
 import { useProjectRunnerSummaries as createProjectRunnerSummaries } from '~/composables/useProjectRunnerSummaries'
+import { useProjectPermissionsFor as createProjectPermissionsFor } from '~/composables/usePermissions'
 import type { EventSourceLike } from '~/lib/project-event-stream'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
@@ -229,6 +230,10 @@ function mountPage(over: {
   sendError?: unknown
   /** true registers the real thread components (the composer/controls interaction specs). */
   real?: boolean
+  /** The keys `GET /me/permissions?project=acme` answers with (US-012 F2: the home project's permission set). */
+  permissionKeys?: string[]
+  /** 'resolve' (default) | 'pending' | 'reject': how the home project's permissions answer. */
+  permissionGet?: 'resolve' | 'pending' | 'reject'
 } = {}): PageMount {
   const thread = over.thread ?? workspaceThread()
   const paths: string[] = []
@@ -249,6 +254,11 @@ function mountPage(over: {
     }
     if (path === '/threads/t1/messages') return { items: over.messages ?? [] }
     if (path === '/projects/acme/fleet/runners') return { records: over.runners ?? [], hasNext: false }
+    if (path === '/me/permissions') {
+      if (over.permissionGet === 'pending') return new Promise(() => undefined)
+      if (over.permissionGet === 'reject') throw new ApiError(500, 'permissions exploded')
+      return { keys: over.permissionKeys ?? ['thread.answer'] }
+    }
     return {}
   })
   const post = jest.fn(async (path: string, body?: unknown) => {
@@ -266,6 +276,9 @@ function mountPage(over: {
 
   const useWorkspaceThread = jest.fn((id: string) => createWorkspaceThread(id))
   const useProjectRunnerSummaries = jest.fn(() => createProjectRunnerSummaries())
+  // thread-agents-modes US-012: the page reads the home project's permission keys through this one, so it runs for real
+  // against the stubbed `$api` (its own `useApi()` resolves to the global set below).
+  const useProjectPermissionsFor = jest.fn((slug: () => string | null) => createProjectPermissionsFor(slug))
 
   const app = mountSfc(pageFile, {
     components: over.real === true ? { ...uiStubs, ...realComponents() } : { ...uiStubs, ...MARKERS },
@@ -285,6 +298,7 @@ function mountPage(over: {
       },
       useWorkspaceThread,
       useProjectRunnerSummaries,
+      useProjectPermissionsFor,
     },
   })
 
@@ -683,6 +697,73 @@ describe('US-012 AC-11: pages/threads/[id].vue — session approvals', () => {
     await m.settle()
 
     expect(byTestId(m.app, 'thread-mode')).toBeUndefined()
+    m.app.unmount()
+  })
+})
+/**
+ * thread-agents-modes US-012 (fix round 1, F2): the approval controls follow `thread.answer` in the thread's home
+ * project, not just "a loaded thread".
+ *
+ * The decision route is gated on `thread.answer` checked with the thread's project (`thread.projectId`, its home
+ * project) and the creator as the resource, so the own-row grant counts and an any-row grant counts; no key at all
+ * must leave the card read-only. The scope is only known once the thread has loaded, so the page reads the home
+ * project's keys after that and every gate stays closed while the read is in flight or after it failed.
+ */
+describe('US-012 F2: pages/threads/[id].vue — the approval gate', () => {
+  const withApproval = () => workspaceThread({ pendingApprovals: [pendingApproval()] })
+
+  test('a creator holding no thread.answer sees the request but no decision controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: [] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeUndefined()
+    expect(byTestId(m.app, 'thread-approval-awaiting')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('an own-row thread.answer grant enables both controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer.own'] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('an any-row thread.answer grant enables both controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer'] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test("the keys are read from the thread's home project, after the thread has loaded", async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer'] })
+    await m.settle()
+
+    expect(m.get).toHaveBeenCalledWith('/me/permissions', { query: { project: 'acme' } })
+    expect(m.paths.indexOf('/threads/t1')).toBeLessThan(m.paths.indexOf('/me/permissions'))
+    m.app.unmount()
+  })
+
+  test('while the home project permissions are still loading the controls stay closed', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionGet: 'pending' })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('a failed permissions read keeps the controls closed', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionGet: 'reject' })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
     m.app.unmount()
   })
 })

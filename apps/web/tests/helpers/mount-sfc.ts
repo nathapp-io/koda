@@ -134,6 +134,9 @@ const NUXT_AUTO_IMPORTS = [
   // Permissions P1 US-006: every gated control reads its keys through one of these two, so any spec
   // that mounts a component holding one must override it through `globals`.
   'useGlobalPermissions', 'useProjectPermissions',
+  // thread-agents-modes US-012: the workspace thread page reads its home project's keys with this one,
+  // because the slug (and so the permission scope) is only known once the thread has loaded.
+  'useProjectPermissionsFor',
   // Permissions P1 US-010: the Admin -> Roles page and its editor read the roles API through this.
   'useRoles',
   // Permissions P1 US-011: the principal-roles dialog and the Admin -> Users page read and write

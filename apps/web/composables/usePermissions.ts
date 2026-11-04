@@ -15,7 +15,7 @@
  * (whose `has`/`hasOwn` are functions) is therefore built in the computed -- on the server for SSR
  * and again on the client after hydration.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { EMPTY_PERMISSIONS, permissionSet } from '~/lib/permissions'
 import type { PermissionSet } from '~/lib/permissions'
@@ -79,4 +79,67 @@ export function useGlobalPermissions(): Permissions {
 /** The keys the caller holds in one project: `GET /me/permissions?project=<slug>`. */
 export function useProjectPermissions(slug: string): Permissions {
   return usePermissionsFor(`permissions-project-${slug}`, slug)
+}
+
+/**
+ * The keys the caller holds in a project whose slug is only known later — a WORKSPACE thread's home project, which
+ * arrives with the thread itself.
+ *
+ * `useAsyncData` cannot help here: it needs the key at setup time and the slug is not known then, so the read is a
+ * plain `$api` GET issued by a watcher over `slug()`. Fail closed like the other two: while a read is in flight, after
+ * one failed, or before any slug has arrived, `permissions` is `EMPTY_PERMISSIONS`, so a gated control simply does not
+ * render. A read that arrives after the slug moved on is dropped (a thread can be replaced under the page).
+ */
+export function useProjectPermissionsFor(slug: () => string | null): Permissions {
+  const { $api } = useApi()
+  const keys = ref<PermissionKeys | null>(null)
+  const pending = ref(true)
+  const error = ref<unknown>(null)
+  /** The slug the latest read was started for; a response for an older one is stale and ignored. */
+  let requested: string | null = null
+
+  const permissions = computed(() =>
+    pending.value || error.value !== null || keys.value === null
+      ? EMPTY_PERMISSIONS
+      : permissionSet(keys.value))
+
+  const load = async (target: string): Promise<void> => {
+    pending.value = true
+    error.value = null
+    // A new scope closes every gate until its own answer arrives, so keys of the previous project never leak.
+    keys.value = null
+    try {
+      const response = await $api.get<MePermissionsResponse>('/me/permissions', { query: { project: target } })
+      if (requested !== target) return
+      const list = response?.keys
+      // A malformed answer closes every gate instead of unlocking anything.
+      keys.value = Array.isArray(list) ? [...list] : []
+    } catch (err: unknown) {
+      if (requested !== target) return
+      error.value = err
+    } finally {
+      if (requested === target) pending.value = false
+    }
+  }
+
+  watch(() => slug(), (target) => {
+    requested = target
+    if (target === null || target === '') {
+      keys.value = null
+      error.value = null
+      pending.value = false
+      return
+    }
+    // The read's own failure is recorded in `error` (which keeps the gates closed); it never escapes the page.
+    void load(target).catch(() => undefined)
+  }, { immediate: true })
+
+  return {
+    permissions,
+    pending,
+    error,
+    refresh: async (): Promise<void> => {
+      if (requested !== null && requested !== '') await load(requested)
+    },
+  }
 }
