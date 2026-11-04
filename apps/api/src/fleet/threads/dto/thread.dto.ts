@@ -6,6 +6,20 @@ import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.dom
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
+/**
+ * thread-agents-modes US-007: one answerable session approval the thread waits on. `command` and `unsandboxed` are
+ * absent when the request did not carry them; `reason` is the runner's own explanation of why it asks.
+ */
+export class ThreadPendingApprovalDto {
+  @ApiProperty({ description: 'The request id the decision route takes' }) requestId: string;
+  @ApiProperty({ description: 'The tool that needs the decision' }) tool: string;
+  @ApiProperty({ description: 'What the tool would do, in the runner\'s own words' }) summary: string;
+  @ApiProperty({ required: false, description: 'The command the tool would run, when it runs one' }) command?: string;
+  @ApiProperty({ required: false, description: 'Why the runner is asking' }) reason?: string;
+  @ApiProperty({ description: 'When the runner stops waiting for the decision' }) expiresAt: string;
+  @ApiProperty({ required: false, description: 'Set when the request would leave the session sandbox' }) unsandboxed?: true;
+}
+
 export class ThreadDto {
   @ApiProperty({ enum: ['read', 'ask', 'full'] }) mode: ThreadMode;
   @ApiProperty() id: string;
@@ -26,6 +40,7 @@ export class ThreadDto {
   @ApiProperty({ nullable: true }) tokens: unknown;
   @ApiProperty({ nullable: true }) specPath: string | null;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
+  @ApiProperty({ type: [ThreadPendingApprovalDto], description: 'The answerable session approvals the thread waits on, oldest first (US-007)' }) pendingApprovals: ThreadPendingApprovalDto[];
   @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' }, kodaToolsUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)' }, projectCodeUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;

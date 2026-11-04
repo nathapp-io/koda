@@ -28,6 +28,7 @@ import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { readPendingApprovals } from './domain/pending-approvals';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
 import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
@@ -706,6 +707,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
       pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
+      pendingApprovals: readPendingApprovals(row.pendingApprovals),
       lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
       writtenPaths: row.writtenPaths, publishedSha: row.publishedSha, specPublished: row.specPublished,
       lastWrite: (row.lastWrite as unknown as ThreadWriteResult | null) ?? null,

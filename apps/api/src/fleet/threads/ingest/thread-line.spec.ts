@@ -170,6 +170,7 @@ describe('parseThreadLine (US-004)', () => {
   });
 
   it('US-004 AC6: parses approval_requested with its requestId and optional callId', () => {
+    // thread-agents-modes US-007: a line without tool, summary and expiresAt keeps today's minimal shape.
     expect(parseThreadLine('{"type":"approval_requested","requestId":"a1","callId":"c1"}')).toEqual({
       type: 'approval_requested', requestId: 'a1', callId: 'c1',
     });
@@ -219,5 +220,68 @@ describe('parseThreadLine (US-004)', () => {
 
   it('US-004 field rule: rejects a session_failed line with an empty reason', () => {
     expect(parseThreadLine('{"type":"session_failed","reason":""}')).toEqual({ bad: true });
+  });
+});
+
+const EXPIRES_AT = '2026-11-24T01:00:00.000Z';
+
+/** A complete `approval_requested` line: every field the nax-agent event carries (thread-agents-modes US-007). */
+const completeApproval = (over: Record<string, unknown> = {}): string => JSON.stringify({
+  type: 'approval_requested', requestId: 'a1', tool: 'bash', summary: 'Run the test suite',
+  command: 'bun run test', reason: 'reads the worktree', expiresAt: EXPIRES_AT, unsandboxed: true, ...over,
+});
+
+describe('parseThreadLine approval_requested fields (US-007)', () => {
+  it('US-007 AC-1: keeps tool, summary, command, reason, expiresAt and unsandboxed: true from a valid line', () => {
+    expect(parseThreadLine(completeApproval())).toEqual({
+      type: 'approval_requested', requestId: 'a1', tool: 'bash', summary: 'Run the test suite',
+      command: 'bun run test', reason: 'reads the worktree', expiresAt: EXPIRES_AT, unsandboxed: true, answerable: true,
+    });
+  });
+
+  it('US-007 AC-2: reads answerable false when the line says so', () => {
+    expect(parseThreadLine(completeApproval({ answerable: false }))).toMatchObject({
+      type: 'approval_requested', requestId: 'a1', tool: 'bash', answerable: false,
+    });
+  });
+
+  it('US-007 AC-3: reads answerable true when the line omits it', () => {
+    const parsed = parseThreadLine(completeApproval({ command: undefined, unsandboxed: undefined }));
+    expect(parsed).toMatchObject({
+      type: 'approval_requested', requestId: 'a1', tool: 'bash', summary: 'Run the test suite', expiresAt: EXPIRES_AT, answerable: true,
+    });
+  });
+
+  it('US-007 AC-3: a minimal line carries no answerable field, so it cannot read as answerable', () => {
+    expect(parseThreadLine('{"type":"approval_requested","requestId":"a1"}')).toEqual({ type: 'approval_requested', requestId: 'a1' });
+  });
+
+  it.each([['tool'], ['summary'], ['expiresAt']])('US-007 field rule: drops a line with no %s back to the minimal shape', (missing) => {
+    expect(parseThreadLine(completeApproval({ [missing]: undefined }))).toEqual({ type: 'approval_requested', requestId: 'a1' });
+  });
+
+  it('US-007 field rule: drops a malformed optional command and reason but keeps the complete line', () => {
+    expect(parseThreadLine(completeApproval({ command: 7, reason: '' }))).toEqual({
+      type: 'approval_requested', requestId: 'a1', tool: 'bash', summary: 'Run the test suite', expiresAt: EXPIRES_AT,
+      unsandboxed: true, answerable: true,
+    });
+  });
+
+  it('US-007 field rule: keeps unsandboxed only when it is exactly true', () => {
+    expect(parseThreadLine(completeApproval({ unsandboxed: false }))).not.toHaveProperty('unsandboxed');
+  });
+});
+
+describe('parseThreadLine session_started mode (US-007)', () => {
+  it('US-007 AC-4: accepts a session_started line with mode ask and keeps the mode', () => {
+    expect(parseThreadLine(JSON.stringify({
+      type: 'session_started', at: '2026-11-24T00:00:00.000Z', resumed: true, mode: 'ask', backend: { kind: 'native' }, skillShas: [],
+    }))).toEqual({ type: 'session_started', at: '2026-11-24T00:00:00.000Z', resumed: true, mode: 'ask' });
+  });
+
+  it('US-007 field rule: drops a mode that is not a thread mode and keeps the line', () => {
+    expect(parseThreadLine(JSON.stringify({
+      type: 'session_started', at: '2026-11-24T00:00:00.000Z', resumed: false, mode: 'write', backend: { kind: 'native' }, skillShas: [],
+    }))).toEqual({ type: 'session_started', at: '2026-11-24T00:00:00.000Z', resumed: false });
   });
 });

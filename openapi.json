@@ -22038,6 +22038,45 @@
           "backend"
         ]
       },
+      "ThreadPendingApprovalDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "The request id the decision route takes"
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool that needs the decision"
+          },
+          "summary": {
+            "type": "string",
+            "description": "What the tool would do, in the runner's own words"
+          },
+          "command": {
+            "type": "string",
+            "description": "The command the tool would run, when it runs one"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the runner is asking"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When the runner stops waiting for the decision"
+          },
+          "unsandboxed": {
+            "type": "boolean",
+            "description": "Set when the request would leave the session sandbox"
+          }
+        },
+        "required": [
+          "requestId",
+          "tool",
+          "summary",
+          "expiresAt"
+        ]
+      },
       "WorkspaceThreadDto": {
         "type": "object",
         "properties": {
@@ -22120,6 +22159,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -22236,6 +22282,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -22392,6 +22439,13 @@
             "type": "object",
             "nullable": true
           },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
+          },
           "session": {
             "type": "object",
             "nullable": true,
@@ -22543,6 +22597,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -22838,6 +22893,13 @@
             "type": "object",
             "nullable": true
           },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
+          },
           "session": {
             "type": "object",
             "nullable": true,
@@ -22938,6 +23000,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -23048,6 +23111,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -23185,6 +23255,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",

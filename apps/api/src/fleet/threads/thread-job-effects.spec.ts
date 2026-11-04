@@ -229,4 +229,12 @@ describe('ThreadJobEffects.onJobEnded (#264)', () => {
     await new ThreadJobEffects(prisma).onJobEnded(endedJob());
     expect(chatThread.update).not.toHaveBeenCalled();
   });
+
+  it('US-007 AC-10: clears the thread pendingApprovals as well as its pendingQuestion', async () => {
+    const { prisma, chatThread } = endedPrisma({ open: [] });
+    await new ThreadJobEffects(prisma).onJobEnded(endedJob({ state: 'CRASHED' }));
+    expect(chatThread.updateMany).toHaveBeenCalledWith({
+      where: { id: 'T' }, data: { pendingQuestion: Prisma.DbNull, pendingApprovals: Prisma.DbNull },
+    });
+  });
 });

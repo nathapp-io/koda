@@ -47,7 +47,11 @@ export class ThreadJobEffects {
     const where = { threadId, status: { in: ['pending', 'streaming'] } };
     const open = await this.prisma.client.chatMessage.findMany({ where, select: { id: true } });
     await this.prisma.client.chatMessage.updateMany({ where, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
-    await this.prisma.client.chatThread.updateMany({ where: { id: threadId }, data: { pendingQuestion: Prisma.DbNull } });
+    await this.prisma.client.chatThread.updateMany({
+      where: { id: threadId },
+      // thread-agents-modes US-007: the ended session waits on no decision, so its pending approvals go with the question.
+      data: { pendingQuestion: Prisma.DbNull, pendingApprovals: Prisma.DbNull },
+    });
     const at = (job.finishedAt ?? new Date()).toISOString();
     await this.closeSnapshot(job, threadId, at);
     const base = { threadId, at };

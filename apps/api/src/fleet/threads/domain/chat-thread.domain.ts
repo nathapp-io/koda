@@ -1,5 +1,6 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
+import type { ThreadPendingApproval } from './pending-approvals';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
@@ -80,7 +81,13 @@ export interface ChatThreadRecord {
   createdByType?: 'USER' | 'AGENT';
   runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
-  pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
+  pendingQuestion: unknown;
+  /**
+   * thread-agents-modes US-007: the answerable session approvals the thread waits on, oldest first (at most 20).
+   * Always an array — a thread with nothing pending and a row written before the column carry an empty list.
+   */
+  pendingApprovals: ThreadPendingApproval[];
+  session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
   /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
   writtenPaths: string[];
