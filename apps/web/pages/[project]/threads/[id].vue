@@ -57,10 +57,14 @@ const allowedModes = computed<ThreadMode[]>(() => allowedThreadModes(permissions
 const showModeControl = computed(() => controller.thread.value?.kind === 'REPO')
 const pendingApprovals = computed(() => controller.thread.value?.pendingApprovals ?? [])
 /**
- * Deciding a session approval needs `thread.answer` on a thread the caller created (US-008 gates the route with that key
- * and the service with the creator), so the gate is the creator plus the own-or-any row form — never a role name.
+ * Deciding a session approval needs `thread.answer` on the thread (US-008 gates the route with that key and the service
+ * with the creator), but it is the live session's REQUESTER who answers: any-row holder or the thread's creator with the
+ * own-row grant (`own` means "my threads"). Branch fix B4: an any-row holder who started the turn in somebody else's
+ * thread must get the controls too, or that turn has no answerable UI. The server still checks the requester, and its
+ * refusal is shown on the card. Never a role name.
  */
-const canDecideApprovals = computed(() => isCreator.value && permissions.value.hasOwn('thread.answer'))
+const canDecideApprovals = computed(() =>
+  permissions.value.has('thread.answer') || (isCreator.value && permissions.value.hasOwn('thread.answer')))
 
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',

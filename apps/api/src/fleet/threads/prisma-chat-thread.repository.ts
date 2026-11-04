@@ -382,7 +382,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         return { jobId: null };
       }
       if (active) throw new ConflictAppException({}, 'threads.busy');
-      if (thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
+      // thread-agents-modes (branch fix B1): `writtenPaths` counts write_doc only, and an `ask`/`full` turn edits the
+      // worktree through native Write/Edit/Bash or the ACP agent's own tools, so those modes publish the runner's own
+      // diff and the API has nothing to count in advance. `read` keeps the guard: there is nothing else to publish.
+      if (thread.mode === 'read' && thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
       const job = await this.createThreadJob(thread, 'PUBLISH', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });

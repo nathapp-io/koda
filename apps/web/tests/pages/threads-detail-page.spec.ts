@@ -472,6 +472,46 @@ describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control 
     m.app.unmount()
   })
 
+  // Branch fix B4: the API authorizes the live session's REQUESTER with creator-or-any-row `thread.answer`, so an
+  // any-row holder who started the ask turn in somebody else's thread must get the decision controls too.
+  test('B4: a non-creator holding the any-row thread.answer sees the decision controls', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      permissions: ['thread.answer'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-deny"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B4: a non-creator holding only the own-row thread.answer sees no decision controls', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      // `own` means "my threads", so another creator's pending request stays read-only for this viewer.
+      permissions: ['thread.answer.own'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-approval-awaiting"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B4: the thread creator with the own-row thread.answer still decides', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u1', pendingApprovals: [approval()] }),
+      permissions: ['thread.answer.own'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeDefined()
+    m.app.unmount()
+  })
+
   test('US-012 wiring: Approve on a card reaches the controller action with its request id', async () => {
     const m = mountPage({ thread: threadDetail({ pendingApprovals: [approval({ requestId: 'req-9' })] }), permissions: MODE_KEYS })
     await m.settle()

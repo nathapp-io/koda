@@ -218,4 +218,49 @@ describeDb('US-003 thread publish', () => {
     expect(response.body.message).toContain('Another job of this thread is still active');
     expect(await db.chatMessage.count({ where: { threadId: thread.id } })).toBe(0);
   });
+
+  // Branch fix B1: `writtenPaths` counts write_doc only, so an `ask`/`full` turn's code changes never appear in it.
+  // Those modes publish the runner's own diff, so Publish must dispatch without a written path — and `read` must not.
+  it('B1: creates the PUBLISH job for a full-mode thread with no written path', async () => {
+    const runner = await makeRunner(`publish-full-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id, mode: 'full', writtenPaths: [] });
+    const response = await publish(thread.id).expect(200);
+    const { jobId } = response.body.data as { jobId: string };
+    expect(jobId).toBeTruthy();
+    expect(await db.fleetThreadTurn.findUniqueOrThrow({ where: { jobId } })).toMatchObject({ action: 'PUBLISH', mode: 'full' });
+  });
+
+  it('B1: creates the PUBLISH job for an ask-mode thread with no written path', async () => {
+    const runner = await makeRunner(`publish-ask-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id, mode: 'ask', writtenPaths: [] });
+    const response = await publish(thread.id).expect(200);
+    expect((response.body.data as { jobId: string | null }).jobId).toBeTruthy();
+  });
+
+  it('B1: keeps refusing a read-mode thread with no written path', async () => {
+    const runner = await makeRunner(`publish-read-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id, mode: 'read', writtenPaths: [] });
+    const response = await publish(thread.id).expect(409);
+    expect(response.body.message).toContain('nothing to publish');
+    expect(await db.fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+  });
+
+  // B1 live-session coverage: an ask/full thread with no written path publishes INTO its idle live session.
+  it('B1: queues THREAD_PUBLISH on the idle live session of a full-mode thread with no written path', async () => {
+    const runner = await makeRunner(`publish-full-live-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id, mode: 'full', writtenPaths: [] });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING', leaseEpoch: 11,
+      runnerId: runner.id, threadId: thread.id,
+    } });
+    await db.fleetThreadTurn.create({ data: {
+      jobId: job.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: '',
+      backend: { kind: 'native', model: 'm1' }, skills: [], resume: false, mode: 'full',
+    } });
+    await publish(thread.id).expect(200);
+    const commands = await db.fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_PUBLISH' } });
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ leaseEpoch: 11, payload: {} });
+  });
 });

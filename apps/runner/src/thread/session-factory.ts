@@ -130,6 +130,10 @@ export class ThreadSessionFactory {
 
       const backendOptions = {
         ...(thread.mode === 'ask' || thread.mode === 'full' ? { allowUnsandboxed: true } : {}),
+        // thread-agents-modes (branch fix B2): nax-agent resolves `bashApproval` to `gated` whatever the profile, so
+        // `full` — the no-prompts mode — has to ask for `raw` explicitly or every Bash call would wait for a decision.
+        // `ask` keeps gated, which its profile requires (a non-gated mode would run Bash without asking).
+        ...(thread.mode === 'full' ? { bashApproval: 'raw' as const } : {}),
         model: effort === undefined ? model : `${model}[${effort}]`,
         carryHistoryAcrossModels: true,
         hostPorts: {

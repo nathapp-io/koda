@@ -217,6 +217,53 @@ describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
     m.app.unmount()
   })
 
+  // Branch fix B3: a 200 only means the decision was queued; the runner may reject it and the request stays pending.
+  // The card must stay visible, say the decision is queued, and offer a resend — never hide an unresolved request.
+  test('B3: an accepted decision keeps the card visible and marks it queued', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7' }) })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledWith('/projects/acme/threads/th1/approvals/req-7', { decision: 'allow' })
+    // The thread the fake reloads still lists the request, which is exactly the unresolved state the card must show.
+    expect(m.byId('thread-approval')).toBeDefined()
+    expect(m.textOf('thread-approval-queued')).toBe('Decision sent. Waiting for the session to apply it.')
+    expect(m.disabled('thread-approval-approve')).toBe(true)
+    expect(m.disabled('thread-approval-deny')).toBe(true)
+    m.app.unmount()
+  })
+
+  test('B3: a queued decision can be sent again for a request the session has not resolved', async () => {
+    const m = mountCard({ approval: approval({ requestId: 'req-7' }) })
+    await settle()
+
+    m.click('thread-approval-deny')
+    await settle()
+    expect(m.byId('thread-approval-retry')).toBeDefined()
+
+    m.click('thread-approval-retry')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledTimes(2)
+    expect(m.post).toHaveBeenLastCalledWith('/projects/acme/threads/th1/approvals/req-7', { decision: 'deny' })
+    m.app.unmount()
+  })
+
+  test('B3: a retry that the API refuses clears the queued mark and shows the message', async () => {
+    const m = mountCard({ postError: { data: { message: 'The session already closed.' } } })
+    await settle()
+
+    m.click('thread-approval-approve')
+    await settle()
+
+    expect(m.byId('thread-approval-queued')).toBeUndefined()
+    expect(m.textOf('thread-approval-error')).toBe('The session already closed.')
+    expect(m.disabled('thread-approval-approve')).toBe(false)
+    m.app.unmount()
+  })
+
   test('AC-12: the Approve label is English with the English locale and Chinese with the Chinese locale', async () => {
     const en = mountCard()
     await settle()

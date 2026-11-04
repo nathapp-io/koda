@@ -197,7 +197,7 @@ describe('Fleet locale parity (en and zh)', () => {
   // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render.
   test('the thread page mode and approval keys cover exactly what the controls render (US-012)', () => {
     const modeKeys = ['read', 'ask', 'full']
-    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting']
+    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry']
     for (const locale of [en, zh]) {
       const modes = at(locale, 'fleet.threads.mode') as Tree | undefined
       expect(Object.keys(modes ?? {}).sort()).toEqual(['label', 'noPermission', ...modeKeys].sort())
