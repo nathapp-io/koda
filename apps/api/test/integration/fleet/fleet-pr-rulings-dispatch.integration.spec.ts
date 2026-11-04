@@ -49,7 +49,7 @@ const headSha = 'b'.repeat(40);
     disposition: 'confirmed', actorType: 'USER', actorId: world.ids.root, state, createdAt,
   } });
   const stub = (kind: string) => {
-    vi.spyOn(app.get(GitHubAppClient), 'mintReadOnlyToken').mockResolvedValue({ token: 'ephemeral', expiresAt: new Date() });
+    vi.spyOn(app.get(GitHubAppClient), 'mintThreadReadToken').mockResolvedValue({ token: 'ephemeral', expiresAt: new Date() });
     const read = vi.spyOn(app.get(GitHubAppClient), 'getPullRequest');
     if (kind === 'throw') read.mockRejectedValue(new Error('provider down'));
     else read.mockResolvedValue(kind === 'missing' ? null : { state: kind, headSha } as never);
