@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FleetCommandOut, KodaToolDescriptor, ThreadAssign } from '@nathapp/fleet-protocol';
+import type { FleetCommandOut, KodaToolDescriptor, ThreadAssign, ThreadBackend } from '@nathapp/fleet-protocol';
 import { assignFor } from '../../test/helpers/assign';
 import { parseAssign } from './assign-parser';
 
@@ -143,6 +143,40 @@ describe('parseAssign THREAD (US-001)', () => {
     const { assign } = threadFixture({ backend: { kind: 'acp', agent: 'claude' } as never });
     const parsed = parseAssign(cmd(assign));
     expect(parsed.ok).toBe(true);
+  });
+
+  // thread-agents-modes US-003: `cursor` joins the accepted ACP agents, and an ACP model id may carry the
+  // `[...]` option suffix the agent advertises (fleet-protocol's ACP_MODEL_ID_RE).
+  test('US-003 AC-7: an acp cursor backend with an option-suffix model is accepted and copied', () => {
+    const backend: ThreadBackend = { kind: 'acp', agent: 'cursor', model: 'gpt-5.5[context=272k,reasoning=medium]' };
+    const { assign } = threadFixture({ backend: backend as never });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.backend).toEqual(backend);
+  });
+
+  test('US-003 AC-8: an acp gemini backend returns invalid backend', () => {
+    const { assign } = threadFixture({ backend: { kind: 'acp', agent: 'gemini' } as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid backend' });
+  });
+
+  test('US-003: an acp agent must be present and one of the three koda admits', () => {
+    for (const agent of [undefined, '', 'opencode', 42]) {
+      const { assign } = threadFixture({ backend: { kind: 'acp', agent } as never });
+      expect({ agent, parsed: parseAssign(cmd(assign)) }).toEqual({ agent, parsed: { ok: false, detail: 'invalid backend' } });
+    }
+  });
+
+  test('US-003: an ACP effort may carry digits, dashes and underscores, as the API accepts it', () => {
+    const { assign } = threadFixture({ backend: { kind: 'acp', agent: 'cursor', effort: 'x-high_2' } as never });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.backend).toEqual({ kind: 'acp', agent: 'cursor', effort: 'x-high_2' });
+  });
+
+  test('US-003: a model only the ACP pattern accepts is refused on a native backend', () => {
+    const { assign } = threadFixture({ backend: { kind: 'native', model: 'gpt-5.5[context=272k,reasoning=medium]' } as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid backend' });
   });
 
   test('US-001 AC-11: fixture with skills none returns invalid skills', () => {
