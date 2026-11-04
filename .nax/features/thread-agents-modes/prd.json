@@ -3,7 +3,7 @@
   "feature": "thread-agents-modes",
   "branchName": "feat/thread-agents-modes",
   "createdAt": "2026-11-24T00:00:00Z",
-  "updatedAt": "2026-11-04T14:50:39.290Z",
+  "updatedAt": "2026-11-04T15:26:10.111Z",
   "userStories": [
     {
       "id": "US-001",
@@ -465,14 +465,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Untrusted session-event parsing and concurrent approval state lifecycle are security-sensitive even without a new decision endpoint."
+        "reasoning": "Untrusted session-event parsing and concurrent approval state lifecycle are security-sensitive even without a new decision endpoint.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/ingest/thread-line.ts",
@@ -496,7 +499,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "248b43ff053a865314dd9f43cdb181e6b8b0c29f"
     },
     {
       "id": "US-008",
