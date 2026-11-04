@@ -26,14 +26,14 @@ const withProjectThreads = (runner: PlacementRunnerRow): PlacementRunnerRow =>
   ({ ...runner, capabilities: { ...runner.capabilities, projectThreads: true } });
 
 /** Fake collaborators for one QUEUED THREAD job whose turn names `kind`. */
-function fixture(kind: 'REPO' | 'PROJECT') {
+function fixture(kind: 'REPO' | 'PROJECT', mode: 'read' | 'ask' | 'full' = 'read') {
   const job = {
     id: 'j1', projectId: 'p1', repoId: 'repo1', command: 'THREAD', state: FleetJobState.QUEUED, pinnedRunnerId: null,
     selectorLabels: [], profiles: [], bashMode: 'raw', threadId: 't1', feature: `thread-t1`, ref: 'trunk', maxCostUsd: '5',
     planFrom: null, approvalTimeoutSec: 600, leaseEpoch: 0,
   };
   const threadAssign = {
-    threadId: 't1', action: 'SESSION', kind, feature: kind === 'PROJECT' ? 'thread-t1' : 'auth', resume: false,
+    threadId: 't1', action: 'SESSION', kind, mode, feature: kind === 'PROJECT' ? 'thread-t1' : 'auth', resume: false,
     instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], initialMessage: null,
   };
   const repo = {
@@ -120,5 +120,28 @@ describe('US-005: fillRunnerThreads (a runner sync) carries the thread kind into
     expect(repo.createCommand).toHaveBeenCalledWith(expect.objectContaining({
       type: FleetCommandType.ASSIGN, payload: expect.objectContaining({ thread: expect.objectContaining({ kind: 'REPO' }) }),
     }));
+  });
+});
+
+describe('both placement builders carry the turn mode', () => {
+  it.each(['ask', 'full'] as const)('placeJob leaves %s queued on an old runner', async (mode) => {
+    const { service, repo } = fixture('REPO', mode);
+    expect(await service.placeJob('j1', NOW)).toMatchObject({ assigned: false, misfits: [{ reason: 'thread_modes' }] });
+    expect(repo.casAssign).not.toHaveBeenCalled();
+  });
+  it.each(['ask', 'full'] as const)('fillRunnerThreads leaves %s queued on an old runner', async (mode) => {
+    const { service, repo } = fixture('REPO', mode);
+    await service.fillRunnerThreads('r1', NOW);
+    expect(repo.casAssign).not.toHaveBeenCalled();
+  });
+  it('both entry points assign the snapshotted mode to a capable runner', async () => {
+    for (const entry of ['placeJob', 'fillRunnerThreads'] as const) {
+      const { service, repo, setRunners } = fixture('REPO', 'full');
+      const runner = runnerRow();
+      setRunners([{ ...runner, capabilities: { ...runner.capabilities, threadModes: true } }]);
+      if (entry === 'placeJob') await service.placeJob('j1', NOW);
+      else await service.fillRunnerThreads('r1', NOW);
+      expect(repo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: FleetCommandType.ASSIGN, payload: expect.objectContaining({ thread: expect.objectContaining({ mode: 'full' }) }) }));
+    }
   });
 });

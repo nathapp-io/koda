@@ -29,6 +29,19 @@ const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURE
 const brokenFast = { fast: { protocol: 'native' as const, providers: ['deepseek'], sandbox: true, interaction: TG_FAILED } };
 
 describe('placement rules (spec §4)', () => {
+  it('AC-5: mode-capable sessions fail closed on old runners; read stays compatible', () => {
+    const r = runner({ protocolVersion: 4, threadCapacity: 2, capabilities: caps({ threadBackends: { native: ['m1'], acp: ['cursor'] }, threadWrite: true }) });
+    for (const mode of ['ask', 'full'] as const) {
+      for (const backend of [{ kind: 'native' as const }, { kind: 'acp' as const, agent: 'cursor' as const }]) {
+        const j = job({ command: 'THREAD', thread: { enabled: true, backend, mode } });
+        expect(misfit(j, r)).toBe('thread_modes');
+        expect(misfit(j, { ...r, capabilities: { ...r.capabilities, threadModes: true } })).toBeNull();
+        expect(misfit({ ...j, thread: { enabled: true, backend, mode, action: 'PUBLISH' } }, r)).toBeNull();
+      }
+    }
+    expect(misfit(job({ command: 'THREAD', thread: { enabled: true, backend: { kind: 'native' }, mode: 'read' } }), r)).toBeNull();
+    expect(MISFIT_REASONS).toContain('thread_modes');
+  });
   it('requires botReview first for REVIEW jobs, but fits a capable matching runner', () => {
     const review = job({ command: 'REVIEW' });
     expect(misfit(review, runner())).toBe('bot_review');

@@ -1,3 +1,5 @@
+import { PermissionService } from '../../permissions/permission.service';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ConfigType } from '@nestjs/config';
@@ -28,11 +30,16 @@ export class ThreadsService {
     private readonly fleetJobs: FleetJobsService,
     private readonly projectBrief: ProjectBriefService,
     private readonly afterCommit: AfterCommitService,
+    private readonly permissions: PermissionService,
   ) {}
 
-  async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
+  async create(projectId: string, principal: KodaPrincipal, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     const normalized = validateCreateThread(input, input.baseRef ?? 'main');
+    if (normalized.kind === 'REPO' && normalized.mode !== 'read' && !(await this.permissions.can(principal, `thread.mode.${normalized.mode}`, { projectId })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+    const userId = principal.id;
     // S5b-R3: a PROJECT thread has no repo, worktree or feature. The anchor repo is bookkeeping only (S5b-R13).
     if (normalized.kind === 'PROJECT') {
       const anchor = await this.repos.findAnchor(projectId);
@@ -46,7 +53,7 @@ export class ThreadsService {
     const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);
     try {
-      return await this.threads.create({ kind: 'REPO', projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
+      return await this.threads.create({ kind: 'REPO', mode: resolved.mode, projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
     } catch (error) {
       if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: resolved.feature }, 'threads.featureTaken');
       throw error;

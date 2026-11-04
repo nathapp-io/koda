@@ -23,6 +23,10 @@ function rejection(raw: unknown): unknown {
 const models = (count: number): string[] => Array.from({ length: count }, (_, i) => `model-${i}`);
 
 describe('parseCapabilitiesCore threadBackends (US-001)', () => {
+  it('AC-4: keeps threadModes only when exactly true', () => {
+    expect(parseCapabilitiesCore({ ...valid, threadModes: true })).toHaveProperty('threadModes', true);
+    for (const threadModes of ['yes', false, 1, null]) expect(parseCapabilitiesCore({ ...valid, threadModes })).not.toHaveProperty('threadModes');
+  });
   it('US-001: keeps a valid threadBackends report', () => {
     const parsed = parseCapabilitiesCore({ ...valid, threadBackends: { native: ['deepseek-v3'], acp: ['claude'] } });
     expect(parsed.threadBackends).toEqual({ native: ['deepseek-v3'], acp: ['claude'] });

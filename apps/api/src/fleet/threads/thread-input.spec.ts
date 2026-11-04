@@ -54,7 +54,7 @@ describe('validateCreateThread — PROJECT threads (fleet S5b US-003)', () => {
   it('AC-8: an absent kind with a repoId, a valid feature and a native backend validates as kind REPO', () => {
     const normalized = validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth' }), 'trunk');
     expect(normalized.kind).toBe('REPO');
-    expect(normalized).toEqual({ kind: 'REPO', repoId: 'r1', feature: 'add-auth', baseRef: 'trunk', title: 'Brainstorm', maxCostUsd: '5', backend: { kind: 'native', model: 'm1' } });
+    expect(normalized).toEqual({ kind: 'REPO', mode: 'read', repoId: 'r1', feature: 'add-auth', baseRef: 'trunk', title: 'Brainstorm', maxCostUsd: '5', backend: { kind: 'native', model: 'm1' } });
   });
 });
 

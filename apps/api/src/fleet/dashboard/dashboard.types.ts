@@ -108,7 +108,7 @@ export type CredentialWhy = (typeof CREDENTIAL_WHY)[number];
 /** Every MisfitReason, for the DTO enum (same list as PlacementMisfitDto). */
 export const MISFIT_REASONS: readonly MisfitReason[] = [
   'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox',
-  'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'trust_domain', 'thread_capacity', 'thread_backend', 'threads_disabled', 'thread_write',
+  'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'trust_domain', 'thread_capacity', 'thread_backend', 'thread_modes', 'threads_disabled', 'thread_write',
   'project_threads', 'workspace_threads', 'bot_review', 'bot_fix', 'bot_rulings',
 ];
 

@@ -4170,8 +4170,17 @@ describeIntegration('API Integration Tests', () => {
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
       const res = await createThread('add-auth').expect(201);
       const thread = body<{ id: string; status: string; createdById: string; baseRef: string; specPath: string; maxCostUsd: string }>(res);
-      expect(thread).toMatchObject({ status: 'ACTIVE', createdById: world.ids.dev, baseRef: 'trunk', specPath: '.nax/features/add-auth/spec.md', maxCostUsd: '5' });
+      expect(thread).toMatchObject({ mode: 'read', status: 'ACTIVE', createdById: world.ids.dev, baseRef: 'trunk', specPath: '.nax/features/add-auth/spec.md', maxCostUsd: '5' });
       threadId = thread.id;
+    });
+
+    it('thread modes: developer creates ask but cannot create full', async () => {
+      const base = { repoId: world.repoId, title: 'Mode', backend: { kind: 'native', model: 'm1' } };
+      const route = `/api/projects/${projectSlug}/threads`;
+      const ok = await request(httpServer).post(route).set('Authorization', `Bearer ${world.tokens.dev}`).send({ ...base, feature: 'endpoint-ask', mode: 'ask' }).expect(201);
+      expect(body<{ mode: string }>(ok).mode).toBe('ask');
+      await request(httpServer).post(route).set('Authorization', `Bearer ${world.tokens.dev}`).send({ ...base, feature: 'endpoint-full-denied', mode: 'full' }).expect(403);
+      expect(await db().chatThread.count({ where: { feature: 'endpoint-full-denied' } })).toBe(0);
     });
 
     it('US-003 AC2: snapshots only enabled skills with the source SHA', async () => {

@@ -27,7 +27,7 @@ import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
 import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
-import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
+import type { ChatThreadKind, ThreadAction, ThreadMode, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { threadAuditKey } from './thread-audit';
@@ -63,10 +63,11 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly audit: AuditRecorder,
   ) {}
 
-  async create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
+  async create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
     const row = await this.audit.audited(
       () => this.prisma.client.chatThread.create({ data: {
       kind: input.kind,
+      mode: input.mode ?? 'read',
       projectId: input.projectId,
       repoId: input.repoId,
       baseRef: input.baseRef,
@@ -531,6 +532,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     await this.prisma.client.fleetThreadTurn.create({ data: {
       jobId: job.id, threadId: thread.id, action, initialMessageId: message?.id ?? null, instructions: target.instructions,
       backend: backend as Prisma.InputJsonValue, skills: skills as unknown as Prisma.InputJsonValue,
+      mode: thread.mode,
       resume: action === 'SESSION' && previousSession !== null,
     } });
     return job;
@@ -624,6 +626,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   private mapThread(row: Prisma.ChatThreadGetPayload<object> & { project?: { slug: string; name: string } }, activeJob: { id: string; state: string } | null): ChatThreadRecord {
     return {
+      mode: (row.mode ?? 'read') as ThreadMode,
       id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
       ...(row.project ? { homeProject: row.project } : {}),
       repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,

@@ -63,6 +63,9 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
+  // Create constrains approval with alsoKeys; the mode route declares these in US-005.
+  'thread.mode.ask',
+  'thread.mode.full',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
 ]);
@@ -129,6 +132,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   // FIX on an unprotected default branch: its own key so grants and approval policies for the other
   // repo toggles never reach it.
   'fleet.repo.fix.unprotected': 'global',
+  'thread.mode.ask': 'project',
+  'thread.mode.full': 'project',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);
@@ -147,6 +152,7 @@ const HIGH_RISK_PREFIXES: readonly string[] = [
   'fleet.enrollment.',
   'fleet.credential.',
   'fleet.job.shell.',
+  'thread.mode.',
 ];
 
 /** Credential writes that can return a raw secret or credential. */

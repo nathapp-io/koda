@@ -1,3 +1,5 @@
+import type { PermissionService } from '../../permissions/permission.service';
+import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { Logger } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { AfterCommitService } from '../../permissions/after-commit.service';
@@ -18,7 +20,11 @@ import { ThreadsService } from './threads.service';
 const briefStub = (section = 'Repository context: unavailable (no repository)') =>
   ({ resolveRepoContext: vi.fn(async () => section) }) as unknown as ProjectBriefService;
 
+const principal = { id: 'u1', actorType: 'user', role: 'MEMBER', email: 'u@test', name: 'User', blacklisted: false, revoked: false, authorities: [] } satisfies UserPrincipal;
+const permissionStub = () => ({ can: vi.fn().mockResolvedValue({ allowed: false }) }) as unknown as PermissionService;
+
 const record: ChatThreadRecord = {
+  mode: 'read',
   id: 't1', kind: 'REPO', projectId: 'p1', repoId: 'r1', baseRef: 'main', feature: 'auth', title: 'T', createdById: 'u1', runnerId: null,
   backend: { kind: 'native', model: 'm1' }, status: 'ACTIVE', archivedAt: null, skills: [],
   maxCostUsd: '5', costUsd: '0', tokens: null, specPath: '.nax/features/auth/spec.md', pendingQuestion: null,
@@ -30,7 +36,7 @@ describe('ThreadsService.prepareSendMessage', () => {
   function build() {
     const threads = { get: vi.fn().mockResolvedValue(record), sendMessage: vi.fn().mockResolvedValue({ message: { id: 'm1' }, jobId: 'j1', deduplicated: false }) };
     const brief = briefStub('ctx');
-    const service = new ThreadsService(threads as unknown as ChatThreadRepository, {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>, {} as FleetJobsService, brief, new AfterCommitService());
+    const service = new ThreadsService(threads as unknown as ChatThreadRepository, {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>, {} as FleetJobsService, brief, new AfterCommitService(), permissionStub());
     return { service, threads, brief };
   }
   it('message AC-7: rejects invalid text before reading repository context', async () => {
@@ -61,7 +67,7 @@ describe('ThreadsService.list', () => {
       config,
       {} as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     const open = await service.list('p1', undefined, 0, 20);
@@ -92,7 +98,7 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     const thread = await service.get('p1', 't1');
@@ -120,7 +126,7 @@ describe('ThreadsService.get pending actions (S5b US-004)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     const thread = await service.get('p1', 't1');
@@ -141,7 +147,7 @@ describe('ThreadsService.plan (US-006)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     await service.plan('p1', 't1', 'u1', {});
@@ -155,7 +161,7 @@ describe('ThreadsService.plan (US-006)', () => {
     const dispatch = vi.fn();
     const threads = { get: vi.fn().mockResolvedValue({ ...record, specPublished: true, runnerId: null }) } as unknown as ChatThreadRepository;
     const service = new ThreadsService(threads, {} as unknown as IFleetRepoRepository, {} as unknown as SkillsService,
-      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService, briefStub(), new AfterCommitService());
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService, briefStub(), new AfterCommitService(), permissionStub());
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.runnerMissing' });
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -170,7 +176,7 @@ describe('ThreadsService.plan (US-006)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPublished', httpStatus: 409 });
     expect(dispatch).not.toHaveBeenCalled();
@@ -186,7 +192,7 @@ describe('ThreadsService.run (US-007)', () => {
     { threadsEnabled: enabled } as unknown as ConfigType<typeof fleetConfig>,
     { dispatch } as unknown as FleetJobsService,
     briefStub(),
-    new AfterCommitService(),
+    new AfterCommitService(), permissionStub(),
   );
 
   it('AC-1: dispatches a RUN on the feature branch pinned to the thread runner, with the default cap and thread id', async () => {
@@ -302,14 +308,14 @@ describe('ThreadsService.create (US-003)', () => {
       { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
     return { service, create, findAnchor, findById, snapshotForProject };
   };
 
   it('AC-11/12: creates a PROJECT thread against the project anchor with no repo lookup and null repo fields', async () => {
     const { service, create, findAnchor, findById } = createService();
-    await service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } });
+    await service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } });
 
     expect(findAnchor).toHaveBeenCalledWith('p1');
     expect(findById).not.toHaveBeenCalled();
@@ -321,7 +327,7 @@ describe('ThreadsService.create (US-003)', () => {
 
   it('AC-13: refuses a PROJECT thread with threads.noFleetRepo when the project has no fleet repo', async () => {
     const { service, create, snapshotForProject } = createService({ repos: { findAnchor: vi.fn().mockResolvedValue(null) } });
-    await expect(service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
+    await expect(service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
       .rejects.toMatchObject({ code: 409, prefix: 'threads.noFleetRepo', httpStatus: 409 });
     expect(create).not.toHaveBeenCalled();
     expect(snapshotForProject).not.toHaveBeenCalled();
@@ -329,7 +335,7 @@ describe('ThreadsService.create (US-003)', () => {
 
   it('keeps the REPO two-pass flow: the repo branch validates the baseRef and the created row carries the repo', async () => {
     const { service, create, findAnchor, findById } = createService();
-    await service.create('p1', 'u1', { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } });
+    await service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } });
 
     expect(findById).toHaveBeenCalledWith('r1');
     expect(findAnchor).not.toHaveBeenCalled();
@@ -338,14 +344,14 @@ describe('ThreadsService.create (US-003)', () => {
 
   it('refuses a REPO create whose repo belongs to another project before any write', async () => {
     const { service, create } = createService({ repos: { findById: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'other', defaultBranch: 'trunk' }) } });
-    await expect(service.create('p1', 'u1', { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
+    await expect(service.create('p1', principal, { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
       .rejects.toMatchObject({ code: 404, prefix: 'fleet.repos' });
     expect(create).not.toHaveBeenCalled();
   });
 
   it('gates PROJECT exactly as it gates REPO: threads.disabled wins', async () => {
     const { service, create, findAnchor } = createService({ config: { threadsEnabled: false } });
-    await expect(service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
+    await expect(service.create('p1', principal, { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
       .rejects.toMatchObject({ code: 409, prefix: 'threads.disabled' });
     expect(findAnchor).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
@@ -360,7 +366,7 @@ describe('ThreadsService.discard (US-004)', () => {
     { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
     {} as unknown as FleetJobsService,
     briefStub(),
-    new AfterCommitService(),
+    new AfterCommitService(), permissionStub(),
   );
 
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
@@ -413,7 +419,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
       { resolveRepoContext } as unknown as ProjectBriefService,
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
     return { service, order, resolveRepoContext, findAnchor, sendMessage, get };
   };
@@ -488,7 +494,7 @@ describe('ThreadsService canOperate (US-002)', () => {
     { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
     { dispatch: vi.fn() } as unknown as FleetJobsService,
     briefStub(),
-    new AfterCommitService(),
+    new AfterCommitService(), permissionStub(),
   );
 
   it('forwards canOperate to updateCap, stop, endSession, answer, publish and sendMessage', async () => {
@@ -546,7 +552,7 @@ describe('ThreadsService canOperate (US-002)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     await service.plan('p1', 't1', 'u1', {}, true);
@@ -563,7 +569,7 @@ describe('ThreadsService canOperate (US-002)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
       briefStub(),
-      new AfterCommitService(),
+      new AfterCommitService(), permissionStub(),
     );
 
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'permissions' });
@@ -578,7 +584,7 @@ describe('ThreadsService archive after commit', () => {
     const cancel = vi.fn().mockResolvedValue(undefined);
     const service = new ThreadsService({ archive } as unknown as ChatThreadRepository,
       {} as IFleetRepoRepository, {} as SkillsService, {} as ConfigType<typeof fleetConfig>,
-      { cancel } as unknown as FleetJobsService, briefStub(), afterCommit);
+      { cancel } as unknown as FleetJobsService, briefStub(), afterCommit, permissionStub());
     return { afterCommit, archive, cancel, service };
   }
 

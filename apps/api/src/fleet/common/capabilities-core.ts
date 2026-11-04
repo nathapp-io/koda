@@ -211,6 +211,7 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(interaction !== undefined ? { interaction: parseInteraction(interaction, 'interaction') } : {}),
     ...(configJobs === true ? { configJobs: true as const } : {}),
     ...(threadBackends !== undefined ? { threadBackends: parseThreadBackends(threadBackends) } : {}),
+    ...(raw.threadModes === true ? { threadModes: true as const } : {}),
     ...(threadWrite === true ? { threadWrite: true as const } : {}),
     ...(projectThreads === true ? { projectThreads: true as const } : {}),
     ...(kodaTools === true ? { kodaTools: true as const } : {}),

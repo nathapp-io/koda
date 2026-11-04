@@ -1,12 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
+  @ApiProperty({ enum: ['read', 'ask', 'full'] }) mode: ThreadMode;
   @ApiProperty() id: string;
   @ApiProperty({ enum: ['REPO', 'PROJECT', 'WORKSPACE'] }) kind: ChatThreadKind;
   @ApiProperty({ description: "The thread's project; for a WORKSPACE thread, its home project" }) projectId: string;
@@ -102,6 +103,7 @@ export class AnswerQuestionDto {
 }
 
 export class CreateThreadDto {
+  @Allow() @ApiProperty({ required: false, enum: ['read', 'ask', 'full'], default: 'read' }) mode?: ThreadMode;
   @Allow() @ApiProperty({ required: false, enum: ['REPO', 'PROJECT'] }) kind?: ChatThreadKind;
   @Allow() @ApiProperty({ required: false }) repoId?: string;
   @Allow() @ApiProperty({ required: false }) feature?: string;

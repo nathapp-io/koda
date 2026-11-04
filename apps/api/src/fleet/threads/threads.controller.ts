@@ -1,3 +1,4 @@
+import { validateCreateThread } from './thread-input';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
@@ -47,7 +48,10 @@ export class ThreadsController {
   @ApiResponse({ status: 403, description: 'thread.create is missing' })
   @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const normalized = validateCreateThread(dto, dto.baseRef ?? 'main');
+    const alsoKeys = normalized.kind === 'REPO' && normalized.mode !== 'read' ? [`thread.mode.${normalized.mode}`] : [];
     const outcome = await this.routeGate.run<ChatThreadRecord>({
+      ...(alsoKeys.length ? { alsoKeys } : {}),
       key: 'thread.create', variant: THREAD_ROUTE_VARIANTS.create, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, thread: dto },
     });

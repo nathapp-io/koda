@@ -3,14 +3,14 @@ import { isRunnerOnline } from '../common/runner-online';
 import { isConfigKind } from '../common/config-jobs';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { isThreadKind } from '../common/thread-jobs';
-import type { ThreadAction, ThreadBackend, ChatThreadKind } from '../common/thread-jobs';
+import type { ThreadAction, ThreadBackend, ThreadMode, ChatThreadKind } from '../common/thread-jobs';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'thread_modes' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -24,6 +24,7 @@ export const PERMANENT_MISFITS: ReadonlySet<MisfitReason> = new Set<MisfitReason
 
 /** The thread facts placement judges: the turn's backend and action, whether thread jobs are on, and the thread kind. */
 export interface PlacementThread {
+  mode?: ThreadMode;
   backend: ThreadBackend;
   enabled: boolean;
   action?: ThreadAction;
@@ -141,6 +142,7 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
     // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
     const action = job.thread.action ?? 'SESSION';
     if (action === 'SESSION') {
+      if ((job.thread.mode === 'ask' || job.thread.mode === 'full') && runner.capabilities.threadModes !== true) return 'thread_modes';
       const backends = runner.capabilities.threadBackends;
       const backend = job.thread.backend;
       if (backend.kind === 'native') {

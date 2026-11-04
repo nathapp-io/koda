@@ -19053,6 +19053,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -21128,6 +21129,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -21781,6 +21783,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -21904,6 +21907,14 @@
       "CreateWorkspaceThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read"
+            ],
+            "type": "string",
+            "default": "read",
+            "description": "Workspace threads support read only"
+          },
           "kind": {
             "enum": [
               "WORKSPACE"
@@ -21949,6 +21960,14 @@
       "WorkspaceThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22117,6 +22136,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22211,6 +22231,14 @@
       "WorkspaceThreadDetailDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22415,6 +22443,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22604,6 +22633,15 @@
       "CreateThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string",
+            "default": "read"
+          },
           "kind": {
             "enum": [
               "REPO",
@@ -22639,6 +22677,14 @@
       "ThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22792,6 +22838,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22841,6 +22888,14 @@
       "ThreadDetailDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -23030,6 +23085,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",

@@ -59,7 +59,7 @@ export class ThreadRouteCommands implements OnModuleInit {
         const value = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
         return { ...route, thread: parseBody(CreateThreadDto, value.thread ?? {}) };
       },
-      run: (principal, input) => this.threads.create(input.projectId, principal.id, input.thread),
+      run: (principal, input) => this.threads.create(input.projectId, principal, input.thread),
       toResult: (result) => result,
     }, this.loader));
 

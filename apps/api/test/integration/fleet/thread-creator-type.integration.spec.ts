@@ -1,3 +1,4 @@
+import { ActorPrincipalLoader } from '../../../src/auth/principal/actor-principal.loader';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-001 — threads record their creator's and requester's type (PG).
@@ -58,7 +59,7 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
 
   /** A PROJECT thread of `web` created by `creatorId` acting as `type`. */
   const createThread = (creatorId: string, type: 'USER' | 'AGENT') =>
-    runWithActor({ type, id: creatorId }, () => threads.create(world.projectId, creatorId, projectThreadInput(`Requester ${++seq}`)));
+    runWithActor({ type, id: creatorId }, async () => threads.create(world.projectId, await app.get(ActorPrincipalLoader).forContext(), projectThreadInput(`Requester ${++seq}`)));
 
   /** A message from `senderId` on its own thread, which creates the thread's first THREAD job. */
   const send = (threadId: string, senderId: string, type: 'USER' | 'AGENT') =>
@@ -81,7 +82,7 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
     // The guard refuses a write with no context at all, so the no-principal case is only reachable from a
     // system component now; `actorTypeFor` answers 'USER' for it exactly as it does with no context.
     const created = await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
-      threads.create(world.projectId, world.ids.dev, projectThreadInput('No context')));
+      threads.create(world.projectId, { id: world.ids.dev, actorType: 'user', role: 'MEMBER', email: 'dev@koda.test', name: 'Dev', blacklisted: false, revoked: false, authorities: [] }, projectThreadInput('No context')));
     const row = await prisma.chatThread.findUniqueOrThrow({ where: { id: created.id } });
     expect(row.createdById).toBe(world.ids.dev);
     expect(row.createdByType).toBe('USER');

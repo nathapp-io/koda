@@ -9,6 +9,9 @@ export function isThreadKind(command: string): command is typeof THREAD_JOB_KIND
 export const THREAD_COMMAND_TYPES = ['THREAD_INPUT', 'THREAD_ANSWER', 'THREAD_STOP_TURN', 'THREAD_CLOSE', 'THREAD_PUBLISH'] as const;
 export type ThreadCommandType = (typeof THREAD_COMMAND_TYPES)[number];
 
+/** The execution profile snapshotted by a thread turn. */
+export type ThreadMode = 'read' | 'ask' | 'full';
+
 /** The ACP backends a runner can host a thread on (thread-agents-modes). nax-agent-acp knows more; the API admits these three. */
 export type ThreadAgent = 'claude' | 'codex' | 'cursor';
 
@@ -98,6 +101,8 @@ export type ThreadDiscardFailReason = 'no_worktree' | 'git_error';
 /** ASSIGN's `thread` block, present only for THREAD jobs. */
 export interface ThreadAssign {
   threadId: string;
+  /** Absent on older APIs means read. */
+  mode?: ThreadMode;
   action: ThreadAction;
   /** Fleet S5b 1a-R1: `REPO`, `PROJECT` or `WORKSPACE`; absent means `REPO` (older API). `WORKSPACE`: a personal
    *  thread, no checkout, no project repositories. */
@@ -140,7 +145,7 @@ export type ThreadFailReason = 'backend_unavailable' | 'agent_not_logged_in' | '
 
 /** Lines the runner writes itself; other stream lines are nax-agent SessionEvents. */
 export type ThreadRunnerLine =
-  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }
+  | { type: 'session_started'; mode?: ThreadMode; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }
   | { type: 'session_closed'; at: string; reason: ThreadCloseReason }
   | { type: 'input_consumed'; at: string; messageId: string }
   | { type: 'session_failed'; at: string; reason: ThreadFailReason }

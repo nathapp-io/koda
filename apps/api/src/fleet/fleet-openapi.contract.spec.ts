@@ -123,6 +123,11 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
   });
 
+  it('exposes thread modes on create/response and both misfit enums', () => {
+    for (const schema of ['PlacementMisfitDto', 'AttentionReasonDto']) expect(JSON.stringify(spec.components.schemas[schema])).toContain('thread_modes');
+    for (const schema of ['ThreadDto', 'CreateThreadDto']) expect(spec.components.schemas[schema]?.properties?.mode).toMatchObject({ enum: ['read', 'ask', 'full'] });
+  });
+
   it('exposes the project_threads misfit on the dispatch and dashboard enums (US-005)', () => {
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('project_threads');
     expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('project_threads');

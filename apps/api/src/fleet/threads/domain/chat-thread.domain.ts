@@ -1,5 +1,5 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
@@ -70,6 +70,7 @@ export type ThreadWriteResult =
 
 export interface ChatThreadRecord {
   id: string; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null;
+  mode: ThreadMode;
   title: string;
   createdById: string;
   /**
@@ -124,7 +125,7 @@ export interface ChatMessageRecord {
 export type ThreadScope = { kind: 'project'; projectId: string } | { kind: 'workspace'; userId: string };
 
 export interface ChatThreadRepository {
-  create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
+  create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;

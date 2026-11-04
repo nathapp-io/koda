@@ -117,13 +117,13 @@ describe('ThreadRouteCommands', () => {
   });
 
   it('creates as the rebuilt requester and validates frozen bodies and ids', async () => {
-    const { registry, threads, loader } = build();
+    const { registry, threads, loader, principal } = build();
     const command = registry.get('thread.create', THREAD_ROUTE_VARIANTS.create);
     if (!command) throw new Error('Missing create command');
     const thread = { kind: 'REPO', repoId: 'r1', feature: 'unique', title: 'Unique', backend: { kind: 'native', model: 'm1' } };
     const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', thread }));
     expect(loader.forContext).toHaveBeenCalledOnce();
-    expect(threads.create).toHaveBeenCalledWith('p1', 'a1', thread);
+    expect(threads.create).toHaveBeenCalledWith('p1', principal, thread);
     expect(command.toResult?.(result)).toEqual({ id: 't1' });
     for (const input of [null, {}, { slug: 'web', projectId: '' }, { slug: 'web', projectId: 'p1', thread: [] }]) expect(() => command.parse(input)).toThrow(ValidationAppException);
     // Domain validation stays in the service, including when the frozen body is missing.

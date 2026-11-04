@@ -4,7 +4,7 @@ import type { ChatThreadKind, ThreadAgent, ThreadCommandType } from '@nathapp/fl
 export type {
   ChatThreadKind, ProjectRepoAssign, ProjectRepoUnavailable,
   ThreadAction, ThreadAcpOffer, ThreadAgent, ThreadAnswerPayload, ThreadAssign, ThreadBackend, ThreadBackends, ThreadCommandType,
-  ThreadInputPayload, ThreadSkill, ThreadSkillSource,
+  ThreadMode, ThreadInputPayload, ThreadSkill, ThreadSkillSource,
 } from '@nathapp/fleet-protocol';
 
 export const THREAD_JOB_KIND = 'THREAD' as const;

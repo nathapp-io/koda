@@ -78,6 +78,8 @@ export interface RunnerCapabilities {
   threadBackends?: ThreadBackends;
   /** Fleet S5a §4: the runner writes thread docs and runs PUBLISH / DISCARD jobs. Absent on older runners. */
   threadWrite?: true;
+  /** Can enforce read/ask/full thread profiles. */
+  threadModes?: true;
   /** Fleet S5b: the runner hosts PROJECT threads with no checkout. Absent on older runners. */
   projectThreads?: true;
   /** Fleet S5b: the runner proxies koda API tools into a session. Absent on older runners (no tools on the ASSIGN). */
