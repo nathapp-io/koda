@@ -36,7 +36,7 @@ describe('FleetPrRulingsService', () => {
       expect(currentContext()).toBe(before);
     });
   });
-  it.each(['confirm', 'looks fine'])('rejects invalid text without writes: %s', async (text) => {
+  it.each(['confirm', 'looks fine', `confirm: ${'😀'.repeat(1100)}`, `confirm: ${'x'.repeat(1992)}`])('rejects invalid text without writes: %s', async (text) => {
     const { service, repo } = setup();
     await expect(service.create(agent, 'slug', 'run', { itemId: 'D-1', text })).rejects.toThrow();
     expect(repo.insert).not.toHaveBeenCalled();

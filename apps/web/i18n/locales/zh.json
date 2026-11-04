@@ -1116,6 +1116,7 @@
       "finish": "完成 PR",
       "created": "裁定已记录",
       "pendingApproval": "裁定等待审批",
+      "finishPendingApproval": "完成请求等待审批：{id}",
       "unexpectedApproval": "审批响应异常，请刷新审批收件箱。",
       "validation": {
         "evidence": "请提供证据或理由",
@@ -1904,6 +1905,7 @@
       "legacyLink": "在时间线中查看采样行"
     },
     "dispatch": {
+      "pendingApproval": "派发请求等待审批：{id}",
       "title": "派发任务",
       "subtitle": "在一台 fleet 执行机上运行 nax",
       "noPermission": "你没有在此项目中派发任务的权限。",

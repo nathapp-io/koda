@@ -22,7 +22,7 @@ const fire = (node: FakeNode, event: string, value?: unknown) => (node.props[eve
 function mount(permissions = ['fleet.job.rule', 'fleet.job.dispatch'], rows = [ruling()]) {
   const list = jest.fn(async () => rows)
   const create = jest.fn<(...args: unknown[]) => Promise<unknown>>(async () => ruling())
-  const dispatch = jest.fn(async () => ({ job: { id: 'fix1' } }))
+  const dispatch = jest.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ job: { id: 'fix1' } }))
   const navigate = jest.fn()
   const toast = toastRecorder()
   const app = mountSfc(webFile('components/fleet/FleetJobOpenItems.vue'), {
@@ -118,6 +118,18 @@ describe('draft RUN open items', () => {
     const m = mount(); await settle(); await fire(m.byId('fleet-job-finish'), 'onClick'); await settle()
     expect(m.dispatch).toHaveBeenCalledWith({ command: 'FIX', repoId: 'r1', prNumber: 12, maxCostUsd: 5 })
     expect(m.navigate).toHaveBeenCalledWith('/koda/fleet/jobs/fix1')
+    m.app.unmount()
+  })
+  test('AC-11: successful 202 Finish identifies the pending dispatch instead of opening a nonexistent job', async () => {
+    const m = mount()
+    m.dispatch.mockResolvedValue({ id: 'approval1', permissionKey: 'fleet.job.dispatch', status: 'pending', requiredMode: 'human', projectId: 'p1' })
+    await settle(); await fire(m.byId('fleet-job-finish'), 'onClick'); await settle()
+    expect(m.navigate).not.toHaveBeenCalled()
+    expect(m.toast.calls).toEqual([{ kind: 'success', message: 'Finish pending approval: approval1' }])
+    expect(m.byId('fleet-job-finish').props.disabled).toBe(true)
+    expect(m.byId('finish-approval').props.to).toBe('/koda/approvals?id=approval1')
+    await fire(m.byId('fleet-job-finish'), 'onClick'); await settle()
+    expect(m.dispatch).toHaveBeenCalledTimes(1)
     m.app.unmount()
   })
   test('AC-12: Finish is hidden without dispatch permission', async () => {

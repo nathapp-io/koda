@@ -4,6 +4,7 @@ import { extractApiError } from '~/composables/useApi'
 import { useFleetRulings } from '~/composables/useFleetRulings'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { draftRunPrNumber } from '~/lib/fleet-rulings'
+import { inboxHref } from '~/lib/approval-requests'
 import type { FleetJobDto, FleetPrRulingDto } from '~/lib/fleet-types'
 import FleetJobRulingForm from '~/components/fleet/FleetJobRulingForm.vue'
 
@@ -20,6 +21,7 @@ const rulings = ref<FleetPrRulingDto[]>([])
 const loading = ref(true)
 const failed = ref(false)
 const finishing = ref(false)
+const finishApproval = ref<string | null>(null)
 let requestId = 0
 const latest = computed(() => {
   const byItem = new Map<string, FleetPrRulingDto>()
@@ -70,10 +72,18 @@ async function rule(itemId: string, text: string): Promise<void> {
   }
 }
 async function finish(): Promise<void> {
-  if (finishing.value || !canDispatch.value || prNumber.value === null) return
+  if (finishing.value || finishApproval.value || !canDispatch.value || prNumber.value === null) return
   finishing.value = true
   try {
     const result = await jobs.dispatch({ command: 'FIX', repoId: props.job.repoId, prNumber: prNumber.value, maxCostUsd: Number(props.job.maxCostUsd) })
+    if ('permissionKey' in result) {
+      if (result.permissionKey === 'fleet.job.dispatch' && result.status === 'pending') {
+        finishApproval.value = result.id
+        toast.success(t('fleet.rulings.finishPendingApproval', { id: result.id }))
+      }
+      else toast.error(t('fleet.rulings.unexpectedApproval'))
+      return
+    }
     await navigateTo(`/${props.slug}/fleet/jobs/${result.job.id}`)
   }
   catch (err: unknown) {
@@ -119,6 +129,7 @@ async function finish(): Promise<void> {
         </TableBody>
       </Table>
     </div>
-    <Button v-if="canDispatch" :disabled="finishing" data-testid="fleet-job-finish" @click="finish()">{{ t('fleet.rulings.finish') }}</Button>
+    <NuxtLink v-if="finishApproval" :to="inboxHref(slug, finishApproval)" class="text-primary underline" data-testid="finish-approval">{{ t('fleet.rulings.finishPendingApproval', { id: finishApproval }) }}</NuxtLink>
+    <Button v-if="canDispatch" :disabled="finishing || finishApproval !== null" data-testid="fleet-job-finish" @click="finish()">{{ t('fleet.rulings.finish') }}</Button>
   </section>
 </template>

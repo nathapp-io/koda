@@ -1116,6 +1116,7 @@
       "finish": "Finish",
       "created": "Ruling recorded",
       "pendingApproval": "Ruling pending approval",
+      "finishPendingApproval": "Finish pending approval: {id}",
       "unexpectedApproval": "Unexpected approval response. Refresh the approval inbox.",
       "validation": {
         "evidence": "Evidence or a reason is required",
@@ -1904,6 +1905,7 @@
       "legacyLink": "See the sampled lines in the timeline"
     },
     "dispatch": {
+      "pendingApproval": "Dispatch pending approval: {id}",
       "title": "Dispatch a job",
       "subtitle": "Run nax on one of the fleet runners",
       "noPermission": "You do not have permission to dispatch jobs in this project.",

@@ -1,4 +1,6 @@
 import { buildAssignPayload } from './assign-payload';
+import { parseRulingText } from '../rulings/ruling-keyword';
+import { parseAssign } from '../../../../runner/src/supervisor/assign-parser';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 import { EMPTY_LOAD, firstMisfit, PERMANENT_MISFITS, toPlacementJob } from './placement-rules';
 import type { PlacementRunner } from './placement-rules';
@@ -38,6 +40,16 @@ const capabilities = {
 const runner: PlacementRunner = { id: 'r1', name: 'runner', enabled: true, lastSeenAt: NOW, labels: [], capacity: 1, capabilities };
 
 describe('FIX caller rulings', () => {
+  it('API-to-runner Unicode boundary uses 2000 UTF-16 code units, not code points', () => {
+    const text = `confirm: ${'😀'.repeat(995)}x`;
+    expect(text.length).toBe(2000);
+    expect(parseRulingText(text)?.disposition).toBe('confirmed');
+    const payload = buildAssignPayload({ ...fix, prRulings: { ...snapshot, rulings: [{ ...ruling, ruling: text }] } }, repo, 'https://github.com/acme/app.git', identity);
+    expect(parseAssign({ commandId: 'cmd1', type: 'ASSIGN', jobId: fix.id, leaseEpoch: 1, payload }).ok).toBe(true);
+    // REST and approved commands both call this parser before any ruling is persisted.
+    expect(parseRulingText(`${text}x`)).toBeNull();
+    expect(parseRulingText(`confirm: ${'😀'.repeat(1100)}`)).toBeNull();
+  });
   it('AC-1 projects the stored snapshot without internal rulingId', () => {
     const payload = buildAssignPayload(fix, repo, 'https://x/y.git', identity);
     expect(payload.review).toEqual({ prNumber: 42, botLogin: identity.name, rulings: {
