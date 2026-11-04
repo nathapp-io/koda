@@ -5,6 +5,7 @@ export type {
   ApprovalRequestEventPayload,
   AssignPayload,
   BashMode,
+  CallerRuling,
   CommandAck,
   CommandAckResult,
   ConfigEditMode,

@@ -90,6 +90,8 @@ export interface RunnerCapabilities {
   botReview?: true;
   /** Fleet PR fix: nax supports `nax bot fix --no-rereview` in addition to bot review. */
   botFix?: true;
+  /** nax supports caller rulings for an explicit FIX assignment. */
+  botRulings?: true;
 }
 
 export interface EnrollRequest {
@@ -247,6 +249,8 @@ export interface GitIdentity { name: string; email: string }
 /** ASSIGN carries everything the runner needs; never a secret (git tokens come via gitTokens). */
 export interface ReviewDecision { id: string; statement: string; source?: string }
 
+export interface CallerRuling { item: string; ruling: string; by: string; at: string }
+
 export interface AssignPayload {
   jobId: string;
   command: FleetJobKindName;
@@ -268,6 +272,8 @@ export interface AssignPayload {
     prNumber: number;
     botLogin: string;
     decisions?: ReviewDecision[];
+    /** FIX-only snapshot; internal ruling ids never leave the API. */
+    rulings?: { headSha: string; rulings: CallerRuling[] };
     /** FIX-only: allow nax to trust detected checks for this assignment. */
     trustDetectedChecks?: true;
   };

@@ -18985,7 +18985,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }
@@ -20999,7 +21000,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }
@@ -21651,7 +21653,8 @@
               "project_threads",
               "workspace_threads",
               "bot_review",
-              "bot_fix"
+              "bot_fix",
+              "bot_rulings"
             ],
             "type": "string"
           }

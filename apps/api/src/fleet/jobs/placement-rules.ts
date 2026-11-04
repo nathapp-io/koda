@@ -10,7 +10,7 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -41,6 +41,8 @@ export interface PlacementJob {
   pinnedRunnerId: string | null;
   bashMode: BashMode;
   thread?: PlacementThread;
+  /** Only explicit FIX jobs with a non-empty ruling snapshot need this capability. */
+  needsBotRulings?: true;
 }
 
 export interface PlacementRunner {
@@ -96,6 +98,8 @@ function toolsMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason 
 function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
   if ((job.command === 'REVIEW' || job.command === 'FIX') && caps.botReview !== true) return 'bot_review';
   if (job.command === 'FIX' && caps.botFix !== true) return 'bot_fix';
+  // Recoverable: a runner upgrade can add ruling support. Never refuse the pre-snapshot pin check.
+  if (job.needsBotRulings && caps.botRulings !== true) return 'bot_rulings';
   // Fleet S3 D470: a config job runs no agent, so only the S3 capability and the forge tools matter.
   if (isConfigKind(job.command)) return caps.configJobs === true ? toolsMisfit(job, caps) : 'config_jobs';
   // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.
@@ -203,12 +207,13 @@ export const toLoads = (refs: readonly { runnerId: string; repoId: string; comma
   }, new Map<string, RunnerLoad>());
 
 export const toPlacementJob = (
-  job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
+  job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode' | 'prRulings'>,
   repo: Pick<FleetRepoRef, 'provider' | 'projectId'>,
   thread?: PlacementThread,
 ): PlacementJob => ({
   command: job.command, repoId: job.repoId, projectId: repo.projectId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
   ...(thread ? { thread } : {}),
+  ...(job.command === 'FIX' && job.prRulings && 'rulings' in job.prRulings && job.prRulings.rulings.length > 0 ? { needsBotRulings: true as const } : {}),
 });
 
 /** S1b §2.3 pre-assign pause check; config jobs spend nothing, so a pause never holds or cancels them (fleet S3 D470). */
