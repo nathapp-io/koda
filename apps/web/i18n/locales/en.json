@@ -2751,5 +2751,31 @@
         "deleted": "Approval policy deleted."
       }
     }
+  },
+  "providerKeysProject": {
+    "title": "Provider keys",
+    "description": "Project-wide keys and repository-specific overrides. Key values are never shown after saving.",
+    "projectTitle": "Provider keys",
+    "projectDescription": "Manage provider credentials for this project.",
+    "projectScope": "Project",
+    "repoScope": "Repository",
+    "addTitle": "Add provider key",
+    "repoPlaceholder": "Choose a repository",
+    "unknownRepo": "Unknown repository",
+    "providerId": "Provider ID",
+    "name": "Name",
+    "key": "Key",
+    "newKey": "New key",
+    "add": "Add key",
+    "rotate": "Rotate",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete": "Delete",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "deleteConfirm": "Delete {name}?",
+    "pending": "Pending approval. The key has not been saved yet.",
+    "noReadPermission": "You do not have permission to view provider keys.",
+    "validation": { "invalid": "Check the provider key fields.", "repoRequired": "Choose a repository." }
   }
 }
