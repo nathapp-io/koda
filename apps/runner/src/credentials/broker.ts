@@ -259,12 +259,16 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     const cached = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs());
     if (cached.kind === 'grant') return serve(cached.grant);   // no request needed: the lease still has margin
     // A new lookup revalidates an earlier denial; from here it reads only the answer its own request settles with.
+    const cancelled = (): boolean => this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline;
     let wait = cache.want(job.jobId, job.leaseEpoch, providerId);
     for (;;) {
-      // Check before waiting again: a released waiter must never read a dropped epoch's answer as its own.
-      if (this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline) return { ok: false, reason: 'error' };
+      // Check before waiting: a released waiter must never read a dropped epoch's answer as its own.
+      if (cancelled()) return { ok: false, reason: 'error' };
       // The poll tick only re-checks those guards; the answer itself arrives as soon as the sync delivers it.
       const answer = await Promise.race([wait.answered, sleep(timing.pollMs).then((): null => null)]);
+      // … and again after it: an answer that lands while the epoch is being released, the broker is closing or the wait
+      // runs out must neither be served nor re-queued, so the check has to sit between the await and any use of it.
+      if (cancelled()) return { ok: false, reason: 'error' };
       if (answer === null) continue;
       if (answer.kind === 'denied') return { ok: false, reason: answer.reason };
       if (answer.grant.expiresAtMs - nowMs() > cache.refreshMarginMs) return serve(answer.grant);

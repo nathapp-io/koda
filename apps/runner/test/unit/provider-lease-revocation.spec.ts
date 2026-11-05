@@ -85,3 +85,55 @@ describe('a provider-key lookup owns its own answer (US-008 D-1 as wired by US-0
     }
   });
 });
+
+describe('a cancelled provider-key lookup never serves a settled key (US-009)', () => {
+  // Every case parks the lookup on its own request, settles that request's answer, and cancels the lookup in the same
+  // synchronous block — before the awaiting continuation can run. The guard has to run again after the await.
+  test('a grant that settles as the epoch is released is not served', async () => {
+    const w = world();
+    try {
+      const reply = w.broker.providerKeyReply(w.row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [w.grant()], []);   // the answer settles ...
+      const released = w.broker.releaseProviderKeys(w.row);   // ... and the epoch goes before the lookup resumes
+      expect(await within(reply, 'the released lookup'), 'a released epoch must not hand out a key').toEqual({ ok: false, reason: 'error' });
+      await released;
+    } finally {
+      await w.broker.closeAll();
+    }
+  });
+
+  test('a grant that settles as the broker closes is not served', async () => {
+    const w = world();
+    const reply = w.broker.providerKeyReply(w.row, 'openrouter');
+    w.cache.apply(w.cache.requests(), [w.grant()], []);
+    const closed = w.broker.closeAll();   // `closing` is set before the lookup resumes
+    expect(await within(reply, 'the closed broker\'s lookup'), 'a stopping daemon must not hand out a key').toEqual({ ok: false, reason: 'error' });
+    await closed;
+  });
+
+  test('a grant that settles after the wait deadline is not served', async () => {
+    const w = world();
+    try {
+      const reply = w.broker.providerKeyReply(w.row, 'openrouter');
+      w.clock.now = T0 + 60_000;   // past the 55 s wait, before the answer is delivered
+      w.cache.apply(w.cache.requests(), [w.grant({ expiresAt: iso(w.clock.now + 600_000) })], []);
+      expect(await within(reply, 'the expired wait'), 'a wait past its deadline must not hand out a key').toEqual({ ok: false, reason: 'error' });
+    } finally {
+      await w.broker.closeAll();
+    }
+  });
+
+  test('a lease too short to hand out never recreates a released epoch\'s request', async () => {
+    const w = world();
+    try {
+      const reply = w.broker.providerKeyReply(w.row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [w.grant({ expiresAt: iso(w.clock.now + 30_000) })], []);   // inside the 60 s margin
+      const released = w.broker.releaseProviderKeys(w.row);
+      expect(await within(reply, 'the released lookup'), 'a released epoch must not be asked again').toEqual({ ok: false, reason: 'error' });
+      expect(w.cache.requests(), 'the released epoch must stay dropped').toEqual([]);
+      await released;
+    } finally {
+      await w.broker.closeAll();
+    }
+  });
+});
