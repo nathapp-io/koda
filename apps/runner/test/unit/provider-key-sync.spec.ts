@@ -14,6 +14,7 @@ import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
 import { SyncLoop, type SyncLoopDeps } from '../../src/sync/sync-loop';
 import { assignFor } from '../helpers/assign';
+import { within } from '../helpers/deadline';
 import { waitFor } from '../helpers/wait';
 
 const T0 = Date.parse('2026-10-01T00:00:00.000Z');
@@ -23,6 +24,14 @@ const grant = (providerId = 'openrouter', key = 'sk-or-1'): ProviderKeyGrant => 
   jobId: 'j1', providerId, key, account: 'koda:global:fleet', fingerprint: '0123456789ab',
   expiresAt: new Date(T0 + 600_000).toISOString(),
 });
+const liveExpiry = (): string => new Date(Date.now() + 600_000).toISOString();
+/**
+ * A grant on the **real** clock: the tests that hold a socket or a broker with `nowMs: () => Date.now()` need an
+ * expiry the cache will still serve. `grant()` above is pinned to `T0` for the tests that drive a fake clock, and its
+ * expiry is in the past for a real-clock consumer — which is a request that waits forever, not a served key.
+ */
+const liveGrant = (providerId = 'openrouter', key = 'sk-or-1'): ProviderKeyGrant =>
+  ({ ...grant(providerId, key), expiresAt: liveExpiry() });
 
 /**
  * Every assertion below is written `expect(value, message)` with the message built here first: a failure then names
@@ -33,22 +42,6 @@ const captured = (label: string, value: unknown): string => {
   const seen = value === null || value === undefined ? String(value) : JSON.stringify(value);
   return `${label}: ${seen ?? String(value)}`;
 };
-
-/**
- * Awaits `promise`, failing with `message` instead of hanging the test when nothing arrives. A socket that never
- * answers would otherwise end the test in a timeout with no assertion message at all.
- */
-async function within<T>(promise: Promise<T>, message: string, ms = 5_000): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${message}: nothing arrived within ${ms} ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** The JSON the socket answered, `null` when it answered nothing or something that is not JSON, plus the raw text. */
 function decode(rawAnswer: string): { reply: unknown; raw: string } {
@@ -191,6 +184,34 @@ describe('US-008 SyncLoop provider keys', () => {
       h.journal.close();
     }
   });
+  test('AC-14: a grant the sync answers reaches a real-clock waiting job', async () => {
+    // The socket half of this file only runs on a host. This is the same flow on the real clock without a socket, so
+    // a grant the cache will never serve fails here with a message instead of hanging the socket test into the bare
+    // timeout that captures no assertion message.
+    const cache = new ProviderKeyCache({ refreshMarginMs: 60_000 });
+    const broker = new CredentialBroker({
+      tokens: new TokenCache({ refreshMarginMs: 240_000, cooldownMs: 30_000 }),
+      providerKeys: cache, socketDir: join(tmpdir(), 'pk-sync'), runnerId: 'r1', selfCommand: ['/k/koda-runner'],
+      nowMs: () => Date.now(), sleep: (ms) => Bun.sleep(ms), timing: { waitMs: 2_000, serveWaitMs: 2_000, pollMs: 10 }, uid,
+    });
+    const repo = { provider: 'github' as const, owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'git@github.com:o/n.git' };
+    const row: JobRow = Journal.open(':memory:').insertJob({ assign: assignFor('RUN', { jobId: 'j1', repo }), leaseEpoch: 1, repoKey: 'o/n', jobDir: join(tmpdir(), 'pk-sync-jobs', 'j1') }).row;
+    const h = harness(cache);
+    try {
+      const waiting = broker.providerKeyReply(row, 'openrouter');
+      const pending = h.loop.syncOnce();
+      h.release({ ...empty, providerKeys: [liveGrant()] });
+      await within(pending, 'the sync that answered the grant');
+      const state = cache.state('j1', 1, 'openrouter', Date.now());
+      expect(state, `a grant the cache can serve must be a grant right after the sync; ${captured('state', state)}`)
+        .toMatchObject({ kind: 'grant' });
+      const reply = await within(waiting, 'the reply a real-clock job waits for');
+      expect(reply, `the job must be handed the key the sync granted; ${captured('reply', reply)}`).toMatchObject({ ok: true, key: 'sk-or-1' });
+    } finally {
+      h.loop.stop();
+      h.journal.close();
+    }
+  });
 });
 
 // The nax sandbox withholds real Unix socket binding, so the end-to-end half of AC-14 runs on a host.
@@ -209,14 +230,14 @@ describe.skipIf(isNaxSandboxed())('US-008 SyncLoop to a real provider-key socket
     const row: JobRow = journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1', repo }), leaseEpoch: 1, repoKey: 'o/n', jobDir: join(dir, '.jobs', 'j1') }).row;
     const h = harness(cache);
     try {
-      const path = await broker.serveProviderKeys(row);
+      const path = await within(broker.serveProviderKeys(row), 'the provider-key socket listen');
       const answer = askProvider(path, 'provider openrouter\n');
-      await waitFor(() => cache.requests().length > 0, { message: `the socket request at ${path} never queued a ProviderKeyRequest` });
+      await waitFor(() => cache.requests().length > 0, { timeoutMs: 2_000, message: `the socket request at ${path} never queued a ProviderKeyRequest` });
       const pending = h.loop.syncOnce();
       const carried = h.calls[0]?.providerRequests;
       expect(carried, `the socket's request must be the one the sync carries; ${h.body()}`)
         .toEqual([{ jobId: 'j1', leaseEpoch: 1, providerId: 'openrouter' }]);
-      h.release({ ...empty, providerKeys: [grant()] });
+      h.release({ ...empty, providerKeys: [liveGrant()] });
       const outcome = await within(pending, 'the sync that answered the socket request');
       expect(outcome, `the sync that answered the key must still succeed; ${h.body()}`).toEqual({ kind: 'ok' });
       const raw = await within(answer, 'the provider-key socket answer');
@@ -232,7 +253,7 @@ describe.skipIf(isNaxSandboxed())('US-008 SyncLoop to a real provider-key socket
 });
 
 function askProvider(path: string, line: string): Promise<string> {
-  return new Promise((resolve, reject) => {
+  const answer = new Promise<string>((resolve, reject) => {
     const socket = createConnection(path);
     let out = '';
     socket.setEncoding('utf8');
@@ -241,4 +262,5 @@ function askProvider(path: string, line: string): Promise<string> {
     socket.on('end', () => resolve(out));
     socket.on('error', (error: Error) => reject(new Error(`the provider-key socket at ${path} failed: ${error.message}`)));
   });
+  return within(answer, `the answer from the provider-key socket at ${path}`);
 }

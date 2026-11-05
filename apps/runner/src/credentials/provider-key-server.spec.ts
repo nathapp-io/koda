@@ -5,6 +5,7 @@ import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isNaxSandboxed } from '../../test/helpers/test-environment';
+import { within } from '../../test/helpers/deadline';
 import {
   CredentialServer, serveCredentialRequests, serveProviderRequests,
   type CredentialReply, type ProviderReply, type RequestSocket,
@@ -155,9 +156,9 @@ describe('provider-key line protocol (US-008)', () => {
   });
 });
 
-/** A raw client: send `line`, collect everything until the server closes. */
-function ask(path: string, line: string): Promise<string> {
-  return new Promise((resolve, reject) => {
+/** A raw client: send `line`, collect everything until the server closes. Bounded: a silent socket must fail with a message. */
+async function ask(path: string, line: string): Promise<string> {
+  const answer = new Promise<string>((resolve, reject) => {
     const socket = createConnection(path);
     let out = '';
     socket.setEncoding('utf8');
@@ -166,6 +167,7 @@ function ask(path: string, line: string): Promise<string> {
     socket.on('end', () => resolve(out));
     socket.on('error', (error: Error) => reject(new Error(`${path} failed: ${error.message} (answered ${JSON.stringify(out)})`)));
   });
+  return within(answer, `the answer from the socket at ${path}`);
 }
 
 /** The raw socket answer, parsed, with the text kept for the message (an empty answer means no line came back). */

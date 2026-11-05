@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderKeyGrant } from '@nathapp/fleet-protocol';
 import { isNaxSandboxed } from '../../test/helpers/test-environment';
+import { within } from '../../test/helpers/deadline';
 import { CredentialBroker, type BrokerTiming } from './broker';
 import { ProviderKeyCache } from './provider-key-cache';
 import { SocketDirError } from './socket-dir';
@@ -190,7 +191,7 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
   test('AC-4: serveProviderKeys returns an existing socket path for an ssh clone URL', async () => {
     const w = await socketWorld();
     try {
-      const path = await w.broker.serveProviderKeys(w.row);
+      const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
       expect(path.startsWith(w.socketDir), `serveProviderKeys returned ${path}, outside ${w.socketDir}`).toBe(true);
       expect((await stat(path)).isSocket(), `${path} is not a socket`).toBe(true);
     } finally {
@@ -201,10 +202,12 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
   test('AC-5: two calls for one job and epoch return the same path and open one socket', async () => {
     const w = await socketWorld();
     try {
-      const [first, second] = await Promise.all([w.broker.serveProviderKeys(w.row), w.broker.serveProviderKeys(w.row)]);
+      const [first, second] = await within(
+        Promise.all([w.broker.serveProviderKeys(w.row), w.broker.serveProviderKeys(w.row)]), 'two provider-key socket listens');
       expect(first, `two concurrent calls returned ${first} and ${second}`).toBe(second);
       const inode = (await stat(first)).ino;
-      expect(await w.broker.serveProviderKeys(w.row), `a third call must return ${first}`).toBe(first);
+      const third = await within(w.broker.serveProviderKeys(w.row), 'the third provider-key socket listen');
+      expect(third, `a third call must return ${first}`).toBe(first);
       expect((await stat(first)).ino, 'a second listen would have replaced the socket file (new inode)').toBe(inode);
     } finally {
       await w.broker.closeAll();
@@ -214,11 +217,12 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
   test('AC-13: releaseProviderKeys removes the socket and drops the cached grants', async () => {
     const w = await socketWorld();
     try {
-      const path = await w.broker.serveProviderKeys(w.row);
+      const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
       const pending = w.broker.providerKeyReply(w.row, 'openrouter');
       w.cache.apply(w.cache.requests(), [w.grant()], []);
-      expect(await pending, 'the job must hold a grant before the release can be observed').toMatchObject({ ok: true, key: 'sk-or-1' });
-      await w.broker.releaseProviderKeys(w.row);
+      const reply = await within(pending, 'the reply for the granted key');
+      expect(reply, 'the job must hold a grant before the release can be observed').toMatchObject({ ok: true, key: 'sk-or-1' });
+      await within(w.broker.releaseProviderKeys(w.row), 'the provider-key release');
       await expect(stat(path), `${path} must be gone after releaseProviderKeys`).rejects.toThrow();
       expect(w.cache.state('j1', 1, 'openrouter', Date.now()), 'the release must drop the cached grant').toEqual({ kind: 'pending' });
       expect(w.cache.requests(), 'the release must leave nothing queued').toEqual([]);
@@ -230,9 +234,9 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
   test('the git release ignores the provider-key socket: it does not keep <jobDir>/bin alive, and the socket stays', async () => {
     const w = await socketWorld();
     try {
-      const path = await w.broker.serveProviderKeys(w.row);
+      const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
       await mkdir(join(w.row.jobDir, 'bin'), { recursive: true });
-      await w.broker.release(w.row);
+      await within(w.broker.release(w.row), 'the git release');
       await expect(stat(join(w.row.jobDir, 'bin')), 'a provider-key socket must not keep the git shims alive').rejects.toThrow();
       expect((await stat(path)).isSocket(), `the git release must leave ${path} serving`).toBe(true);
     } finally {
@@ -242,7 +246,7 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
 
   test('closeAll closes the provider-key socket too', async () => {
     const w = await socketWorld();
-    const path = await w.broker.serveProviderKeys(w.row);
+    const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
     await w.broker.closeAll();
     await expect(stat(path), `${path} must be gone after closeAll`).rejects.toThrow();
   });
@@ -250,11 +254,11 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
   test('a socket request waits for the grant and answers it in epoch milliseconds', async () => {
     const w = await socketWorld();
     try {
-      const path = await w.broker.serveProviderKeys(w.row);
+      const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
       const answer = askProvider(path, 'provider openrouter\n');
       await Bun.sleep(20);
       w.cache.apply(w.cache.requests(), [w.grant()], []);
-      const raw = await answer;
+      const raw = await within(answer, 'the provider-key socket answer');
       let reply: unknown = null;
       try { reply = JSON.parse(raw); } catch { reply = null; }
       expect(reply, `the socket answered ${JSON.stringify(raw)} (empty means no line came back)`)
@@ -266,7 +270,7 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
 });
 
 function askProvider(path: string, line: string): Promise<string> {
-  return new Promise((resolve, reject) => {
+  const answer = new Promise<string>((resolve, reject) => {
     const socket = createConnection(path);
     let out = '';
     socket.setEncoding('utf8');
@@ -275,4 +279,5 @@ function askProvider(path: string, line: string): Promise<string> {
     socket.on('end', () => resolve(out));
     socket.on('error', (error: Error) => reject(new Error(`${path} failed: ${error.message} (answered ${JSON.stringify(out)})`)));
   });
+  return within(answer, `the answer from the provider-key socket at ${path}`);
 }
