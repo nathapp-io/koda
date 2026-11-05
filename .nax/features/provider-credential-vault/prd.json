@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T09:26:43.974Z",
+  "updatedAt": "2026-11-05T10:00:49.003Z",
   "userStories": [
     {
       "id": "US-001",
@@ -267,14 +267,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "PATCH/DELETE extend the established controller, command and service from US-003 with standard VCS variants; secret rotation and redacted approval handling mandate isolated security TDD."
+        "reasoning": "PATCH/DELETE extend the established controller, command and service from US-003 with standard VCS variants; secret rotation and redacted approval handling mandate isolated security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/provider-credentials/fleet-provider-credentials.controller.ts",
@@ -313,7 +316,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cb7f8d6f401f524efdf9e1a178ffe44b3e08b941"
     },
     {
       "id": "US-005",
