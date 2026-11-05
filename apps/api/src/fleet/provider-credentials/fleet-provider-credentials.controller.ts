@@ -74,6 +74,7 @@ export class FleetProviderCredentialsController {
   @ApiResponse({ status: 404, description: 'GLOBAL credential not found' })
   async update(@Param('id') id: string, @Body() patch: UpdateProviderCredentialDto, @ApprovalRedeemHeader() redeem?: string) {
     this.credentials.assertEnabled();
+    await this.credentials.assertGlobal(id);
     const outcome = await this.routeGate.run<ProviderCredentialDto>({
       key: 'fleet.credential.update', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update,
       projectId: null, input: { id, patch }, redeem,
@@ -92,6 +93,7 @@ export class FleetProviderCredentialsController {
   @ApiResponse({ status: 404, description: 'GLOBAL credential not found' })
   async remove(@Param('id') id: string, @ApprovalRedeemHeader() redeem?: string) {
     this.credentials.assertEnabled();
+    await this.credentials.assertGlobal(id);
     const outcome = await this.routeGate.run<null>({
       key: 'fleet.credential.delete', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.delete,
       projectId: null, input: { id }, redeem,

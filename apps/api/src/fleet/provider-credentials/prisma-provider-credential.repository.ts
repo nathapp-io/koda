@@ -7,10 +7,10 @@ import {
   type PrismaModelDelegate,
 } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
-import type {
+import {
   Prisma,
-  PrismaClient,
-  ProviderCredential as ProviderCredentialRow,
+  type PrismaClient,
+  type ProviderCredential as ProviderCredentialRow,
 } from '../../generated/prisma/client';
 import { isRecordNotFound } from '../../common/utils/prisma-errors';
 import {
@@ -63,6 +63,14 @@ export class PrismaProviderCredentialRepository
       ProviderCredentialRow,
       string
     >;
+  }
+
+  async lockById(id: string): Promise<ProviderCredential | null> {
+    const rows = await this.prisma.client.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT id FROM "ProviderCredential" WHERE id = ${id} FOR UPDATE
+    `);
+    if (rows.length === 0) return null;
+    return this.findById(id);
   }
 
   protected toDomain(row: ProviderCredentialRow): ProviderCredential {

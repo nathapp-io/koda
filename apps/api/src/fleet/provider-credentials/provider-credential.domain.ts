@@ -121,6 +121,8 @@ export function scopeKeyFor(ref: ProviderCredentialScopeRef): string {
  */
 export interface IProviderCredentialRepository {
   findById(id: string): Promise<ProviderCredential | null>;
+  /** Locks the row for the lifetime of the caller's transaction, then returns its current version. */
+  lockById(id: string): Promise<ProviderCredential | null>;
   /** Active (not disabled) rows that can answer a lookup: the GLOBAL, PROJECT and REPO keys of one provider. */
   findActiveCandidates(lookup: ProviderCredentialLookup): Promise<ProviderCredential[]>;
   /** One bounded page of GLOBAL rows (the admin list). */

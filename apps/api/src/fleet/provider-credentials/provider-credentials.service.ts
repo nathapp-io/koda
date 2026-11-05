@@ -180,6 +180,12 @@ export class ProviderCredentialsService {
     return updated;
   }
 
+  /** Rejects out-of-scope ids before approval creation; mutation handlers repeat this check transactionally. */
+  async assertGlobal(id: string): Promise<void> {
+    const row = await this.repository.findById(id);
+    if (!row || row.scope !== 'GLOBAL') throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+  }
+
   async updateGlobal(id: string, input: UpdateProviderCredentialInput): Promise<ProviderCredentialDto> {
     this.assertEnabled();
     const updated = await this.txManager.run(async () => {
@@ -203,7 +209,7 @@ export class ProviderCredentialsService {
   async removeGlobal(id: string, actorId: string): Promise<void> {
     this.assertEnabled();
     await this.txManager.run(async () => {
-      const current = await this.repository.findById(id);
+      const current = await this.repository.lockById(id);
       if (!current || current.scope !== 'GLOBAL') throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
       await this.remove(id);
       await this.activity.record({ actorType: 'USER', actorId, action: 'credential.deleted', entityType: 'provider_credential', entityId: id, projectId: null,

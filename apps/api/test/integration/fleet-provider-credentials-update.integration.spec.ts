@@ -65,10 +65,41 @@ describeIntegration('GLOBAL provider credential updates (PG)', () => {
     expect(data<{ records: Row[] }>(await request(server()).get(PATH).set(auth(world.tokens.root)).expect(200)).records).toEqual([]);
     expect((await db.fleetActivity.findFirstOrThrow({ where: { entityId: row.id, action: 'credential.deleted' } })).action).toBe('credential.deleted');
   });
-  it('AC-10/11: other scopes are hidden from global mutations', async () => {
+  it('AC-10: agent PATCH for a PROJECT credential is 404 before an approval request is created', async () => {
     const project = await db.project.findFirstOrThrow();
     const row = await db.providerCredential.create({ data: { scope: 'PROJECT', scopeKey: `project:${project.id}`, projectId: project.id, providerId: 'openrouter', name: 'project', encryptedKey: 'a', last4: '1234', fingerprint: '123456789abc', createdById: world.ids.root, updatedById: world.ids.root } });
-    await call('patch', row.id).send({ name: 'x' }).expect(404); await call('delete', row.id).expect(404);
+    const agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.credential.update'], null);
+    await seedWaitPolicy(db, 'fleet.credential.update', null); await app.get(PermissionCache).invalidate();
+    await call('patch', row.id, agent.apiKey).send({ name: 'x' }).expect(404);
+    expect(await db.approvalRequest.count()).toBe(0);
+  });
+  it('AC-11: agent DELETE for a REPO credential is 404 before an approval request and preserves the row', async () => {
+    const project = await db.project.findFirstOrThrow();
+    const repo = await db.fleetRepo.create({ data: { projectId: project.id, provider: 'github', owner: 'vault-test', name: 'repo-key', defaultBranch: 'main', createdById: world.ids.root } });
+    const row = await db.providerCredential.create({ data: { scope: 'REPO', scopeKey: `repo:${repo.id}`, projectId: project.id, repoId: repo.id, providerId: 'openrouter', name: 'repo', encryptedKey: 'a', last4: '1234', fingerprint: '123456789abc', createdById: world.ids.root, updatedById: world.ids.root } });
+    const agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.credential.delete'], null);
+    await seedWaitPolicy(db, 'fleet.credential.delete', null); await app.get(PermissionCache).invalidate();
+    await call('delete', row.id, agent.apiKey).expect(404);
+    expect(await db.approvalRequest.count()).toBe(0);
+    expect(await db.providerCredential.findUnique({ where: { id: row.id } })).not.toBeNull();
+  });
+  it('AC-9: delete waits for an in-flight row update and records metadata from the deleted version', async () => {
+    const row = await create();
+    let signalLocked!: () => void; let release!: () => void;
+    const locked = new Promise<void>((resolve) => { signalLocked = resolve; });
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const updating = db.$transaction(async (tx) => {
+      await tx.providerCredential.update({ where: { id: row.id }, data: { name: 'concurrent-rename', fingerprint: 'abcdef123456' } });
+      signalLocked(); await hold;
+    });
+    await locked;
+    const deleting = call('delete', row.id).expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release(); await updating; await deleting;
+    const activity = await db.fleetActivity.findFirstOrThrow({ where: { entityId: row.id, action: 'credential.deleted' } });
+    expect(activity.payload).toMatchObject({ name: 'concurrent-rename', fingerprint: 'abcdef123456' });
   });
   it('AC-12: agent rotation approval stores only the redactSecret marker', async () => {
     const row = await create(); const agent = await seedFleetHttpAgent(server(), world.tokens.root);
