@@ -1254,6 +1254,7 @@
         "writeOnly": "The key is stored encrypted and never shown again."
       },
       "actions": { "rotate": "Rotate", "enable": "Enable", "disable": "Disable", "delete": "Delete" },
+      "pager": { "info": "Page {current} · {total} keys", "prev": "Previous page", "next": "Next page" },
       "validation": {
         "providerId": "Use lowercase letters, digits, dots, dashes or underscores (up to 48 characters).",
         "nameLength": "Enter a name of 1 to 64 characters.",

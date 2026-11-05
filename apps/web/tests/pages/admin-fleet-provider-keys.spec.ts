@@ -19,7 +19,8 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: 'c1', scope: 'GLOBAL', projectId: null, repoId: null, providerId: 'openrouter', name: 'Team key',
   last4: 'abcd', fingerprint: '9f2c1a4b7d3e', disabled: false, createdBy: 'u1', updatedAt: '2026-10-01T00:00:00.000Z', ...over,
 })
-const pageOf = (records: unknown[]) => ({ records, total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false })
+const pageOf = (records: unknown[], over: Record<string, unknown> = {}) =>
+  ({ records, total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, ...over })
 const approval = { id: 'ap1', permissionKey: 'fleet.credential.create', status: 'pending' }
 
 /** A FormField that registers the real vee-validate field, so a test can type and see the error. */
@@ -56,13 +57,14 @@ function mountPage(over: {
   records?: unknown[]
   permissions?: string[]
   failLoad?: unknown
+  get?: jest.Mock
   post?: (body: unknown) => Promise<unknown>
   patch?: (path: string, body: unknown) => Promise<unknown>
   deleteResult?: unknown
   confirm?: boolean
 } = {}): Mounted {
   const api: Api = {
-    get: jest.fn(async () => {
+    get: over.get ?? jest.fn(async () => {
       if (over.failLoad) throw over.failLoad
       return pageOf(over.records ?? [row()])
     }),
@@ -126,6 +128,16 @@ async function submitAddForm(p: Mounted): Promise<void> {
 
 const click = async (p: Mounted, id: string): Promise<void> => {
   await (p.button(id).onClick as () => void | Promise<void>)()
+  await p.settle()
+}
+
+/**
+ * Fires a control without awaiting its promise: a write whose response is deferred must be observed
+ * while it is still in flight.
+ */
+const fire = async (p: Mounted, id: string): Promise<void> => {
+  void (p.button(id).onClick as () => void | Promise<void>)()
+  await Promise.resolve()
   await p.settle()
 }
 
@@ -387,6 +399,98 @@ describe('admin provider keys page (US-012)', () => {
 
     expect(p.api.patch).not.toHaveBeenCalled()
     expect(p.app.textOf(p.byId('provider-key-rotate-error-c1')[0])).toBe(t('fleet.providerKeys.validation.keyWhitespace'))
+    p.unmount()
+  })
+
+  test('F1: a credential on the second page is reachable and manageable', async () => {
+    const pageTwo = row({ id: 'c101', providerId: 'page-two', name: 'Second hundred', fingerprint: 'ffffffffffff' })
+    const get = jest.fn(async (_path: string, options: { query: Record<string, string> }) =>
+      (options.query.current === '2'
+        ? pageOf([pageTwo], { current: 2, hasNext: false, hasPrev: true, total: 101 })
+        : pageOf([row()], { current: 1, hasNext: true, hasPrev: false, total: 101 })))
+    const p = mountPage({ get })
+    await p.settle()
+
+    expect(get).toHaveBeenNthCalledWith(1, '/fleet/provider-credentials', { query: { size: '100' } })
+    expect(p.byId('provider-key-c101')).toHaveLength(0)
+    expect(p.button('provider-keys-prev').disabled).toBe(true)
+
+    await click(p, 'provider-keys-next')
+
+    expect(get).toHaveBeenNthCalledWith(2, '/fleet/provider-credentials', { query: { size: '100', current: '2' } })
+    expect(p.byId('provider-key-c101')).toHaveLength(1)
+    expect(p.app.textOf(p.byId('provider-key-c101')[0])).toContain('ffffffffffff')
+    expect(p.button('provider-keys-next').disabled).toBe(true)
+
+    // The row on page two is a normal row: it can be rotated.
+    type(p, 'provider-key-rotate-c101', 'sk-live-fedcba9876543210')
+    await p.settle()
+    await click(p, 'provider-key-rotate-button-c101')
+    expect(p.api.patch).toHaveBeenCalledWith('/fleet/provider-credentials/c101', { key: 'sk-live-fedcba9876543210' })
+
+    // And the way back loads the first page again.
+    await click(p, 'provider-keys-prev')
+    expect(get).toHaveBeenLastCalledWith('/fleet/provider-credentials', { query: { size: '100' } })
+    expect(p.byId('provider-key-c1')).toHaveLength(1)
+    p.unmount()
+  })
+
+  test('F2: two rows writing at once each stay disabled until their own response lands', async () => {
+    const releases: Record<string, (value: unknown) => void> = {}
+    const p = mountPage({
+      records: [row(), row({ id: 'c2', providerId: 'anthropic', name: 'Billing A' })],
+      patch: (path: string) => new Promise((resolve) => { releases[path.split('/').pop() ?? ''] = resolve }),
+    })
+    await p.settle()
+
+    type(p, 'provider-key-rotate-c1', 'sk-live-fedcba9876543210')
+    await p.settle()
+    await fire(p, 'provider-key-rotate-button-c1')
+    await fire(p, 'provider-key-toggle-c2')
+
+    // Row c1 keeps its busy marker while c2's write starts: the second write must not re-enable it.
+    expect(p.button('provider-key-rotate-button-c1').disabled).toBe(true)
+    expect(p.button('provider-key-toggle-c2').disabled).toBe(true)
+
+    releases.c1?.(row({ fingerprint: 'ffffffffffff', last4: 'wxyz' }))
+    await p.settle()
+
+    expect(p.app.textOf(p.byId('provider-key-c1')[0])).toContain('ffffffffffff')
+    expect(p.button('provider-key-rotate-button-c1').disabled).toBe(false)
+    expect(p.button('provider-key-toggle-c2').disabled).toBe(true)
+
+    releases.c2?.(row({ id: 'c2', providerId: 'anthropic', name: 'Billing A', disabled: true }))
+    await p.settle()
+
+    expect(p.byId('provider-key-c2')[0].props['data-disabled']).toBe('true')
+    expect(p.button('provider-key-toggle-c2').disabled).toBe(false)
+    p.unmount()
+  })
+
+  test('F2: a second write on the same row is refused while the first is pending (button and Enter)', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const patch = jest.fn(() => new Promise<unknown>((resolve) => { release = resolve }))
+    const p = mountPage({ patch })
+    await p.settle()
+
+    type(p, 'provider-key-rotate-c1', 'sk-live-fedcba9876543210')
+    await p.settle()
+    await fire(p, 'provider-key-rotate-button-c1')
+
+    // The field is closed while its row is busy, so Enter cannot start a second write either.
+    expect(p.byId('provider-key-rotate-c1')[0].props.disabled).toBe(true)
+    await (p.byId('provider-key-rotate-c1')[0].props.onKeyup as (event: { key: string }) => void)({ key: 'Enter' })
+    await (p.button('provider-key-rotate-button-c1').onClick as () => void)()
+    await (p.button('provider-key-toggle-c1').onClick as () => void)()
+    await p.settle()
+
+    expect(patch).toHaveBeenCalledTimes(1)
+
+    release(row())
+    await p.settle()
+
+    expect(p.byId('provider-key-rotate-c1')[0].props.disabled).toBe(false)
+    expect(patch).toHaveBeenCalledTimes(1)
     p.unmount()
   })
 })

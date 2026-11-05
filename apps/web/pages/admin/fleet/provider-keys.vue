@@ -4,7 +4,6 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { useProviderCredentials } from '~/composables/useProviderCredentials'
 import { providerCredentialFormSchema, providerKeySchema } from '~/lib/provider-credentials'
-import { FLEET_LIST_SIZE } from '~/lib/fleet-types'
 import type { ProviderCredentialRow } from '~/composables/useProviderCredentials'
 
 definePageMeta({ layout: 'default' })
@@ -20,7 +19,7 @@ definePageMeta({ layout: 'default' })
  */
 const { t } = useI18n()
 const toast = useAppToast()
-const { credentials, hasMore, pending, load, create, rotate, setDisabled, remove } = useProviderCredentials()
+const { credentials, pending, current, total, hasNext, hasPrev, load, create, rotate, setDisabled, remove } = useProviderCredentials()
 
 const { permissions } = useGlobalPermissions()
 const canCreate = computed(() => permissions.value.has('fleet.credential.create'))
@@ -31,24 +30,45 @@ const forbidden = ref(false)
 /** The approval-pending notice: a write that became a request changes nothing until it is approved. */
 const notice = ref('')
 const adding = ref(false)
-/** The row whose write is in flight, so only its controls are disabled. */
-const savingId = ref('')
+/**
+ * The rows with a write in flight, keyed by credential id. One per row rather than one for the page:
+ * starting a write on row B must not re-enable row A while A's response is still outstanding, and a
+ * row's own controls — Enter on the rotate field included — stay closed until its response lands.
+ */
+const saving = ref<Record<string, boolean>>({})
 /** The rotate field per row, and the per-row validation message (a key never leaves the browser). */
 const rotateKeys = ref<Record<string, string>>({})
 const rotateErrors = ref<Record<string, string>>({})
+
+function isSaving(id: string): boolean {
+  return saving.value[id] === true
+}
+
+function setSaving(id: string, busy: boolean): void {
+  const next = { ...saving.value }
+  if (busy) next[id] = true
+  else delete next[id]
+  saving.value = next
+}
 
 // ApiError.code is the envelope `ret`: a 403 arrives as ret 40003 (see pages/admin/fleet/repos.vue).
 function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && (err.code === 40003 || err.code === 403)
 }
 
-async function reload(): Promise<void> {
+async function reload(page?: number): Promise<void> {
   try {
-    await load()
+    await load(page)
   } catch (err: unknown) {
     if (isForbidden(err)) forbidden.value = true
     else toast.error(extractApiError(err))
   }
+}
+
+/** The pager: every key must be reachable, however many pages the inventory takes. */
+async function goTo(page: number): Promise<void> {
+  if (page < 1 || pending.value) return
+  await reload(page)
 }
 
 const { handleSubmit, resetForm } = useForm({
@@ -57,6 +77,7 @@ const { handleSubmit, resetForm } = useForm({
 })
 
 const onAdd = handleSubmit(async (values) => {
+  if (adding.value) return
   notice.value = ''
   adding.value = true
   try {
@@ -85,6 +106,9 @@ function setRotateError(id: string, message: string): void {
 
 /** Rotation submits the new key only: the provider id and scope belong to the row being replaced. */
 async function onRotate(credential: ProviderCredentialRow): Promise<void> {
+  // A second submission on the same row (a repeated click, or Enter while the field was still open)
+  // must not start a write whose response could land after the first one's.
+  if (isSaving(credential.id)) return
   const parsed = providerKeySchema(t).safeParse(rotateKeys.value[credential.id] ?? '')
   if (!parsed.success) {
     setRotateError(credential.id, parsed.error.issues[0]?.message ?? t('fleet.providerKeys.validation.keyLength'))
@@ -92,7 +116,7 @@ async function onRotate(credential: ProviderCredentialRow): Promise<void> {
   }
   setRotateError(credential.id, '')
   notice.value = ''
-  savingId.value = credential.id
+  setSaving(credential.id, true)
   try {
     const result = await rotate(credential.id, { key: parsed.data })
     if (result.kind === 'pending') {
@@ -104,13 +128,14 @@ async function onRotate(credential: ProviderCredentialRow): Promise<void> {
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   } finally {
-    savingId.value = ''
+    setSaving(credential.id, false)
   }
 }
 
 async function onToggle(credential: ProviderCredentialRow): Promise<void> {
+  if (isSaving(credential.id)) return
   notice.value = ''
-  savingId.value = credential.id
+  setSaving(credential.id, true)
   try {
     const wasDisabled = credential.disabled
     const result = await setDisabled(credential.id, !wasDisabled)
@@ -122,14 +147,15 @@ async function onToggle(credential: ProviderCredentialRow): Promise<void> {
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   } finally {
-    savingId.value = ''
+    setSaving(credential.id, false)
   }
 }
 
 async function onDelete(credential: ProviderCredentialRow): Promise<void> {
+  if (isSaving(credential.id)) return
   if (!window.confirm(t('fleet.providerKeys.deleteConfirm', { provider: credential.providerId }))) return
   notice.value = ''
-  savingId.value = credential.id
+  setSaving(credential.id, true)
   try {
     const result = await remove(credential.id)
     if (result.kind === 'pending') {
@@ -140,7 +166,7 @@ async function onDelete(credential: ProviderCredentialRow): Promise<void> {
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   } finally {
-    savingId.value = ''
+    setSaving(credential.id, false)
   }
 }
 
@@ -241,13 +267,14 @@ onMounted(() => { void reload() })
                   class="h-8 w-44"
                   :placeholder="t('fleet.providerKeys.form.newKey')"
                   :data-testid="`provider-key-rotate-${credential.id}`"
+                  :disabled="isSaving(credential.id)"
                   @update:model-value="(value: string | number) => setRotateKey(credential.id, String(value))"
                   @keyup.enter="onRotate(credential)"
                 />
                 <Button
                   size="sm"
                   variant="outline"
-                  :disabled="savingId === credential.id"
+                  :disabled="isSaving(credential.id)"
                   :data-testid="`provider-key-rotate-button-${credential.id}`"
                   @click="onRotate(credential)"
                 >
@@ -256,7 +283,7 @@ onMounted(() => { void reload() })
                 <Button
                   size="sm"
                   variant="outline"
-                  :disabled="savingId === credential.id"
+                  :disabled="isSaving(credential.id)"
                   :data-testid="`provider-key-toggle-${credential.id}`"
                   @click="onToggle(credential)"
                 >
@@ -267,7 +294,7 @@ onMounted(() => { void reload() })
                 v-if="canDelete"
                 size="sm"
                 variant="destructive"
-                :disabled="savingId === credential.id"
+                :disabled="isSaving(credential.id)"
                 :data-testid="`provider-key-delete-${credential.id}`"
                 @click="onDelete(credential)"
               >
@@ -280,7 +307,17 @@ onMounted(() => { void reload() })
           </TableRow>
         </TableBody>
       </Table>
-      <p v-if="hasMore" class="text-sm text-muted-foreground">{{ t('fleet.common.more', { n: FLEET_LIST_SIZE }) }}</p>
+      <p v-if="hasPrev || hasNext" class="flex flex-wrap items-center justify-between gap-2" data-testid="provider-keys-pager">
+        <span class="text-sm text-muted-foreground">{{ t('fleet.providerKeys.pager.info', { current, total }) }}</span>
+        <span class="flex gap-2">
+          <Button variant="outline" :disabled="!hasPrev || pending" data-testid="provider-keys-prev" @click="goTo(current - 1)">
+            {{ t('fleet.providerKeys.pager.prev') }}
+          </Button>
+          <Button variant="outline" :disabled="!hasNext || pending" data-testid="provider-keys-next" @click="goTo(current + 1)">
+            {{ t('fleet.providerKeys.pager.next') }}
+          </Button>
+        </span>
+      </p>
     </template>
   </div>
 </template>

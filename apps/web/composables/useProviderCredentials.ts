@@ -69,16 +69,30 @@ function itemPath(scope: ProviderCredentialsScope, id: string): string {
 export function useProviderCredentials(scope: ProviderCredentialsScope = { kind: 'global' }) {
   const { $api } = useApi()
   const credentials = ref<ProviderCredentialRow[]>([])
-  const hasMore = ref(false)
   const pending = ref(false)
+  /** The page being browsed. A plain `load()` reloads it, so Refresh never jumps back to page one. */
+  const current = ref(1)
+  const total = ref(0)
+  const hasNext = ref(false)
+  const hasPrev = ref(false)
 
-  /** Never swallows: the caller decides what a failed read means (the page shows its 403 note). */
-  async function load(): Promise<void> {
+  /**
+   * One page of the management list. Page 1 sends no `current` (the API's default), later pages do —
+   * a GLOBAL inventory is unbounded, so every key must be reachable to rotate or delete it.
+   * Never swallows: the caller decides what a failed read means (the page shows its 403 note).
+   */
+  async function load(targetPage: number = current.value): Promise<void> {
+    const page = Math.max(1, Math.trunc(targetPage) || 1)
     pending.value = true
     try {
-      const page = await $api.get<FleetPage<ProviderCredentialRow>>(listPath(scope), { query: { size: String(FLEET_LIST_SIZE) } })
-      credentials.value = page.records ?? []
-      hasMore.value = page.hasNext === true
+      const result = await $api.get<FleetPage<ProviderCredentialRow>>(listPath(scope), {
+        query: { size: String(FLEET_LIST_SIZE), ...(page > 1 ? { current: String(page) } : {}) },
+      })
+      credentials.value = result.records ?? []
+      current.value = typeof result.current === 'number' && result.current > 0 ? result.current : page
+      total.value = typeof result.total === 'number' ? result.total : credentials.value.length
+      hasNext.value = result.hasNext === true
+      hasPrev.value = result.hasPrev === true || current.value > 1
     } finally {
       pending.value = false
     }
@@ -120,5 +134,5 @@ export function useProviderCredentials(scope: ProviderCredentialsScope = { kind:
     credentials.value = credentials.value.map((existing) => (existing.id === row.id ? row : existing))
   }
 
-  return { credentials, hasMore, pending, load, create, rotate, setDisabled, remove }
+  return { credentials, pending, current, total, hasNext, hasPrev, load, create, rotate, setDisabled, remove }
 }

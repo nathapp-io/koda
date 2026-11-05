@@ -1254,6 +1254,7 @@
         "writeOnly": "密钥加密保存，之后不再显示。"
       },
       "actions": { "rotate": "轮换", "enable": "启用", "disable": "禁用", "delete": "删除" },
+      "pager": { "info": "第 {current} 页 · 共 {total} 条密钥", "prev": "上一页", "next": "下一页" },
       "validation": {
         "providerId": "请使用小写字母、数字、点、短横线或下划线（最多 48 个字符）。",
         "nameLength": "名称长度为 1 到 64 个字符。",

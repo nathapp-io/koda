@@ -24,18 +24,45 @@ function withApi(api: Record<string, jest.Mock>): void {
 describe('useProviderCredentials', () => {
   beforeEach(() => { (globalThis as Record<string, unknown>).useApi = undefined })
 
-  test('load asks for one page of 100 GLOBAL keys and keeps the rows and the pager flag', async () => {
-    const get = jest.fn(async () => pageOf([row()], { hasNext: true }))
+  test('load asks for one page of 100 GLOBAL keys and keeps the rows and the pager flags', async () => {
+    const get = jest.fn(async () => pageOf([row()], { hasNext: true, hasPrev: false, total: 120 }))
     withApi({ get })
     const { useProviderCredentials } = await import(composablePath)
     const vault = useProviderCredentials()
 
     expect(vault.credentials.value).toEqual([])
+    expect(vault.current.value).toBe(1)
     await vault.load()
 
     expect(get).toHaveBeenCalledWith('/fleet/provider-credentials', { query: { size: '100' } })
     expect(vault.credentials.value).toEqual([row()])
-    expect(vault.hasMore.value).toBe(true)
+    expect(vault.hasNext.value).toBe(true)
+    expect(vault.hasPrev.value).toBe(false)
+    expect(vault.total.value).toBe(120)
+  })
+
+  test('load(page) reaches later pages and a plain reload keeps the page it is on (F1)', async () => {
+    const page2 = row({ id: 'c101', providerId: 'page-two' })
+    const get = jest.fn(async (_path: string, options: { query: Record<string, string> }) =>
+      (options.query.current === '2'
+        ? pageOf([page2], { current: 2, hasNext: false, hasPrev: true, total: 101 })
+        : pageOf([row()], { current: 1, hasNext: true, hasPrev: false, total: 101 })))
+    withApi({ get })
+    const { useProviderCredentials } = await import(composablePath)
+    const vault = useProviderCredentials()
+
+    await vault.load(2)
+
+    expect(get).toHaveBeenLastCalledWith('/fleet/provider-credentials', { query: { size: '100', current: '2' } })
+    expect(vault.credentials.value).toEqual([page2])
+    expect(vault.current.value).toBe(2)
+    expect(vault.hasPrev.value).toBe(true)
+    expect(vault.hasNext.value).toBe(false)
+
+    // A plain reload (Refresh, or after a write) stays on the page being browsed.
+    await vault.load()
+    expect(get).toHaveBeenLastCalledWith('/fleet/provider-credentials', { query: { size: '100', current: '2' } })
+    expect(vault.credentials.value).toEqual([page2])
   })
 
   test('a project scope reads the project route with the slug as one path segment', async () => {
