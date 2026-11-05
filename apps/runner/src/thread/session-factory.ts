@@ -6,11 +6,13 @@ import {
   resumeAgentSession,
   type AgentSession,
   type CreateAgentSessionOptions,
+  type CredentialSource,
   type NativeBackendOptions,
   type SessionBackend,
 } from '@nathapp/nax-agent';
 import { acpBackend, type AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
 import type { ThreadAssign, ThreadBackend, ThreadFailReason } from '@nathapp/fleet-protocol';
+import { selfCommand as defaultSelfCommand } from '../self-command';
 import { threadTranscriptDir } from './thread-paths';
 import type { NativeModelSet } from './native-models';
 
@@ -30,6 +32,21 @@ interface ThreadSessionFactoryOptions {
   naxHome: string;
   nativeModels: () => Promise<NativeModelSet>;
   agent?: AgentSessionFactory;
+  /**
+   * US-011: this runner's own argv, prepended to the `provider-cred` exec helper a native session is opened with.
+   * Optional so an existing construction keeps working: it defaults to `selfCommand()`.
+   */
+  selfCommand?: readonly string[];
+}
+
+/**
+ * US-011: what a native session needs from the runner's provider-key vault. `socket` is the job epoch's provider-key
+ * socket, and `granted` answers whether koda resolves a key for a provider for this thread's scope (the broker's own
+ * lookup — the same one the socket answers — so the decision and the hand-out can never disagree).
+ */
+export interface ThreadProviderKeys {
+  readonly socket: string;
+  granted(providerId: string): Promise<boolean>;
 }
 
 export interface OpenThreadSessionOptions {
@@ -38,6 +55,12 @@ export interface OpenThreadSessionOptions {
   worktree: string;
   tools: CreateAgentSessionOptions['tools'];
   approvalTimeoutSec: number;
+  /**
+   * US-011: the job's provider keys, when this runner serves any. Absent (a runner without a vault, or a job whose
+   * socket could not be served) keeps today's backend options: nax's process-wide store — the machine's own
+   * credentials — serves the session.
+   */
+  providerKeys?: ThreadProviderKeys;
 }
 
 export type OpenThreadSessionResult =
@@ -48,6 +71,8 @@ const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const EFFORT_RE = /^[a-z]{1,16}$/;
 const MIN_APPROVAL_TIMEOUT_MS = 30_000;
 const MAX_APPROVAL_TIMEOUT_MS = 3_600_000;
+/** US-011, design §5.4: nax's schema maximum, so a thread's provider lookup gets the same bound a fleet job's does. */
+const PROVIDER_CRED_TIMEOUT_MS = 60_000;
 
 /**
  * The agent-session error code behind `error`, whatever prototype it carries. `instanceof` alone
@@ -92,6 +117,8 @@ function acpBackendOptions(backend: AcpThreadBackend): AcpBackendOptions {
 export class ThreadSessionFactory {
   private readonly agent: AgentSessionFactory;
   private readonly acp: typeof acpBackend;
+  /** US-011: the argv the exec helper runs the runner again with. */
+  private readonly self: readonly string[];
 
   constructor(private readonly options: ThreadSessionFactoryOptions) {
     this.agent = options.agent ?? {
@@ -103,6 +130,7 @@ export class ThreadSessionFactory {
     // The ACP factory is the one dependency from another package (nax-agent-acp), so a spec that injects the
     // nax-agent functions alone still opens an `acp` thread through production's factory.
     this.acp = this.agent.acpBackend ?? acpBackend;
+    this.self = options.selfCommand ?? defaultSelfCommand();
   }
 
   async open(input: OpenThreadSessionOptions): Promise<OpenThreadSessionResult> {
@@ -128,6 +156,9 @@ export class ThreadSessionFactory {
       }
       if (!SESSION_ID_RE.test(thread.threadId)) return { ok: false, reason: 'session_error' };
 
+      // US-011: the provider lookup comes after every existing validation, so an unknown model, an invalid effort
+      // or an unusable thread id fails exactly as before and never waits on the vault.
+      const credentials = await this.credentialSource(model, input.providerKeys);
       const backendOptions = {
         ...(thread.mode === 'ask' || thread.mode === 'full' ? { allowUnsandboxed: true } : {}),
         // thread-agents-modes (branch fix B2): nax-agent resolves `bashApproval` to `gated` whatever the profile, so
@@ -143,11 +174,41 @@ export class ThreadSessionFactory {
             credentialDir: this.options.naxHome,
           },
         },
+        ...(credentials === undefined ? {} : { credentials }),
       } satisfies NativeBackendOptions;
       return await this.start(input, this.agent.nativeBackend(backendOptions));
     } catch (error) {
       return { ok: false, reason: failureReason(error) };
     }
+  }
+
+  /**
+   * US-011, design §5.5: the per-session credential source for a native session. The provider is the validated model
+   * id's text before the first `/` — the same prefix nax's own model ids carry — and a model id with no prefix names no
+   * provider, so it gets no koda key. A grant makes the session read its keys from the job's socket through the
+   * `provider-cred` exec helper; without one the session opens without `credentials` and nax's process-wide store (the
+   * machine's own) serves it, which is exactly how a runner with no vault behaves.
+   *
+   * A lookup that throws is treated as no grant: a thread must still open on the machine's own credentials rather than
+   * fail because the vault hiccuped. A model switch inside one open session is deliberately not re-resolved — the
+   * per-session source has no file fallback, so the next session open resolves it again.
+   */
+  private async credentialSource(model: string, providerKeys: ThreadProviderKeys | undefined): Promise<CredentialSource | undefined> {
+    if (providerKeys === undefined) return undefined;
+    const separator = model.indexOf('/');
+    if (separator <= 0) return undefined;
+    let granted = false;
+    try {
+      granted = await providerKeys.granted(model.slice(0, separator));
+    } catch {
+      return undefined;
+    }
+    if (!granted) return undefined;
+    return {
+      kind: 'exec',
+      command: [...this.self, 'provider-cred', '--socket', providerKeys.socket],
+      timeoutMs: PROVIDER_CRED_TIMEOUT_MS,
+    };
   }
 
   /**

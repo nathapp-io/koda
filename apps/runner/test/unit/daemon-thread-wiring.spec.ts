@@ -120,6 +120,45 @@ describe('US-007 daemon thread wiring', () => {
   });
 });
 
+describe('US-011 daemon thread provider keys wiring', () => {
+  const envelope = (data: unknown): Response =>
+    new Response(JSON.stringify({ ret: 0, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  /** The daemon's own fetch seam: /me and /sync answer, so the start needs no listening server. */
+  const daemonFetch = (): FetchFn => async (url) => {
+    if (url.endsWith('/me')) return envelope({ id: 'r1', name: 'box', labels: [], capacity: 2, enabled: true });
+    if (url.endsWith('/sync')) return envelope({ jobAcks: [], commands: [], gitTokens: [], gitTokenErrors: [], unknownJobIds: [] });
+    return envelope({ content: 'unexpected', isError: true });
+  };
+
+  test('US-011: the daemon builds the thread session factory with its own argv, so a session helper is this runner', async () => {
+    const base = await tmp.make('thread-provider-keys-wiring');
+    const home = resolveHome({}, join(base, 'home'));
+    // The unix socket path cap (100 bytes) rules out a child of the sandbox's deep $TMPDIR.
+    const socketDir = join(tmpdir(), 'kw');
+    const config = parseRunnerConfig({
+      serverUrl: 'http://127.0.0.1:9', workspaceRoot: join(base, 'ws'), naxHome: join(base, 'naxhome'),
+      jobRetentionDays: 1, socketDir,
+    }, {});
+    const identity = { runnerId: 'r1', apiKey: 'kr_test', serverUrl: config.serverUrl, name: 'box', enrolledAt: '2026-10-01T00:00:00.000Z' };
+    const daemon = await startDaemon({
+      home, config, identity, log: createMemoryLogger(), fetchFn: daemonFetch(),
+      nax: new FakeNaxCli({ version: '0.83.1' }), selfCommand: ['/k/koda-runner'],
+      tuning: { syncMinGapMs: 5, statusPollMs: 5, syncTimeoutMs: 2_000, ackPollMs: 5 }, executorFactory: () => new FakeExecutor(),
+    });
+    try {
+      const deps = Reflect.get(daemon.supervisor, 'deps') as { threads?: { host: ThreadHostDeps } };
+      const sessions = deps.threads?.host.sessions;
+      expect(sessions).toBeDefined();
+      // The factory's own argv is the one `vault enable` writes into nax's config and a thread's exec helper runs.
+      expect(Reflect.get(sessions as object, 'self')).toEqual(['/k/koda-runner']);
+    } finally {
+      await daemon.stop();
+      await rm(socketDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('US-006 daemon koda tools wiring', () => {
   const emptyEnvelope = (data: unknown, status = 200): Response =>
     new Response(JSON.stringify({ ret: 0, data }), { status, headers: { 'content-type': 'application/json' } });

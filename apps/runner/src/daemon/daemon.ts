@@ -226,6 +226,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sessions: options.threadSessions ?? new ThreadSessionFactory({
         homeDir: home.dir, naxHome: config.naxHome,
         nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
+        // US-011: the same argv the broker's helpers and the probe use, so a thread's `provider-cred` helper is this
+        // runner again — and the one the vault-enabled `config.json` names.
+        selfCommand: self,
       }),
       credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
