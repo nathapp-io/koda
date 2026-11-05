@@ -30,6 +30,10 @@ const envSchema = Joi.object({
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   API_KEY_SECRET: secret(Joi.string().required()),
   VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
+  // Provider credential vault (spec §"US-001"): 64 hex chars, deliberately separate from
+  // VCS_ENCRYPTION_KEY so a compromised key is not shared with the forge token store.
+  // Unset = the vault is off; the API still boots.
+  PROVIDER_CREDENTIAL_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
   VCS_DEFAULT_POLLING_INTERVAL_MS: Joi.number().integer().min(60000).optional(),
   GITHUB_API_URL: Joi.string().uri().optional(),
   RAG_IN_MEMORY_ONLY: Joi.boolean()

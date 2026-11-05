@@ -21,6 +21,10 @@ import { outboxConfig } from '../../config/outbox.config';
 import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import {
+  IProviderCredentialsConfig,
+  PROVIDER_CREDENTIALS_CFG,
+} from '../../config/provider-credentials.config';
 import { testFleetConfig } from './fleet-config';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 
@@ -175,6 +179,9 @@ export const mockWebhookConfig: IWebhookConfig = {
 
 export const mockFleetConfig: IFleetConfig = testFleetConfig();
 
+/** Provider credential vault (US-001): off by default, exactly as an unset env value behaves. */
+export const mockProviderCredentialsConfig: IProviderCredentialsConfig = { encryptionKey: undefined };
+
 @Global()
 @Module({
   imports: [
@@ -210,7 +217,8 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: LIVE_CFG, useValue: mockLiveConfig },
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
+    { provide: PROVIDER_CREDENTIALS_CFG, useValue: mockProviderCredentialsConfig },
   ],
-  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AfterCommitService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AfterCommitService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG, PROVIDER_CREDENTIALS_CFG],
 })
 export class GlobalStubsModule {}

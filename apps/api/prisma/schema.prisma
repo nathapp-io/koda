@@ -156,6 +156,7 @@ model Project {
   memoryQueryMetrics MemoryQueryMetric[]
   webhookDeliveries  WebhookDelivery[]
   fleetRepos         FleetRepo[]
+  providerCredentials ProviderCredential[]
   fleetJobs          FleetJob[]
   fleetPrRulings     FleetPrRuling[]
   jobSchedules       JobSchedule[]
@@ -821,6 +822,7 @@ model FleetRepo {
   knowledgeIndex KnowledgeRepoIndex?
   knowledgeFiles KnowledgeRepoFile[]
   prReviews      FleetPrReview[]
+  providerCredentials ProviderCredential[]
 
   @@unique([provider, owner, name])
   @@index([projectId])
@@ -1787,4 +1789,48 @@ model FleetReviewEvent {
 
   @@unique([jobId, leaseEpoch, threadId])
   @@index([status, createdAt])
+}
+
+/// Provider credential vault (spec §US-001). One encrypted provider API key per (scope, provider).
+/// Uniqueness is a computed `scopeKey` string — `global`, `project:<projectId>`, `repo:<repoId>` — because
+/// Postgres treats NULL columns as distinct, so a unique key over (projectId, repoId, providerId) would never
+/// collide for GLOBAL rows. `scope` is GLOBAL | PROJECT | REPO (a String column: Prisma enums are not used).
+model ProviderCredential {
+  id           String    @id @default(cuid())
+  scope        String
+  scopeKey     String
+  projectId    String?
+  repoId       String?
+  providerId   String
+  name         String
+  encryptedKey String // AES-256-GCM iv:tag:ciphertext, hex (common/utils/encryption.util.ts)
+  last4        String // display only: the last four characters of the key
+  fingerprint  String // first 12 hex chars of HMAC-SHA256(master key, key); safe to show and to dedupe with
+  /// Plain strings, no foreign key, like the other fleet creator columns: a deleted principal leaves
+  /// the row readable.
+  createdById  String
+  updatedById  String
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  project Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo    FleetRepo? @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeKey, providerId])
+  @@index([projectId])
+  @@index([repoId])
+}
+
+/// One row per (job, credential, fingerprint) hand-out — the attribution record behind `credential.issued`.
+/// The unique index is also the dedupe: insertion uses skip-on-duplicate. Plain strings, no foreign keys,
+/// so the record survives the deletion of the job or the credential it names.
+model ProviderCredentialIssue {
+  id           String   @id @default(cuid())
+  jobId        String
+  credentialId String
+  fingerprint  String
+  createdAt    DateTime @default(now())
+
+  @@unique([jobId, credentialId, fingerprint])
 }
