@@ -77,6 +77,13 @@ export class ProviderKeyCache {
     return { kind: 'pending' };
   }
 
+  /** Record a successful broker reply, not sync receipt or a read-only cache lookup. */
+  markServed(jobId: string, leaseEpoch: number, providerId: string): void {
+    const key = keyOf(jobId, leaseEpoch, providerId);
+    const entry = this.entries.get(key);
+    if (entry?.grant && !entry.served) this.entries = new Map([...this.entries, [key, { ...entry, served: true }]]);
+  }
+
   /** Drop everything this job epoch holds: its grants, its served set and any queued request (releaseProviderKeys). */
   drop(jobId: string, leaseEpoch: number): void {
     this.entries = new Map([...this.entries].filter(([, entry]) => entry.jobId !== jobId || entry.leaseEpoch !== leaseEpoch));
@@ -111,7 +118,7 @@ export class ProviderKeyCache {
       const expiresAtMs = Date.parse(grant.expiresAt);
       if (Number.isNaN(expiresAtMs)) continue;   // pending expiry is an error, never an invented grant
       next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.providerId), {
-        ...entry, grant: { key: grant.key, expiresAtMs, account: grant.account }, denial: null, served: true, wanted: false,
+        ...entry, grant: { key: grant.key, expiresAtMs, account: grant.account }, denial: null, wanted: false,
       });
     }
     for (const error of errors) {

@@ -100,6 +100,8 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
   private servers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
   /** US-008: provider-key sockets live apart from `servers`, so `release`'s shims check never sees them. */
   private providerServers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
+  /** Identity tokens invalidate sleeping provider replies when their job epoch is released. */
+  private readonly providerEpochs = new Map<string, object>();
   private closing = false;
   private readonly repositories = new Map<string, Set<string>>();
 
@@ -242,14 +244,25 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     const cache = this.deps.providerKeys;
     if (!cache) return { ok: false, reason: 'error' };   // no vault wired: nothing can be granted, so invent nothing
     const { nowMs, sleep, timing } = this.deps;
+    if (this.closing) return { ok: false, reason: 'error' };
+    const key = keyOf(job);
+    const epoch = this.providerEpochs.get(key) ?? {};
+    this.providerEpochs.set(key, epoch);
     const deadline = nowMs() + (timing.providerKeyWaitMs ?? PROVIDER_KEY_WAIT_MS);
+    // A new lookup revalidates an earlier denial. Within this lookup, return the sync's denial without requeueing.
+    if (cache.state(job.jobId, job.leaseEpoch, providerId, nowMs()).kind !== 'grant') {
+      cache.want(job.jobId, job.leaseEpoch, providerId);
+    }
     for (;;) {
+      // Check before reading or mutating the cache: a released waiter must never recreate its dropped entry.
+      if (this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline) return { ok: false, reason: 'error' };
       const state = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs());
-      if (state.kind === 'grant') return { ok: true, key: state.grant.key, expiresAt: state.grant.expiresAtMs, account: state.grant.account };
+      if (state.kind === 'grant') {
+        cache.markServed(job.jobId, job.leaseEpoch, providerId);
+        return { ok: true, key: state.grant.key, expiresAt: state.grant.expiresAtMs, account: state.grant.account };
+      }
       if (state.kind === 'denied') return { ok: false, reason: state.reason };
       cache.want(job.jobId, job.leaseEpoch, providerId);   // a no-op while this request is already queued
-      if (this.closing) return { ok: false, reason: 'error' };
-      if (nowMs() >= deadline) return { ok: false, reason: 'error' };
       await sleep(timing.pollMs);
     }
   }
@@ -258,6 +271,7 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
   async releaseProviderKeys(job: JobRow): Promise<void> {
     const key = keyOf(job);
     const pending = this.providerServers.get(key);
+    this.providerEpochs.delete(key);   // invalidate every provider waiter before dropping this epoch's cache
     this.providerServers = new Map([...this.providerServers].filter(([other]) => other !== key));
     this.deps.providerKeys?.drop(job.jobId, job.leaseEpoch);
     if (pending) await closeQuietly(pending);
@@ -266,6 +280,7 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
   /** D90: daemon stop or crash. The sockets go; the tokens stay wanted and the shims stay, for a readopt. */
   async closeAll(): Promise<void> {
     this.closing = true;   // a prepare still waiting for its first token stops at once (daemon stop must not wait 120 s)
+    this.providerEpochs.clear();
     const pending = [...this.servers.values(), ...this.providerServers.values()];
     this.servers = new Map();
     this.providerServers = new Map();

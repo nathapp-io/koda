@@ -131,10 +131,21 @@ describe('ProviderKeyCache serving window (US-008)', () => {
     const cache = new ProviderKeyCache(timing);
     cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [grant()], []);
+    cache.markServed('j1', 1, 'openrouter');   // the broker returned a successful reply
     const late = T0 + 600_000 - 30_000;   // inside the refresh margin, so the socket asks for a new key
     cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [], [denial()]);
     expect(cache.state('j1', 1, 'openrouter', late), 'a provider served before must revoke, never decline').toEqual({ kind: 'denied', reason: 'revoked' });
+  });
+
+  test('AC-10: sync receipt and state inspection alone do not mark an unused grant served', () => {
+    const cache = new ProviderKeyCache(timing);
+    cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [grant()], []);
+    expect(cache.state('j1', 1, 'openrouter', T0), 'a live grant is available, but has not been delivered').toMatchObject({ kind: 'grant' });
+    cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [], [denial()]);
+    expect(cache.state('j1', 1, 'openrouter', T0 + 600_000), 'an unused grant must not turn a denial into revocation').toEqual({ kind: 'denied', reason: 'none' });
   });
 
   test('a live grant outranks a denial: a still-valid key keeps serving', () => {
@@ -154,6 +165,7 @@ describe('ProviderKeyCache serving window (US-008)', () => {
     const served = new ProviderKeyCache(timing);
     served.want('j1', 1, 'openrouter');
     served.apply(served.requests(), [grant()], []);
+    served.markServed('j1', 1, 'openrouter');
     served.want('j1', 1, 'openrouter');
     served.apply(served.requests(), [], [denial({ reason: 'job_not_active' })]);
     expect(served.state('j1', 1, 'openrouter', T0 + 600_000), 'an inactive job after a grant is a revocation').toEqual({ kind: 'denied', reason: 'revoked' });
@@ -184,6 +196,7 @@ describe('ProviderKeyCache drop (US-008 release)', () => {
     const cache = new ProviderKeyCache(timing);
     cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [grant()], []);
+    cache.markServed('j1', 1, 'openrouter');
     cache.drop('j1', 1);
     expect(cache.state('j1', 1, 'openrouter', T0), 'the released epoch must hold nothing').toEqual({ kind: 'pending' });
     expect(cache.requests(), 'nothing of the released epoch may stay queued').toEqual([]);

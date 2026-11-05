@@ -28,13 +28,13 @@ afterAll(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { r
  * A job row, a provider cache and a broker on a clock the test moves. `sleep` yields a microtask first (so a test can
  * queue a grant while a request is in flight) and then jumps the clock by the poll interval, so 55 s costs no time.
  */
-function world() {
+function world(sleep?: (ms: number) => Promise<void>) {
   const clock = { now: T0 };
   const cache = new ProviderKeyCache({ refreshMarginMs: 60_000 });
   const broker = new CredentialBroker({
     tokens: new TokenCache({ refreshMarginMs: 240_000, cooldownMs: 30_000 }),
     providerKeys: cache, socketDir: join(tmpdir(), 'pk-broker'), runnerId: 'r1', selfCommand: SELF,
-    nowMs: () => clock.now, sleep: async (ms: number) => { await Promise.resolve(); clock.now += ms; }, timing: FAST, uid,
+    nowMs: () => clock.now, sleep: sleep ?? (async (ms: number) => { await Promise.resolve(); clock.now += ms; }), timing: FAST, uid,
   });
   const journal = Journal.open(':memory:');
   const job = (cloneUrl = 'https://github.com/acme/app.git', leaseEpoch = 1): JobRow => {
@@ -120,6 +120,71 @@ describe('CredentialBroker provider keys (US-008)', () => {
     expect(await pending, 'a request with no answer must answer error, never a key').toEqual({ ok: false, reason: 'error' });
     expect(w.clock.now - started, `the reply gave up after ${w.clock.now - started} ms of its 55 s budget`).toBe(55_000);
   });
+
+  test('AC-13: release invalidates sleeping replies before dropping the epoch, including late sync grants', async () => {
+    const sleepers: Array<() => void> = [];
+    const w = world(() => new Promise<void>((resolve) => sleepers.push(resolve)));
+    const old = w.job(undefined, 1);
+    const current = w.job(undefined, 2);
+    const oldReply = w.broker.providerKeyReply(old, 'openrouter');
+    const oldRequests = w.cache.requests();
+    // A different provider prevents requests()'s highest-epoch deduplication from hiding a resurrected old want.
+    const currentReply = w.broker.providerKeyReply(current, 'zai');
+    const currentRequests = w.cache.requests().filter((request) => request.leaseEpoch === 2);
+    try {
+      await w.broker.releaseProviderKeys(old);
+      expect(w.cache.requests(), 'release must retain only the other epoch').toEqual(currentRequests);
+      sleepers.splice(0).forEach((resume) => resume());
+      await Promise.resolve();
+      expect(w.cache.requests(), 'resuming the released waiter must not recreate its request').toEqual(currentRequests);
+      w.cache.apply(oldRequests, [w.grant({ key: 'released-key' })], []);
+      expect(w.cache.state('j1', 1, 'openrouter', w.clock.now), 'a late grant must not repopulate the released epoch').toEqual({ kind: 'pending' });
+      expect(await within(oldReply, 'the cancelled epoch reply'), 'release must end the pending reply with error').toEqual({ ok: false, reason: 'error' });
+      w.cache.apply(currentRequests, [w.grant({ providerId: 'zai', key: 'current-key' })], []);
+      sleepers.splice(0).forEach((resume) => resume());
+      expect(await within(currentReply, 'the other epoch reply'), 'the other epoch must still receive its grant').toMatchObject({ ok: true, key: 'current-key' });
+      expect(w.cache.requests(), 'no request may survive the release and the other epoch grant').toEqual([]);
+    } finally {
+      await w.broker.closeAll();
+      sleepers.splice(0).forEach((resume) => resume());
+      await Promise.all([oldReply, currentReply]);
+    }
+  });
+
+  test('AC-10: a timed-out request followed by a late unused grant, expiry and none still declines', async () => {
+    const w = world();
+    const row = w.job();
+    const timedOut = w.broker.providerKeyReply(row, 'openrouter');
+    const originalRequests = w.cache.requests();
+    expect(await timedOut, 'no grant was delivered before the deadline').toEqual({ ok: false, reason: 'error' });
+    const unused = w.grant();
+    w.cache.apply(originalRequests, [unused], []);
+    w.clock.now = Date.parse(unused.expiresAt);
+    const renewal = w.broker.providerKeyReply(row, 'openrouter');
+    w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
+    expect(await renewal, 'sync receipt without broker delivery must not create served history').toEqual({ ok: false, reason: 'none' });
+  });
+
+  for (const reason of ['none', 'vault_off'] as const) {
+    test(`AC-6: a later broker lookup revalidates ${reason} and can receive a newly available key`, async () => {
+      const w = world();
+      const row = w.job();
+      const first = w.broker.providerKeyReply(row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason }]);
+      expect(await first, 'the initial lookup must decline').toEqual({ ok: false, reason: 'none' });
+      const retry = w.broker.providerKeyReply(row, 'openrouter');
+      expect(w.cache.requests(), 'the actual broker must queue the revalidation, without a direct cache.want').toEqual([{ jobId: 'j1', leaseEpoch: 1, providerId: 'openrouter' }]);
+      w.cache.apply(w.cache.requests(), [w.grant()], []);
+      expect(await retry, 'a newly configured credential must recover this job epoch').toMatchObject({ ok: true, key: 'sk-or-1' });
+      w.clock.now += 600_000;
+      const renewal = w.broker.providerKeyReply(row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
+      expect(await renewal, 'revalidation must preserve subsequent successful delivery history').toEqual({ ok: false, reason: 'revoked' });
+      const deniedAgain = w.broker.providerKeyReply(row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
+      expect(await deniedAgain, 'revalidating a revocation must not clear served history').toEqual({ ok: false, reason: 'revoked' });
+    });
+  }
 
   test('providerKeyGranted is true on a grant and false on a denial', async () => {
     const w = world();
