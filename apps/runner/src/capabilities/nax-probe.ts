@@ -2,12 +2,14 @@ import type { Dirent } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from '@nathapp/fleet-protocol';
+import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential, ThreadAcpOffer } from '@nathapp/fleet-protocol';
 import { withoutCredentialVars } from '../credentials/credential-env';
 import { sanitizeDiagnostic } from '../diagnostics';
+import { errorMessage } from '../errors';
 import { PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { parseNaxJson, readNaxVersion, relaySupported, type NaxCli } from '../nax/nax-cli';
 import type { Now } from '../time';
+import type { AcpAgentProbe } from './acp-agent-probe';
 import type { CapabilityProbe, ProbeResult } from './capability-probe';
 import { mapLimit } from './map-limit';
 import { nativeModelsForProviders, readNativeModelConfig } from '../thread/native-models';
@@ -44,6 +46,11 @@ export interface NaxProbeDeps {
   readonly toolWorks: (command: string) => Promise<boolean>;
   /** D98: machine profiles are resolved from a directory with no project config. */
   readonly makeEmptyDir?: () => Promise<EmptyDir>;
+  /**
+   * thread-agents-modes US-002: the ACP agents this machine can start and run, probed beside the nax calls. Absent on
+   * a caller that does not probe them (every daemon test but the ACP one), which reports `acp: []`.
+   */
+  readonly acpProbe?: AcpAgentProbe;
 }
 
 export async function makeEmptyDir(): Promise<EmptyDir> {
@@ -149,8 +156,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const empty = await (this.deps.makeEmptyDir ?? makeEmptyDir)();
     try {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
-      const [scan, base, sandbox, protocols, tools, botReview] = await Promise.all([
+      const [scan, base, sandbox, protocols, tools, botReview, acp] = await Promise.all([
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
+        this.acpAgents(),
       ]);
       const botFix = botReview && await this.botFix(empty.dir);
       const botRulings = botReview && await this.botRulings(empty.dir);
@@ -164,11 +172,18 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         sandbox: { ...sandbox, probedAt: this.deps.now().toISOString() },
         profiles: scan.profiles,
         credentials: credentials.list,
-        threadBackends: { native: threadModels.models, acp: [] },
+        // thread-agents-modes US-002: only an agent that is both launchable and logged in may host a thread; every
+        // offer (a logged-out or absent agent included) rides along so the web can say why it is unusable.
+        threadBackends: {
+          native: threadModels.models,
+          acp: acp.offers.filter((offer) => offer.launchable && offer.loggedIn === true).map((offer) => offer.agent),
+          ...(acp.offers.length === 0 ? {} : { acpOffers: acp.offers }),
+        },
         tools,
         executors: ['host'],
         configJobs: true,
         threadWrite: true,
+        threadModes: true,
         projectThreads: true,
         // Fleet S5b 1d: a WORKSPACE thread runs on the same no-checkout path as a PROJECT one, so the runner
         // advertises it and the API places a WORKSPACE ASSIGN nowhere else.
@@ -183,9 +198,25 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
       });
-      return { capabilities: bounded.capabilities, warnings: [...base.warnings, ...scan.warnings, ...credentials.warnings, ...bounded.warnings] };
+      return {
+        capabilities: bounded.capabilities,
+        warnings: [...base.warnings, ...scan.warnings, ...credentials.warnings, ...acp.warnings, ...bounded.warnings],
+      };
     } finally {
       await empty.remove();
+    }
+  }
+
+  /**
+   * thread-agents-modes US-002: a failed ACP probe reports no agents rather than stopping the report — the runner's
+   * other capabilities (and its threads) stay available, and the warning says why no agent is offered.
+   */
+  private async acpAgents(): Promise<{ offers: ThreadAcpOffer[]; warnings: string[] }> {
+    if (this.deps.acpProbe === undefined) return { offers: [], warnings: [] };
+    try {
+      return { offers: await this.deps.acpProbe(), warnings: [] };
+    } catch (error) {
+      return { offers: [], warnings: [`ACP agent probe failed (${sanitizeDiagnostic(errorMessage(error))}); no ACP agents reported`] };
     }
   }
 

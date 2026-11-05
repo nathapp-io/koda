@@ -124,6 +124,37 @@ async function streamLines(context: ReturnType<typeof setup>): Promise<Array<Rec
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+/**
+ * The stream's lines, or null while the run is recreating the file. `openStream` removes the stream and appends the
+ * start line afterwards, so a read that lands in that window sees a missing or still-empty file; that is "not yet",
+ * never a failure. Anything else — a file that exists but holds a line that is not JSON — still throws.
+ */
+async function presentStreamLines(context: ReturnType<typeof setup>): Promise<Array<Record<string, unknown>> | null> {
+  let text: string;
+  try {
+    text = await readFile(join(context.jobDir, 'thread-events.jsonl'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  const body = text.trim();
+  if (body === '') return null;
+  return body.split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** Waits until the stream carries a line of `type`, polling past the recreation window; null when it never does. */
+async function waitForStreamLine(
+  context: ReturnType<typeof setup>, type: string, timeoutMs = 1_000,
+): Promise<Array<Record<string, unknown>> | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const lines = await presentStreamLines(context);
+    if (lines !== null && lines.some((line) => line.type === type)) return lines;
+    await Bun.sleep(10);
+  }
+  return null;
+}
+
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 
 describe('ThreadJobRun turns, idle, caps and failure (US-004)', () => {
@@ -284,10 +315,12 @@ describe('ThreadJobRun turns, idle, caps and failure (US-004)', () => {
     const context = setup();
     await mkdir(context.jobDir, { recursive: true });
     await writeFile(join(context.jobDir, 'thread-events.jsonl'), '{"type":"stale"}\n');
-    const { started } = await running(context);
-    expect(await eventually(async () => (await streamLines(context)).some((line) => line.type === 'session_started'))).toBe(true);
-    const lines = await streamLines(context);
-    expect(lines.some((line) => line.type === 'stale')).toBe(false);
+    // The stale file already satisfies `running`'s wait, so the run is started directly: the wait below is for the
+    // line the run itself writes, not for a file that was there before it.
+    const started = context.run.start('prepare');
+    const observed = await waitForStreamLine(context, 'session_started');
+    expect(observed?.map((line) => line.type)).toContain('session_started');
+    expect(observed?.map((line) => line.type)).not.toContain('stale');
     context.run.halt(); await started; context.journal.close();
   });
 });

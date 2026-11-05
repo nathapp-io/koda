@@ -167,11 +167,14 @@ function readInput(payload: unknown): { messageId: string; text: string } | null
   return isSafeSegment(messageId) && isMessageText(text) ? { messageId, text } : null;
 }
 
-/** The `THREAD_ANSWER` payload, or null when it is not exactly `{ requestId, text }` with a usable id and text. */
-function readAnswer(payload: unknown): { requestId: string; text: string } | null {
+/** The `THREAD_ANSWER` payload, or null when its request id and text/decision are unusable. */
+function readAnswer(payload: unknown): { requestId: string; reply: { text: string } | { decision: 'allow' | 'deny' } } | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const { requestId, text } = payload as { requestId?: unknown; text?: unknown };
-  return typeof requestId === 'string' && REQUEST_ID_RE.test(requestId) && isMessageText(text) ? { requestId, text } : null;
+  const { requestId, text, decision } = payload as { requestId?: unknown; text?: unknown; decision?: unknown };
+  if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) return null;
+  if (isMessageText(text)) return { requestId, reply: { text } };
+  if (decision === 'allow' || decision === 'deny') return { requestId, reply: { decision } };
+  return null;
 }
 
 /**
@@ -366,7 +369,7 @@ export class ThreadJobRun {
     this.livePublish = new ThreadLivePublish({
       publish: this.deps.host.publish ?? publishThreadDocs,
       input: { git: this.deps.host.git, mutex: publishInputMutex(this.deps.mutex), repoKey: row.repoKey, worktree: prepared.worktree,
-        feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity },
+        feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity, mode: thread.mode ?? 'read' },
       writer: () => this.writer,
       turnRunning: () => this.turnRunning,
       stopped: () => this.halted,
@@ -649,7 +652,7 @@ export class ThreadJobRun {
       threadPath,
       lifecycle: (level, message) => this.events.lifecycle(level, message),
     });
-    if (announce) writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
+    if (announce) writer.started({ resumed, mode: thread.mode ?? 'read', backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
   }
 
   /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only idles. */
@@ -925,7 +928,7 @@ export class ThreadJobRun {
     const session = this.session;
     if (session === null) return { result: 'rejected', detail: 'session_not_ready' };
     try {
-      const status: unknown = session.answer(answer.requestId, { text: answer.text });
+      const status: unknown = session.answer(answer.requestId, answer.reply);
       if (status instanceof Promise) {
         return status.then((value: string) => value === 'accepted' ? { result: 'ok' as const } : { result: 'rejected' as const, detail: String(value) })
           .catch((error: unknown) => {

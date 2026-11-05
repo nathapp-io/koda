@@ -6,9 +6,10 @@ import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 import { APP_CFG, IAppConfig } from './config/app.config';
 import { registerRawBodyHook } from './common/hooks/raw-body.hook';
 import { registerBundleContentParser, registerLogContentParser } from './common/hooks/bundle-content-parser';
+import { createFastifyAdapter } from './common/fastify-adapter';
 
 async function bootstrap() {
-  const app = await AppFactory.createFastifyApp(AppModule, {
+  const app = await AppFactory.createFastifyApp(AppModule, createFastifyAdapter(), {
     bufferLogs: true,
   });
 

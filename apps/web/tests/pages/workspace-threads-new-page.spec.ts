@@ -312,3 +312,99 @@ describe('US-005 AC-6..AC-11: pages/threads/new.vue', () => {
     m.app.unmount()
   })
 })
+
+// ── US-011: the agent select on the personal (workspace) form ───────────────────────────────────
+
+/** One ACP discovery offer (runner-summary.dto.ts `ThreadAcpOffer`). */
+const acpOffer = (agent: string, over: Record<string, unknown> = {}) => ({
+  agent, launchable: true, loggedIn: true, models: [], efforts: [], ...over,
+})
+
+/** A runner summary that can also start Cursor, which is what the workspace form must offer. */
+const cursorRunner = (over: Partial<FleetRunnerSummary> = {}): FleetRunnerSummary => runner({
+  id: 'rn-cursor',
+  threadBackends: {
+    native: ['m1'],
+    acp: ['cursor'],
+    acpOffers: [acpOffer('cursor', { models: ['cursor-small', 'cursor-large'] })],
+  },
+  ...over,
+})
+
+const agentSelect = (app: Mounted): FakeNode | undefined => app.one('[data-testid="thread-new-agent"]')
+
+const chooseAgent = (app: Mounted, agent: string): void => {
+  const select = must(agentSelect(app), 'agent select')
+  ;(select.props.onChange as (e: unknown) => void)({ target: { value: agent } })
+}
+
+describe('US-011 AC-11: the workspace form posts the chosen agent and never a mode', () => {
+  test('AC-11: submitting with Cursor posts an acp backend with agent cursor and no mode', async () => {
+    const m = mountPage({ runners: [cursorRunner()] })
+    await m.settle()
+
+    chooseAgent(m.app, 'cursor')
+    await m.settle()
+    typeInto(m.app, 'title', 't')
+    await submit(m.app)
+
+    expect(m.post).toHaveBeenCalledTimes(1)
+    const [path, body] = m.post.mock.calls[0] as [string, { backend: unknown; mode?: unknown }]
+    expect(path).toBe('/threads')
+    expect(body.backend).toEqual({ kind: 'acp', agent: 'cursor', model: 'cursor-large' })
+    // A WORKSPACE thread has no worktree or publish: it stays `read`, and the body says nothing about it.
+    expect(body).not.toHaveProperty('mode')
+    m.app.unmount()
+  })
+
+  // F2: the same rule on the personal form — a ready agent with no advertised model still submits.
+  test('F2: a model-less ready Cursor submits an acp backend with no model', async () => {
+    const modeless: FleetRunnerSummary = runner({
+      id: 'rn-modeless',
+      threadBackends: {
+        native: [],
+        acp: ['cursor'],
+        acpOffers: [acpOffer('cursor', { models: [] })],
+      },
+    })
+    const m = mountPage({ runners: [modeless] })
+    await m.settle()
+
+    // Create must be usable: a ready agent needs no model id.
+    expect(must(m.app.find('[data-stub="button"]').find((button) => button.props.type === 'submit'), 'submit button').props.disabled)
+      .toBe(false)
+
+    typeInto(m.app, 'title', 't')
+    await submit(m.app)
+
+    expect(m.post).toHaveBeenCalledTimes(1)
+    const [, body] = m.post.mock.calls[0] as [string, { backend: unknown; mode?: unknown }]
+    expect(body.backend).toEqual({ kind: 'acp', agent: 'cursor' })
+    expect(body).not.toHaveProperty('mode')
+    m.app.unmount()
+  })
+
+  test('AC-11 (edge): the workspace form offers no mode select at all', async () => {
+    const m = mountPage({ runners: [cursorRunner()] })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-new-mode"]')).toBeUndefined()
+    expect(m.app.text()).not.toContain('fleet.threads.new.mode.label')
+    m.app.unmount()
+  })
+
+  test('AC-11 (edge): picking Cursor lists Cursor’s own models', async () => {
+    const m = mountPage({ runners: [cursorRunner()] })
+    await m.settle()
+
+    expect(modelOptions(m.app)).toEqual(['m1'])
+
+    chooseAgent(m.app, 'cursor')
+    await m.settle()
+
+    // The picker sorts an agent's models, like the native list it replaced, and leads with the empty
+    // entry that means "the agent's own default" (F2).
+    expect(modelOptions(m.app)).toEqual(['', 'cursor-large', 'cursor-small'])
+    m.app.unmount()
+  })
+})

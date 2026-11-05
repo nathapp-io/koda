@@ -19,11 +19,13 @@ const thread: ThreadAssign = {
 const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0 };
 const turnEnd = { type: 'turn_end', sessionId: 'thread-1', turnId: 'turn-1', at: new Date(0).toISOString(), status: 'completed' } as never;
 function deferred<T = void>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
-function setup(options: { send?: () => AsyncGenerator<SessionEvent>; publish?: (input: Record<string, unknown>) => Promise<ThreadPublishResult>; stale?: boolean; title?: string; noTitle?: boolean } = {}) {
+function setup(options: { send?: () => AsyncGenerator<SessionEvent>; publish?: (input: Record<string, unknown>) => Promise<ThreadPublishResult>; stale?: boolean; title?: string; noTitle?: boolean; mode?: 'read' | 'ask' | 'full' } = {}) {
   const root = join(import.meta.dir, `.thread-publish-${crypto.randomUUID()}`); roots.push(root);
   const workspaceRoot = join(root, 'workspace'); const jobDir = join(workspaceRoot, '.jobs', 'thread-publish-1');
   const clock = manualClock(Date.parse('2026-01-01T00:00:00.000Z')); const journal = Journal.open(':memory:');
-  const assignedThread: ThreadAssign = options.noTitle ? (({ title: _title, ...rest }) => rest)(thread) : { ...thread, ...(options.title === undefined ? {} : { title: options.title }) };
+  const assignedThread: ThreadAssign = options.noTitle
+    ? (({ title: _title, ...rest }) => ({ ...rest, ...(options.mode === undefined ? {} : { mode: options.mode }) }))(thread)
+    : { ...thread, ...(options.title === undefined ? {} : { title: options.title }), ...(options.mode === undefined ? {} : { mode: options.mode }) };
   const assign = assignFor('THREAD', { jobId: 'thread-publish-1', ref: 'refs/heads/base', approvalTimeoutSec: 30, thread: assignedThread });
   journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir });
   const lines: string[] = []; const logs = { register(job: { threadPath: string }) { lines.push(job.threadPath); }, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
@@ -63,6 +65,16 @@ test('US-006 AC-2: running write_doc writes and announces docs/a.md', async () =
   expect(result).toMatchObject({ content: 'wrote docs/a.md (2 bytes)' });
   expect(await stream(ctx)).toContainEqual(expect.objectContaining({ type: 'write_doc', path: 'docs/a.md', bytes: 2 }));
   ctx.run.halt(); await startedRun; ctx.journal.close();
+});
+
+test('publish during ask-mode SESSION forwards assign mode', async () => {
+  const ctx = setup({ mode: 'ask' });
+  const { started: startedRun } = await started(ctx);
+  await Bun.sleep(10);
+  expect(ctx.run.command('THREAD_PUBLISH', {})).toEqual({ result: 'ok' });
+  await Bun.sleep(0);
+  expect(ctx.calls.at(-1)).toMatchObject({ mode: 'ask' });
+  ctx.gate.resolve(); ctx.run.halt(); await startedRun; ctx.journal.close();
 });
 
 test('US-006 AC-3, AC-4, AC-5, AC-6: publish acknowledges, passes assignment and writes result', async () => {

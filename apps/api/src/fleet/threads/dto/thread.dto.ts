@@ -1,12 +1,40 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
+/**
+ * B3: the runner's outcome for the last decision sent for one pending request. The decision route answers `200` as soon
+ * as the command is queued, so this is the only place the page learns whether the session actually took the decision.
+ */
+export class ThreadApprovalDeliveryDto {
+  @ApiProperty({ enum: ['allow', 'deny'], description: 'Which way the last decision went' }) decision: 'allow' | 'deny';
+  @ApiProperty({ enum: ['ok', 'rejected'], description: 'ok = the session accepted it; rejected = the runner refused it and the request is still pending' }) result: 'ok' | 'rejected';
+  @ApiProperty({ nullable: true, type: String, description: "The runner's own reason for a rejection" }) detail: string | null;
+  @ApiProperty({ description: 'When the runner acknowledged the decision' }) at: string;
+}
+
+/**
+ * thread-agents-modes US-007: one answerable session approval the thread waits on. `command` and `unsandboxed` are
+ * absent when the request did not carry them; `reason` is the runner's own explanation of why it asks; `delivery` is
+ * absent until a decision for it has been acknowledged (B3).
+ */
+export class ThreadPendingApprovalDto {
+  @ApiProperty({ description: 'The request id the decision route takes' }) requestId: string;
+  @ApiProperty({ description: 'The tool that needs the decision' }) tool: string;
+  @ApiProperty({ description: 'What the tool would do, in the runner\'s own words' }) summary: string;
+  @ApiProperty({ required: false, description: 'The command the tool would run, when it runs one' }) command?: string;
+  @ApiProperty({ required: false, description: 'Why the runner is asking' }) reason?: string;
+  @ApiProperty({ description: 'When the runner stops waiting for the decision' }) expiresAt: string;
+  @ApiProperty({ required: false, description: 'Set when the request would leave the session sandbox' }) unsandboxed?: true;
+  @ApiProperty({ required: false, type: ThreadApprovalDeliveryDto, description: 'The runner\'s outcome for the last decision sent for this request' }) delivery?: ThreadApprovalDeliveryDto;
+}
+
 export class ThreadDto {
+  @ApiProperty({ enum: ['read', 'ask', 'full'] }) mode: ThreadMode;
   @ApiProperty() id: string;
   @ApiProperty({ enum: ['REPO', 'PROJECT', 'WORKSPACE'] }) kind: ChatThreadKind;
   @ApiProperty({ description: "The thread's project; for a WORKSPACE thread, its home project" }) projectId: string;
@@ -25,6 +53,7 @@ export class ThreadDto {
   @ApiProperty({ nullable: true }) tokens: unknown;
   @ApiProperty({ nullable: true }) specPath: string | null;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
+  @ApiProperty({ type: [ThreadPendingApprovalDto], description: 'The answerable session approvals the thread waits on, oldest first (US-007)' }) pendingApprovals: ThreadPendingApprovalDto[];
   @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' }, kodaToolsUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)' }, projectCodeUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
@@ -92,6 +121,10 @@ export class SendMessageResultDto {
   @ApiProperty({ nullable: true }) jobId: string | null;
 }
 
+export class ChangeThreadModeDto {
+  @Allow() @ApiProperty({ enum: ['read', 'ask', 'full'] }) mode: ThreadMode;
+}
+
 export class UpdateThreadDto {
   @Allow() @ApiProperty() maxCostUsd: number;
 }
@@ -101,7 +134,16 @@ export class AnswerQuestionDto {
   @Allow() @ApiProperty({ minLength: 1, maxLength: 32768 }) text: string;
 }
 
+/**
+ * thread-agents-modes US-008: the body of an approval decision. The request id comes from the route, and the
+ * decision is validated by the service so an unknown value is a 400 naming `decision` rather than a whitelist 400.
+ */
+export class DecideThreadApprovalDto {
+  @Allow() @ApiProperty({ enum: ['allow', 'deny'], description: 'allow runs the pending tool, deny refuses it' }) decision: string;
+}
+
 export class CreateThreadDto {
+  @Allow() @ApiProperty({ required: false, enum: ['read', 'ask', 'full'], default: 'read' }) mode?: ThreadMode;
   @Allow() @ApiProperty({ required: false, enum: ['REPO', 'PROJECT'] }) kind?: ChatThreadKind;
   @Allow() @ApiProperty({ required: false }) repoId?: string;
   @Allow() @ApiProperty({ required: false }) feature?: string;

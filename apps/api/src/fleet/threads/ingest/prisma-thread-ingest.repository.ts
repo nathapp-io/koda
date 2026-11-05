@@ -12,8 +12,11 @@ import { round4 } from './thread-cost';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult, UnfoldedStream } from './domain/thread-ingest.domain';
 import { allocateThreadSeq } from '../domain/chat-thread.domain';
+import {
+  appendPendingApproval, readPendingApprovals, removePendingApproval, type ThreadPendingApproval,
+} from '../domain/pending-approvals';
 import { ACTIVE_STATES, isTerminal } from '../../jobs/job-state';
-import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
+import type { ApprovalRequestedThreadLine, AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import { writeLinePatch, type WriteFoldPatch, type WriteLine } from './thread-write-fold';
 import {
   upsertInformationalQuestion, upsertToolSummary, type ToolSummaryEntry,
@@ -99,6 +102,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         const deltaText = new Map<string, string>();
         const resetTurns = new Set<string>();
         const questions: Array<{ requestId: string; text: string }> = [];
+        // An attempt that is over (the job reached a terminal state) or that no longer holds the job (a requeue gave the
+        // thread a new leaseEpoch) is a boot catch-up replay: its transcript still folds, but its session state must not.
+        const stale = isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch;
         let threadChanged = false;
         if (threadId && job) {
           for (const { line } of batch.lines) {
@@ -113,6 +119,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             else if (isToolLine(line)) {
               const folded = await this.foldToolLine(threadId, line);
               skippedLines += folded.skipped;
+              // thread-agents-modes US-007: the pending list folds on its own, so a request with no callId still
+              // lists (the tool-summary fold only knows lines that name a call). A replay never moves it (US-007 F1).
+              if (await this.foldPendingApproval(threadId, line, stale)) threadChanged = true;
               if ('turnId' in line && folded.messageId) {
                 changedTurns.add(line.turnId);
                 messageEventTurns.add(line.turnId);
@@ -135,7 +144,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
               }
             }
             else if (isSessionLine(line)) {
-              const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch, job.runnerId);
+              const erroredIds = await this.foldSessionLine(batch, threadId, line, stale, job.runnerId);
               for (const id of erroredIds) messageIds.add(id);
               threadChanged = true;
             }
@@ -404,6 +413,44 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   }
 
   /**
+   * thread-agents-modes US-007: keeps `ChatThread.pendingApprovals` — the answerable requests the session is waiting
+   * on, oldest first and at most `MAX_PENDING_APPROVALS`. An `approval_requested` line that is answerable and complete
+   * appends its entry; the matching `approval_resolved` removes it. It runs beside the tool-summary fold, so a request
+   * with no callId still lists, and a minimal or informational line changes nothing. The caller holds the thread row
+   * lock.
+   *
+   * A `stale` attempt (its job is over, or a requeue moved the job to another leaseEpoch) never moves the list
+   * (US-007 F1): a crashed stream need not carry a closing event, so a boot catch-up would otherwise append a request
+   * the job-end cleanup already dropped — or resolve a newer session's request — long after the session is gone.
+   *
+   * Returns whether the thread row changed (which publishes its live event).
+   */
+  private async foldPendingApproval(threadId: string, line: ToolThreadLine, stale: boolean): Promise<boolean> {
+    if (line.type !== 'approval_requested' && line.type !== 'approval_resolved') return false;
+    if (stale) return false;
+    const entry = line.type === 'approval_requested' ? this.pendingEntryOf(line) : null;
+    if (line.type === 'approval_requested' && entry === null) return false;
+    const db = this.prisma.client;
+    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { pendingApprovals: true } });
+    const current = readPendingApprovals(thread?.pendingApprovals ?? null);
+    const next = entry === null ? removePendingApproval(current, line.requestId) : appendPendingApproval(current, entry);
+    if (next === null) return false;
+    await db.chatThread.update({ where: { id: threadId }, data: { pendingApprovals: next as unknown as Prisma.InputJsonValue } });
+    return true;
+  }
+
+  /** The pending entry an answerable, complete request line yields; null for a minimal or informational one. */
+  private pendingEntryOf(line: ApprovalRequestedThreadLine): ThreadPendingApproval | null {
+    if (line.tool === undefined || line.summary === undefined || line.expiresAt === undefined || line.answerable === false) return null;
+    return {
+      requestId: line.requestId, tool: line.tool, summary: line.summary, expiresAt: line.expiresAt,
+      ...(line.command !== undefined ? { command: line.command } : {}),
+      ...(line.reason !== undefined ? { reason: line.reason } : {}),
+      ...(line.unsandboxed === true ? { unsandboxed: true as const } : {}),
+    };
+  }
+
+  /**
    * An answerable question sets the thread's `pendingQuestion`; an informational one becomes an `ask_human` tool entry.
    * Returns 1 when the question names a turn with no assistant message.
    */
@@ -465,7 +512,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       reason: line.reason,
       at,
     };
-    await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
+    // thread-agents-modes US-007: a session that closed or failed is not waiting on any decision, so its pending list
+    // goes with the snapshot. Both clears ride the same update, under the thread lock the caller already holds.
+    const closedData = { session: session as unknown as Prisma.InputJsonValue, pendingApprovals: Prisma.DbNull };
+    await db.chatThread.update({ where: { id: threadId }, data: closedData });
     if (line.type !== 'session_failed') return [];
     const affected = await db.chatMessage.findMany({
       where: { threadId, status: { in: ['pending', 'streaming'] } }, select: { id: true },

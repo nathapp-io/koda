@@ -1,10 +1,15 @@
+import { randomUUID } from 'node:crypto';
+import { committedEffect } from '../../common/committed-effects';
+import { ThreadEventBus } from '../../live/thread-event-bus';
+import { threadModeKey } from './thread-mode';
+import threadMessages from '../../i18n/en/threads.json';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
 import { actorTypeFor, type ActorType } from '../../action-context/action-context';
@@ -23,14 +28,16 @@ import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { readPendingApprovals } from './domain/pending-approvals';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
 import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
-import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
+import type { ChatThreadKind, ThreadAction, ThreadMode, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { threadAuditKey } from './thread-audit';
+import { readApprovalDecision } from './thread-decision';
 
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
@@ -61,12 +68,14 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly audit: AuditRecorder,
+    private readonly threadEvents: ThreadEventBus,
   ) {}
 
-  async create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
+  async create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
     const row = await this.audit.audited(
       () => this.prisma.client.chatThread.create({ data: {
       kind: input.kind,
+      mode: input.mode ?? 'read',
       projectId: input.projectId,
       repoId: input.repoId,
       baseRef: input.baseRef,
@@ -192,6 +201,71 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return updated;
   }
 
+  /** Mode, transcript note, audit and idle-session close are one write, with the same lock order as send. */
+  async changeMode(projectId: string, threadId: string, actor: { id: string; type: 'USER' | 'AGENT' }, mode: ThreadMode, canOperate: boolean): Promise<ChatThreadRecord> {
+    let notification: { messageId: string; runnerId: string | null } | null = null;
+    const result = await this.txManager.run(async () => {
+      const where = { id: threadId, ...scopeWhere({ kind: 'project', projectId }) };
+      const before = await this.prisma.client.chatThread.findFirst({ where });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      const assertOwner = (thread: typeof before) => {
+        if (!canOperate && (thread.createdById !== actor.id || thread.createdByType !== actor.type)) {
+          throw new ForbiddenAppException({}, 'permissions');
+        }
+      };
+      assertOwner(before);
+      const current = await this.activeThreadJob(threadId);
+      if (current) await this.jobs.lockById(current.id);
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const thread = await this.prisma.client.chatThread.findFirst({ where });
+      if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+      assertOwner(thread);
+      if (mapThreadKind(thread.kind) !== 'REPO' && mode !== 'read') throw new ValidationAppException({ reason: 'mode' }, 'threads.input');
+      const active = await this.activeThreadJob(threadId);
+      if ((current?.id ?? null) !== (active?.id ?? null)) throw new ConflictAppException({}, 'threads.busy');
+      // A no-op is harmless even during a turn; it never closes or annotates the session.
+      if (thread.mode === mode) return this.mapThread(thread, active);
+      if (active && (active.command !== 'THREAD' || active.action !== 'SESSION')) throw new ConflictAppException({}, 'threads.busy');
+      const { refusal } = await this.sendRefusalFor(thread, active);
+      if (refusal === 'turnRunning') throw new ConflictAppException({}, 'threads.turnRunning');
+      const close = active ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch }, select: { id: true } }) : null;
+      // Mode changes do not need send budget/runner eligibility, but those earlier send refusals must
+      // not hide a queued/running turn. UPLOADING and a close already sent are closing, not new turns.
+      const closing = active?.state === 'UPLOADING' || (active?.state === 'RUNNING' && close !== null);
+      if (!closing && (active?.state === 'QUEUED' || active?.state === 'ASSIGNED' || await this.prisma.client.chatMessage.findFirst({ where: { threadId, status: { in: ['pending', 'streaming'] } }, select: { id: true } }))) {
+        throw new ConflictAppException({}, 'threads.turnRunning');
+      }
+      let runnerId: string | null = null;
+      if (active?.state === 'RUNNING' && active.runnerId && !close) {
+        await this.jobs.createCommand({ runnerId: active.runnerId, jobId: active.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: active.leaseEpoch, payload: {} });
+        runnerId = active.runnerId;
+      }
+      const from = thread.mode;
+      const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { mode, lastActivityAt: new Date() } });
+      const displayName = actor.type === 'AGENT'
+        ? (await this.prisma.client.agent.findUnique({ where: { id: actor.id }, select: { name: true, slug: true } }))
+        : (await this.prisma.client.user.findUnique({ where: { id: actor.id }, select: { name: true, email: true } }));
+      const name = displayName?.name ?? (displayName && ('email' in displayName ? displayName.email : displayName.slug)) ?? actor.id;
+      // Persist English transcript text (also consumed by agents), resolving the actor's name at write time.
+      const content = threadMessages.modeChanged.replace('{from}', () => from).replace('{to}', () => mode).replace('{name}', () => name);
+      const seq = await allocateThreadSeq(this.prisma.client, threadId);
+      const message = await this.prisma.client.chatMessage.create({ data: { threadId, seq, role: 'system', status: 'complete', content } });
+      await this.audit.record({ key: threadModeKey(mode), resourceType: 'thread', resourceId: threadId, projectId, summary: `mode changed from ${from} to ${mode}` });
+      notification = { messageId: message.id, runnerId };
+      return this.mapThread(row, active);
+    });
+    if (notification) {
+      const { messageId, runnerId } = notification;
+      if (runnerId) this.notifier.notify(runnerId);
+      committedEffect(() => {
+        const at = new Date().toISOString();
+        this.threadEvents.publish({ id: randomUUID(), type: 'message', threadId, messageId, at });
+        this.threadEvents.publish({ id: randomUUID(), type: 'thread', threadId, at });
+      });
+    }
+    return result;
+  }
+
   async command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate = false): Promise<void> {
     let runnerId: string | null = null;
     await this.txManager.run(async () => {
@@ -204,10 +278,19 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (!canOperate && thread.createdById !== userId) throw new ForbiddenAppException({}, 'permissions');
+      // US-008: an answer carries either a text or a decision, and each is checked against its own pending list —
+      // a decision never satisfies a pending question, and a text answer never satisfies a pending approval.
+      const answer = payload as { requestId?: unknown; decision?: unknown };
+      const decision = type === FleetCommandType.THREAD_ANSWER ? readApprovalDecision(answer.decision) : null;
       if (type === FleetCommandType.THREAD_ANSWER) {
-        const question = thread.pendingQuestion as { requestId?: unknown } | null;
-        const requestId = (payload as { requestId?: unknown }).requestId;
-        if (!question || question.requestId !== requestId) throw new ConflictAppException({}, 'threads.noQuestion');
+        if (decision !== null) {
+          if (!readPendingApprovals(thread.pendingApprovals).some((row) => row.requestId === answer.requestId)) {
+            throw new ConflictAppException({}, 'threads.noApproval');
+          }
+        } else {
+          const question = thread.pendingQuestion as { requestId?: unknown } | null;
+          if (!question || question.requestId !== answer.requestId) throw new ConflictAppException({}, 'threads.noQuestion');
+        }
       }
       const job = await this.currentThreadJob(threadId);
       if (!current || current.id !== job?.id || job.state !== 'RUNNING' || !job.runnerId) throw new ConflictAppException({}, 'threads.noSession');
@@ -223,10 +306,14 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       await this.jobs.createCommand({ runnerId: job.runnerId, jobId: job.id, type: type as FleetCommandType, leaseEpoch: job.leaseEpoch, payload });
       const action = type === FleetCommandType.THREAD_STOP_TURN ? 'stop'
         : type === FleetCommandType.THREAD_CLOSE ? 'end-session'
-          : type === FleetCommandType.THREAD_ANSWER ? 'answer' : null;
+          : type === FleetCommandType.THREAD_ANSWER ? (decision === null ? 'answer' : 'approve') : null;
       if (action) await this.audit.record({
         key: threadAuditKey(action, scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id,
-        projectId: thread.projectId, summary: action === 'stop' ? 'stop requested' : action === 'end-session' ? 'end requested' : 'answered',
+        projectId: thread.projectId,
+        // US-008: the decision's audit entry names which way it went, so the transcript says allow or deny.
+        summary: action === 'stop' ? 'stop requested'
+          : action === 'end-session' ? 'end requested'
+            : action === 'approve' ? `decision ${decision} for ${String(answer.requestId)}` : 'answered',
       });
       runnerId = job.runnerId;
     });
@@ -295,7 +382,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         return { jobId: null };
       }
       if (active) throw new ConflictAppException({}, 'threads.busy');
-      if (thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
+      // thread-agents-modes (branch fix B1): `writtenPaths` counts write_doc only, and an `ask`/`full` turn edits the
+      // worktree through native Write/Edit/Bash or the ACP agent's own tools, so those modes publish the runner's own
+      // diff and the API has nothing to count in advance. `read` keeps the guard: there is nothing else to publish.
+      if (thread.mode === 'read' && thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
       const job = await this.createThreadJob(thread, 'PUBLISH', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
@@ -531,6 +621,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     await this.prisma.client.fleetThreadTurn.create({ data: {
       jobId: job.id, threadId: thread.id, action, initialMessageId: message?.id ?? null, instructions: target.instructions,
       backend: backend as Prisma.InputJsonValue, skills: skills as unknown as Prisma.InputJsonValue,
+      mode: thread.mode,
       resume: action === 'SESSION' && previousSession !== null,
     } });
     return job;
@@ -554,7 +645,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
     const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
     if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
-    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills, brief: await this.readBriefBlock(thread.projectId, repoContext) }) };
+    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills, mode: (thread.mode ?? 'read') as ThreadMode, brief: await this.readBriefBlock(thread.projectId, repoContext) }) };
   }
 
   /**
@@ -624,6 +715,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   private mapThread(row: Prisma.ChatThreadGetPayload<object> & { project?: { slug: string; name: string } }, activeJob: { id: string; state: string } | null): ChatThreadRecord {
     return {
+      mode: (row.mode ?? 'read') as ThreadMode,
       id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
       ...(row.project ? { homeProject: row.project } : {}),
       repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
@@ -632,6 +724,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
       pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
+      pendingApprovals: readPendingApprovals(row.pendingApprovals),
       lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
       writtenPaths: row.writtenPaths, publishedSha: row.publishedSha, specPublished: row.specPublished,
       lastWrite: (row.lastWrite as unknown as ThreadWriteResult | null) ?? null,

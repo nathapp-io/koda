@@ -1,9 +1,10 @@
 import { ApiProperty, type ApiPropertyOptions } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
-import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
 import { ThreadDto, ThreadDetailDto } from './thread.dto';
 
 export class CreateWorkspaceThreadDto {
+  @Allow() @ApiProperty({ required: false, enum: ['read'], default: 'read', description: 'Workspace threads support read only' }) mode?: ThreadMode;
   @Allow() @ApiProperty({ required: false, enum: ['WORKSPACE'] }) kind?: ChatThreadKind;
   @Allow() @ApiProperty({ required: false, description: 'Not allowed on workspace threads' }) repoId?: string;
   @Allow() @ApiProperty({ required: false, description: 'Not allowed on workspace threads' }) feature?: string;

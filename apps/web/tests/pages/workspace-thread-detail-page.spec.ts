@@ -10,6 +10,7 @@ import * as apiModule from '../../composables/useApi'
 import { ApiError, extractApiError } from '../../composables/useApi'
 import { useWorkspaceThread as createWorkspaceThread } from '~/composables/useWorkspaceThread'
 import { useProjectRunnerSummaries as createProjectRunnerSummaries } from '~/composables/useProjectRunnerSummaries'
+import { useProjectPermissionsFor as createProjectPermissionsFor } from '~/composables/usePermissions'
 import type { EventSourceLike } from '~/lib/project-event-stream'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
@@ -66,6 +67,7 @@ const workspaceThread = (over: Record<string, unknown> = {}): ThreadDetailDto =>
   tokens: null,
   specPath: null,
   pendingQuestion: null,
+  pendingApprovals: [],
   session: null,
   lastActivityAt: '2026-10-14T00:00:00.000Z',
   createdAt: '2026-10-14T00:00:00.000Z',
@@ -160,8 +162,12 @@ function realComponents(): Record<string, Component> {
   const timeline = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadTimeline.vue'), globals)
   const controls = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadControls.vue'), globals)
   const composer = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadComposer.vue'), globals)
+  // thread-agents-modes US-012: the session approval cards are the page's own children.
+  const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), globals)
   return {
     ...MARKERS,
+    ThreadApprovalCard: approvalCard,
+    FleetThreadsThreadApprovalCard: approvalCard,
     ThreadHeader: header,
     FleetThreadsThreadHeader: header,
     ThreadTimeline: timeline,
@@ -224,6 +230,10 @@ function mountPage(over: {
   sendError?: unknown
   /** true registers the real thread components (the composer/controls interaction specs). */
   real?: boolean
+  /** The keys `GET /me/permissions?project=acme` answers with (US-012 F2: the home project's permission set). */
+  permissionKeys?: string[]
+  /** 'resolve' (default) | 'pending' | 'reject': how the home project's permissions answer. */
+  permissionGet?: 'resolve' | 'pending' | 'reject'
 } = {}): PageMount {
   const thread = over.thread ?? workspaceThread()
   const paths: string[] = []
@@ -244,6 +254,11 @@ function mountPage(over: {
     }
     if (path === '/threads/t1/messages') return { items: over.messages ?? [] }
     if (path === '/projects/acme/fleet/runners') return { records: over.runners ?? [], hasNext: false }
+    if (path === '/me/permissions') {
+      if (over.permissionGet === 'pending') return new Promise(() => undefined)
+      if (over.permissionGet === 'reject') throw new ApiError(500, 'permissions exploded')
+      return { keys: over.permissionKeys ?? ['thread.answer'] }
+    }
     return {}
   })
   const post = jest.fn(async (path: string, body?: unknown) => {
@@ -261,6 +276,9 @@ function mountPage(over: {
 
   const useWorkspaceThread = jest.fn((id: string) => createWorkspaceThread(id))
   const useProjectRunnerSummaries = jest.fn(() => createProjectRunnerSummaries())
+  // thread-agents-modes US-012: the page reads the home project's permission keys through this one, so it runs for real
+  // against the stubbed `$api` (its own `useApi()` resolves to the global set below).
+  const useProjectPermissionsFor = jest.fn((slug: () => string | null) => createProjectPermissionsFor(slug))
 
   const app = mountSfc(pageFile, {
     components: over.real === true ? { ...uiStubs, ...realComponents() } : { ...uiStubs, ...MARKERS },
@@ -280,6 +298,7 @@ function mountPage(over: {
       },
       useWorkspaceThread,
       useProjectRunnerSummaries,
+      useProjectPermissionsFor,
     },
   })
 
@@ -608,6 +627,143 @@ describe('US-006 AC-10, AC-12, AC-13: pages/threads/[id].vue — load failure, t
 
     expect(m.paths).toContain('/projects/acme/fleet/runners')
     expect(byTestId(m.app, 'page-thread-header')).toBeDefined()
+    m.app.unmount()
+  })
+})
+
+/**
+ * thread-agents-modes US-012 AC-11: the WORKSPACE thread page's session approvals.
+ *
+ * A WORKSPACE thread is not project-scoped, so its approval decisions go to the personal
+ * `/threads/:id/approvals/:requestId` route — the same card component the project page renders, over
+ * the shared controller (whose `threadPath` is what differs). There is no mode control here: a
+ * WORKSPACE thread has no worktree to publish and is always `read`, and the API has no workspace
+ * mode route.
+ */
+const pendingApproval = (over: Record<string, unknown> = {}) => ({
+  requestId: 'req1',
+  tool: 'bash',
+  summary: 'Run the migration',
+  command: 'bun run db:migrate',
+  reason: 'The schema changed',
+  expiresAt: '2026-10-14T10:10:00.000Z',
+  ...over,
+})
+
+describe('US-012 AC-11: pages/threads/[id].vue — session approvals', () => {
+  test('AC-11: the thread pendingApprovals render as cards and Approve posts to the workspace approval endpoint', async () => {
+    const m = mountPage({
+      real: true,
+      thread: workspaceThread({ pendingApprovals: [pendingApproval({ requestId: 'req-7' })] }),
+    })
+    await m.settle()
+
+    const approve = byTestId(m.app, 'thread-approval-approve')
+    expect(approve).toBeDefined()
+    expect(m.app.text()).toContain('bun run db:migrate')
+    if (approve !== undefined) click(approve)
+    await m.settle()
+
+    expect(m.posts).toEqual([{ path: '/threads/t1/approvals/req-7', body: { decision: 'allow' } }])
+    m.app.unmount()
+  })
+
+  test('AC-11 (deny): Deny posts decision deny to the same workspace route', async () => {
+    const m = mountPage({
+      real: true,
+      thread: workspaceThread({ pendingApprovals: [pendingApproval({ requestId: 'req-8' })] }),
+    })
+    await m.settle()
+
+    const deny = byTestId(m.app, 'thread-approval-deny')
+    expect(deny).toBeDefined()
+    if (deny !== undefined) click(deny)
+    await m.settle()
+
+    expect(m.posts).toEqual([{ path: '/threads/t1/approvals/req-8', body: { decision: 'deny' } }])
+    m.app.unmount()
+  })
+
+  test('AC-11 (empty): a thread with no pending approval renders no card', async () => {
+    const m = mountPage({ real: true, thread: workspaceThread({ pendingApprovals: [] }) })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('the workspace page renders no mode control (no workspace mode route)', async () => {
+    const m = mountPage({ real: true })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-mode')).toBeUndefined()
+    m.app.unmount()
+  })
+})
+/**
+ * thread-agents-modes US-012 (fix round 1, F2): the approval controls follow `thread.answer` in the thread's home
+ * project, not just "a loaded thread".
+ *
+ * The decision route is gated on `thread.answer` checked with the thread's project (`thread.projectId`, its home
+ * project) and the creator as the resource, so the own-row grant counts and an any-row grant counts; no key at all
+ * must leave the card read-only. The scope is only known once the thread has loaded, so the page reads the home
+ * project's keys after that and every gate stays closed while the read is in flight or after it failed.
+ */
+describe('US-012 F2: pages/threads/[id].vue — the approval gate', () => {
+  const withApproval = () => workspaceThread({ pendingApprovals: [pendingApproval()] })
+
+  test('a creator holding no thread.answer sees the request but no decision controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: [] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeUndefined()
+    expect(byTestId(m.app, 'thread-approval-awaiting')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('an own-row thread.answer grant enables both controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer.own'] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('an any-row thread.answer grant enables both controls', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer'] })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-deny')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test("the keys are read from the thread's home project, after the thread has loaded", async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionKeys: ['thread.answer'] })
+    await m.settle()
+
+    expect(m.get).toHaveBeenCalledWith('/me/permissions', { query: { project: 'acme' } })
+    expect(m.paths.indexOf('/threads/t1')).toBeLessThan(m.paths.indexOf('/me/permissions'))
+    m.app.unmount()
+  })
+
+  test('while the home project permissions are still loading the controls stay closed', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionGet: 'pending' })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval')).toBeDefined()
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('a failed permissions read keeps the controls closed', async () => {
+    const m = mountPage({ real: true, thread: withApproval(), permissionGet: 'reject' })
+    await m.settle()
+
+    expect(byTestId(m.app, 'thread-approval-approve')).toBeUndefined()
     m.app.unmount()
   })
 })

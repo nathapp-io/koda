@@ -118,6 +118,7 @@
       "dependencies": {
         "@nathapp/fleet-protocol": "workspace:*",
         "@nathapp/nax-agent": "0.91.7",
+        "@nathapp/nax-agent-acp": "0.91.7",
         "commander": "^12.0.0",
       },
       "devDependencies": {
@@ -213,6 +214,8 @@
   },
   "packages": {
     "@acemir/cssom": ["@acemir/cssom@0.9.31", "", {}, "sha512-ZnR3GSaH+/vJ0YlHau21FjfLYjMpYVIzTD8M8vIEQvIGxeOXyXdzCI140rrCY862p/C/BbzWsjc1dgnM9mkoTA=="],
+
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.7.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-ZORuxsuEnLjRly7t6Ad7zAsWitjWsyprswyPUHz/yycPb+tTm3DGa8XheaHhRXqX8LS9snuxaYavXSRA50TlHw=="],
 
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
 
@@ -813,6 +816,8 @@
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
     "@nathapp/nax-agent": ["@nathapp/nax-agent@0.91.7", "", { "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.77", "@modelcontextprotocol/sdk": "^1.32.1", "@nathapp/nax-ai": "0.91.7", "zod": "^4.3.6" } }, "sha512-TkcIfRJr2IBC7MRBvf4sw1bB1qGrJIC1q7hrwSaCrYQ8OyMT6zXSMwvTvSB73gsFCHx1sgUA9c/d4579IJtNBw=="],
+
+    "@nathapp/nax-agent-acp": ["@nathapp/nax-agent-acp@0.91.7", "", { "dependencies": { "@agentclientprotocol/sdk": "~1.7.0", "@modelcontextprotocol/sdk": "^1.32.1", "zod": "^4.3.6" }, "peerDependencies": { "@nathapp/nax-agent": "^0.91.7" }, "bin": { "nax-agent": "bin/nax-agent.js" } }, "sha512-wnCwZBvlsUv9CTOTDq8313uHYzGcBNCs7NBqH39rgoh47yimovaOiAA1AtwWc3/MIT1sXJs5AjxainLgRCwqvA=="],
 
     "@nathapp/nax-ai": ["@nathapp/nax-ai@0.91.7", "", { "dependencies": { "@earendil-works/pi-ai": "1.4.0", "proper-lockfile": "4.1.2" } }, "sha512-LwwqQyQ4lBpyMeawV8ONhN4OmtCXY3fAZU1bTW6BqH2nOiytrNwJD0fWqSWZyIpJKToS+viO8Hmr6nnTs0YPsA=="],
 
@@ -4045,6 +4050,8 @@
     "@nathapp/fleet-protocol/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@nathapp/nax-agent/zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
+
+    "@nathapp/nax-agent-acp/zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
 
     "@nathapp/nestjs-common/joi": ["joi@17.13.8", "", { "dependencies": { "@hapi/hoek": "^9.3.0", "@hapi/topo": "^5.1.0", "@sideway/address": "^4.1.5", "@sideway/formula": "^3.0.1", "@sideway/pinpoint": "^2.0.0" } }, "sha512-iPKOGmiRw1jxf/JOPwxmCcUQAOdF359mdzYiP2DJ+TMX0YK2zjK3D+zYOaGjpumWxOFF/l2xVWjRVK5bGSLdEw=="],
 

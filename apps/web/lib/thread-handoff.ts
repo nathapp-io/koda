@@ -66,7 +66,10 @@ export function handoffActionState(
 ): HandoffActionState {
   switch (action) {
     case 'publish': {
-      if (thread.writtenPaths.length === 0) return blocked('nothingToPublish')
+      // thread-agents-modes (branch fix B1): `writtenPaths` counts write_doc only. An `ask`/`full` turn edits the
+      // worktree through the agent's own tools, so its publish carries the runner's own diff and there is nothing for
+      // the page to count — only `read` needs a written path first. The API applies the same rule.
+      if ((thread.mode ?? 'read') === 'read' && thread.writtenPaths.length === 0) return blocked('nothingToPublish')
       if (isHandoffBusy(thread)) return blocked('handoffBusy')
       const label = sessionLabel(thread)
       if (isTurnRunning(messages) || label === 'starting' || label === 'closing') return blocked('turnRunning')

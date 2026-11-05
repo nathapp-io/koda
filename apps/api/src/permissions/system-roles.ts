@@ -84,6 +84,7 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'approval.decide@fleet.job.shell.escalate',
       'fleet.knowledge.repo.reindex',
       'thread.create',
+      'thread.mode.ask',
       'thread.*.own',
       'kb.document.add',
       'kb.document.delete.own',

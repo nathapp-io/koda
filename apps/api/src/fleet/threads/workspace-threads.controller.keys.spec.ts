@@ -37,6 +37,7 @@ describe('WorkspaceThreadsController route keys (US-003)', () => {
     { handler: 'stop', keys: ['thread.stop'], enforcedBy: 'service' },
     { handler: 'endSession', keys: ['thread.end-session'], enforcedBy: 'service' },
     { handler: 'answer', keys: ['thread.answer'], enforcedBy: 'service' },
+    { handler: 'decideApproval', keys: ['thread.answer'], enforcedBy: 'service' },
   ];
 
   it.each(TABLE)('$handler declares its catalog key at $enforcedBy', ({ handler, keys, enforcedBy }) => {

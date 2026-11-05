@@ -5,7 +5,7 @@ import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
-import { AnswerQuestionDto, ChatMessageListDto, SendMessageDto, SendMessageResultDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, DecideThreadApprovalDto, SendMessageDto, SendMessageResultDto, UpdateThreadDto } from './dto/thread.dto';
 import { CreateWorkspaceThreadDto, WorkspaceThreadDetailDto, WorkspaceThreadDto, WorkspaceThreadListDto } from './dto/workspace-thread.dto';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
@@ -13,6 +13,7 @@ import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { WORKSPACE_THREAD_ROUTE_VARIANTS } from './workspace-thread-route.commands';
 import type { ChatThreadRecord, ChatThreadDetail } from './domain/chat-thread.domain';
+import { validateCreateWorkspaceThread } from './thread-input';
 
 /** A query integer (same rules as the project route): only digits, so `Number('1e3')` or `Number('')` never pass. */
 function intParam(raw: string | undefined, min: number, max: number): number | null {
@@ -47,6 +48,7 @@ export class WorkspaceThreadsController {
   @ApiResponse({ status: 403, description: 'thread.workspace.create is missing, or thread.create is refused in the home project' })
   @ApprovalGated()
   async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    validateCreateWorkspaceThread(dto);
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: 'thread.workspace.create', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.create, projectId: null,
       input: { thread: dto },
@@ -197,6 +199,28 @@ export class WorkspaceThreadsController {
     const outcome = await this.routeGate.run<Record<string, never>>({
       key: 'thread.answer', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.answer, projectId: thread.projectId,
       input: { id, answer: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok({});
+  }
+
+  @Post(':id/approvals/:requestId')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('thread.answer', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Decide a pending session approval of a workspace chat thread (thread.answer: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'The decision is not allow or deny' })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  @ApiResponse({ status: 404, description: 'threads.notFound when the thread is not the caller’s WORKSPACE thread' })
+  @ApiResponse({ status: 409, description: 'threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal' })
+  @ApprovalGated()
+  async decideApproval(@Param('id') id: string, @Param('requestId') requestId: string, @Body() dto: DecideThreadApprovalDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    // The row names the home project the key is checked in, exactly as the text answer does.
+    const thread = await this.threads.requireOwnedThread(principal.id, id);
+    const outcome = await this.routeGate.run<Record<string, never>>({
+      key: 'thread.answer', variant: WORKSPACE_THREAD_ROUTE_VARIANTS.approve, projectId: thread.projectId,
+      input: { id, requestId, approval: dto },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok({});

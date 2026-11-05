@@ -1,29 +1,32 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
-import { MODEL_ID_RE, type ChatThreadKind, type ThreadBackend } from '../common/thread-jobs';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, MODEL_ID_RE, THREAD_AGENTS, type ChatThreadKind, type ThreadAgent, type ThreadBackend, type ThreadMode } from '../common/thread-jobs';
 
-export interface CreateWorkspaceThreadInput { kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; homeProject?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
-export interface NormalizedCreateWorkspaceThread { kind: 'WORKSPACE'; homeProject?: string; title: string; maxCostUsd: string; backend: ThreadBackend & { kind: 'native' } }
+export interface CreateWorkspaceThreadInput { mode?: ThreadMode; kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; homeProject?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
+export interface NormalizedCreateWorkspaceThread { kind: 'WORKSPACE'; homeProject?: string; title: string; maxCostUsd: string; backend: ThreadBackend }
 
 /** Workspace-only fields precede the shared project-thread validation tail. */
 export function validateCreateWorkspaceThread(value: CreateWorkspaceThreadInput): NormalizedCreateWorkspaceThread {
   if (value.kind !== undefined && value.kind !== 'WORKSPACE') fail('kind');
   if (present(value.repoId) || present(value.feature) || present(value.baseRef)) fail('workspaceFields');
   if (present(value.homeProject) && (typeof value.homeProject !== 'string' || value.homeProject.length < 1 || value.homeProject.length > 100)) fail('homeProject');
-  const normalized = validateCreateThread({ kind: 'PROJECT', title: value.title, maxCostUsd: value.maxCostUsd, backend: value.backend }, 'main');
+  const normalized = validateCreateThread({ kind: 'PROJECT', title: value.title, maxCostUsd: value.maxCostUsd, backend: value.backend, mode: value.mode }, 'main');
   return { ...normalized, kind: 'WORKSPACE', ...(present(value.homeProject) ? { homeProject: value.homeProject } : {}) };
 }
 
-export interface CreateThreadInput { kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
+export interface CreateThreadInput { mode?: ThreadMode; kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
 
 /**
  * The validated create input (fleet S5b §1a-R4): a REPO thread carries the repo, the branch and the nax feature; a
- * PROJECT thread (fleet S5b-R3) carries none of them and its backend is always native (1a-R2: ACP sessions get no
- * tools, nax#2444).
+ * PROJECT thread (fleet S5b-R3) carries none of them. Every kind takes a native or an ACP backend (thread-agents-modes
+ * US-001, which lifts the 1a-R2 native-only rule for PROJECT and WORKSPACE).
  */
 export type NormalizedCreateThread =
-  | { kind: 'REPO'; repoId: string; feature: string; baseRef: string; title: string; maxCostUsd: string; backend: ThreadBackend }
-  | { kind: 'PROJECT'; title: string; maxCostUsd: string; backend: ThreadBackend & { kind: 'native' } };
+  | { kind: 'REPO'; mode: ThreadMode; repoId: string; feature: string; baseRef: string; title: string; maxCostUsd: string; backend: ThreadBackend }
+  | { kind: 'PROJECT'; title: string; maxCostUsd: string; backend: ThreadBackend };
+
+/** The native effort ids a create backend accepts (unchanged by thread-agents-modes). */
+const NATIVE_EFFORT_RE = /^[a-z]{1,16}$/;
 
 /** 0.0001..10000 with at most 4 decimals (shared by create and the cap PATCH). */
 export const MAX_COST_USD_MIN = 0.0001;
@@ -52,6 +55,8 @@ export function validateCreateThread(value: CreateThreadInput, defaultBranch: st
 export function validateCreateThread(value: CreateThreadInput, defaultBranch: string): NormalizedCreateThread {
   const kind = value.kind ?? 'REPO';
   if (kind !== 'REPO' && kind !== 'PROJECT') fail('kind');
+  const mode = value.mode ?? 'read';
+  if (!['read', 'ask', 'full'].includes(mode) || (kind !== 'REPO' && mode !== 'read')) fail('mode');
   // Checked before the shared tail so the order stays repoId/feature/baseRef → title → maxCostUsd → backend.
   let repo: { repoId: string; feature: string; baseRef: string } | null = null;
   if (kind === 'REPO') {
@@ -71,11 +76,12 @@ export function validateCreateThread(value: CreateThreadInput, defaultBranch: st
   const b = backend as Record<string, unknown>;
   const allowed = b.kind === 'native' ? ['kind', 'model', 'effort'] : b.kind === 'acp' ? ['kind', 'agent', 'model', 'effort'] : [];
   if (!allowed.length || Object.keys(b).some((key) => !allowed.includes(key))) fail('backend');
-  if (b.kind === 'acp' && b.agent !== 'claude' && b.agent !== 'codex') fail('backend');
-  if (b.model !== undefined && (typeof b.model !== 'string' || !MODEL_ID_RE.test(b.model))) fail('backend');
-  if (b.effort !== undefined && (typeof b.effort !== 'string' || !/^[a-z]{1,16}$/.test(b.effort))) fail('backend');
-  if (repo) return { kind: 'REPO', repoId: repo.repoId, feature: repo.feature, baseRef: repo.baseRef, title: value.title, maxCostUsd: String(max), backend: value.backend };
-  // 1a-R2: ACP sessions get no tools, so a PROJECT thread is native-only.
-  if (value.backend.kind !== 'native') fail('backend');
+  if (b.kind === 'acp' && !THREAD_AGENTS.includes(b.agent as ThreadAgent)) fail('backend');
+  // thread-agents-modes US-001: an ACP model and effort id may carry what the agent advertises (`[...]` option suffixes
+  // in a model, digits and dashes in an effort); a native backend keeps the narrower rules.
+  const isAcp = b.kind === 'acp';
+  if (b.model !== undefined && (typeof b.model !== 'string' || !(isAcp ? ACP_MODEL_ID_RE : MODEL_ID_RE).test(b.model))) fail('backend');
+  if (b.effort !== undefined && (typeof b.effort !== 'string' || !(isAcp ? ACP_EFFORT_RE : NATIVE_EFFORT_RE).test(b.effort))) fail('backend');
+  if (repo) return { kind: 'REPO', mode, repoId: repo.repoId, feature: repo.feature, baseRef: repo.baseRef, title: value.title, maxCostUsd: String(max), backend: value.backend };
   return { kind: 'PROJECT', title: value.title, maxCostUsd: String(max), backend: value.backend };
 }

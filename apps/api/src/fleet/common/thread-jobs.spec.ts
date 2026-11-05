@@ -97,3 +97,28 @@ describe('MODEL_ID_RE (US-001)', () => {
     expect(apiThreads.MODEL_ID_RE.test(id)).toBe(false);
   });
 });
+
+describe('ACP offer rules (thread-agents-modes US-001)', () => {
+  it('pins ACP_MODEL_ID_RE to the package and admits the bracketed ids nax names ACP models with', () => {
+    expect(apiThreads.ACP_MODEL_ID_RE.source).toBe(pkg.ACP_MODEL_ID_RE.source);
+    expect(apiThreads.ACP_MODEL_ID_RE.flags).toBe(pkg.ACP_MODEL_ID_RE.flags);
+    expect(apiThreads.ACP_MODEL_ID_RE.test('gpt-5.5[context=272k,reasoning=medium]')).toBe(true);
+    expect(apiThreads.ACP_MODEL_ID_RE.test('a,b=c[d]')).toBe(true);
+    expect(apiThreads.ACP_MODEL_ID_RE.test('bad model!')).toBe(false);
+    expect(apiThreads.ACP_MODEL_ID_RE.test('a'.repeat(129))).toBe(false);
+  });
+
+  it('pins ACP_EFFORT_RE and ACP_OFFER_LIMITS to the package', () => {
+    expect(apiThreads.ACP_EFFORT_RE.source).toBe(pkg.ACP_EFFORT_RE.source);
+    expect(apiThreads.ACP_EFFORT_RE.test('high')).toBe(true);
+    expect(apiThreads.ACP_EFFORT_RE.test('x-high_2')).toBe(true);
+    expect(apiThreads.ACP_EFFORT_RE.test('HIGH')).toBe(false);
+    expect(apiThreads.ACP_EFFORT_RE.test('a'.repeat(33))).toBe(false);
+    expect(apiThreads.ACP_OFFER_LIMITS).toEqual(pkg.ACP_OFFER_LIMITS);
+    expect(apiThreads.ACP_OFFER_LIMITS).toEqual({ maxEfforts: 8 });
+  });
+
+  it('mirrors the three agents the package admits', () => {
+    expect(apiThreads.THREAD_AGENTS).toEqual(['claude', 'codex', 'cursor']);
+  });
+});

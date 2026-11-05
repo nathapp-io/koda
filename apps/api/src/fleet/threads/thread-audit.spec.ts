@@ -10,6 +10,7 @@ describe('threadAuditKey', () => {
     ['stop', 'thread.stop', 'thread.stop'],
     ['end-session', 'thread.end-session', 'thread.end-session'],
     ['answer', 'thread.answer', 'thread.answer'],
+    ['approve', 'thread.answer', 'thread.answer'],
     ['publish', 'thread.publish', 'thread.publish'],
     ['discard', 'thread.discard', 'thread.discard'],
   ] satisfies [ThreadAuditAction, string, string][])('maps %s in both scopes', (action, projectKey, workspaceKey) => {

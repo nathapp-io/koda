@@ -20,9 +20,9 @@ const leaseEpoch = 1;
 const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0 };
 const threadBase = { threadId: 'thread-1', feature: 'divide', resume: false, instructions: 'help', backend: { kind: 'native' as const, model: 'minimax/MiniMax-M3' }, skills: [], initialMessage: null };
 
-function setup(action: 'PUBLISH' | 'DISCARD', overrides: { publish?: (input: Record<string, unknown>) => Promise<unknown>; discard?: (input: Record<string, unknown>) => Promise<unknown>; title?: string; git?: Git; mutex?: RepoMutex } = {}) {
+function setup(action: 'PUBLISH' | 'DISCARD', overrides: { publish?: (input: Record<string, unknown>) => Promise<unknown>; discard?: (input: Record<string, unknown>) => Promise<unknown>; title?: string; git?: Git; mutex?: RepoMutex; mode?: 'read' | 'ask' | 'full' } = {}) {
   const journal = Journal.open(':memory:');
-  const thread: ThreadAssign = { ...threadBase, action, ...(overrides.title === undefined ? {} : { title: overrides.title }) };
+  const thread: ThreadAssign = { ...threadBase, action, ...(overrides.title === undefined ? {} : { title: overrides.title }), ...(overrides.mode === undefined ? {} : { mode: overrides.mode }) };
   const assign = assignFor('THREAD', { jobId, ref: 'refs/heads/main', thread });
   journal.insertJob({ assign, leaseEpoch, repoKey: 'acme/app', jobDir: join(workspaceRoot, '.jobs', jobId) });
   const calls: string[] = [];
@@ -62,15 +62,23 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('Thread action jobs (US-007)', () => {
   test('PUBLISH performs only the action, streams one result, and transitions through UPLOADING', async () => {
-    const ctx = setup('PUBLISH', { title: 'Divide brainstorm', publish: async () => ({ ok: true, sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: true }) });
+    const ctx = setup('PUBLISH', { title: 'Divide brainstorm', mode: 'full', publish: async () => ({ ok: true, sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: true }) });
     await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
     await (await ctx.run()).start('prepare');
     expect(ctx.calls).toEqual(['publish']);
-    expect(ctx.observed.publish).toMatchObject({ worktree: join(homeDir, 'threads', 'thread-1', 'wt'), feature: 'divide', title: 'Divide brainstorm' });
+    expect(ctx.observed.publish).toMatchObject({ worktree: join(homeDir, 'threads', 'thread-1', 'wt'), feature: 'divide', title: 'Divide brainstorm', mode: 'full' });
     const lines = (await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ type: 'published', sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: true });
     expect(states(ctx.journal)).toEqual([{ to: 'RUNNING' }, { to: 'UPLOADING' }, { to: 'COMPLETED', reason: 'published' }]);
+    ctx.journal.close();
+  });
+
+  test('PUBLISH defaults missing assign mode to read', async () => {
+    const ctx = setup('PUBLISH', { publish: async () => ({ ok: true, sha: 'bbb', paths: [], ignored: [], specPresent: false }) });
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    await (await ctx.run()).start('prepare');
+    expect(ctx.observed.publish).toMatchObject({ mode: 'read' });
     ctx.journal.close();
   });
 

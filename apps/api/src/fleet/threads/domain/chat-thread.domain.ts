@@ -1,5 +1,6 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadMode, ThreadBackend } from '../../common/thread-jobs';
+import type { ThreadPendingApproval } from './pending-approvals';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
@@ -70,6 +71,7 @@ export type ThreadWriteResult =
 
 export interface ChatThreadRecord {
   id: string; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null;
+  mode: ThreadMode;
   title: string;
   createdById: string;
   /**
@@ -79,7 +81,13 @@ export interface ChatThreadRecord {
   createdByType?: 'USER' | 'AGENT';
   runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
-  pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
+  pendingQuestion: unknown;
+  /**
+   * thread-agents-modes US-007: the answerable session approvals the thread waits on, oldest first (at most 20).
+   * Always an array — a thread with nothing pending and a row written before the column carry an empty list.
+   */
+  pendingApprovals: ThreadPendingApproval[];
+  session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
   /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
   writtenPaths: string[];
@@ -124,7 +132,7 @@ export interface ChatMessageRecord {
 export type ThreadScope = { kind: 'project'; projectId: string } | { kind: 'workspace'; userId: string };
 
 export interface ChatThreadRepository {
-  create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
+  create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;
@@ -140,6 +148,7 @@ export interface ChatThreadRepository {
   publish(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
+  changeMode(projectId: string, threadId: string, actor: { id: string; type: 'USER' | 'AGENT' }, mode: ThreadMode, canOperate: boolean): Promise<ChatThreadRecord>;
   updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string, canOperate?: boolean): Promise<ChatThreadRecord>;
   command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate?: boolean): Promise<void>;
   archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;

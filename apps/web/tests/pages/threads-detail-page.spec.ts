@@ -98,6 +98,8 @@ const pageFile = webFile('pages', '[project]', 'threads', '[id].vue')
 
 const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   id: 'th1',
+  kind: 'REPO',
+  mode: 'read',
   repoId: 'r1',
   baseRef: 'main',
   feature: 'add-auth',
@@ -113,6 +115,7 @@ const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   tokens: null,
   specPath: '.nax/features/add-auth/prd.json',
   pendingQuestion: null,
+  pendingApprovals: [],
   session: null,
   lastActivityAt: '2026-10-14T00:00:00.000Z',
   createdAt: '2026-10-14T00:00:00.000Z',
@@ -159,6 +162,8 @@ function mountPage(over: {
   messages?: ChatMessageDto[]
   runners?: FleetRunnerSummary[]
   job?: Record<string, unknown> | null
+  /** The caller's project permission keys (Permissions P1); the archive and mode gates read them. */
+  permissions?: string[]
 } = {}) {
   const thread = ref(over.thread ?? threadDetail())
   const messages = ref(over.messages ?? [])
@@ -167,6 +172,9 @@ function mountPage(over: {
   const jobs = ref({ plan: null, run: over.job as never ?? null })
   const reloadThread = jest.fn(async () => undefined)
   const refreshJob = jest.fn(async () => undefined)
+  // thread-agents-modes US-012: the page binds the mode control and the approval cards to these two controller actions.
+  const changeMode = jest.fn(async () => ({ ok: true }))
+  const decideApproval = jest.fn(async () => ({ ok: true }))
   const useThreadHandoffJobs = jest.fn(() => ({ jobs, sync: jest.fn(async () => undefined), refreshJob, isHandoffJob: (id: string) => id === 'r1' }))
   const useProjectEvents = jest.fn()
   // The real thread components under both the contract names (explicit imports) and the Nuxt
@@ -180,10 +188,17 @@ function mountPage(over: {
   // US-008: the project-code notice is mounted by the page itself, so the real component (not a
   // stub) is what AC-6 asserts on.
   const projectCodeNotice = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadProjectCodeNotice.vue'), { useI18n: () => enI18n() })
+  // US-012: the mode control and the approval cards are the page's own children, mounted for real.
+  const modeControl = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadModeControl.vue'), { useI18n: () => enI18n() })
+  const approvalCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadApprovalCard.vue'), { useI18n: () => enI18n() })
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
       FleetThreadsThreadProjectCodeNotice: projectCodeNotice,
+      ThreadModeControl: modeControl,
+      FleetThreadsThreadModeControl: modeControl,
+      ThreadApprovalCard: approvalCard,
+      FleetThreadsThreadApprovalCard: approvalCard,
       ThreadHeader: header,
       FleetThreadsThreadHeader: header,
       ThreadTimeline: timeline,
@@ -211,6 +226,8 @@ function mountPage(over: {
         start: jest.fn(),
         stop: jest.fn(),
         reloadThread,
+        changeMode,
+        decideApproval,
       }),
       useThreadHandoffJobs,
       useProjectEvents,
@@ -230,8 +247,9 @@ function mountPage(over: {
         repoName: (id: string) => id,
         runnerName: (id: string | null) => id,
       }),
-      // Permissions P1 US-007: the page's archive-any control follows `thread.archive`.
-      useProjectPermissions: () => projectPermissionsStub(['thread.archive']),
+      // Permissions P1 US-007: the page's archive-any control follows `thread.archive`; US-012 adds
+      // the three mode keys the REPO mode control is limited to.
+      useProjectPermissions: () => projectPermissionsStub(over.permissions ?? ['thread.archive']),
     },
   })
   const settle = async (): Promise<void> => {
@@ -240,7 +258,7 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs }
+  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs, changeMode, decideApproval }
 }
 
 /** The resolved title useHead received: `title` may be a value or a function. */
@@ -319,6 +337,223 @@ describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
     const notice = m.app.one('[data-testid="thread-project-code-notice"]')
     expect(notice).toBeDefined()
     expect(notice === undefined ? null : m.app.textOf(notice)).toContain('wk-mac')
+    m.app.unmount()
+  })
+})
+/**
+ * thread-agents-modes US-012 AC-5, AC-10: the page's mode control and session approvals.
+ *
+ * The mode control is REPO-only (a PROJECT thread has no worktree to publish, so it is always
+ * `read`; a WORKSPACE one is not even on this page), and its Full button follows `thread.mode.full`.
+ * Approvals are a separate list from `pendingQuestion` and the assistant `pendingActions`: one card
+ * per `pendingApprovals` entry, rendered by the page itself, decided through the controller.
+ */
+
+/** The permission keys a REPO thread's mode control is limited to (US-005), plus the decision key of its approvals. */
+const MODE_KEYS = ['thread.archive', 'thread.cap.update', 'thread.mode.ask', 'thread.mode.full', 'thread.answer']
+
+const approval = (over: Record<string, unknown> = {}) => ({
+  requestId: 'req1',
+  tool: 'bash',
+  summary: 'Run the migration',
+  command: 'bun run db:migrate',
+  reason: 'The schema changed',
+  expiresAt: '2026-10-14T10:10:00.000Z',
+  ...over,
+})
+
+describe('US-012 AC-5, AC-10: pages/[project]/threads/[id].vue — mode control and approvals', () => {
+  test('AC-5: a REPO thread renders ThreadModeControl', async () => {
+    const m = mountPage({ thread: threadDetail({ kind: 'REPO' }), permissions: MODE_KEYS })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-mode-ask"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('AC-5 (control): a PROJECT thread renders no ThreadModeControl', async () => {
+    const m = mountPage({ thread: threadDetail({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null }), permissions: MODE_KEYS })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-mode-ask"]')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('AC-5 (permissions): Full is disabled on the page when the caller lacks thread.mode.full', async () => {
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO' }),
+      permissions: ['thread.cap.update', 'thread.mode.ask'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode-full"]')?.props.disabled).toBe(true)
+    expect(m.app.one('[data-testid="thread-mode-ask"]')?.props.disabled).toBe(false)
+    m.app.unmount()
+  })
+
+  test("F1: the default developer's own-row grants let the creator switch to Read and Ask, but not Full", async () => {
+    // thread.cap.update is granted as `.own`, so an any-row check would hide Read from the thread's own creator — the
+    // API allows it (creator + target key), and so must the control.
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u1', mode: 'ask' }),
+      permissions: ['thread.cap.update.own', 'thread.mode.ask'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode-read"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-ask"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-full"]')?.props.disabled).toBe(true)
+    m.app.unmount()
+  })
+
+  test("F1: another creator's thread offers no mode without the any-row thread.cap.update authority", async () => {
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u2' }),
+      permissions: ['thread.mode.ask', 'thread.cap.update.own'],
+    })
+    await m.settle()
+
+    for (const mode of ['read', 'ask', 'full']) {
+      expect(m.app.one(`[data-testid="thread-mode-${mode}"]`)?.props.disabled).toBe(true)
+    }
+    m.app.unmount()
+  })
+
+  test("F1: the any-row cap authority offers Read and Ask on another creator's thread", async () => {
+    const m = mountPage({
+      thread: threadDetail({ kind: 'REPO', createdById: 'u2' }),
+      permissions: ['thread.cap.update', 'thread.mode.ask'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-mode-read"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-ask"]')?.props.disabled).toBe(false)
+    expect(m.app.one('[data-testid="thread-mode-full"]')?.props.disabled).toBe(true)
+    m.app.unmount()
+  })
+
+  test('AC-10: the page renders one ThreadApprovalCard per pendingApprovals entry', async () => {
+    const m = mountPage({
+      thread: threadDetail({
+        pendingApprovals: [approval(), approval({ requestId: 'req2', tool: 'write_file', summary: 'Write docs/plan.md' })],
+      }),
+      permissions: MODE_KEYS,
+    })
+    await m.settle()
+
+    const cards = m.app.find('[data-testid="thread-approval"]')
+    expect(cards).toHaveLength(2)
+    expect(m.app.text()).toContain('bun run db:migrate')
+    expect(m.app.text()).toContain('Write docs/plan.md')
+    m.app.unmount()
+  })
+
+  test('AC-10 (empty): no approval card is rendered when pendingApprovals is empty', async () => {
+    const m = mountPage({ thread: threadDetail({ pendingApprovals: [] }), permissions: MODE_KEYS })
+    await m.settle()
+
+    expect(m.app.find('[data-testid="thread-approval"]')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('US-012 gate: a creator without thread.answer sees the request but no decision controls', async () => {
+    const m = mountPage({
+      thread: threadDetail({ pendingApprovals: [approval()] }),
+      // The creator's role lacks the decision key: the card renders read-only (the API refuses anyway).
+      permissions: ['thread.cap.update', 'thread.mode.ask', 'thread.mode.full'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-approval-awaiting"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  // Branch fix B4: the API authorizes the live session's REQUESTER with creator-or-any-row `thread.answer`, so an
+  // any-row holder who started the ask turn in somebody else's thread must get the decision controls too.
+  test('B4: a non-creator holding the any-row thread.answer sees the decision controls', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      permissions: ['thread.answer'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-deny"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B4: a non-creator holding only the own-row thread.answer sees no decision controls', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u2', pendingApprovals: [approval()] }),
+      // `own` means "my threads", so another creator's pending request stays read-only for this viewer.
+      permissions: ['thread.answer.own'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval"]')).toBeDefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-approval-awaiting"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B4: the thread creator with the own-row thread.answer still decides', async () => {
+    const m = mountPage({
+      thread: threadDetail({ createdById: 'u1', pendingApprovals: [approval()] }),
+      permissions: ['thread.answer.own'],
+    })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="thread-approval-approve"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('US-012 wiring: Approve on a card reaches the controller action with its request id', async () => {
+    const m = mountPage({ thread: threadDetail({ pendingApprovals: [approval({ requestId: 'req-9' })] }), permissions: MODE_KEYS })
+    await m.settle()
+
+    const approve = m.app.one('[data-testid="thread-approval-approve"]')
+    expect(approve).toBeDefined()
+    if (approve !== undefined) (approve.props.onClick as () => void)()
+    await m.settle()
+
+    expect(m.decideApproval).toHaveBeenCalledWith('req-9', 'allow')
+    m.app.unmount()
+  })
+
+  // Branch fix B3 (review round 2): the reloaded thread carries the runner's outcome for the decision, so the page shows
+  // the refusal and keeps the request decidable instead of leaving it marked queued with both buttons disabled.
+  test('B3: a pending request whose decision the runner rejected renders the rejection and stays decidable', async () => {
+    const m = mountPage({
+      thread: threadDetail({
+        pendingApprovals: [approval({ delivery: { decision: 'allow', result: 'rejected', detail: 'expired', at: '2026-10-14T10:00:00.000Z' } })],
+      }),
+      permissions: MODE_KEYS,
+    })
+    await m.settle()
+
+    const rejected = m.app.one('[data-testid="thread-approval-rejected"]')
+    expect(rejected).toBeDefined()
+    expect(rejected === undefined ? '' : m.app.textOf(rejected)).toBe('The runner did not apply the decision: expired')
+    expect(m.app.one('[data-testid="thread-approval-queued"]')).toBeUndefined()
+    expect(m.app.one('[data-testid="thread-approval-approve"]')?.props.disabled).toBe(false)
+    m.app.unmount()
+  })
+
+  test('US-012 wiring: choosing Ask reaches the controller mode action', async () => {
+    const m = mountPage({ thread: threadDetail({ kind: 'REPO', mode: 'read' }), permissions: MODE_KEYS })
+    await m.settle()
+
+    const ask = m.app.one('[data-testid="thread-mode-ask"]')
+    expect(ask).toBeDefined()
+    if (ask !== undefined) (ask.props.onClick as () => void)()
+    await m.settle()
+
+    expect(m.changeMode).toHaveBeenCalledWith('ask')
     m.app.unmount()
   })
 })

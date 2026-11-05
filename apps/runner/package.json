@@ -19,6 +19,7 @@
   "dependencies": {
     "@nathapp/fleet-protocol": "workspace:*",
     "@nathapp/nax-agent": "0.91.7",
+    "@nathapp/nax-agent-acp": "0.91.7",
     "commander": "^12.0.0"
   },
   "devDependencies": {

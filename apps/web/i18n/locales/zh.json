@@ -923,12 +923,31 @@
         "feature": "功能标识",
         "threadTitle": "标题",
         "maxCost": "费用上限（美元）",
-        "backend": "原生模型",
+        "backend": "后端",
+        "agent": {
+          "label": "代理",
+          "native": "原生",
+          "claude": "Claude Code",
+          "codex": "Codex",
+          "cursor": "Cursor",
+          "defaultModel": "代理默认",
+          "reason": {
+            "notInstalled": "未安装",
+            "notLoggedIn": "未登录",
+            "notReady": "未就绪"
+          }
+        },
+        "mode": {
+          "label": "模式",
+          "read": "只读",
+          "ask": "询问",
+          "full": "完全"
+        },
         "model": "模型",
         "effortLabel": "推理强度",
         "effortDefault": "默认",
         "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
-        "noBackend": "没有在线且启用的执行机提供原生线程模型。",
+        "noBackend": "没有在线且启用的执行机提供此代理的模型。",
         "noPermission": "你没有在此项目中创建线程的权限。",
         "skills": "已启用的项目技能",
         "create": "创建线程",
@@ -980,6 +999,25 @@
         "placeholder": "回答问题…",
         "send": "发送"
       },
+      "mode": {
+        "label": "模式",
+        "read": "只读",
+        "ask": "询问",
+        "full": "完全",
+        "noPermission": "你没有切换到该模式的权限。"
+      },
+      "approval": {
+        "unsandboxed": "非沙箱",
+        "command": "命令",
+        "reason": "原因",
+        "approve": "批准",
+        "deny": "拒绝",
+        "awaiting": "等待线程创建者决定。",
+        "queued": "决定已发送，等待会话应用。",
+        "rejected": "运行器未应用该决定：{detail}",
+        "rejectedNoDetail": "运行器未应用该决定。",
+        "retry": "再次发送"
+      },
       "message": {
         "required": "消息不能为空。",
         "tooLong": "消息长度不能超过 32768 字节。",
@@ -1006,7 +1044,7 @@
       "handoff": {
         "actions": { "publish": "发布", "plan": "规划", "run": "运行", "discard": "丢弃", "submit": "提交" },
         "blocked": { "nothingToPublish": "没有可发布的内容", "turnRunning": "有一轮正在运行", "handoffBusy": "交接任务正在运行", "notPublished": "请先发布规格", "sessionActive": "线程任务正在运行", "notPlanned": "请先规划规格", "planNotCompleted": "规划尚未完成" },
-        "publishDialog": { "title": "发布线程更改", "confirm": "发布" },
+        "publishDialog": { "title": "发布线程更改", "confirm": "发布", "noPaths": "本次发布会提交会话对工作区的所有更改。" },
         "planDialog": { "title": "规划此线程" },
         "runDialog": { "title": "运行此线程" },
         "discardDialog": { "title": "丢弃未发布的更改？", "body": "丢弃此过期会话中的未发布更改？", "confirm": "丢弃" },

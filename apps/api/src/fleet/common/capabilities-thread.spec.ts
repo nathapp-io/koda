@@ -23,6 +23,10 @@ function rejection(raw: unknown): unknown {
 const models = (count: number): string[] => Array.from({ length: count }, (_, i) => `model-${i}`);
 
 describe('parseCapabilitiesCore threadBackends (US-001)', () => {
+  it('AC-4: keeps threadModes only when exactly true', () => {
+    expect(parseCapabilitiesCore({ ...valid, threadModes: true })).toHaveProperty('threadModes', true);
+    for (const threadModes of ['yes', false, 1, null]) expect(parseCapabilitiesCore({ ...valid, threadModes })).not.toHaveProperty('threadModes');
+  });
   it('US-001: keeps a valid threadBackends report', () => {
     const parsed = parseCapabilitiesCore({ ...valid, threadBackends: { native: ['deepseek-v3'], acp: ['claude'] } });
     expect(parsed.threadBackends).toEqual({ native: ['deepseek-v3'], acp: ['claude'] });
@@ -80,6 +84,101 @@ describe('parseCapabilitiesCore threadBackends (US-001)', () => {
   it('US-001: refuses a non-object threadBackends', () => {
     const err = rejection({ ...valid, threadBackends: ['claude'] });
     expect(err).toMatchObject({ reason: 'threadBackends' });
+  });
+});
+
+/** One ACP discovery offer as the runner reports it; `over` makes a single field malformed. */
+const offer = (over: Record<string, unknown> = {}) => ({
+  agent: 'cursor', launchable: true, loggedIn: true, models: ['gpt-5.5[context=272k,reasoning=medium]'], efforts: ['high'], ...over,
+});
+
+/** Parses a report whose threadBackends carries `acpOffers`, and answers the parsed backends. */
+const parsedWith = (acpOffers: unknown, over: Record<string, unknown> = {}) =>
+  parseCapabilitiesCore({ ...valid, threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers, ...over } }).threadBackends;
+
+describe('parseCapabilitiesCore ACP agents on threadBackends (thread-agents-modes US-001)', () => {
+  it('AC-1: keeps acp: [cursor]', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, threadBackends: { native: [], acp: ['cursor'] } });
+    expect(parsed.threadBackends).toEqual({ native: [], acp: ['cursor'] });
+  });
+
+  it('AC-2: refuses acp: [gemini] with the same refusal as any unknown agent', () => {
+    const unknownAgent = rejection({ ...valid, threadBackends: { native: [], acp: ['not-an-agent'] } });
+    const gemini = rejection({ ...valid, threadBackends: { native: [], acp: ['gemini'] } });
+    expect(gemini).toBeInstanceOf(CapabilityValidationError);
+    expect(gemini).toMatchObject({ reason: 'threadBackends' });
+    expect(gemini).toEqual(unknownAgent);
+  });
+
+  it('AC-3: keeps a valid acpOffers list unchanged', () => {
+    const acpOffers = [offer()];
+    const parsed = parseCapabilitiesCore({ ...valid, threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers } });
+    expect(parsed.threadBackends).toEqual({ native: ['m1'], acp: ['cursor'], acpOffers });
+  });
+
+  it('AC-4: drops acpOffers whose models hold an invalid id, keeping native and acp', () => {
+    const backends = parsedWith([offer({ models: ['bad model!'] })]);
+    expect(backends).toEqual({ native: ['m1'], acp: ['cursor'] });
+    expect(backends).not.toHaveProperty('acpOffers');
+  });
+
+  it('AC-5: drops acpOffers that name the same agent twice', () => {
+    const backends = parsedWith([offer(), offer({ launchable: false, loggedIn: null })]);
+    expect(backends).toEqual({ native: ['m1'], acp: ['cursor'] });
+    expect(backends).not.toHaveProperty('acpOffers');
+  });
+
+  it('AC-6: still refuses a threadBackends object with an extra key', () => {
+    const err = rejection({ ...valid, threadBackends: { native: [], acp: [], other: [] } });
+    expect(err).toMatchObject({ reason: 'threadBackends' });
+    // A valid offer list does not make an unknown sibling key acceptable: the object stays strict.
+    const withExtra = rejection({ ...valid, threadBackends: { native: [], acp: [], acpOffers: [offer()], extra: 1 } });
+    expect(withExtra).toMatchObject({ reason: 'threadBackends' });
+  });
+
+  it('keeps an offer whose loggedIn is null (not probed, or the probe failed)', () => {
+    expect(parsedWith([offer({ loggedIn: null })])?.acpOffers).toEqual([offer({ loggedIn: null })]);
+  });
+
+  it('keeps a launchable but not-logged-in agent that is absent from acp', () => {
+    const backends = parsedWith([offer({ agent: 'claude', loggedIn: false, models: [], efforts: [] })], { acp: ['cursor'] });
+    expect(backends?.acp).toEqual(['cursor']);
+    expect(backends?.acpOffers).toEqual([{ agent: 'claude', launchable: true, loggedIn: false, models: [], efforts: [] }]);
+  });
+
+  it.each([
+    ['loggedIn missing', offer({ loggedIn: undefined })],
+    ['loggedIn a string', offer({ loggedIn: 'yes' })],
+    ['launchable a string', offer({ launchable: 'yes' })],
+    ['agent gemini', offer({ agent: 'gemini' })],
+    ['models missing', offer({ models: undefined })],
+    ['models not an array', offer({ models: 'gpt-5.5' })],
+    ['33 model ids', offer({ models: models(33) })],
+    ['efforts missing', offer({ efforts: undefined })],
+    ['effort with a space', offer({ efforts: ['high effort'] })],
+    ['effort longer than 32 characters', offer({ efforts: ['a'.repeat(33)] })],
+    ['9 efforts', offer({ efforts: Array.from({ length: 9 }, (_, i) => `e${i}`) })],
+    ['an extra key', { ...offer(), secret: true }],
+  ])('drops acpOffers when an entry has %s', (_name, entry) => {
+    const backends = parsedWith([entry]);
+    expect(backends).toEqual({ native: ['m1'], acp: ['cursor'] });
+  });
+
+  it('drops acpOffers that is not an array or holds more than 8 entries', () => {
+    expect(parsedWith('[not-an-array]')).toEqual({ native: ['m1'], acp: ['cursor'] });
+    const nine = Array.from({ length: 9 }, (_, i) => offer({ agent: 'cursor', models: [`m${i}`] }));
+    expect(parsedWith(nine)).toEqual({ native: ['m1'], acp: ['cursor'] });
+  });
+
+  it('keeps one offer per agent and 32 model ids per offer', () => {
+    // The agent set is three, so a valid list is at most three offers long whatever the array cap says.
+    const three = ['claude', 'codex', 'cursor'].map((agent) => offer({ agent }));
+    expect(parsedWith(three)?.acpOffers).toHaveLength(3);
+    expect(parsedWith([offer({ models: models(32) })])?.acpOffers?.[0].models).toHaveLength(32);
+  });
+
+  it('omits acpOffers when the report has none', () => {
+    expect(parsedWith(undefined)).toEqual({ native: ['m1'], acp: ['cursor'] });
   });
 });
 

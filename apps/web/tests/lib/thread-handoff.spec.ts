@@ -78,6 +78,32 @@ describe('US-001 thread handoff action rules', () => {
     expect(handoffActionState(t, [], 'publish')).toEqual({ enabled: false, reason: 'nothingToPublish' })
   })
 
+  // Branch fix B1: `writtenPaths` counts write_doc only, and an ask/full turn edits the worktree through the agent's
+  // own tools — so those modes publish the runner's own diff and the page must not block them on an empty list.
+  test('B1: publish is enabled for an ask-mode thread with no written path', () => {
+    const t = thread({ mode: 'ask', writtenPaths: [] })
+
+    expect(handoffActionState(t, [], 'publish')).toEqual({ enabled: true, reason: null })
+  })
+
+  test('B1: publish is enabled for a full-mode thread with no written path', () => {
+    const t = thread({ mode: 'full', writtenPaths: [] })
+
+    expect(handoffActionState(t, [], 'publish')).toEqual({ enabled: true, reason: null })
+  })
+
+  test('B1: a read-mode thread without a written path is still blocked as nothing to publish', () => {
+    const t = thread({ mode: 'read', writtenPaths: [] })
+
+    expect(handoffActionState(t, [], 'publish')).toEqual({ enabled: false, reason: 'nothingToPublish' })
+  })
+
+  test('B1: an ask-mode thread with no written path still refuses while a turn runs', () => {
+    const t = thread({ mode: 'ask', writtenPaths: [], activeJob: { id: 'j1', state: 'UPLOADING' } })
+
+    expect(handoffActionState(t, [], 'publish')).toEqual({ enabled: false, reason: 'turnRunning' })
+  })
+
   test('US-001 AC4: handoffActionState(thread, [], publish) returns handoffBusy when a path is written and handoff.plan is QUEUED', () => {
     const t = thread({
       writtenPaths: ['.nax/features/f/spec.md'],

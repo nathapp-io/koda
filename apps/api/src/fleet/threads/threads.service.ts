@@ -1,3 +1,6 @@
+import { threadModeKey, validateThreadMode } from './thread-mode';
+import { PermissionService } from '../../permissions/permission.service';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AfterCommitService } from '../../permissions/after-commit.service';
 import { ConfigType } from '@nestjs/config';
@@ -13,8 +16,10 @@ import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
+import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import type { ThreadMode } from '../common/thread-jobs';
 
 @Injectable()
 export class ThreadsService {
@@ -28,11 +33,21 @@ export class ThreadsService {
     private readonly fleetJobs: FleetJobsService,
     private readonly projectBrief: ProjectBriefService,
     private readonly afterCommit: AfterCommitService,
+    private readonly permissions: PermissionService,
   ) {}
 
-  async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
+  /** Check before opening approval and again at execution: approval never substitutes for possession of the mode key. */
+  async assertModeAllowed(projectId: string, principal: KodaPrincipal, mode: ThreadMode): Promise<void> {
+    if (mode !== 'read' && !(await this.permissions.can(principal, `thread.mode.${mode}`, { projectId })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+  }
+
+  async create(projectId: string, principal: KodaPrincipal, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     const normalized = validateCreateThread(input, input.baseRef ?? 'main');
+    if (normalized.kind === 'REPO') await this.assertModeAllowed(projectId, principal, normalized.mode);
+    const userId = principal.id;
     // S5b-R3: a PROJECT thread has no repo, worktree or feature. The anchor repo is bookkeeping only (S5b-R13).
     if (normalized.kind === 'PROJECT') {
       const anchor = await this.repos.findAnchor(projectId);
@@ -46,7 +61,7 @@ export class ThreadsService {
     const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);
     try {
-      return await this.threads.create({ kind: 'REPO', projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
+      return await this.threads.create({ kind: 'REPO', mode: resolved.mode, projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
     } catch (error) {
       if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: resolved.feature }, 'threads.featureTaken');
       throw error;
@@ -76,6 +91,22 @@ export class ThreadsService {
     return this.threads.updateCap({ kind: 'project', projectId }, threadId, userId, String(value), canOperate);
   }
 
+  async changeMode(projectId: string, threadId: string, principal: KodaPrincipal, value: unknown): Promise<ChatThreadRecord> {
+    const mode = validateThreadMode(value);
+    if (principal.actorType === 'runner') throw new ForbiddenAppException({}, 'permissions');
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    if (thread.kind !== 'REPO' && mode !== 'read') throw new ValidationAppException({ reason: 'mode' }, 'threads.input');
+    const [anyRow, target] = await Promise.all([
+      this.permissions.can(principal, 'thread.cap.update', { projectId }),
+      this.permissions.can(principal, threadModeKey(mode), {
+        projectId, resource: { createdBy: { id: thread.createdById, type: thread.createdByType ?? 'USER' } },
+      }),
+    ]);
+    if (!target.allowed) throw new ForbiddenAppException({}, 'permissions');
+    return this.threads.changeMode(projectId, threadId, { id: principal.id, type: principal.actorType === 'agent' ? 'AGENT' : 'USER' }, mode, anyRow.allowed);
+  }
+
   stop(projectId: string, threadId: string, userId: string, canOperate = false): Promise<void> {
     return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {}, canOperate);
   }
@@ -87,6 +118,13 @@ export class ThreadsService {
   async answer(projectId: string, threadId: string, userId: string, input: AnswerQuestionDto, canOperate = false): Promise<void> {
     if (typeof input.requestId !== 'string' || input.requestId.length < 1 || input.requestId.length > 128 || typeof input.text !== 'string' || input.text.length < 1 || Buffer.byteLength(input.text, 'utf8') > 32768) throw new ValidationAppException({ reason: 'answer' }, 'threads.input');
     return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_ANSWER, input, canOperate);
+  }
+
+  /** US-008: the same `THREAD_ANSWER` command as the text answer, carrying the decision for a pending approval. */
+  async decide(projectId: string, threadId: string, userId: string, requestId: unknown, decision: unknown, canOperate = false): Promise<void> {
+    const request = validateAnswerRequestId(requestId);
+    const payload = decisionPayload(request, validateApprovalDecision(decision));
+    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_ANSWER, payload, canOperate);
   }
 
   async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {

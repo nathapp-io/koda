@@ -11602,6 +11602,83 @@
         ]
       }
     },
+    "/api/threads/{id}/approvals/{requestId}": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_decideApproval",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideThreadApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The decision is not allow or deny"
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
+          },
+          "404": {
+            "description": "threads.notFound when the thread is not the caller’s WORKSPACE thread"
+          },
+          "409": {
+            "description": "threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending session approval of a workspace chat thread (thread.answer: the creator, or the any-row key)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads": {
       "post": {
         "operationId": "ThreadsController_create",
@@ -11821,6 +11898,87 @@
           }
         ],
         "summary": "Update a chat thread cost cap (thread.cap.update: the creator, or the any-row key)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/mode": {
+      "patch": {
+        "operationId": "ThreadsController_changeMode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeThreadModeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mode; ask and full require a REPO thread"
+          },
+          "403": {
+            "description": "Target mode key or creator/any-row thread.cap.update authority is missing"
+          },
+          "409": {
+            "description": "threads.turnRunning or threads.busy"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a repository thread mode between turns",
         "tags": [
           "fleet threads"
         ]
@@ -12158,6 +12316,88 @@
           }
         ],
         "summary": "Answer a pending question of a chat thread (thread.answer: the creator, or the any-row key)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/approvals/{requestId}": {
+      "post": {
+        "operationId": "ThreadsController_decideApproval",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideThreadApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The decision is not allow or deny"
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
+          },
+          "409": {
+            "description": "threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending session approval of a chat thread (thread.answer: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -19053,6 +19293,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -20093,6 +20334,7 @@
           },
           "threadBackends": {
             "type": "object",
+            "description": "Thread backends: `native` model ids, `acp` agents a thread can start, and `acpOffers` discovery detail (thread-agents-modes)",
             "properties": {
               "native": {
                 "type": "array",
@@ -20103,7 +20345,49 @@
               "acp": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "cursor"
+                  ]
+                }
+              },
+              "acpOffers": {
+                "type": "array",
+                "description": "One bounded offer per probeable ACP agent; absent when the runner reports none",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "type": "string",
+                      "enum": [
+                        "claude",
+                        "codex",
+                        "cursor"
+                      ]
+                    },
+                    "launchable": {
+                      "type": "boolean"
+                    },
+                    "loggedIn": {
+                      "type": "boolean",
+                      "nullable": true,
+                      "description": "null when not probed or the probe failed"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "efforts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -21085,6 +21369,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -21738,6 +22023,7 @@
               "trust_domain",
               "thread_capacity",
               "thread_backend",
+              "thread_modes",
               "threads_disabled",
               "thread_write",
               "project_threads",
@@ -21861,6 +22147,14 @@
       "CreateWorkspaceThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read"
+            ],
+            "type": "string",
+            "default": "read",
+            "description": "Workspace threads support read only"
+          },
           "kind": {
             "enum": [
               "WORKSPACE"
@@ -21903,9 +22197,100 @@
           "backend"
         ]
       },
+      "ThreadApprovalDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "type": "string",
+            "description": "Which way the last decision went"
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "rejected"
+            ],
+            "type": "string",
+            "description": "ok = the session accepted it; rejected = the runner refused it and the request is still pending"
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "The runner's own reason for a rejection"
+          },
+          "at": {
+            "type": "string",
+            "description": "When the runner acknowledged the decision"
+          }
+        },
+        "required": [
+          "decision",
+          "result",
+          "detail",
+          "at"
+        ]
+      },
+      "ThreadPendingApprovalDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "The request id the decision route takes"
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool that needs the decision"
+          },
+          "summary": {
+            "type": "string",
+            "description": "What the tool would do, in the runner's own words"
+          },
+          "command": {
+            "type": "string",
+            "description": "The command the tool would run, when it runs one"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the runner is asking"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When the runner stops waiting for the decision"
+          },
+          "unsandboxed": {
+            "type": "boolean",
+            "description": "Set when the request would leave the session sandbox"
+          },
+          "delivery": {
+            "description": "The runner's outcome for the last decision sent for this request",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ThreadApprovalDeliveryDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "tool",
+          "summary",
+          "expiresAt"
+        ]
+      },
       "WorkspaceThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -21977,6 +22362,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -22074,6 +22466,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22092,6 +22485,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -22168,6 +22562,14 @@
       "WorkspaceThreadDetailDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22239,6 +22641,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -22372,6 +22781,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22390,6 +22800,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -22558,9 +22969,34 @@
           "text"
         ]
       },
+      "DecideThreadApprovalDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "description": "allow runs the pending tool, deny refuses it"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
       "CreateThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string",
+            "default": "read"
+          },
           "kind": {
             "enum": [
               "REPO",
@@ -22596,6 +23032,14 @@
       "ThreadDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22667,6 +23111,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -22749,6 +23200,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -22767,6 +23219,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -22798,6 +23251,14 @@
       "ThreadDetailDto": {
         "type": "object",
         "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -22869,6 +23330,13 @@
           "pendingQuestion": {
             "type": "object",
             "nullable": true
+          },
+          "pendingApprovals": {
+            "description": "The answerable session approvals the thread waits on, oldest first (US-007)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadPendingApprovalDto"
+            }
           },
           "session": {
             "type": "object",
@@ -22987,6 +23455,7 @@
           }
         },
         "required": [
+          "mode",
           "id",
           "kind",
           "projectId",
@@ -23005,6 +23474,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "pendingApprovals",
           "session",
           "lastActivityAt",
           "createdAt",
@@ -23016,6 +23486,22 @@
           "sendRefusal",
           "handoff",
           "pendingActions"
+        ]
+      },
+      "ChangeThreadModeDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "ask",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
         ]
       },
       "PlanThreadDto": {

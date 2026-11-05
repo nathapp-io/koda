@@ -35,6 +35,35 @@ describe('RunnerSummaryDto.from', () => {
     expect(dto.threadBackends).toEqual({ native: [], acp: [] });
   });
 
+  it('AC-7: exposes a valid acpOffers list unchanged under threadBackends', () => {
+    const acpOffers = [{
+      agent: 'cursor', launchable: true, loggedIn: true,
+      models: ['gpt-5.5[context=272k,reasoning=medium]'], efforts: ['high', 'low'],
+    }];
+    const dto = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+    expect(dto.threadBackends).toEqual({ native: ['m1'], acp: ['cursor'], acpOffers });
+  });
+
+  it('AC-7: drops a malformed acpOffers list but keeps the native and acp lists beside it', () => {
+    for (const acpOffers of [
+      [{ agent: 'cursor', launchable: true, loggedIn: true, models: ['bad model!'], efforts: [] }],
+      [{ agent: 'gemini', launchable: true, loggedIn: true, models: [], efforts: [] }],
+      [{ agent: 'cursor', launchable: true, models: [], efforts: [] }],
+      [{ agent: 'cursor' }],
+      'not-an-array',
+    ]) {
+      const dto = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+      expect(dto.threadBackends).toEqual({ native: ['m1'], acp: ['cursor'] });
+    }
+  });
+
+  it('AC-7: omits acpOffers for a report that has none and below the protocol floor', () => {
+    const noOffers = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1'], acp: ['cursor'] } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+    expect(noOffers.threadBackends).not.toHaveProperty('acpOffers');
+    const belowFloor = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1'], acp: ['cursor'], acpOffers: [{ agent: 'cursor', launchable: true, loggedIn: null, models: [], efforts: [] }] } }, { protocolVersion: 3 }), { now, offlineSec: 90 });
+    expect(belowFloor.threadBackends).toEqual({ native: [], acp: [] });
+  });
+
   it('US-001 AC5: reports projectThreads for a protocol v4 runner whose report advertises it', () => {
     const dto = RunnerSummaryDto.from(record({ projectThreads: true }, { protocolVersion: 4 }), { now, offlineSec: 90 });
     expect(dto.projectThreads).toBe(true);

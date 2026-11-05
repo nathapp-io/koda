@@ -15,10 +15,20 @@
  */
 export type ChatThreadKind = 'REPO' | 'PROJECT' | 'WORKSPACE'
 
+/** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadAgent`): the ACP backends a runner can host. */
+export type ThreadAgent = 'claude' | 'codex' | 'cursor'
+
+/**
+ * Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadMode`), thread-agents-modes: the execution
+ * profile a thread's turns run with. Only a REPO thread can be created with a mode other than `read`; PROJECT and
+ * WORKSPACE threads have no worktree or publish and stay `read`.
+ */
+export type ThreadMode = 'read' | 'ask' | 'full'
+
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadBackend`). */
 export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
-  | { kind: 'acp'; agent: 'claude' | 'codex'; model?: string; effort?: string }
+  | { kind: 'acp'; agent: ThreadAgent; model?: string; effort?: string }
 
 /** The skills the thread was created with (skill-catalog.domain.ts `ThreadSkillSource`). */
 export interface ThreadSkillSource {
@@ -64,6 +74,47 @@ export interface ThreadSession {
 }
 
 /**
+ * B3 (whole-branch review): the runner's outcome for the last decision sent for one pending request. The decision route
+ * answers `200` as soon as the command is queued, so this is the only thing that says whether the session took it; a
+ * rejection leaves the request pending (the runner refused the decision, not the request).
+ */
+export interface ThreadApprovalDelivery {
+  /** Which way the last decision went. */
+  decision: 'allow' | 'deny'
+  /** `ok` = the session accepted it; `rejected` = the runner refused it and the request is still pending. */
+  result: 'ok' | 'rejected'
+  /** The runner's own reason for a rejection; null when it gave none. Never trusted as markup (B4-D1). */
+  detail: string | null
+  /** When the runner acknowledged the decision. */
+  at: string
+}
+
+/**
+ * One answerable session approval the thread waits on (mirrors the API's `ThreadPendingApprovalDto`, thread-agents-modes
+ * US-007): oldest first, at most 20. `command`, `reason` and `unsandboxed` are absent when the runner's request did not
+ * carry them. Every field is runner/agent text, so the card renders it through `{{ }}` interpolation only (B4-D1).
+ */
+export interface ThreadPendingApprovalDto {
+  /** The request id the decision route takes. */
+  requestId: string
+  tool: string
+  summary: string
+  /** The command the tool would run, when it runs one. */
+  command?: string
+  /** Why the runner is asking. */
+  reason?: string
+  /** When the runner stops waiting for the decision. */
+  expiresAt: string
+  /** Set when the request would leave the session sandbox. */
+  unsandboxed?: true
+  /** Absent until a decision for this request has been acknowledged (B3). */
+  delivery?: ThreadApprovalDelivery
+}
+
+/** A decision a person sends for one pending approval (US-008: Approve maps to `allow`, Deny to `deny`). */
+export type ThreadApprovalDecision = 'allow' | 'deny'
+
+/**
  * The thread's last Publish or Discard result (chat-thread.domain.ts `ThreadWriteResult`, also the
  * `lastWrite` wire shape). Publish writes `published` or `publish_failed`; Discard writes `discarded`
  * or `discard_failed`.
@@ -90,6 +141,11 @@ export interface ThreadHandoff {
 export interface ThreadDto {
   id: string
   kind: ChatThreadKind
+  /**
+   * The execution profile the thread's turns run with (thread-agents-modes US-004). The API always sends it; optional
+   * here so a payload written before the feature still type-checks, and a thread with no mode reads as `read`.
+   */
+  mode?: ThreadMode
   repoId: string | null
   baseRef: string | null
   feature: string | null
@@ -107,6 +163,11 @@ export interface ThreadDto {
   tokens: ThreadTokens | null
   specPath: string | null
   pendingQuestion: ThreadPendingQuestion | null
+  /**
+   * The answerable session approvals the thread waits on, oldest first (thread-agents-modes US-007). Optional here for
+   * the same reason as `pendingActions`: a payload written before the feature renders no approval card.
+   */
+  pendingApprovals?: ThreadPendingApprovalDto[]
   session: ThreadSession | null
   lastActivityAt: string
   createdAt: string
@@ -181,10 +242,24 @@ export type ThreadLiveEvent = { id: string; threadId: string; at: string } & (
   | { type: 'thread' }
 )
 
+/**
+ * One ACP agent's discovery offer (runner-summary.dto.ts `ThreadAcpOffer`, thread-agents-modes). `loggedIn` is null
+ * when the agent was not probed or its probe failed; a not-logged-in agent is still launchable but absent from `acp`.
+ */
+export interface ThreadAcpOffer {
+  agent: ThreadAgent
+  launchable: boolean
+  loggedIn: boolean | null
+  models: string[]
+  efforts: string[]
+}
+
 /** Runner capability report as the web sees it (runner-summary.dto.ts). */
 export interface RunnerThreadBackends {
   native: string[]
-  acp: string[]
+  acp: ThreadAgent[]
+  /** Absent when the runner reports no offers (or its offer list was malformed). */
+  acpOffers?: ThreadAcpOffer[]
 }
 
 export type SessionLabel = 'starting' | 'closing' | 'live' | 'failed' | 'closed' | 'none'

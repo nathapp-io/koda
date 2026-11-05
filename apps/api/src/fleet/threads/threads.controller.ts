@@ -1,3 +1,6 @@
+import { threadModeKey, validateThreadMode } from './thread-mode';
+import { ChangeThreadModeDto } from './dto/thread.dto';
+import { validateCreateThread } from './thread-input';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
@@ -14,7 +17,7 @@ import { CurrentProject } from '../../projects/current-project.decorator';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import type { ProjectContext } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, DecideThreadApprovalDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 
@@ -47,7 +50,13 @@ export class ThreadsController {
   @ApiResponse({ status: 403, description: 'thread.create is missing' })
   @ApprovalGated()
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const normalized = validateCreateThread(dto, dto.baseRef ?? 'main');
+    if (normalized.kind === 'REPO' && normalized.mode !== 'read') {
+      await this.threads.assertModeAllowed(ctx.project.id, principal, normalized.mode);
+    }
+    const alsoKeys = normalized.kind === 'REPO' && normalized.mode !== 'read' ? [`thread.mode.${normalized.mode}`] : [];
     const outcome = await this.routeGate.run<ChatThreadRecord>({
+      ...(alsoKeys.length ? { alsoKeys } : {}),
       key: 'thread.create', variant: THREAD_ROUTE_VARIANTS.create, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, thread: dto },
     });
@@ -99,6 +108,25 @@ export class ThreadsController {
     const outcome = await this.routeGate.run<ChatThreadRecord>({
       key: 'thread.cap.update', variant: THREAD_ROUTE_VARIANTS.update, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Patch(':id/mode')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires(['thread.mode.ask', 'thread.mode.full', 'thread.cap.update'], { mode: 'any', enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Change a repository thread mode between turns' })
+  @ApiResponse({ status: 200, type: ThreadDto })
+  @ApiResponse({ status: 400, description: 'Invalid mode; ask and full require a REPO thread' })
+  @ApiResponse({ status: 403, description: 'Target mode key or creator/any-row thread.cap.update authority is missing' })
+  @ApiResponse({ status: 409, description: 'threads.turnRunning or threads.busy' })
+  @ApprovalGated()
+  async changeMode(@Param('id') id: string, @Body() dto: ChangeThreadModeDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const mode = validateThreadMode(dto.mode);
+    const outcome = await this.routeGate.run<ChatThreadRecord>({
+      key: threadModeKey(mode), variant: THREAD_ROUTE_VARIANTS.mode, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, mode },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
@@ -185,6 +213,25 @@ export class ThreadsController {
     const outcome = await this.routeGate.run<void>({
       key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.answer, projectId: ctx.project.id,
       input: { slug: ctx.project.slug, projectId: ctx.project.id, id, answer: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Post(':id/approvals/:requestId')
+  @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.answer')
+  @ApiOperation({ summary: 'Decide a pending session approval of a chat thread (thread.answer: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'The decision is not allow or deny' })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  @ApiResponse({ status: 409, description: 'threads.noApproval, threads.noSession, or threads.sessionOtherPrincipal' })
+  @ApprovalGated()
+  async decideApproval(@Param('id') id: string, @Param('requestId') requestId: string, @Body() dto: DecideThreadApprovalDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    const outcome = await this.routeGate.run<void>({
+      key: 'thread.answer', variant: THREAD_ROUTE_VARIANTS.approve, projectId: ctx.project.id,
+      input: { slug: ctx.project.slug, projectId: ctx.project.id, id, requestId, approval: dto },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

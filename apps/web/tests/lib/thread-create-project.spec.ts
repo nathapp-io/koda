@@ -36,6 +36,8 @@ const projectValues = (over: Partial<ThreadCreateValues> = {}): ThreadCreateValu
   feature: '',
   title: 'Chat about the project',
   maxCostUsd: '5',
+  agent: 'native',
+  mode: 'read',
   model: 'm1',
   effort: '',
   ...over,
@@ -90,7 +92,7 @@ describe('toCreateThreadBody scope (US-007 AC3-AC4)', () => {
     expect(Object.keys(body).sort()).toEqual(['backend', 'kind', 'maxCostUsd', 'title'])
   })
 
-  test('AC4: a REPO body is today\'s body plus kind REPO', () => {
+  test('AC4: a REPO body is today\'s body plus kind REPO and the mode', () => {
     const body = toCreateThreadBody({
       kind: 'REPO',
       repoId: 'r1',
@@ -98,6 +100,8 @@ describe('toCreateThreadBody scope (US-007 AC3-AC4)', () => {
       feature: 'add-auth',
       title: 'Auth spec',
       maxCostUsd: '5',
+      agent: 'native',
+      mode: 'read',
       model: 'm1',
       effort: '',
     })
@@ -109,6 +113,8 @@ describe('toCreateThreadBody scope (US-007 AC3-AC4)', () => {
       title: 'Auth spec',
       maxCostUsd: 5,
       backend: { kind: 'native', model: 'm1' },
+      // thread-agents-modes US-011: a REPO create body always carries its mode, a PROJECT body never does.
+      mode: 'read',
     })
   })
 })

@@ -1,4 +1,5 @@
 import { ConfigError, loadRunnerConfig, resolveHome } from '../config/runner-config';
+import { probeAcpAgents } from '../capabilities/acp-agent-probe';
 import type { DaemonHandle, DaemonOptions } from '../daemon/daemon';
 import { errorMessage, StartupError } from '../errors';
 import { IdentityError, readIdentity } from '../identity/identity-store';
@@ -23,7 +24,8 @@ export async function runCommand(homeOverride: string | undefined, deps: RunDeps
     if (new URL(identity.serverUrl).origin !== new URL(config.serverUrl).origin) {
       throw new ConfigError(`identity.json was issued by ${identity.serverUrl} but runner.json points at ${config.serverUrl}`);
     }
-    daemon = await deps.start({ home, config, identity, log: deps.log });
+    // thread-agents-modes US-002: the production runner is the one caller that advertises its ACP agents.
+    daemon = await deps.start({ home, config, identity, log: deps.log, acpProbe: probeAcpAgents });
   } catch (error) {
     if (error instanceof ConfigError || error instanceof IdentityError || error instanceof StartupError) {
       deps.log.error(error.message);

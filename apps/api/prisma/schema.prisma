@@ -1229,6 +1229,8 @@ model ChatThread {
   costUsd         Decimal   @default(0) @db.Decimal(12, 4)
   tokens          Json? // { input, output, cacheRead, cacheWrite }; written by B2
   specPath        String? // .nax/features/<feature>/spec.md
+  mode            String    @default("read") // read | ask | full
+  pendingApprovals Json?
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
   session         Json? // S5a: the thread's session state, folded from the thread stream
   writtenPaths    String[]  @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
@@ -1290,6 +1292,7 @@ model FleetThreadTurn {
   backend          Json
   skills           Json
   resume           Boolean
+  mode             String  @default("read")
 
   job    FleetJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)

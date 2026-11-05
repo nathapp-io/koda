@@ -11,7 +11,7 @@ describe('ThreadRouteCommands', () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'a1', actorType: 'agent', slug: 'agent', status: 'ACTIVE', capabilities: [] } satisfies AgentPrincipal;
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
-    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined), publish: vi.fn().mockResolvedValue({ jobId: 'jp1' }), discard: vi.fn().mockResolvedValue({ jobId: 'jd1' }) };
+    const threads = { create: vi.fn().mockResolvedValue({ id: 't1' }), updateCap: vi.fn().mockResolvedValue({ id: 't1' }), archive: vi.fn(), get: vi.fn().mockResolvedValue({ id: 't1', status: 'ARCHIVED' }), plan: vi.fn().mockResolvedValue({ job: { id: 'j1' } }), run: vi.fn().mockResolvedValue({ job: { id: 'j2' } }), stop: vi.fn().mockResolvedValue(undefined), endSession: vi.fn().mockResolvedValue(undefined), answer: vi.fn().mockResolvedValue(undefined), decide: vi.fn().mockResolvedValue(undefined), publish: vi.fn().mockResolvedValue({ jobId: 'jp1' }), discard: vi.fn().mockResolvedValue({ jobId: 'jd1' }) };
     const sendResult = { message: { id: 'm1' }, jobId: 'j1', deduplicated: false };
     const mutate = vi.fn().mockResolvedValue(sendResult);
     const messageThreads = { ...threads, sendMessage: vi.fn().mockResolvedValue(sendResult), prepareSendMessage: vi.fn().mockResolvedValue(mutate) };
@@ -117,17 +117,40 @@ describe('ThreadRouteCommands', () => {
   });
 
   it('creates as the rebuilt requester and validates frozen bodies and ids', async () => {
-    const { registry, threads, loader } = build();
+    const { registry, threads, loader, principal } = build();
     const command = registry.get('thread.create', THREAD_ROUTE_VARIANTS.create);
     if (!command) throw new Error('Missing create command');
     const thread = { kind: 'REPO', repoId: 'r1', feature: 'unique', title: 'Unique', backend: { kind: 'native', model: 'm1' } };
     const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', thread }));
     expect(loader.forContext).toHaveBeenCalledOnce();
-    expect(threads.create).toHaveBeenCalledWith('p1', 'a1', thread);
+    expect(threads.create).toHaveBeenCalledWith('p1', principal, thread);
     expect(command.toResult?.(result)).toEqual({ id: 't1' });
     for (const input of [null, {}, { slug: 'web', projectId: '' }, { slug: 'web', projectId: 'p1', thread: [] }]) expect(() => command.parse(input)).toThrow(ValidationAppException);
     // Domain validation stays in the service, including when the frozen body is missing.
     expect(command.parse({ slug: 'web', projectId: 'p1' })).toMatchObject({ thread: {} });
+  });
+
+  it('US-008: registers the decision variant beside the text answer and recomputes thread.answer authority', async () => {
+    const { registry, threads, permissions, principal } = build();
+    const command = registry.get('thread.answer', THREAD_ROUTE_VARIANTS.approve);
+    if (!command) throw new Error('Missing approve command');
+    expect(command).toMatchObject({ key: 'thread.answer', variant: 'rest:threads.approve' });
+
+    const result = await command.execute(command.parse({ slug: 'web', projectId: 'p1', id: 't1', requestId: 'r1', approval: { decision: 'allow' } }));
+
+    expect(permissions.can).toHaveBeenCalledExactlyOnceWith(principal, 'thread.answer', { projectId: 'p1' });
+    expect(threads.decide).toHaveBeenCalledExactlyOnceWith('p1', 't1', 'a1', 'r1', 'allow', false);
+    expect(command.toResult?.(result)).toEqual({});
+  });
+
+  it('US-008: a decision command parses a route id and body it cannot read as invalid input', () => {
+    const { registry } = build();
+    const command = registry.get('thread.answer', THREAD_ROUTE_VARIANTS.approve);
+    if (!command) throw new Error('Missing approve command');
+    expect(command.parse({ slug: 'web', projectId: 'p1', id: 't1', requestId: 'r1' })).toMatchObject({ approval: {} });
+    for (const input of [{ slug: 'web', projectId: 'p1', id: 't1' }, { slug: 'web', projectId: 'p1', id: 't1', requestId: '' }, { slug: 'web', projectId: 'p1', id: 't1', requestId: 'r1', approval: [] }]) {
+      expect(() => command.parse(input)).toThrow(ValidationAppException);
+    }
   });
 
   it('AC-6: registers publish and discard REST variants', () => {

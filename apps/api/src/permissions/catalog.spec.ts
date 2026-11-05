@@ -96,6 +96,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.job.shell.escalate': 'project',
   'fleet.budget.override': 'any',
   'fleet.repo.fix.unprotected': 'global',
+  'thread.mode.ask': 'project',
+  'thread.mode.full': 'project',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 
@@ -110,6 +112,7 @@ const HIGH_RISK_PREFIXES = [
   'fleet.enrollment.',
   'fleet.credential.',
   'fleet.job.shell.',
+  'thread.mode.',
 ];
 
 /** `[key, catalog_scope]` in file order, with cells holding several keys split on `;`. */

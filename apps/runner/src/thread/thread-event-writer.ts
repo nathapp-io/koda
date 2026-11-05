@@ -27,6 +27,7 @@ export interface ThreadWakeSink {
 /** The `session_started` line's payload. `stale: true` marks a start on the worktree's old HEAD (S5a C1). */
 export interface ThreadSessionStart {
   readonly resumed: boolean;
+  readonly mode?: 'read' | 'ask' | 'full';
   readonly backend: ThreadBackend;
   readonly skillShas: string[];
   readonly stale?: boolean;
@@ -200,7 +201,7 @@ export class ThreadEventWriter {
     this.releaseAll();
     // `stale` is written only when true: a fresh start keeps the B3b line exactly as it was.
     const stale = start.stale === true ? { stale: true } : {};
-    this.appendRunner({ type: 'session_started', at: this.now().toISOString(), resumed: start.resumed, backend: start.backend, skillShas: start.skillShas, ...stale });
+    this.appendRunner({ type: 'session_started', mode: start.mode ?? 'read', at: this.now().toISOString(), resumed: start.resumed, backend: start.backend, skillShas: start.skillShas, ...stale });
   }
 
   inputConsumed(messageId: string): void {

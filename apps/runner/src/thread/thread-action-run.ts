@@ -32,7 +32,7 @@ export async function runThreadAction(input: {
       result = await publish({
         git: deps.host.git, mutex: { acquire: deps.mutex.acquire.bind(deps.mutex), isLocked: deps.mutex.isLocked?.bind(deps.mutex) ?? (() => false) },
         repoKey: row.repoKey, worktree: threadWorktreeDir(deps.host.homeDir, thread.threadId), feature: thread.feature,
-        threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity,
+        threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity, mode: thread.mode ?? 'read',
       } as ThreadPublishInput);
     } catch {
       result = { ok: false, reason: 'git_error' };

@@ -923,12 +923,31 @@
         "feature": "Feature",
         "threadTitle": "Title",
         "maxCost": "Cost cap in USD",
-        "backend": "Native model",
+        "backend": "Backend",
+        "agent": {
+          "label": "Agent",
+          "native": "Native",
+          "claude": "Claude Code",
+          "codex": "Codex",
+          "cursor": "Cursor",
+          "defaultModel": "Agent default",
+          "reason": {
+            "notInstalled": "Not installed",
+            "notLoggedIn": "Not logged in",
+            "notReady": "Not ready"
+          }
+        },
+        "mode": {
+          "label": "Mode",
+          "read": "Read",
+          "ask": "Ask",
+          "full": "Full"
+        },
         "model": "Model",
         "effortLabel": "Effort",
         "effortDefault": "Default",
         "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
-        "noBackend": "No online enabled runner offers a native thread model.",
+        "noBackend": "No online enabled runner offers a model for this agent.",
         "noPermission": "You do not have permission to create threads in this project.",
         "skills": "Enabled project skills",
         "create": "Create thread",
@@ -980,6 +999,25 @@
         "placeholder": "Answer the question…",
         "send": "Send"
       },
+      "mode": {
+        "label": "Mode",
+        "read": "Read",
+        "ask": "Ask",
+        "full": "Full",
+        "noPermission": "You do not have permission to switch to this mode."
+      },
+      "approval": {
+        "unsandboxed": "Unsandboxed",
+        "command": "Command",
+        "reason": "Why",
+        "approve": "Approve",
+        "deny": "Deny",
+        "awaiting": "Waiting for the thread's creator to decide.",
+        "queued": "Decision sent. Waiting for the session to apply it.",
+        "rejected": "The runner did not apply the decision: {detail}",
+        "rejectedNoDetail": "The runner did not apply the decision.",
+        "retry": "Send again"
+      },
       "message": {
         "required": "Message cannot be empty.",
         "tooLong": "Message must be 32768 bytes or fewer.",
@@ -1006,7 +1044,7 @@
       "handoff": {
         "actions": { "publish": "Publish", "plan": "Plan", "run": "Run", "discard": "Discard", "submit": "Submit" },
         "blocked": { "nothingToPublish": "Nothing to publish", "turnRunning": "A turn is running", "handoffBusy": "A handoff is already running", "notPublished": "Publish the spec first", "sessionActive": "A thread job is active", "notPlanned": "Plan the spec first", "planNotCompleted": "The plan has not completed" },
-        "publishDialog": { "title": "Publish thread changes", "confirm": "Publish" },
+        "publishDialog": { "title": "Publish thread changes", "confirm": "Publish", "noPaths": "The session's own changes to the worktree are committed with this publish." },
         "planDialog": { "title": "Plan this thread" },
         "runDialog": { "title": "Run this thread" },
         "discardDialog": { "title": "Discard unpublished changes?", "body": "Discard the unpublished changes from this stale session?", "confirm": "Discard" },

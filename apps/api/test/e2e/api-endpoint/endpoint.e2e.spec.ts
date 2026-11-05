@@ -4170,8 +4170,17 @@ describeIntegration('API Integration Tests', () => {
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
       const res = await createThread('add-auth').expect(201);
       const thread = body<{ id: string; status: string; createdById: string; baseRef: string; specPath: string; maxCostUsd: string }>(res);
-      expect(thread).toMatchObject({ status: 'ACTIVE', createdById: world.ids.dev, baseRef: 'trunk', specPath: '.nax/features/add-auth/spec.md', maxCostUsd: '5' });
+      expect(thread).toMatchObject({ mode: 'read', status: 'ACTIVE', createdById: world.ids.dev, baseRef: 'trunk', specPath: '.nax/features/add-auth/spec.md', maxCostUsd: '5' });
       threadId = thread.id;
+    });
+
+    it('thread modes: developer creates ask but cannot create full', async () => {
+      const base = { repoId: world.repoId, title: 'Mode', backend: { kind: 'native', model: 'm1' } };
+      const route = `/api/projects/${projectSlug}/threads`;
+      const ok = await request(httpServer).post(route).set('Authorization', `Bearer ${world.tokens.dev}`).send({ ...base, feature: 'endpoint-ask', mode: 'ask' }).expect(201);
+      expect(body<{ mode: string }>(ok).mode).toBe('ask');
+      await request(httpServer).post(route).set('Authorization', `Bearer ${world.tokens.dev}`).send({ ...base, feature: 'endpoint-full-denied', mode: 'full' }).expect(403);
+      expect(await db().chatThread.count({ where: { feature: 'endpoint-full-denied' } })).toBe(0);
     });
 
     it('US-003 AC2: snapshots only enabled skills with the source SHA', async () => {
@@ -6189,6 +6198,17 @@ describeIntegration('project thread approval lifecycle', () => {
     for (const key of ['thread.create', 'thread.cap.update', 'thread.archive']) await seedWaitPolicy(db, key, world.projectId);
   }, 60_000);
   afterAll(async () => { await app?.close(); });
+
+  it('thread mode PATCH stores ask for its creator and rejects an invalid target', async () => {
+    const thread = data<{ id: string }>(await request(server()).post(path).set(auth(world.tokens.dev))
+      .send({ kind: 'REPO', repoId: world.repoId, feature: 'mode-change-e2e', title: 'Mode change', backend: { kind: 'native', model: 'm1' } }).expect(201));
+    const result = data<{ mode: string }>(await request(server()).patch(`${path}/${thread.id}/mode`)
+      .set(auth(world.tokens.dev)).send({ mode: 'ask' }).expect(200));
+    expect(result.mode).toBe('ask');
+    expect((await db.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).mode).toBe('ask');
+    refusal(await request(server()).patch(`${path}/${thread.id}/mode`).set(auth(world.tokens.dev))
+      .send({ mode: 'bogus' }).expect(400), 'threads.input.-2', { reason: 'mode' });
+  });
 
   it('create, cap update and archive wait, execute on approval, and refuse a keyless actor', async () => {
     const thread = { kind: 'REPO', repoId: world.repoId, feature: 'thread-approval-e2e', title: 'Gated thread', backend: { kind: 'native', model: 'm1' } };

@@ -1,4 +1,4 @@
-import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -32,13 +32,26 @@ function checked(fn: () => void): boolean {
  *  so it is exported under a test-only name rather than widened into the public parse surface. */
 export const __checked = checked;
 
+/**
+ * thread-agents-modes US-003: the ACP agents a thread may name. An exhaustive map, so a new `ThreadAgent` in
+ * fleet-protocol fails to compile until it is admitted or refused here on purpose.
+ */
+const ACP_AGENT: Readonly<Record<ThreadAgent, true>> = { claude: true, codex: true, cursor: true };
+
+const isThreadAgent = (v: unknown): v is ThreadAgent => typeof v === 'string' && Object.hasOwn(ACP_AGENT, v);
+
 function cleanBackend(v: unknown): ThreadBackend | null {
   if (!isObj(v)) return null;
   const kind = v['kind'];
   const model = v['model'];
   const effort = v['effort'];
-  const modelOk = model === undefined || (typeof model === 'string' && THREAD_MODEL_ID_RE.test(model));
-  const effortOk = effort === undefined || (typeof effort === 'string' && EFFORT_RE.test(effort));
+  if (kind !== 'native' && kind !== 'acp') return null;
+  // thread-agents-modes US-003: an ACP model and effort id may carry what the agent advertises (`[...]`
+  // option suffixes in a model, digits and dashes in an effort); a native backend keeps the narrower rules.
+  // Without this split the runner refuses an ASSIGN the API accepted (thread-input.ts).
+  const isAcp = kind === 'acp';
+  const modelOk = model === undefined || (typeof model === 'string' && (isAcp ? ACP_MODEL_ID_RE : THREAD_MODEL_ID_RE).test(model));
+  const effortOk = effort === undefined || (typeof effort === 'string' && (isAcp ? ACP_EFFORT_RE : EFFORT_RE).test(effort));
   if (!modelOk || !effortOk) return null;
   if (kind === 'native') {
     if (v['agent'] !== undefined) return null;
@@ -48,17 +61,14 @@ function cleanBackend(v: unknown): ThreadBackend | null {
       ...(effort !== undefined ? { effort: effort as string } : {}),
     };
   }
-  if (kind === 'acp') {
-    const agent = v['agent'];
-    if (agent !== 'claude' && agent !== 'codex') return null;
-    return {
-      kind: 'acp',
-      agent,
-      ...(model !== undefined ? { model: model as string } : {}),
-      ...(effort !== undefined ? { effort: effort as string } : {}),
-    };
-  }
-  return null;
+  const agent = v['agent'];
+  if (!isThreadAgent(agent)) return null;
+  return {
+    kind: 'acp',
+    agent,
+    ...(model !== undefined ? { model: model as string } : {}),
+    ...(effort !== undefined ? { effort: effort as string } : {}),
+  };
 }
 
 function cleanSkills(v: unknown): ThreadSkillSource[] | null {
@@ -276,6 +286,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
   const action = t['action'];
   if (action !== 'SESSION' && action !== 'PUBLISH' && action !== 'DISCARD') return bad('thread action');
+  const rawMode = t['mode'];
+  if (rawMode !== undefined && rawMode !== 'read' && rawMode !== 'ask' && rawMode !== 'full') return bad('thread mode');
   // Fleet S5b: `kind` is optional (absent means REPO); a PROJECT or WORKSPACE thread only ever runs a SESSION.
   const rawKind = t['kind'];
   if (rawKind !== undefined && rawKind !== 'REPO' && rawKind !== 'PROJECT' && rawKind !== 'WORKSPACE') return bad('thread kind');
@@ -319,6 +331,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (projectRepos === null || projectReposUnavailable === null) return bad('project repos');
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
+    ...(rawMode === undefined ? {} : { mode: rawMode }),
     action,
     ...(rawKind !== undefined ? { kind: rawKind } : {}),
     feature: t['feature'] as string,

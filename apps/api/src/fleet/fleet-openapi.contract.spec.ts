@@ -110,6 +110,19 @@ describe('fleet OpenAPI contract', () => {
       .toContain('#/components/schemas/PendingActionDto');
   });
 
+  it('exposes the thread pending approvals and their entry shape (thread-agents-modes US-007)', () => {
+    expect(Object.keys(spec.components.schemas['ThreadDto']?.properties ?? {})).toContain('pendingApprovals');
+    expect(Object.keys(spec.components.schemas['WorkspaceThreadDto']?.properties ?? {})).toContain('pendingApprovals');
+    expect(Object.keys(spec.components.schemas['ThreadPendingApprovalDto']?.properties ?? {}).sort())
+      .toEqual(['command', 'delivery', 'expiresAt', 'reason', 'requestId', 'summary', 'tool', 'unsandboxed']);
+    expect(spec.components.schemas['ThreadPendingApprovalDto']?.required).toEqual(['requestId', 'tool', 'summary', 'expiresAt']);
+    // B3: the decision's delivery outcome is a nested schema, and it is what tells the card a decision was refused.
+    expect(JSON.stringify(spec.components.schemas['ThreadPendingApprovalDto']?.properties?.['delivery']))
+      .toContain('#/components/schemas/ThreadApprovalDeliveryDto');
+    expect(Object.keys(spec.components.schemas['ThreadApprovalDeliveryDto']?.properties ?? {}).sort())
+      .toEqual(['at', 'decision', 'detail', 'result']);
+  });
+
   it('exposes the budget routes on both prefixes and the budget_paused misfit (S1b §2.3, §2.4)', () => {
     for (const base of ['/api/fleet/budgets', '/api/projects/{slug}/fleet/budgets']) {
       expect(spec.paths[base]?.['get']).toBeDefined();
@@ -121,6 +134,11 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['BudgetPolicyDto']?.properties ?? {}))
       .toEqual(expect.arrayContaining(['scopeType', 'windowKind', 'amountUsd', 'spentUsd', 'windowStart', 'paused', 'warnReached']));
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
+  });
+
+  it('exposes thread modes on create/response and both misfit enums', () => {
+    for (const schema of ['PlacementMisfitDto', 'AttentionReasonDto']) expect(JSON.stringify(spec.components.schemas[schema])).toContain('thread_modes');
+    for (const schema of ['ThreadDto', 'CreateThreadDto']) expect(spec.components.schemas[schema]?.properties?.mode).toMatchObject({ enum: ['read', 'ask', 'full'] });
   });
 
   it('exposes the project_threads misfit on the dispatch and dashboard enums (US-005)', () => {

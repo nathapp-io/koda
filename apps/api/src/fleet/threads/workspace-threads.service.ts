@@ -12,6 +12,7 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThreadInput } from './thread-input';
+import { decisionPayload, validateAnswerRequestId, validateApprovalDecision } from './thread-decision';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { AfterCommitService } from '../../permissions/after-commit.service';
@@ -148,6 +149,15 @@ export class WorkspaceThreadsService {
     const thread = await this.requireOwnedThread(principal.id, threadId);
     await this.assertThreadKey(principal, 'thread.answer', thread);
     return this.threads.command({ kind: 'workspace', userId: principal.id }, threadId, principal.id, FleetCommandType.THREAD_ANSWER, input);
+  }
+
+  /** US-008: the workspace half of the decision route — same fence and key as the text answer, decision payload. */
+  async decide(principal: UserPrincipal | AgentPrincipal, threadId: string, requestId: unknown, decision: unknown): Promise<void> {
+    const request = validateAnswerRequestId(requestId);
+    const payload = decisionPayload(request, validateApprovalDecision(decision));
+    const thread = await this.requireOwnedThread(principal.id, threadId);
+    await this.assertThreadKey(principal, 'thread.answer', thread);
+    return this.threads.command({ kind: 'workspace', userId: principal.id }, threadId, principal.id, FleetCommandType.THREAD_ANSWER, payload);
   }
 
   async sendMessage(principal: UserPrincipal | AgentPrincipal, id: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {

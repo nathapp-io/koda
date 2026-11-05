@@ -7,15 +7,21 @@ import {
   type AgentSession,
   type CreateAgentSessionOptions,
   type NativeBackendOptions,
+  type SessionBackend,
 } from '@nathapp/nax-agent';
-import type { ThreadAssign, ThreadFailReason } from '@nathapp/fleet-protocol';
+import { acpBackend, type AcpBackendOptions } from '@nathapp/nax-agent-acp/client';
+import type { ThreadAssign, ThreadBackend, ThreadFailReason } from '@nathapp/fleet-protocol';
 import { threadTranscriptDir } from './thread-paths';
 import type { NativeModelSet } from './native-models';
+
+type AcpThreadBackend = Extract<ThreadBackend, { kind: 'acp' }>;
 
 interface AgentSessionFactory {
   createAgentSession: typeof createAgentSession;
   resumeAgentSession: typeof resumeAgentSession;
   nativeBackend: typeof nativeBackend;
+  /** thread-agents-modes US-003: the ACP backend factory. Absent in a spec: production's factory is used. */
+  acpBackend?: typeof acpBackend;
   createFileTranscriptStore: typeof createFileTranscriptStore;
 }
 
@@ -48,7 +54,7 @@ const MAX_APPROVAL_TIMEOUT_MS = 3_600_000;
  * misses an `AgentSessionError` built from a second copy of nax-agent (a compiled bundle or a
  * duplicated install), so the code — the contract — is read structurally as well.
  */
-function agentSessionCode(error: unknown): string | undefined {
+export function agentSessionCode(error: unknown): string | undefined {
   if (error instanceof AgentSessionError) return error.code;
   if (typeof error !== 'object' || error === null) return undefined;
   const code = (error as { code?: unknown }).code;
@@ -69,8 +75,23 @@ function approvalTimeoutMsFor(approvalTimeoutSec: number): number {
   return Math.min(MAX_APPROVAL_TIMEOUT_MS, Math.max(MIN_APPROVAL_TIMEOUT_MS, requested));
 }
 
+/**
+ * thread-agents-modes US-003: the ACP backend's own options, exactly as `nax chat` opens an agent — unsandboxed on the
+ * runner host, with the runner's environment — plus the thread's model and effort when it pinned them.
+ */
+function acpBackendOptions(backend: AcpThreadBackend): AcpBackendOptions {
+  return {
+    agent: backend.agent,
+    allowUnsandboxed: true,
+    inheritEnv: true,
+    ...(backend.model === undefined ? {} : { model: backend.model }),
+    ...(backend.effort === undefined ? {} : { effort: backend.effort }),
+  };
+}
+
 export class ThreadSessionFactory {
   private readonly agent: AgentSessionFactory;
+  private readonly acp: typeof acpBackend;
 
   constructor(private readonly options: ThreadSessionFactoryOptions) {
     this.agent = options.agent ?? {
@@ -79,6 +100,9 @@ export class ThreadSessionFactory {
       nativeBackend,
       createFileTranscriptStore,
     };
+    // The ACP factory is the one dependency from another package (nax-agent-acp), so a spec that injects the
+    // nax-agent functions alone still opens an `acp` thread through production's factory.
+    this.acp = this.agent.acpBackend ?? acpBackend;
   }
 
   async open(input: OpenThreadSessionOptions): Promise<OpenThreadSessionResult> {
@@ -86,7 +110,12 @@ export class ThreadSessionFactory {
     // and a rejecting `nativeModels()` must resolve to a failure reason, not escape as a rejection.
     try {
       const { thread } = input;
-      if (thread.backend.kind === 'acp') return { ok: false, reason: 'backend_unavailable' };
+      // thread-agents-modes US-003: an ACP thread opens through the ACP factory. Its model is the agent's, not a
+      // native id, so `nativeModels()` has nothing to say about it and is never consulted.
+      if (thread.backend.kind === 'acp') {
+        if (!SESSION_ID_RE.test(thread.threadId)) return { ok: false, reason: 'session_error' };
+        return await this.start(input, this.acp(acpBackendOptions(thread.backend)));
+      }
 
       const models = await this.options.nativeModels();
       const model = thread.backend.model ?? models.defaultModel;
@@ -100,6 +129,11 @@ export class ThreadSessionFactory {
       if (!SESSION_ID_RE.test(thread.threadId)) return { ok: false, reason: 'session_error' };
 
       const backendOptions = {
+        ...(thread.mode === 'ask' || thread.mode === 'full' ? { allowUnsandboxed: true } : {}),
+        // thread-agents-modes (branch fix B2): nax-agent resolves `bashApproval` to `gated` whatever the profile, so
+        // `full` — the no-prompts mode — has to ask for `raw` explicitly or every Bash call would wait for a decision.
+        // `ask` keeps gated, which its profile requires (a non-gated mode would run Bash without asking).
+        ...(thread.mode === 'full' ? { bashApproval: 'raw' as const } : {}),
         model: effort === undefined ? model : `${model}[${effort}]`,
         carryHistoryAcrossModels: true,
         hostPorts: {
@@ -110,40 +144,48 @@ export class ThreadSessionFactory {
           },
         },
       } satisfies NativeBackendOptions;
-      const backend = this.agent.nativeBackend(backendOptions);
-      const sessionOptions: CreateAgentSessionOptions = {
-        backend,
-        profile: 'read',
-        workdir: input.worktree,
-        instructions: thread.instructions,
-        tools: input.tools,
-        transcriptStore: this.agent.createFileTranscriptStore(threadTranscriptDir(this.options.homeDir, thread.threadId)),
-        approvalTimeoutMs: approvalTimeoutMsFor(input.approvalTimeoutSec),
-        turnTimeoutSeconds: 900,
-        metadata: { threadId: thread.threadId, jobId: input.jobId },
-      };
-
-      if (thread.resume) {
-        try {
-          const session = await this.agent.resumeAgentSession(thread.threadId, sessionOptions);
-          return { ok: true, session, resumed: true };
-        } catch (error) {
-          if (agentSessionCode(error) !== 'AGENT_SESSION_NOT_FOUND') throw error;
-          const session = await this.agent.createAgentSession({ ...sessionOptions, sessionId: thread.threadId });
-          return { ok: true, session, resumed: false };
-        }
-      }
-
-      try {
-        const session = await this.agent.createAgentSession({ ...sessionOptions, sessionId: thread.threadId });
-        return { ok: true, session, resumed: false };
-      } catch (error) {
-        if (agentSessionCode(error) !== 'AGENT_SESSION_EXISTS') throw error;
-        const session = await this.agent.resumeAgentSession(thread.threadId, sessionOptions);
-        return { ok: true, session, resumed: true };
-      }
+      return await this.start(input, this.agent.nativeBackend(backendOptions));
     } catch (error) {
       return { ok: false, reason: failureReason(error) };
+    }
+  }
+
+  /**
+   * The session itself, on a backend the caller built: one set of options for native and ACP alike, then the
+   * resume/create fallback. Errors escape to `open`, which maps the agent-session codes to a failure reason.
+   */
+  private async start(input: OpenThreadSessionOptions, backend: SessionBackend): Promise<OpenThreadSessionResult> {
+    const { thread } = input;
+    const sessionOptions: CreateAgentSessionOptions = {
+      backend,
+      profile: thread.mode ?? 'read',
+      workdir: input.worktree,
+      instructions: thread.instructions,
+      tools: input.tools,
+      transcriptStore: this.agent.createFileTranscriptStore(threadTranscriptDir(this.options.homeDir, thread.threadId)),
+      approvalTimeoutMs: approvalTimeoutMsFor(input.approvalTimeoutSec),
+      turnTimeoutSeconds: 900,
+      metadata: { threadId: thread.threadId, jobId: input.jobId },
+    };
+
+    if (thread.resume) {
+      try {
+        const session = await this.agent.resumeAgentSession(thread.threadId, sessionOptions);
+        return { ok: true, session, resumed: true };
+      } catch (error) {
+        if (agentSessionCode(error) !== 'AGENT_SESSION_NOT_FOUND') throw error;
+        const session = await this.agent.createAgentSession({ ...sessionOptions, sessionId: thread.threadId });
+        return { ok: true, session, resumed: false };
+      }
+    }
+
+    try {
+      const session = await this.agent.createAgentSession({ ...sessionOptions, sessionId: thread.threadId });
+      return { ok: true, session, resumed: false };
+    } catch (error) {
+      if (agentSessionCode(error) !== 'AGENT_SESSION_EXISTS') throw error;
+      const session = await this.agent.resumeAgentSession(thread.threadId, sessionOptions);
+      return { ok: true, session, resumed: true };
     }
   }
 }

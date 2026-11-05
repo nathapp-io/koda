@@ -17,6 +17,8 @@ const valid = (over: Record<string, unknown> = {}): Record<string, unknown> => (
   feature: 'add-auth',
   title: 'Auth spec',
   maxCostUsd: '5',
+  agent: 'native',
+  mode: 'read',
   model: 'm1',
   effort: '',
   ...over,
@@ -74,6 +76,8 @@ describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
       feature: 'add-auth',
       title: 'Auth spec',
       maxCostUsd: '5',
+      agent: 'native',
+      mode: 'read',
       model: 'm1',
       effort: '',
       baseRef: '',
@@ -85,6 +89,8 @@ describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
       title: 'Auth spec',
       maxCostUsd: 5,
       backend: { kind: 'native', model: 'm1' },
+      // thread-agents-modes US-011: every REPO body carries its mode.
+      mode: 'read',
     })
     // The empty effort/baseRef are absent, not empty strings (or undefined keys) in the body.
     expect(body).not.toHaveProperty('baseRef')

@@ -9,7 +9,11 @@ export function isThreadKind(command: string): command is typeof THREAD_JOB_KIND
 export const THREAD_COMMAND_TYPES = ['THREAD_INPUT', 'THREAD_ANSWER', 'THREAD_STOP_TURN', 'THREAD_CLOSE', 'THREAD_PUBLISH'] as const;
 export type ThreadCommandType = (typeof THREAD_COMMAND_TYPES)[number];
 
-export type ThreadAgent = 'claude' | 'codex';
+/** The execution profile snapshotted by a thread turn. */
+export type ThreadMode = 'read' | 'ask' | 'full';
+
+/** The ACP backends a runner can host a thread on (thread-agents-modes). nax-agent-acp knows more; the API admits these three. */
+export type ThreadAgent = 'claude' | 'codex' | 'cursor';
 
 /**
  * Fleet S5b §2: where a thread runs. `REPO` owns a repo checkout; `PROJECT` belongs to the project with no checkout;
@@ -22,8 +26,36 @@ export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
   | { kind: 'acp'; agent: ThreadAgent; model?: string; effort?: string };
 
-/** Runner capability report: native model ids it can serve, ACP agents it can launch. */
-export interface ThreadBackends { native: string[]; acp: ThreadAgent[] }
+/** Runner capability report: native model ids it can serve, and an offer per ACP agent it can launch (thread-agents-modes). */
+export interface ThreadBackends {
+  native: string[];
+  /** The agents that are launchable AND logged in: placement admits an `acp` thread only when this lists its agent. */
+  acp: ThreadAgent[];
+  /** Bounded discovery detail per probed agent; absent on a runner that probes none (or whose offer list is malformed). */
+  acpOffers?: ThreadAcpOffer[];
+}
+
+/**
+ * thread-agents-modes §1: what a runner found for one ACP agent. `loggedIn` is `null` when the agent was not probed
+ * or the probe failed, which is why an offer can exist for an agent that is not in `acp`.
+ */
+export interface ThreadAcpOffer {
+  agent: ThreadAgent;
+  launchable: boolean;
+  loggedIn: boolean | null;
+  models: string[];
+  efforts: string[];
+}
+
+/**
+ * An ACP model id: a native id may also carry the `[...]` option suffix nax names models with
+ * (`gpt-5.5[context=272k,reasoning=medium]`). The API mirrors this regex in thread-jobs.ts.
+ */
+export const ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@=,[\]-]{0,127}$/;
+/** An ACP effort id; the API mirrors it in thread-jobs.ts. */
+export const ACP_EFFORT_RE = /^[a-z0-9_-]{1,32}$/;
+/** Caps for one agent's discovery offer; the API mirrors them in thread-jobs.ts. */
+export const ACP_OFFER_LIMITS = { maxEfforts: 8 } as const;
 
 /** Fleet S5b §1: one koda API tool the API attaches to a THREAD ASSIGN so the runner can proxy it into the session. */
 export interface KodaToolDescriptor {
@@ -69,6 +101,8 @@ export type ThreadDiscardFailReason = 'no_worktree' | 'git_error';
 /** ASSIGN's `thread` block, present only for THREAD jobs. */
 export interface ThreadAssign {
   threadId: string;
+  /** Absent on older APIs means read. */
+  mode?: ThreadMode;
   action: ThreadAction;
   /** Fleet S5b 1a-R1: `REPO`, `PROJECT` or `WORKSPACE`; absent means `REPO` (older API). `WORKSPACE`: a personal
    *  thread, no checkout, no project repositories. */
@@ -94,7 +128,8 @@ export interface ThreadAssign {
 }
 
 export interface ThreadInputPayload { messageId: string; text: string }
-export interface ThreadAnswerPayload { requestId: string; text: string }
+/** thread-agents-modes US-008: a text answer to a pending question, or a decision on a pending approval. */
+export type ThreadAnswerPayload = { requestId: string; text: string } | { requestId: string; decision: 'allow' | 'deny' };
 
 export const THREAD_LIMITS = { messageMaxBytes: 32_768, maxNativeModels: 32, maxAcpAgents: 8, maxArchivedThreadIds: 100 } as const;
 
@@ -111,7 +146,7 @@ export type ThreadFailReason = 'backend_unavailable' | 'agent_not_logged_in' | '
 
 /** Lines the runner writes itself; other stream lines are nax-agent SessionEvents. */
 export type ThreadRunnerLine =
-  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }
+  | { type: 'session_started'; mode?: ThreadMode; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }
   | { type: 'session_closed'; at: string; reason: ThreadCloseReason }
   | { type: 'input_consumed'; at: string; messageId: string }
   | { type: 'session_failed'; at: string; reason: ThreadFailReason }

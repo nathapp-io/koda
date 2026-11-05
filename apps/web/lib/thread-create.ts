@@ -1,6 +1,6 @@
 import * as z from 'zod'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
-import type { ChatThreadKind, ThreadBackend } from '~/lib/thread-types'
+import type { ChatThreadKind, ThreadAcpOffer, ThreadAgent, ThreadBackend, ThreadMode } from '~/lib/thread-types'
 import { FEATURE_RE } from '~/lib/fleet-dispatch'
 
 type Translate = (key: string) => string
@@ -12,22 +12,187 @@ export interface ThreadCreateValues {
   feature: string
   title: string
   maxCostUsd: string | number
+  /** The chosen agent: `native` or one ACP agent (thread-agents-modes US-011). */
+  agent: AgentChoiceKey
+  /** REPO threads only: PROJECT and WORKSPACE threads are always `read`. */
+  mode: ThreadMode
   model: string
   effort: string
 }
 
-type NativeBackend = ThreadBackend & { kind: 'native' }
-
 /**
  * The create request body, discriminated by `kind` exactly as the API reads it: a PROJECT thread
- * carries no repository fields at all (a stale value in a hidden form field must never leak).
+ * carries no repository fields at all (a stale value in a hidden form field must never leak), and
+ * only a REPO thread carries `mode` (thread-agents-modes US-011).
  */
 export type CreateThreadBody =
-  | { kind: 'REPO'; repoId: string; feature: string; title: string; maxCostUsd: number; backend: NativeBackend; baseRef?: string }
-  | { kind: 'PROJECT'; title: string; maxCostUsd: number; backend: NativeBackend }
+  | { kind: 'REPO'; repoId: string; feature: string; title: string; maxCostUsd: number; backend: ThreadBackend; mode: ThreadMode; baseRef?: string }
+  | { kind: 'PROJECT'; title: string; maxCostUsd: number; backend: ThreadBackend }
+
+// ── Agents (thread-agents-modes US-011) ──────────────────────────────────────────────────────────
+
+/** What the agent select offers: the runner's own backend, or one ACP agent. */
+export type AgentChoiceKey = 'native' | ThreadAgent
+
+/** Why an agent cannot be picked; each one has its own `fleet.threads.new.agent.reason.*` copy. */
+export type AgentUnavailableReason = 'notInstalled' | 'notLoggedIn' | 'notReady'
+
+/** One option of the agent select, with the models and efforts the chosen agent offers. */
+export interface AgentChoice {
+  agent: AgentChoiceKey
+  available: boolean
+  /** Set only while the agent is unavailable, so a caller never reads a stale reason. */
+  reason: AgentUnavailableReason | null
+  models: string[]
+  efforts: string[]
+}
+
+/** The select's options, in the order the form renders them. */
+export const AGENT_CHOICE_KEYS: readonly AgentChoiceKey[] = ['native', 'claude', 'codex', 'cursor']
+
+/** The native effort ids the API accepts for a native backend (`NATIVE_EFFORT_RE` there). */
+const NATIVE_EFFORT_VALUES: readonly string[] = ['', 'low', 'medium', 'high', 'xhigh']
+
+/**
+ * Mirrors of `ACP_MODEL_ID_RE` / `ACP_EFFORT_RE` in packages/fleet-protocol/src/threads.ts (which the
+ * API mirrors in thread-jobs.ts): an ACP model may carry nax's `[...]` option suffix, and an ACP
+ * effort is any short lowercase id the agent advertises.
+ */
+const ACP_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@=,[\]-]{0,127}$/
+const ACP_EFFORT_RE = /^[a-z0-9_-]{1,32}$/
+
+const ACP_AGENTS: readonly ThreadAgent[] = ['claude', 'codex', 'cursor']
+
+/** True for a value the agent select can produce (`native` included). */
+export function isAgentChoiceKey(value: unknown): value is AgentChoiceKey {
+  return value === 'native' || ACP_AGENTS.includes(value as ThreadAgent)
+}
+
+/** The i18n key of an agent's label ("Claude Code"). */
+export function agentLabelKey(agent: AgentChoiceKey): string {
+  return `fleet.threads.new.agent.${agent}`
+}
+
+/** The i18n key of an unavailable agent's reason ("Not logged in"). */
+export function agentReasonKey(reason: AgentUnavailableReason): string {
+  return `fleet.threads.new.agent.reason.${reason}`
+}
+
+/** A native effort id is translated; an ACP agent's own effort ids (`minimal`, say) are shown raw. */
+export function effortLabel(effort: string, t: Translate): string {
+  return NATIVE_EFFORT_VALUES.includes(effort) ? t(`fleet.threads.new.effort.${effort}`) : effort
+}
+
+/** The modes the project REPO form offers: Read is always allowed, the others follow their key. */
+export function threadModeChoices(can: (key: string) => boolean): ThreadMode[] {
+  return [
+    'read',
+    ...(can('thread.mode.ask') ? ['ask' as const] : []),
+    ...(can('thread.mode.full') ? ['full' as const] : []),
+  ]
+}
+
+const sortedUnion = (lists: ReadonlyArray<readonly string[]>): string[] =>
+  [...new Set(lists.flat())].sort((a, b) => a.localeCompare(b))
+
+/**
+ * The agents the new-thread form can offer for one scope, each with the models and efforts it adds to
+ * the picker. Eligibility keeps the online/enabled/scope-capability filters the model list has always
+ * used.
+ *
+ * Readiness is the eligible runners' `acp` list and nothing else: that list is what placement admits an
+ * ACP thread against (`threadBackends.acp`), and a runner puts an agent in it only when the agent is both
+ * launchable and logged in. The `acpOffers` discovery detail therefore never decides *whether* an agent
+ * can be started — an offer, even a logged-in one, cannot enable an agent that no eligible runner lists
+ * as ready. Offers supply the models and efforts of a ready agent, and the reason an agent that is not
+ * ready cannot be:
+ *
+ * - `notInstalled` — no eligible runner reports the agent launchable,
+ * - `notLoggedIn` — it is launchable, but every launchable offer says `loggedIn: false`,
+ * - `notReady` — it is launchable, but no eligible runner reports it ready (the login is unconfirmed, or
+ *   the runner listed no readiness for it at all).
+ *
+ * A runner that sends no `acpOffers` is still authoritative through its `acp` list; its models are then
+ * unknown and the form offers the agent's own default.
+ */
+export function eligibleAgents(runners: readonly FleetRunnerSummary[], kind: ChatThreadKind): AgentChoice[] {
+  const eligible = runners.filter(runner => runner.online && runner.enabled && scopeCapability(runner, kind))
+  const offersFor = (agent: ThreadAgent): ThreadAcpOffer[] =>
+    eligible.flatMap(runner => runner.threadBackends?.acpOffers?.filter(offer => offer.agent === agent) ?? [])
+  const ready = (agent: ThreadAgent): boolean =>
+    eligible.some(runner => (runner.threadBackends?.acp ?? []).includes(agent))
+
+  return AGENT_CHOICE_KEYS.map((agent) => {
+    if (agent === 'native') {
+      const models = sortedUnion(eligible.map(runner => runner.threadBackends?.native ?? []))
+      return {
+        agent,
+        available: models.length > 0,
+        reason: models.length > 0 ? null : 'notInstalled',
+        models,
+        efforts: [...NATIVE_EFFORT_VALUES].filter(effort => effort !== ''),
+      }
+    }
+    const available = ready(agent)
+    const offers = offersFor(agent)
+    const launchable = offers.filter(offer => offer.launchable)
+    // Only a confirmed login validates the model/effort list a probe reported; a logged-out or
+    // unprobed offer contributes none of it.
+    const confirmed = launchable.filter(offer => offer.loggedIn === true)
+    const reason: AgentUnavailableReason | null = available
+      ? null
+      : launchable.length === 0
+        ? 'notInstalled'
+        : launchable.every(offer => offer.loggedIn === false) ? 'notLoggedIn' : 'notReady'
+    return {
+      agent,
+      available,
+      reason,
+      models: available ? sortedUnion(confirmed.map(offer => offer.models)) : [],
+      efforts: available ? sortedUnion(confirmed.map(offer => offer.efforts)) : [],
+    }
+  })
+}
+
+/** One form-field problem of the backend block; a `superRefine` turns each into a zod issue. */
+export interface BackendFieldIssue { path: 'model' | 'effort'; message: string }
+
+/**
+ * The backend rules, shared by the project and the workspace form: a native backend needs a model id
+ * and one of the fixed efforts; an ACP backend may omit either (an agent can advertise none) but a
+ * value it does send has to match the agent's wider grammar.
+ */
+export function backendFieldIssues(
+  values: { agent?: string; model?: string; effort?: string },
+  t: Translate,
+): BackendFieldIssue[] {
+  const model = (values.model ?? '').trim()
+  const effort = (values.effort ?? '').trim()
+  const agent = isAgentChoiceKey(values.agent) ? values.agent : 'native'
+  if (agent === 'native') {
+    const issues: BackendFieldIssue[] = []
+    if (model.length === 0) issues.push({ path: 'model', message: t('fleet.threads.new.validation.required') })
+    if (!NATIVE_EFFORT_VALUES.includes(effort)) issues.push({ path: 'effort', message: t('fleet.threads.new.validation.invalid') })
+    return issues
+  }
+  const issues: BackendFieldIssue[] = []
+  if (model.length > 0 && !ACP_MODEL_ID_RE.test(model)) issues.push({ path: 'model', message: t('fleet.threads.new.validation.invalid') })
+  if (effort.length > 0 && !ACP_EFFORT_RE.test(effort)) issues.push({ path: 'effort', message: t('fleet.threads.new.validation.invalid') })
+  return issues
+}
+
+/** The backend the chosen agent produces: native, or `acp` with the agent and its own model/effort. */
+export function toThreadBackend(values: { agent?: string; model: string; effort: string }): ThreadBackend {
+  const model = values.model.trim()
+  const effort = values.effort.trim()
+  const agent = isAgentChoiceKey(values.agent) ? values.agent : 'native'
+  if (agent === 'native') {
+    return { kind: 'native', ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  }
+  return { kind: 'acp', agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+}
 
 export function buildThreadCreateSchema(t: Translate) {
-  const required = t('fleet.threads.new.validation.required')
   const invalid = t('fleet.threads.new.validation.invalid')
   return z.object({
     kind: z.enum(['REPO', 'PROJECT']).default('REPO'),
@@ -42,9 +207,16 @@ export function buildThreadCreateSchema(t: Translate) {
       }), t('fleet.threads.new.validation.title')),
     maxCostUsd: z.coerce.number().gt(0, invalid).max(10_000, invalid)
       .refine(value => Math.abs(value * 10_000 - Math.round(value * 10_000)) < 1e-6, invalid),
-    model: z.string().min(1, required),
-    effort: z.enum(['', 'low', 'medium', 'high', 'xhigh']),
+    // The chosen agent decides which backend the body carries and which model/effort rules apply.
+    agent: z.enum(['native', 'claude', 'codex', 'cursor']).default('native'),
+    mode: z.enum(['read', 'ask', 'full']).default('read'),
+    // Length caps keep a pasted value bounded; `backendFieldIssues` decides what each agent accepts.
+    model: z.string().max(128).default(''),
+    effort: z.string().max(32).default(''),
   }).superRefine((values, ctx) => {
+    for (const issue of backendFieldIssues(values, t)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [issue.path], message: issue.message })
+    }
     // A PROJECT thread has no repository, base ref or feature: those rules run only for REPO
     // (S5b 1a-R4), and each issue lands on the field so the form shows it there.
     if (values.kind !== 'REPO') return
@@ -76,11 +248,11 @@ export function buildThreadMessageSchema(t: Translate) {
 
 export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody {
   const baseRef = values.baseRef.trim()
-  const effort = values.effort.trim()
-  const backend: NativeBackend = { kind: 'native', model: values.model, ...(effort ? { effort } : {}) }
+  const backend = toThreadBackend(values)
   const title = values.title
   const maxCostUsd = Number(values.maxCostUsd)
-  // A PROJECT body has no repository keys at all, so a REPO value left in a hidden field cannot leak.
+  // A PROJECT body has no repository keys at all, so a REPO value left in a hidden field cannot leak;
+  // it carries no mode either — a PROJECT thread is always `read` (thread-agents-modes US-011).
   if (values.kind === 'PROJECT') return { kind: 'PROJECT', title, maxCostUsd, backend }
   return {
     kind: 'REPO',
@@ -89,8 +261,14 @@ export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody
     title,
     maxCostUsd,
     backend,
+    mode: threadModeOf(values.mode),
     ...(baseRef ? { baseRef } : {}),
   }
+}
+
+/** The mode a REPO create body carries; anything the form did not set is the default `read`. */
+function threadModeOf(value: unknown): ThreadMode {
+  return value === 'ask' || value === 'full' ? value : 'read'
 }
 
 /** The one scope capability a runner must advertise to host a thread of this kind (S5b). */
@@ -102,10 +280,10 @@ function scopeCapability(runner: FleetRunnerSummary, kind: ChatThreadKind): bool
   return true
 }
 
-/** The models offered by the eligible runners of one scope: union, deduplicated and sorted. */
+/**
+ * The native models offered by the eligible runners of one scope: union, deduplicated and sorted.
+ * This is the agent select's `native` option (US-011); the ACP agents offer their own lists.
+ */
 export function eligibleModels(runners: readonly FleetRunnerSummary[], kind: ChatThreadKind): string[] {
-  return [...new Set(runners
-    .filter(runner => runner.online && runner.enabled && scopeCapability(runner, kind))
-    .flatMap(runner => runner.threadBackends?.native ?? []))]
-    .sort((a, b) => a.localeCompare(b))
+  return eligibleAgents(runners, kind).find(choice => choice.agent === 'native')?.models ?? []
 }

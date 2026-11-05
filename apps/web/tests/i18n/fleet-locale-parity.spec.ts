@@ -171,4 +171,48 @@ describe('Fleet locale parity (en and zh)', () => {
       expect(Object.keys(controls ?? {}).length).toBeGreaterThan(0)
     }
   })
+
+  // thread-agents-modes US-011: the agent select and the REPO mode select render their labels through
+  // dynamic keys (`fleet.threads.new.agent.<agent>`, `...mode.<mode>`, `...agent.reason.<reason>`),
+  // which used-keys-exist.spec cannot see. This pin locks the key sets to the values the forms render.
+  test('the new-thread agent and mode keys cover exactly the values the forms render (US-011)', () => {
+    const agentKeys = ['native', 'claude', 'codex', 'cursor']
+    const modeKeys = ['read', 'ask', 'full']
+    const reasonKeys = ['notInstalled', 'notLoggedIn', 'notReady']
+    for (const locale of [en, zh]) {
+      for (const key of ['label', 'defaultModel', ...agentKeys]) {
+        expect(String(at(locale, `fleet.threads.new.agent.${key}`) ?? '').trim()).not.toBe('')
+      }
+      const reasons = at(locale, 'fleet.threads.new.agent.reason') as Tree | undefined
+      expect(Object.keys(reasons ?? {}).sort()).toEqual([...reasonKeys].sort())
+      for (const key of modeKeys) {
+        expect(String(at(locale, `fleet.threads.new.mode.${key}`) ?? '').trim()).not.toBe('')
+      }
+      expect(String(at(locale, 'fleet.threads.new.mode.label') ?? '').trim()).not.toBe('')
+    }
+  })
+
+  // thread-agents-modes US-012: the thread page's mode control renders `fleet.threads.mode.<mode>` and the approval
+  // card names its two decisions, all through dynamic or two-letter keys a source scan cannot pin. The mode labels must
+  // cover exactly the three `ThreadMode` values, and the approval keys the card and its badge render. B3 adds the two
+  // wordings of a runner-refused decision.
+  test('the thread page mode and approval keys cover exactly what the controls render (US-012)', () => {
+    const modeKeys = ['read', 'ask', 'full']
+    const approvalKeys = ['unsandboxed', 'command', 'reason', 'approve', 'deny', 'awaiting', 'queued', 'retry', 'rejected', 'rejectedNoDetail']
+    for (const locale of [en, zh]) {
+      const modes = at(locale, 'fleet.threads.mode') as Tree | undefined
+      expect(Object.keys(modes ?? {}).sort()).toEqual(['label', 'noPermission', ...modeKeys].sort())
+      for (const key of ['label', 'noPermission', ...modeKeys]) {
+        expect(String(at(locale, `fleet.threads.mode.${key}`) ?? '').trim()).not.toBe('')
+      }
+      const approvals = at(locale, 'fleet.threads.approval') as Tree | undefined
+      expect(Object.keys(approvals ?? {}).sort()).toEqual([...approvalKeys].sort())
+      for (const key of approvalKeys) {
+        expect(String(at(locale, `fleet.threads.approval.${key}`) ?? '').trim()).not.toBe('')
+      }
+    }
+    // AC-12: the two decisions are worded per locale, never left as the English source in zh.
+    expect(String(at(en, 'fleet.threads.approval.approve'))).toBe('Approve')
+    expect(String(at(zh, 'fleet.threads.approval.approve'))).toBe('批准')
+  })
 })

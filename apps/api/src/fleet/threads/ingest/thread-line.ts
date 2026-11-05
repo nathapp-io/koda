@@ -1,4 +1,6 @@
 import { THREAD_STREAM_LIMITS } from '../../common/thread-jobs';
+import type { ThreadMode } from '../../common/thread-jobs';
+import { PENDING_APPROVAL_LIMITS } from '../domain/pending-approvals';
 
 export interface InputConsumedThreadLine {
   type: 'input_consumed';
@@ -72,6 +74,19 @@ export interface ApprovalRequestedThreadLine {
   type: 'approval_requested';
   requestId: string;
   callId?: string;
+  /**
+   * thread-agents-modes US-007: the fields of an answerable, complete request. A line missing `tool`, `summary` or
+   * `expiresAt` keeps today's minimal shape (above) and never becomes a pending approval; a malformed optional field
+   * is dropped and the rest of the line is kept.
+   */
+  tool?: string;
+  summary?: string;
+  command?: string;
+  reason?: string;
+  expiresAt?: string;
+  unsandboxed?: true;
+  /** Absent on a minimal line; `false` marks a request the person cannot answer from the thread. */
+  answerable?: boolean;
 }
 
 export interface ApprovalResolvedThreadLine {
@@ -94,6 +109,8 @@ export interface SessionStartedThreadLine {
   type: 'session_started';
   at?: string;
   resumed: boolean;
+  /** The mode the session opened with (thread-agents-modes US-007); present only when the runner reports a valid one. */
+  mode?: ThreadMode;
   /** Present only when the runner marks the session's worktree stale (fleet S5a §4). */
   stale?: true;
 }
@@ -165,6 +182,12 @@ export const isIgnoredLine = (parsed: ParsedThreadLine): parsed is { ignored: tr
 
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
 const TURN_ID_MAX = 128;
+/** The thread modes a `session_started` line may carry (thread-agents-modes US-007); mirrors `ThreadMode`. */
+const THREAD_MODES: readonly ThreadMode[] = ['read', 'ask', 'full'];
+const APPROVAL_TOOL_MAX = PENDING_APPROVAL_LIMITS.tool;
+const APPROVAL_SUMMARY_MAX = PENDING_APPROVAL_LIMITS.summary;
+const APPROVAL_COMMAND_MAX = PENDING_APPROVAL_LIMITS.command;
+const APPROVAL_REASON_MAX = PENDING_APPROVAL_LIMITS.reason;
 const MAX_TOKEN_COUNT = 2_147_483_647;
 // Rounds are persisted in PostgreSQL Int columns (streamRound and usage round).
 const isRound = (value: unknown): value is number => isIntegerAtLeastZero(value) && value <= 2_147_483_647;
@@ -204,6 +227,23 @@ const isPathList = (value: unknown): value is string[] =>
 /** Keeps the runner's `at` only when it parses as a date; the fold stamps its own time otherwise. */
 function withRunnerAt<T extends SessionThreadLine | WriteThreadLine>(line: T, at: unknown): T {
   return isIsoDate(at) ? { ...line, at } : line;
+}
+
+/**
+ * thread-agents-modes US-007: keeps the answerable, complete fields of an `approval_requested` line. `tool`,
+ * `summary` and `expiresAt` all have to be valid for the line to be complete — anything less keeps today's minimal
+ * shape so the request never becomes a pending approval. `command`, `reason` and `unsandboxed` are optional: a
+ * malformed one is dropped and the rest of the line kept. Absent `answerable` reads as true.
+ */
+function withApprovalFields(line: ApprovalRequestedThreadLine, value: Record<string, unknown>): ApprovalRequestedThreadLine {
+  if (!isNonEmptyString(value.tool, APPROVAL_TOOL_MAX) || !isNonEmptyString(value.summary, APPROVAL_SUMMARY_MAX) || !isIsoDate(value.expiresAt)) return line;
+  const complete: ApprovalRequestedThreadLine = {
+    ...line, tool: value.tool, summary: value.summary, expiresAt: value.expiresAt, answerable: value.answerable !== false,
+  };
+  if (isNonEmptyString(value.command, APPROVAL_COMMAND_MAX)) complete.command = value.command;
+  if (isNonEmptyString(value.reason, APPROVAL_REASON_MAX)) complete.reason = value.reason;
+  if (value.unsandboxed === true) complete.unsandboxed = true;
+  return complete;
 }
 
 function parseUsage(value: Record<string, unknown>): UsageThreadLine | null {
@@ -308,7 +348,7 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
       if (value.callId !== undefined && !isNonEmptyString(value.callId, TURN_ID_MAX)) return { bad: true };
       const line: ApprovalRequestedThreadLine = { type: 'approval_requested', requestId: value.requestId };
       if (value.callId !== undefined) line.callId = value.callId as string;
-      return line;
+      return withApprovalFields(line, value);
     }
     case 'approval_resolved':
       return isNonEmptyString(value.requestId, TURN_ID_MAX) && isNonEmptyString(value.decidedBy, 32)
@@ -323,6 +363,7 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
       if (typeof value.resumed !== 'boolean' || (value.stale !== undefined && value.stale !== true)) return { bad: true };
       const line: SessionStartedThreadLine = { type: 'session_started', resumed: value.resumed };
       if (value.stale === true) line.stale = true;
+      if (THREAD_MODES.includes(value.mode as ThreadMode)) line.mode = value.mode as ThreadMode;
       return withRunnerAt(line, value.at);
     }
     case 'session_closed':

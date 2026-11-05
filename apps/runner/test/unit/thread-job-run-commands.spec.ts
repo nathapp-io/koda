@@ -69,7 +69,7 @@ function setup(options: {
   const openStarted = deferred<void>();
   const opened = deferred<{ ok: true; session: AgentSession; resumed: false }>();
   const calls: string[] = [];
-  const answers: Array<{ requestId: string; answer: { text: string } }> = [];
+  const answers: Array<{ requestId: string; answer: { text: string } | { decision: 'allow' | 'deny' } }> = [];
   const sent: string[] = [];
   const session: AgentSession = {
     id: 'thread-1', backend: { kind: 'native', capabilities: {} }, lastTurn: undefined,
@@ -81,7 +81,7 @@ function setup(options: {
     },
     answer: (requestId, answer) => {
       calls.push('answer');
-      answers.push({ requestId, answer: answer as { text: string } });
+      answers.push({ requestId, answer: answer as { text: string } | { decision: 'allow' | 'deny' } });
       return options.answer?.(requestId, answer) ?? 'accepted';
     },
     cancel: () => { calls.push('cancel'); },
@@ -170,6 +170,33 @@ describe('ThreadJobRun commands and cancellation (US-005)', () => {
     const context = setup(); const { started } = await running(context);
     expect(context.run.command('THREAD_ANSWER', { requestId: 'q1', text: 'yes' })).toEqual({ result: 'ok' });
     expect(context.answers).toEqual([{ requestId: 'q1', answer: { text: 'yes' } }]);
+    context.run.halt(); await started; context.journal.close();
+  });
+
+  test('US-009 AC-1: an allow decision is forwarded and accepted asynchronously', async () => {
+    const context = setup({ answer: (async () => 'accepted') as unknown as AgentSession['answer'] }); const { started } = await running(context);
+    await expect(context.run.command('THREAD_ANSWER', { requestId: 'r1', decision: 'allow' })).resolves.toEqual({ result: 'ok' });
+    expect(context.answers).toEqual([{ requestId: 'r1', answer: { decision: 'allow' } }]);
+    context.run.halt(); await started; context.journal.close();
+  });
+
+  test('US-009 AC-2: a deny decision is forwarded exactly', async () => {
+    const context = setup(); const { started } = await running(context);
+    expect(context.run.command('THREAD_ANSWER', { requestId: 'r1', decision: 'deny' })).toEqual({ result: 'ok' });
+    expect(context.answers).toEqual([{ requestId: 'r1', answer: { decision: 'deny' } }]);
+    context.run.halt(); await started; context.journal.close();
+  });
+
+  test('US-009 AC-3: invalid decision is rejected without calling answer', async () => {
+    const context = setup(); const { started } = await running(context);
+    expect(context.run.command('THREAD_ANSWER', { requestId: 'r1', decision: 'maybe' })).toEqual({ result: 'rejected', detail: 'invalid payload' });
+    expect(context.answers).toEqual([]);
+    context.run.halt(); await started; context.journal.close();
+  });
+
+  test('US-009 AC-5: a nonaccepted decision status is rejected with its status', async () => {
+    const context = setup({ answer: () => 'expired' }); const { started } = await running(context);
+    expect(context.run.command('THREAD_ANSWER', { requestId: 'r1', decision: 'deny' })).toEqual({ result: 'rejected', detail: 'expired' });
     context.run.halt(); await started; context.journal.close();
   });
 

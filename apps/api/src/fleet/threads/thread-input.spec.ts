@@ -43,10 +43,6 @@ describe('validateCreateThread — PROJECT threads (fleet S5b US-003)', () => {
     expect(reasonOf(() => validateCreateThread(raw({ kind: 'PROJECT', baseRef: 'trunk' }), 'trunk'))).toBe('projectFields');
   });
 
-  it('AC-5: a PROJECT thread with an ACP backend (1a-R2) is refused with reason backend', () => {
-    expect(reasonOf(() => validateCreateThread(raw({ kind: 'PROJECT', backend: { kind: 'acp', agent: 'claude' } }), 'trunk'))).toBe('backend');
-  });
-
   it('AC-6: an unknown kind is refused with reason kind', () => {
     expect(reasonOf(() => validateCreateThread(raw({ kind: 'WORKSPACE', repoId: 'r1', feature: 'add-auth' }), 'trunk'))).toBe('kind');
   });
@@ -58,7 +54,49 @@ describe('validateCreateThread — PROJECT threads (fleet S5b US-003)', () => {
   it('AC-8: an absent kind with a repoId, a valid feature and a native backend validates as kind REPO', () => {
     const normalized = validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth' }), 'trunk');
     expect(normalized.kind).toBe('REPO');
-    expect(normalized).toEqual({ kind: 'REPO', repoId: 'r1', feature: 'add-auth', baseRef: 'trunk', title: 'Brainstorm', maxCostUsd: '5', backend: { kind: 'native', model: 'm1' } });
+    expect(normalized).toEqual({ kind: 'REPO', mode: 'read', repoId: 'r1', feature: 'add-auth', baseRef: 'trunk', title: 'Brainstorm', maxCostUsd: '5', backend: { kind: 'native', model: 'm1' } });
+  });
+});
+
+describe('validateCreateThread — ACP backends on every kind (thread-agents-modes US-001)', () => {
+  it('AC-8: a PROJECT thread with an ACP codex backend validates as kind PROJECT', () => {
+    const normalized = validateCreateThread(raw({ kind: 'PROJECT', backend: { kind: 'acp', agent: 'codex' } }), 'trunk');
+    expect(normalized.kind).toBe('PROJECT');
+    expect(normalized).toEqual({ kind: 'PROJECT', title: 'Brainstorm', maxCostUsd: '5', backend: { kind: 'acp', agent: 'codex' } });
+  });
+
+  it('AC-9: a REPO thread accepts acp cursor with a bracketed ACP model id', () => {
+    const backend = { kind: 'acp', agent: 'cursor', model: 'gpt-5.5[context=272k,reasoning=medium]' };
+    const normalized = validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend }), 'main');
+    expect(normalized).toMatchObject({ kind: 'REPO', repoId: 'r1', feature: 'add-auth', backend });
+  });
+
+  it('AC-10: refuses acp gemini with a validation error naming backend', () => {
+    expect(reasonOf(() => validateCreateThread(raw({ kind: 'PROJECT', backend: { kind: 'acp', agent: 'gemini' } }), 'trunk'))).toBe('backend');
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'gemini' } }), 'main'))).toBe('backend');
+  });
+
+  it('keeps MODEL_ID_RE for a native model id, so a bracketed suffix is still refused', () => {
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'native', model: 'gpt-5.5[context=272k]' } }), 'main'))).toBe('backend');
+    expect(validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'native', model: 'gpt-5.5' } }), 'main'))
+      .toMatchObject({ backend: { kind: 'native', model: 'gpt-5.5' } });
+  });
+
+  it('refuses an ACP model id that ACP_MODEL_ID_RE rejects', () => {
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'cursor', model: 'bad model' } }), 'main'))).toBe('backend');
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'cursor', model: 'a'.repeat(129) } }), 'main'))).toBe('backend');
+    // The 128-character boundary is admitted, so the refusal above is the length rule and not a narrower one.
+    expect(validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'cursor', model: 'a'.repeat(128) } }), 'main'))
+      .toMatchObject({ backend: { kind: 'acp', agent: 'cursor' } });
+  });
+
+  it('accepts the effort ids the offer list advertises for an ACP agent', () => {
+    // The picker (US-011) sends an effort straight from `acpOffers`, whose ids ACP_EFFORT_RE admits, so create has to
+    // admit the same set for an acp backend. A native effort keeps its older, narrower rule.
+    expect(validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'cursor', effort: 'x-high_2' } }), 'main'))
+      .toMatchObject({ backend: { kind: 'acp', agent: 'cursor', effort: 'x-high_2' } });
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'native', effort: 'x-high_2' } }), 'main'))).toBe('backend');
+    expect(reasonOf(() => validateCreateThread(raw({ repoId: 'r1', feature: 'add-auth', backend: { kind: 'acp', agent: 'cursor', effort: 'HIGH' } }), 'main'))).toBe('backend');
   });
 });
 

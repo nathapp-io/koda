@@ -10,6 +10,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { AppModule } from '../../src/app.module';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { createFastifyAdapter } from '../../src/common/fastify-adapter';
 
 export const TEST_PASSWORD = 'Admin1234!Aa';
 
@@ -45,7 +46,7 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
   else delete process.env.KODA_OWNER_EMAIL;
   try {
     const app = opts.adapter === 'fastify'
-      ? await AppFactory.createFastifyApp(AppModule)
+      ? await AppFactory.createFastifyApp(AppModule, createFastifyAdapter())
       : await AppFactory.create(AppModule);
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
