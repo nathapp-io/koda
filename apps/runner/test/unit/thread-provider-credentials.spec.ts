@@ -1,8 +1,8 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProviderKeyGrant, ThreadAssign } from '@nathapp/fleet-protocol';
+import type { ProviderKeyGrant, RunnerCapabilities, ThreadAssign } from '@nathapp/fleet-protocol';
 import {
   createFileTranscriptStore,
   nativeBackend,
@@ -20,7 +20,9 @@ import type { Git } from '../../src/executor/git';
 import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
+import type { NativeModelSet } from '../../src/thread/native-models';
 import { ThreadSessionFactory, type ThreadProviderKeys } from '../../src/thread/session-factory';
+import { threadNativeModels } from '../../src/thread/thread-host';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { isNaxSandboxed } from '../helpers/test-environment';
@@ -62,6 +64,8 @@ function factorySetup(overrides: {
   providerKeys?: ProviderKeysMode;
   /** `'default'` builds the factory without one, so it resolves this runner's own argv. */
   selfCommand?: readonly string[] | 'default';
+  /** F2: the production selector, instead of a literal model list. */
+  nativeModels?: () => Promise<NativeModelSet>;
 } = {}) {
   const selfCommand = overrides.selfCommand ?? SELF;
   const calls = {
@@ -75,10 +79,10 @@ function factorySetup(overrides: {
     homeDir: '/runner-home',
     naxHome: '/nax-home',
     ...(selfCommand === 'default' ? {} : { selfCommand }),
-    nativeModels: async () => ({
+    nativeModels: overrides.nativeModels ?? (async () => ({
       models: overrides.models ?? ['openrouter/qwen3', 'openrouter/default', 'qwen3'],
       defaultModel: overrides.defaultModel === undefined ? 'openrouter/qwen3' : overrides.defaultModel,
-    }),
+    })),
     agent: {
       createAgentSession: async (options: CreateAgentSessionOptions) => { calls.create.push(options); return session; },
       resumeAgentSession: async () => session,
@@ -301,6 +305,66 @@ describe('ThreadJobRun provider keys (US-011)', () => {
     context.journal.close();
   });
 
+  test('F1: an abandon while the session open is pending leaves no provider lookup behind', async () => {
+    // The factory is real and stuck before its provider lookup, which is the window an abandon can land in: the row
+    // is deleted and the socket released, and then the open resumes.
+    let unblock: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    const seen: string[] = [];
+    const credentials: CredentialProvider = {
+      async acquire() { seen.push('acquire'); return { ok: true, credentials: { helper: null, binDir: null } }; },
+      async release() { seen.push('release'); },
+      async serveProviderKeys() { seen.push('serve'); return SOCKET; },
+      async providerKeyGranted() { seen.push('granted'); return true; },
+      async releaseProviderKeys() { seen.push('releaseProviderKeys'); },
+    };
+    const journal = Journal.open(':memory:');
+    const assigned = thread({
+      threadId: 'thread-f1', feature: 'thread-f1', skills: [], initialMessage: null,
+      kind: 'PROJECT', backend: { kind: 'native', model: 'openrouter/qwen3' },
+    });
+    journal.insertJob({ assign: assignFor('THREAD', { jobId, thread: assigned }), leaseEpoch, repoKey: 'acme/app', jobDir: join(root, 'f1', jobId) });
+    const host = {
+      sessions: new ThreadSessionFactory({
+        homeDir, naxHome: join(root, 'nax-home'), selfCommand: SELF,
+        nativeModels: async () => { seen.push('nativeModels'); await blocked; return { models: ['openrouter/qwen3'], defaultModel: 'openrouter/qwen3' }; },
+        agent: {
+          createAgentSession: async () => turnSession,
+          resumeAgentSession: async () => turnSession,
+          nativeBackend: (options: NativeBackendOptions) => { seen.push('nativeBackend'); return nativeBackend(options); },
+          createFileTranscriptStore: (directory: string) => createFileTranscriptStore(directory),
+        },
+      }),
+      credentials,
+      git: { async run() { return { code: 0, stdout: '', stderr: '' }; }, async ok() { return ''; } } as Git,
+      homeDir, workspaceRoot,
+      async prepareWorktree() { return { ok: true as const, worktree: join(root, 'f1-wt'), tipSha: 'b'.repeat(40) }; },
+      async ensureSkills() { return { ok: true as const }; },
+    };
+    const logs = { register() {}, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
+    const deps = {
+      journal, log: createMemoryLogger(), now: () => new Date('2026-01-01T00:00:00.000Z'),
+      sleep: async () => undefined, mutex: { acquire: async () => () => undefined }, logs, host, tuning,
+    };
+    const run = new ThreadJobRun(deps, jobId, leaseEpoch);
+    const starting = run.start('prepare');
+    try {
+      await waitFor(() => seen.includes('nativeModels'));
+      await run.abandon();
+      const abandonedAt = seen.lastIndexOf('releaseProviderKeys');
+      expect(abandonedAt, `abandon released at: ${seen.join(', ')}`).toBeGreaterThanOrEqual(0);
+      unblock();
+      await starting;
+      const afterAbandon = seen.slice(abandonedAt + 1);
+      expect(afterAbandon, `calls after the abandonment release: ${seen.join(', ')}`).not.toContain('granted');
+      // The run's own final cleanup still happens after the open resolved: the row it releases is the one it retained,
+      // because abandon deleted the journal row before the run ended.
+      expect(seen.at(-1), `calls: ${seen.join(', ')}`).toBe('releaseProviderKeys');
+    } finally {
+      journal.close();
+    }
+  });
+
   test('AC-13: a provider with only acquire/release opens the session without providerKeys', async () => {
     const ctx = await running({ kind: 'PROJECT', credentials: 'acquire-release-only' });
     expect(ctx.calls, `calls: ${ctx.calls.join(', ')}`).toContain('sessions.open');
@@ -330,7 +394,7 @@ describe('ThreadJobRun provider keys (US-011)', () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// The seam AC-11 pins: a real broker granting openrouter, and the factory that turns the grant into exec credentials.
+// F2: the production model selector must not require a machine-local credential when koda serves the key.
 // ---------------------------------------------------------------------------------------------------------------
 
 const seamDirs: string[] = [];
@@ -338,14 +402,76 @@ afterAll(async () => {
   await Promise.all(seamDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+/** A nax home whose configured tiers name two models; this machine holds a credential for neither provider. */
+async function tierHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), 'naxsel-'));
+  seamDirs.push(home);
+  await writeFile(join(home, 'config.json'), JSON.stringify({
+    models: { native: { balanced: 'openrouter/qwen3', fast: 'zai/glm-5' } },
+  }));
+  return home;
+}
+
+/** The report a vault-enabled machine probes with no local openrouter login: nax knows the provider, cannot use it. */
+function localReport(vault: boolean): RunnerCapabilities {
+  return {
+    nax: { version: '0.91.7', protocols: ['native'] },
+    sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' },
+    profiles: {},
+    credentials: [{ providerId: 'openrouter', available: false, stored: null, ambient: false }],
+    tools: { git: true, gh: false, glab: false },
+    executors: ['host'],
+    ...(vault ? { providerVault: true as const } : {}),
+  };
+}
+
+describe('thread model eligibility with the provider vault (F2)', () => {
+  test('F2: a vault-enabled runner offers a configured model whose provider only koda can serve', async () => {
+    const home = await tierHome();
+    const models = await threadNativeModels(home, () => localReport(true))();
+    expect(models.models, `offered: ${models.models.join(', ')}`).toEqual(['openrouter/qwen3', 'zai/glm-5']);
+    expect(models.defaultModel).toBe('openrouter/qwen3');
+  });
+
+  test('F2: without the vault the selector keeps today\'s rule and offers nothing for an unusable provider', async () => {
+    const home = await tierHome();
+    const models = await threadNativeModels(home, () => localReport(false))();
+    expect(models.models).toEqual([]);
+    expect(models.defaultModel).toBeNull();
+  });
+
+  test('F2: the vault never offers a model no configured tier names', async () => {
+    const home = await tierHome();
+    const models = await threadNativeModels(home, () => localReport(true))();
+    expect(models.models).not.toContain('openrouter/unknown-model');
+    expect(models.models).toHaveLength(2);
+  });
+
+  test('F2: open with the production selector asks the broker for the model\'s provider when the machine has no key', async () => {
+    const home = await tierHome();
+    const h = factorySetup({ providerKeys: 'granted', nativeModels: threadNativeModels(home, () => localReport(true)) });
+    const result = await h.open({ backend: { kind: 'native', model: 'openrouter/qwen3' } });
+    expect(result.ok).toBe(true);
+    expect(h.calls.granted).toEqual(['openrouter']);
+    expect(h.calls.native[0]?.credentials).toEqual({
+      kind: 'exec', command: [...SELF, 'provider-cred', '--socket', SOCKET], timeoutMs: 60_000,
+    });
+  });
+});
+
 /**
  * A real CredentialBroker over a real ProviderKeyCache, a real ThreadSessionFactory and one REPO thread run. The
  * thread's clone URL is an ssh origin, which the broker serves no git token for (D83), so only the provider-key
  * socket is involved here. `serveProviderKeys` replaces the broker's socket listen with a path it would serve from:
- * the nax sandbox refuses a Unix socket bind, so the criterion's own test binds one and the sandbox-runnable test
- * proves the seam around it.
+ * the nax sandbox refuses a Unix socket bind, so the criterion's own test binds one and the sandbox-runnable tests
+ * prove the seam around it. `nativeModels` replaces the factory's model set, which lets a test hold the open at the
+ * exact point an abandon can land in.
  */
-async function seam(serveProviderKeys?: (job: JobRow) => Promise<string>) {
+async function seam(overrides: {
+  serveProviderKeys?: (job: JobRow) => Promise<string>;
+  nativeModels?: () => Promise<NativeModelSet>;
+} = {}) {
+  const { serveProviderKeys } = overrides;
   const cache = new ProviderKeyCache({ refreshMarginMs: 60_000 });
   const socketDir = await mkdtemp(join(tmpdir(), 'pkt-'));
   seamDirs.push(socketDir);
@@ -375,7 +501,7 @@ async function seam(serveProviderKeys?: (job: JobRow) => Promise<string>) {
   const host = {
     sessions: new ThreadSessionFactory({
       homeDir, naxHome: join(root, 'nax-home'), selfCommand: SELF,
-      nativeModels: async () => ({ models: ['openrouter/qwen3'], defaultModel: 'openrouter/qwen3' }),
+      nativeModels: overrides.nativeModels ?? (async () => ({ models: ['openrouter/qwen3'], defaultModel: 'openrouter/qwen3' })),
       agent: {
         createAgentSession: async () => turnSession,
         resumeAgentSession: async () => turnSession,
@@ -450,11 +576,34 @@ describe.skipIf(isNaxSandboxed())('ThreadJobRun with a real provider-key broker 
 describe('ThreadJobRun session credentials from a granted provider (US-011)', () => {
   test('a granted provider opens the session with exec credentials naming the served socket', async () => {
     const SERVED = '/run/provider-keys.sock';
-    const w = await seam(async () => SERVED);
+    const w = await seam({ serveProviderKeys: async () => SERVED });
     try {
       await w.answerGrant();
       await waitFor(() => w.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
       expect(w.native[0]?.credentials).toEqual({ kind: 'exec', command: [...SELF, 'provider-cred', '--socket', SERVED], timeoutMs: 60_000 });
+    } finally {
+      await w.stop();
+    }
+  });
+
+  test('F1: an abandon while the open is pending leaves no provider request in the real broker\'s cache', async () => {
+    const SERVED = '/run/provider-keys.sock';
+    let reachedModels = false;
+    let unblock: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    const w = await seam({
+      serveProviderKeys: async () => SERVED,
+      nativeModels: async () => { reachedModels = true; await blocked; return { models: ['openrouter/qwen3'], defaultModel: 'openrouter/qwen3' }; },
+    });
+    try {
+      await waitFor(() => reachedModels);
+      // The window the finding names: the row is deleted and the socket released while the session is still opening.
+      await w.run.abandon();
+      unblock();
+      await w.starting;
+      expect(w.native, 'the open must have resumed after the abandonment, or the window was never entered').toHaveLength(1);
+      expect(w.cache.requests(), 'a provider request survived a job that is already gone').toEqual([]);
+      expect(w.cache.state(jobId, leaseEpoch, 'openrouter', Date.now()), 'the released epoch must hold no grant').toEqual({ kind: 'pending' });
     } finally {
       await w.stop();
     }

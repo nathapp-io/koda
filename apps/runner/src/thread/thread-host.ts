@@ -1,5 +1,5 @@
 import type { RunnerCapabilities } from '@nathapp/fleet-protocol';
-import { nativeModelsForProviders, readNativeModelConfig, type NativeModelConfig, type NativeModelSet } from './native-models';
+import { nativeModelsForProviders, readNativeModelConfig, tierProvidersFor, type NativeModelConfig, type NativeModelSet } from './native-models';
 
 /**
  * The capability report a probe produced, plus the tier map a report may carry beside its providers. The wire
@@ -41,9 +41,13 @@ function tiersFromReport(report: ReportWithTiers): NativeModelConfig['tiers'] {
 
 /**
  * Fleet S5a §3: the native models a thread session may name, read from the nax home's `models.native` tiers and
- * filtered to the providers the last probe reported available. `latest()` is the bounded report of that probe
- * (start, every `capabilityProbeMs`, SIGHUP), so a provider logged in since is seen at the next probe; with no
- * report yet there is nothing to serve. Read on every call: the tiers and the report both change under a daemon.
+ * filtered to the providers that can actually serve them. `latest()` is the bounded report of that probe (start, every
+ * `capabilityProbeMs`, SIGHUP), so a provider logged in since is seen at the next probe; with no report yet there is
+ * nothing to serve. Read on every call: the tiers and the report both change under a daemon.
+ *
+ * US-011 (round 1, F2): with the provider vault enabled, a provider has two sources — this machine's nax and koda — so
+ * a configured tier stays eligible even when the machine has no credential for its provider. `open` then asks the
+ * broker for that session's provider and falls back to the machine's own store when koda has no key.
  */
 export function threadNativeModels(naxHome: string, latest: () => RunnerCapabilities | null): () => Promise<NativeModelSet> {
   return async () => {
@@ -51,6 +55,7 @@ export function threadNativeModels(naxHome: string, latest: () => RunnerCapabili
     if (report === null) return { models: [], defaultModel: null };
     const configured = await readNativeModelConfig(naxHome);
     const tiers = configured.tiers.length > 0 ? configured.tiers : tiersFromReport(report);
-    return nativeModelsForProviders({ tiers, providers: configured.providers }, availableProviders(report.credentials));
+    const config: NativeModelConfig = { tiers, providers: configured.providers };
+    return nativeModelsForProviders(config, tierProvidersFor(config, availableProviders(report.credentials), report.providerVault === true));
   };
 }

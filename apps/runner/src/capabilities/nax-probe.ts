@@ -12,7 +12,7 @@ import type { Now } from '../time';
 import type { AcpAgentProbe } from './acp-agent-probe';
 import type { CapabilityProbe, ProbeResult } from './capability-probe';
 import { mapLimit } from './map-limit';
-import { nativeModelsForProviders, readNativeModelConfig } from '../thread/native-models';
+import { nativeModelsForProviders, readNativeModelConfig, tierProvidersFor } from '../thread/native-models';
 import {
   MAX_PROVIDERS_PER_PROFILE, parseAuthList, parseInteraction, parseRequirements, parseSandboxProbe, toProfileNeeds, unavailableCredential,
   type Interaction,
@@ -182,7 +182,10 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       const providers = [...new Set([...scan.providers, ...nativeConfig.providers])].sort();
       const credentials = await this.credentials(empty.dir, providers);
       const availableProviders = new Set(credentials.list.filter((credential) => credential.available).map((credential) => credential.providerId));
-      const threadModels = nativeModelsForProviders(nativeConfig, availableProviders);
+      // US-011 (round 1, F2): with the vault enabled, a configured tier is offered for a provider koda may serve even
+      // when this machine has no credential for it; the flag is exactly what tells the API this runner's keys can come
+      // from koda. Without a vault the advertised list stays what this machine can actually use.
+      const threadModels = nativeModelsForProviders(nativeConfig, tierProvidersFor(nativeConfig, availableProviders, vault.enabled));
       const bounded = boundReport({
         nax: { version, protocols },
         sandbox: { ...sandbox, probedAt: this.deps.now().toISOString() },

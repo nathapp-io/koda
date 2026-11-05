@@ -503,3 +503,26 @@ describe('NaxCapabilityProbe provider vault (C10 US-010)', () => {
     expect(warnings).toEqual(['vault helper check failed (config.json is not valid JSON); provider keys are reported as not served']);
   });
 });
+
+describe('NaxCapabilityProbe thread models with the provider vault (US-011 F2)', () => {
+  /** A nax home that configures one native tier, and a machine whose nax has no credential for its provider. */
+  async function vaultHome() {
+    const home = await naxHome([]);
+    await writeFile(join(home, 'config.json'), JSON.stringify({ models: { native: { balanced: 'openrouter/qwen3' } } }));
+    return { home, nax: new FakeNaxCli({ auth: [{ providerId: 'openrouter', available: false }] }) };
+  }
+
+  test('F2: a vault-enabled runner advertises a configured model whose provider has no machine-local credential', async () => {
+    const { home, nax } = await vaultHome();
+    const { capabilities } = await probeWith(home, nax, ['git', 'gh'], undefined, async () => true).run();
+    expect(capabilities.providerVault).toBe(true);
+    expect(capabilities.threadBackends?.native).toEqual(['openrouter/qwen3']);
+  });
+
+  test('F2: without the vault an advertised native model still needs a machine-local credential', async () => {
+    const { home, nax } = await vaultHome();
+    const { capabilities } = await probeWith(home, nax).run();
+    expect('providerVault' in capabilities).toBe(false);
+    expect(capabilities.threadBackends?.native).toEqual([]);
+  });
+});

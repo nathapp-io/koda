@@ -215,6 +215,11 @@ export class ThreadJobRun {
   private sessionClose: Promise<void> | null = null;
   /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
   private closing = false;
+  /**
+   * US-011: the row whose provider keys this run serves. Kept here because `abandon` deletes the journal row before the
+   * run ends, and the final release still needs the job it releases.
+   */
+  private providerKeyRow: JobRow | null = null;
   /** Cost is the sum of `usage.costUsd` over the whole job (a `turn_end.costUsd` repeats its turn's usage). */
   private spent = 0;
   private maxCostUsd = Number.POSITIVE_INFINITY;
@@ -251,8 +256,9 @@ export class ThreadJobRun {
       // Every exit gives up the job's log streams, including a halt, an abandon and a failure whose own recording failed.
       this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
       // US-011: and its provider-key socket. It outlives the git socket by design (a model call needs it to the last
-      // turn), so it is released here rather than with the checkout; `abandon` releases it too, and a second release
-      // on a socket that is already gone is a no-op.
+      // turn), so it is released here rather than with the checkout — after a still-pending `open` has settled, which
+      // is what closes a lookup that raced an abandon. `abandon` releases it too; a second release on a socket that is
+      // already gone is a no-op, and the retained row keeps this cleanup working after `abandon` deleted the journal row.
       await this.releaseProviderKeys(this.row());
     }
   }
@@ -564,15 +570,22 @@ export class ThreadJobRun {
    * opens exactly as it did before the vault existed and nax's process-wide store — the machine's own credentials —
    * serves it. A socket that could not be opened is a warning for the same reason: a thread that runs without koda
    * keys behaves as it always did, and failing the thread over it would deny a run the machine could serve.
+   *
+   * The row is retained for the run's own cleanup, and a halted run serves nothing and grants nothing: an abandon that
+   * lands while `open` is still preparing must not leave a provider request behind for a job that is already gone
+   * (round 1, F1). The `granted` closure repeats the halt check because the session factory may call it after the
+   * abandonment released the socket.
    */
   private async providerKeysFor(row: JobRow): Promise<ThreadProviderKeys | undefined> {
+    this.providerKeyRow = row;
+    if (this.halted) return undefined;
     const credentials = this.deps.host.credentials;
     const serve = credentials.serveProviderKeys;
     const granted = credentials.providerKeyGranted;
     if (serve === undefined || granted === undefined) return undefined;
     try {
       const socket = await serve.call(credentials, row);
-      return { socket, granted: (providerId) => granted.call(credentials, row, providerId) };
+      return { socket, granted: (providerId) => (this.halted ? Promise.resolve(false) : granted.call(credentials, row, providerId)) };
     } catch (error) {
       this.deps.log.warn('provider-key socket unavailable', { jobId: this.jobId, error: errorMessage(error) });
       return undefined;
@@ -582,13 +595,15 @@ export class ThreadJobRun {
   /**
    * US-011: this epoch's provider-key socket and its grants go when the run ends, whatever ended it. Independent of the
    * git release, and a failure only warns: it must never replace the error that ended the run or skip the cleanup
-   * after it. A row that is already gone (an abandon drops it) leaves nothing to release.
+   * after it. The row is the one this run served (retained above) or, before any serve, the journal's own; after an
+   * abandon deleted the journal row, the retained one is what still lets the final cleanup run.
    */
   private async releaseProviderKeys(row: JobRow | null): Promise<void> {
     const release = this.deps.host.credentials.releaseProviderKeys;
-    if (release === undefined || row === null) return;
+    const target = this.providerKeyRow ?? row;
+    if (release === undefined || target === null) return;
     try {
-      await release.call(this.deps.host.credentials, row);
+      await release.call(this.deps.host.credentials, target);
     } catch (error) {
       this.deps.log.warn('provider-key socket could not be released', { jobId: this.jobId, error: errorMessage(error) });
     }
@@ -1072,9 +1087,10 @@ export class ThreadJobRun {
       } catch (error) {
         this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
       }
-      // US-011: the row is read before `abandon` drops it, so the provider-key socket still has a job to release.
-      await this.releaseProviderKeys(row);
     }
+    // US-011: the row is read before `abandon` drops it, and the run's retained one covers a row it read even earlier;
+    // this is the release `start()`'s own finally then repeats once a still-pending `open` has settled.
+    await this.releaseProviderKeys(row);
     await this.awaitSessionClose();
   }
 
