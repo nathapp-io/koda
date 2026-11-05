@@ -32,6 +32,20 @@ class FakeSocket implements RequestSocket {
 
 const settle = (): Promise<void> => Bun.sleep(1);
 
+/**
+ * What the socket wrote, parsed — with the raw text kept so an assertion names it. `null` means nothing was written
+ * or it was not JSON, which a bare diff could not tell apart.
+ */
+function replyOf(written: readonly string[]): { reply: unknown; raw: string } {
+  const raw = written.join('');
+  try {
+    return { reply: JSON.parse(raw), raw };
+  } catch {
+    return { reply: null, raw };
+  }
+}
+const wrote = (written: readonly string[]): string => `the socket wrote ${JSON.stringify(written.join(''))}`;
+
 describe('provider-key line protocol (US-008)', () => {
   test('AC-1: `provider openrouter` is answered with the provider reply as one JSON line', async () => {
     const socket = new FakeSocket();
@@ -39,8 +53,9 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async (providerId) => { asked.push(providerId); return SOCKET; });
     socket.send('provider openrouter\n');
     await settle();
-    expect(socket.written).toEqual(['{"ok":true,"key":"sk-or-1","expiresAt":1760000000000,"account":"koda:global:fleet"}\n']);
-    expect(asked).toEqual(['openrouter']);
+    expect(socket.written, wrote(socket.written))
+      .toEqual(['{"ok":true,"key":"sk-or-1","expiresAt":1760000000000,"account":"koda:global:fleet"}\n']);
+    expect(asked, `the reply was called with ${JSON.stringify(asked)}`).toEqual(['openrouter']);
   });
 
   test('AC-2: `provider Bad!` is a bad request and the provider reply is never called', async () => {
@@ -49,8 +64,8 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => { calls += 1; return SOCKET; });
     socket.send('provider Bad!\n');
     await settle();
-    expect(JSON.parse(socket.written[0] ?? 'null')).toEqual({ ok: false, reason: 'bad request' });
-    expect(calls).toBe(0);
+    expect(replyOf(socket.written).reply, wrote(socket.written)).toEqual({ ok: false, reason: 'bad request' });
+    expect(calls, `the provider reply was called ${calls} time(s) for a bad id`).toBe(0);
   });
 
   test('AC-3: `get` is a bad request on a provider-key socket', async () => {
@@ -59,8 +74,8 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => { calls += 1; return SOCKET; });
     socket.send('get\n');
     await settle();
-    expect(JSON.parse(socket.written[0] ?? 'null')).toEqual({ ok: false, reason: 'bad request' });
-    expect(calls).toBe(0);
+    expect(replyOf(socket.written).reply, wrote(socket.written)).toEqual({ ok: false, reason: 'bad request' });
+    expect(calls, `the provider reply was called ${calls} time(s) for a git request line`).toBe(0);
   });
 
   test('an id the pattern refuses, or no id at all, is a bad request', async () => {
@@ -70,8 +85,9 @@ describe('provider-key line protocol (US-008)', () => {
       serveProviderRequests(socket, async () => { calls += 1; return SOCKET; });
       socket.send(line);
       await settle();
-      expect(JSON.parse(socket.written[0] ?? 'null')).toEqual({ ok: false, reason: 'bad request' });
-      expect(calls).toBe(0);
+      const context = `line ${JSON.stringify(line)}: ${wrote(socket.written)}`;
+      expect(replyOf(socket.written).reply, context).toEqual({ ok: false, reason: 'bad request' });
+      expect(calls, `line ${JSON.stringify(line)}: the provider reply was called ${calls} time(s)`).toBe(0);
     }
   });
 
@@ -82,7 +98,7 @@ describe('provider-key line protocol (US-008)', () => {
     const id = `a${'b'.repeat(47)}`;
     socket.send(`provider ${id}\n`);
     await settle();
-    expect(asked).toEqual([id]);
+    expect(asked, `the socket wrote ${JSON.stringify(socket.written.join(''))} for a 48-character id`).toEqual([id]);
   });
 
   test('a request delivered in two chunks is one line', async () => {
@@ -90,10 +106,10 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => SOCKET);
     socket.send('provider open');
     await settle();
-    expect(socket.written).toEqual([]);
+    expect(socket.written, `half a request line must not be answered: ${wrote(socket.written)}`).toEqual([]);
     socket.send('router\n');
     await settle();
-    expect(JSON.parse(socket.written[0] ?? 'null')).toEqual(SOCKET);
+    expect(replyOf(socket.written).reply, wrote(socket.written)).toEqual(SOCKET);
   });
 
   test('64 bytes without a newline is a bad request', async () => {
@@ -101,7 +117,7 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => SOCKET);
     socket.send('x'.repeat(65));
     await settle();
-    expect(JSON.parse(socket.written[0] ?? 'null')).toEqual({ ok: false, reason: 'bad request' });
+    expect(replyOf(socket.written).reply, wrote(socket.written)).toEqual({ ok: false, reason: 'bad request' });
   });
 
   test('a provider reply that throws answers `error` and never leaks the message', async () => {
@@ -109,7 +125,7 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => { throw new Error('sk-or-secret in a message'); });
     socket.send('provider openrouter\n');
     await settle();
-    expect(JSON.parse(socket.written[0] ?? 'null')).toEqual({ ok: false, reason: 'error' });
+    expect(replyOf(socket.written).reply, wrote(socket.written)).toEqual({ ok: false, reason: 'error' });
   });
 
   test('a provider-key socket answers only one line', async () => {
@@ -118,8 +134,8 @@ describe('provider-key line protocol (US-008)', () => {
     serveProviderRequests(socket, async () => { calls += 1; return SOCKET; });
     socket.send('provider openrouter\nprovider zai\n');
     await settle();
-    expect(socket.written).toHaveLength(1);
-    expect(calls).toBe(1);
+    expect(socket.written, wrote(socket.written)).toHaveLength(1);
+    expect(calls, `two request lines answered ${calls} time(s)`).toBe(1);
   });
 
   test('AC-15: the git line protocol still answers `get` and still refuses `provider openrouter`', async () => {
@@ -128,14 +144,14 @@ describe('provider-key line protocol (US-008)', () => {
     serveCredentialRequests(get, async () => token);
     get.send('get\n');
     await settle();
-    expect(JSON.parse(get.written[0] ?? 'null')).toEqual(token);
+    expect(replyOf(get.written).reply, wrote(get.written)).toEqual(token);
     const provider = new FakeSocket();
     let calls = 0;
     serveCredentialRequests(provider, async () => { calls += 1; return token; });
     provider.send('provider openrouter\n');
     await settle();
-    expect(JSON.parse(provider.written[0] ?? 'null')).toEqual({ ok: false, reason: 'bad request' });
-    expect(calls).toBe(0);
+    expect(replyOf(provider.written).reply, `${wrote(provider.written)} on a git credential socket`).toEqual({ ok: false, reason: 'bad request' });
+    expect(calls, `a git credential socket answered the token ${calls} time(s) to a provider line`).toBe(0);
   });
 });
 
@@ -148,8 +164,18 @@ function ask(path: string, line: string): Promise<string> {
     socket.on('connect', () => socket.write(line));
     socket.on('data', (chunk: string) => { out += chunk; });
     socket.on('end', () => resolve(out));
-    socket.on('error', reject);
+    socket.on('error', (error: Error) => reject(new Error(`${path} failed: ${error.message} (answered ${JSON.stringify(out)})`)));
   });
+}
+
+/** The raw socket answer, parsed, with the text kept for the message (an empty answer means no line came back). */
+async function answerOf(path: string, line: string): Promise<{ reply: unknown; raw: string }> {
+  const raw = await ask(path, line);
+  try {
+    return { reply: JSON.parse(raw), raw };
+  } catch {
+    return { reply: null, raw };
+  }
 }
 
 const dirs: string[] = [];
@@ -168,10 +194,11 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     const path = await socketIn();
     const server = await CredentialServer.listenProviderKeys(path, async (providerId) => ({ ...SOCKET, key: `key-for-${providerId}` }));
     try {
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
-      const answer = await ask(path, 'provider openrouter\n');
-      expect(answer.endsWith('\n')).toBe(true);
-      expect(JSON.parse(answer)).toEqual({ ...SOCKET, key: 'key-for-openrouter' });
+      const mode = (await stat(path)).mode & 0o777;
+      expect(mode, `socket ${path} has mode ${mode.toString(8)}`).toBe(0o600);
+      const { reply, raw } = await answerOf(path, 'provider openrouter\n');
+      expect(raw.endsWith('\n'), `the answer must be one line: ${JSON.stringify(raw)}`).toBe(true);
+      expect(reply, `the socket answered ${JSON.stringify(raw)}`).toEqual({ ...SOCKET, key: 'key-for-openrouter' });
     } finally {
       await server.close();
     }
@@ -182,9 +209,11 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     let calls = 0;
     const server = await CredentialServer.listenProviderKeys(path, async () => { calls += 1; return SOCKET; });
     try {
-      expect(JSON.parse(await ask(path, 'provider Bad!\n'))).toEqual({ ok: false, reason: 'bad request' });
-      expect(JSON.parse(await ask(path, 'get\n'))).toEqual({ ok: false, reason: 'bad request' });
-      expect(calls).toBe(0);
+      const badId = await answerOf(path, 'provider Bad!\n');
+      expect(badId.reply, `the socket answered ${JSON.stringify(badId.raw)} to a bad id`).toEqual({ ok: false, reason: 'bad request' });
+      const git = await answerOf(path, 'get\n');
+      expect(git.reply, `the socket answered ${JSON.stringify(git.raw)} to get`).toEqual({ ok: false, reason: 'bad request' });
+      expect(calls, `the provider reply was called ${calls} time(s)`).toBe(0);
     } finally {
       await server.close();
     }
@@ -195,8 +224,10 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     const path = await socketIn();
     const server = await CredentialServer.listen(path, async () => token);
     try {
-      expect(JSON.parse(await ask(path, 'get\n'))).toEqual(token);
-      expect(JSON.parse(await ask(path, 'provider openrouter\n'))).toEqual({ ok: false, reason: 'bad request' });
+      const git = await answerOf(path, 'get\n');
+      expect(git.reply, `the git socket answered ${JSON.stringify(git.raw)} to get`).toEqual(token);
+      const provider = await answerOf(path, 'provider openrouter\n');
+      expect(provider.reply, `the git socket answered ${JSON.stringify(provider.raw)} to a provider line`).toEqual({ ok: false, reason: 'bad request' });
     } finally {
       await server.close();
     }
@@ -207,7 +238,8 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     await writeFile(path, 'stale');
     const server = await CredentialServer.listenProviderKeys(path, async () => SOCKET);
     try {
-      expect(JSON.parse(await ask(path, 'provider openrouter\n'))).toEqual(SOCKET);
+      const { reply, raw } = await answerOf(path, 'provider openrouter\n');
+      expect(reply, `the socket answered ${JSON.stringify(raw)} after replacing a stale file`).toEqual(SOCKET);
     } finally {
       await server.close();
     }
@@ -219,11 +251,12 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     const fresh = await CredentialServer.listenProviderKeys(path, async () => SOCKET);
     try {
       await old.close();
-      expect(JSON.parse(await ask(path, 'provider openrouter\n'))).toEqual(SOCKET);
+      const { reply, raw } = await answerOf(path, 'provider openrouter\n');
+      expect(reply, `after the older server closed, the socket answered ${JSON.stringify(raw)}`).toEqual(SOCKET);
     } finally {
       await fresh.close();
     }
-    await expect(stat(path)).rejects.toThrow();
+    await expect(stat(path), `${path} must be gone once its server closed`).rejects.toThrow();
   });
 
   test('close ends a reply that never comes', async () => {
@@ -232,6 +265,7 @@ describe.skipIf(isNaxSandboxed())('CredentialServer.listenProviderKeys (US-008)'
     const pending = ask(path, 'provider openrouter\n').catch(() => 'closed');
     await Bun.sleep(20);
     await server.close();
-    expect(['', 'closed']).toContain(await pending);
+    const seen = await pending;
+    expect(['', 'closed'], `a closed socket must not answer, but it sent ${JSON.stringify(seen)}`).toContain(seen);
   });
 });

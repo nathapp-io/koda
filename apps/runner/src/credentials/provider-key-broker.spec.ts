@@ -48,20 +48,24 @@ function world() {
 }
 
 describe('CredentialBroker provider keys (US-008)', () => {
+  /** What the cache has queued, for an assertion message: a failure has to name the request, not just a diff. */
+  const queued = (cache: ProviderKeyCache): string => `queued provider requests: ${JSON.stringify(cache.requests())}`;
+
   test('AC-6: a request queues a ProviderKeyRequest for the job, its epoch and the provider', () => {
     const w = world();
     const row = w.job(undefined, 3);
     const pending = w.broker.providerKeyReply(row, 'openrouter');
-    expect(w.cache.requests()).toEqual([{ jobId: 'j1', leaseEpoch: 3, providerId: 'openrouter' }]);
+    expect(w.cache.requests(), queued(w.cache)).toEqual([{ jobId: 'j1', leaseEpoch: 3, providerId: 'openrouter' }]);
     w.cache.apply(w.cache.requests(), [w.grant({ jobId: 'j1' })], []);
-    return expect(pending).resolves.toMatchObject({ ok: true });
+    return expect(pending, 'a queued request must resolve once its grant arrives').resolves.toMatchObject({ ok: true });
   });
 
   test('AC-7: the request resolves with the key, the account and expiresAt in epoch milliseconds once the grant lands', async () => {
     const w = world();
     const pending = w.broker.providerKeyReply(w.job(), 'openrouter');
     w.cache.apply(w.cache.requests(), [w.grant()], []);
-    expect(await pending).toEqual({ ok: true, key: 'sk-or-1', expiresAt: T0 + 600_000, account: 'koda:global:fleet' });
+    expect(await pending, `the reply after ${queued(w.cache)} must be the granted key in epoch milliseconds`)
+      .toEqual({ ok: true, key: 'sk-or-1', expiresAt: T0 + 600_000, account: 'koda:global:fleet' });
   });
 
   test('AC-8: a second request inside the lease asks for nothing and answers from the cache', async () => {
@@ -69,10 +73,11 @@ describe('CredentialBroker provider keys (US-008)', () => {
     const row = w.job();
     const first = w.broker.providerKeyReply(row, 'openrouter');
     w.cache.apply(w.cache.requests(), [w.grant()], []);
-    expect(await first).toMatchObject({ ok: true, key: 'sk-or-1' });
+    expect(await first, 'the first request must be answered by its grant').toMatchObject({ ok: true, key: 'sk-or-1' });
     w.clock.now = T0 + 300_000;   // still more than 60 s before expiresAt
-    expect(await w.broker.providerKeyReply(row, 'openrouter')).toMatchObject({ ok: true, key: 'sk-or-1' });
-    expect(w.cache.requests()).toEqual([]);
+    expect(await w.broker.providerKeyReply(row, 'openrouter'), 'a live grant must answer without a new request')
+      .toMatchObject({ ok: true, key: 'sk-or-1' });
+    expect(w.cache.requests(), 'a cached grant must queue nothing').toEqual([]);
   });
 
   test('AC-9: a request inside 60 s of expiresAt queues a new one and does not serve the stale key', async () => {
@@ -80,19 +85,19 @@ describe('CredentialBroker provider keys (US-008)', () => {
     const row = w.job();
     const first = w.broker.providerKeyReply(row, 'openrouter');
     w.cache.apply(w.cache.requests(), [w.grant()], []);
-    expect(await first).toMatchObject({ ok: true, key: 'sk-or-1' });
+    expect(await first, 'the first request must be answered by its grant').toMatchObject({ ok: true, key: 'sk-or-1' });
     w.clock.now = T0 + 600_000 - 30_000;   // inside the refresh margin
     const second = w.broker.providerKeyReply(row, 'openrouter');
-    expect(w.cache.requests()).toEqual([{ jobId: 'j1', leaseEpoch: 1, providerId: 'openrouter' }]);
+    expect(w.cache.requests(), 'a grant inside the 60 s margin must be asked for again').toEqual([{ jobId: 'j1', leaseEpoch: 1, providerId: 'openrouter' }]);
     w.cache.apply(w.cache.requests(), [w.grant({ key: 'sk-or-2' })], []);
-    expect(await second).toMatchObject({ ok: true, key: 'sk-or-2' });
+    expect(await second, 'the re-request must answer the new key, never the stale one').toMatchObject({ ok: true, key: 'sk-or-2' });
   });
 
   test('AC-10: a none for a provider never served to the job answers none', async () => {
     const w = world();
     const pending = w.broker.providerKeyReply(w.job(), 'openrouter');
     w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
-    expect(await pending).toEqual({ ok: false, reason: 'none' });
+    expect(await pending, 'a provider this job never had must decline, not revoke').toEqual({ ok: false, reason: 'none' });
   });
 
   test('AC-11: a none for a provider served before answers revoked, so no identity switch happens', async () => {
@@ -100,19 +105,19 @@ describe('CredentialBroker provider keys (US-008)', () => {
     const row = w.job();
     const served = w.broker.providerKeyReply(row, 'openrouter');
     w.cache.apply(w.cache.requests(), [w.grant()], []);
-    expect(await served).toMatchObject({ ok: true });
+    expect(await served, 'the job must be served a key before the revocation can be observed').toMatchObject({ ok: true });
     w.clock.now = T0 + 600_000 - 30_000;   // inside the margin: the next call asks the server again
     const again = w.broker.providerKeyReply(row, 'openrouter');
     w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
-    expect(await again).toEqual({ ok: false, reason: 'revoked' });
+    expect(await again, `a provider served before must revoke, not decline (${queued(w.cache)})`).toEqual({ ok: false, reason: 'revoked' });
   });
 
   test('AC-12: a request with no answer inside 55 s answers error and invents no key', async () => {
     const w = world();
     const started = w.clock.now;
     const pending = w.broker.providerKeyReply(w.job(), 'openrouter');
-    expect(await pending).toEqual({ ok: false, reason: 'error' });
-    expect(w.clock.now - started).toBe(55_000);
+    expect(await pending, 'a request with no answer must answer error, never a key').toEqual({ ok: false, reason: 'error' });
+    expect(w.clock.now - started, `the reply gave up after ${w.clock.now - started} ms of its 55 s budget`).toBe(55_000);
   });
 
   test('providerKeyGranted is true on a grant and false on a denial', async () => {
@@ -120,11 +125,11 @@ describe('CredentialBroker provider keys (US-008)', () => {
     const row = w.job();
     const granted = w.broker.providerKeyGranted(row, 'openrouter');
     w.cache.apply(w.cache.requests(), [w.grant()], []);
-    expect(await granted).toBe(true);
+    expect(await granted, 'providerKeyGranted must be true once the grant is cached').toBe(true);
     w.cache.drop('j1', 1);
     const declined = w.broker.providerKeyGranted(row, 'zai');
     w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'zai', reason: 'none' }]);
-    expect(await declined).toBe(false);
+    expect(await declined, 'providerKeyGranted must be false for a denied provider').toBe(false);
   });
 
   test('a broker with no provider cache answers error rather than inventing a key', async () => {
@@ -136,8 +141,8 @@ describe('CredentialBroker provider keys (US-008)', () => {
     });
     const repo = { provider: 'github' as const, owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' };
     const row = journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1', repo }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(tmpdir(), 'x') }).row;
-    expect(await broker.providerKeyReply(row, 'openrouter')).toEqual({ ok: false, reason: 'error' });
-    expect(await broker.providerKeyGranted(row, 'openrouter')).toBe(false);
+    expect(await broker.providerKeyReply(row, 'openrouter'), 'a broker with no provider cache cannot grant anything').toEqual({ ok: false, reason: 'error' });
+    expect(await broker.providerKeyGranted(row, 'openrouter'), 'a broker with no provider cache holds no key').toBe(false);
   });
   test('serveProviderKeys refuses an unsafe socket directory instead of serving keys from it', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'pku-'));
@@ -153,7 +158,8 @@ describe('CredentialBroker provider keys (US-008)', () => {
     const row = journal.insertJob({ assign: assignFor('RUN', { jobId: 'j1', repo }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(dir, 'j') }).row;
     // D109: the same check the git sockets do, re-run before every listen (the sandbox's deep $TMPDIR trips the
     // length rule first, on a host the mode rule does — either way it is a SocketDirError, so nothing is served).
-    await expect(broker.serveProviderKeys(row)).rejects.toThrow(SocketDirError);
+    await expect(broker.serveProviderKeys(row), `socketDir ${dir} is group-or-world accessible, so no key may be served from it`)
+      .rejects.toThrow(SocketDirError);
   });
 });
 
@@ -185,8 +191,8 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
     const w = await socketWorld();
     try {
       const path = await w.broker.serveProviderKeys(w.row);
-      expect(path.startsWith(w.socketDir)).toBe(true);
-      expect((await stat(path)).isSocket()).toBe(true);
+      expect(path.startsWith(w.socketDir), `serveProviderKeys returned ${path}, outside ${w.socketDir}`).toBe(true);
+      expect((await stat(path)).isSocket(), `${path} is not a socket`).toBe(true);
     } finally {
       await w.broker.closeAll();
     }
@@ -196,10 +202,10 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
     const w = await socketWorld();
     try {
       const [first, second] = await Promise.all([w.broker.serveProviderKeys(w.row), w.broker.serveProviderKeys(w.row)]);
-      expect(first).toBe(second);
+      expect(first, `two concurrent calls returned ${first} and ${second}`).toBe(second);
       const inode = (await stat(first)).ino;
-      expect(await w.broker.serveProviderKeys(w.row)).toBe(first);
-      expect((await stat(first)).ino).toBe(inode);   // a second listen would have replaced the file
+      expect(await w.broker.serveProviderKeys(w.row), `a third call must return ${first}`).toBe(first);
+      expect((await stat(first)).ino, 'a second listen would have replaced the socket file (new inode)').toBe(inode);
     } finally {
       await w.broker.closeAll();
     }
@@ -211,11 +217,11 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
       const path = await w.broker.serveProviderKeys(w.row);
       const pending = w.broker.providerKeyReply(w.row, 'openrouter');
       w.cache.apply(w.cache.requests(), [w.grant()], []);
-      expect(await pending).toMatchObject({ ok: true, key: 'sk-or-1' });
+      expect(await pending, 'the job must hold a grant before the release can be observed').toMatchObject({ ok: true, key: 'sk-or-1' });
       await w.broker.releaseProviderKeys(w.row);
-      await expect(stat(path)).rejects.toThrow();
-      expect(w.cache.state('j1', 1, 'openrouter', Date.now())).toEqual({ kind: 'pending' });
-      expect(w.cache.requests()).toEqual([]);
+      await expect(stat(path), `${path} must be gone after releaseProviderKeys`).rejects.toThrow();
+      expect(w.cache.state('j1', 1, 'openrouter', Date.now()), 'the release must drop the cached grant').toEqual({ kind: 'pending' });
+      expect(w.cache.requests(), 'the release must leave nothing queued').toEqual([]);
     } finally {
       await w.broker.closeAll();
     }
@@ -227,8 +233,8 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
       const path = await w.broker.serveProviderKeys(w.row);
       await mkdir(join(w.row.jobDir, 'bin'), { recursive: true });
       await w.broker.release(w.row);
-      await expect(stat(join(w.row.jobDir, 'bin'))).rejects.toThrow();
-      expect((await stat(path)).isSocket()).toBe(true);
+      await expect(stat(join(w.row.jobDir, 'bin')), 'a provider-key socket must not keep the git shims alive').rejects.toThrow();
+      expect((await stat(path)).isSocket(), `the git release must leave ${path} serving`).toBe(true);
     } finally {
       await w.broker.closeAll();
     }
@@ -238,7 +244,7 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
     const w = await socketWorld();
     const path = await w.broker.serveProviderKeys(w.row);
     await w.broker.closeAll();
-    await expect(stat(path)).rejects.toThrow();
+    await expect(stat(path), `${path} must be gone after closeAll`).rejects.toThrow();
   });
 
   test('a socket request waits for the grant and answers it in epoch milliseconds', async () => {
@@ -248,7 +254,11 @@ describe.skipIf(isNaxSandboxed())('CredentialBroker provider-key socket (US-008)
       const answer = askProvider(path, 'provider openrouter\n');
       await Bun.sleep(20);
       w.cache.apply(w.cache.requests(), [w.grant()], []);
-      expect(JSON.parse(await answer)).toMatchObject({ ok: true, key: 'sk-or-1', account: 'koda:global:fleet' });
+      const raw = await answer;
+      let reply: unknown = null;
+      try { reply = JSON.parse(raw); } catch { reply = null; }
+      expect(reply, `the socket answered ${JSON.stringify(raw)} (empty means no line came back)`)
+        .toMatchObject({ ok: true, key: 'sk-or-1', account: 'koda:global:fleet' });
     } finally {
       await w.broker.closeAll();
     }
@@ -263,6 +273,6 @@ function askProvider(path: string, line: string): Promise<string> {
     socket.on('connect', () => socket.write(line));
     socket.on('data', (chunk: string) => { out += chunk; });
     socket.on('end', () => resolve(out));
-    socket.on('error', reject);
+    socket.on('error', (error: Error) => reject(new Error(`${path} failed: ${error.message} (answered ${JSON.stringify(out)})`)));
   });
 }
