@@ -5,13 +5,18 @@ import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-d
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { actorKind, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { currentContext, runWithActionContext } from '../../action-context/action-context';
-import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling } from './fleet-pr-ruling.domain';
+import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling, type RulingJobTarget } from './fleet-pr-ruling.domain';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import type { FleetRepoRef, FleetJobPrRulings, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { parseRulingText } from './ruling-keyword';
 import type { BotReviewParse } from '../ingest/parsers/bot-review.parser';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
+
+/** #394: the marker nax publishes in a PR comment once it has an item index for the review. */
+export const NAX_ITEM_INDEX_MARKER = '<!-- nax-bot:v1 key=w-index -->';
+/** One comments page: a full page means a marker may sit beyond the page we read, so the check fails open. */
+const ITEM_INDEX_COMMENT_PAGE = 100;
 
 /** Sole ruling writer and eligibility boundary shared by REST and approved execution. */
 @Injectable()
@@ -86,10 +91,45 @@ export class FleetPrRulingsService {
     if (!target) throw new NotFoundAppException({}, 'fleet.jobs');
     if (target.command !== 'RUN' || target.outcome !== 'draft' || target.prNumber === null) throw new ConflictAppException({}, 'fleet.rulings.notDraft');
     if (await this.latestRunForPr(target.repoId, target.prNumber) !== jobId) throw new ConflictAppException({}, 'fleet.rulings.notLatest');
-    if (!target.openItems.some((item) => item.id === dto.itemId)) throw new NotFoundAppException({}, 'fleet.rulings.unknownItem');
+    const item = target.openItems.find((open) => open.id === dto.itemId);
+    if (!item) throw new NotFoundAppException({}, 'fleet.rulings.unknownItem');
+    // #394: a ci item is settled by rerunning CI; a FIX can only report `skipped: unknown-item`. Refuse it here,
+    // before the forge read, so the caller never creates or approves a ruling that cannot apply.
+    if (item.kind === 'ci') throw new ConflictAppException({}, 'fleet.rulings.notRulable');
     if (!parseRulingText(dto.text)) throw new ValidationAppException({ property: 'text' }, 'fleet.rulings.invalidText');
     if ((await this.repo.latestRuling(jobId, dto.itemId))?.state === 'applied') throw new ConflictAppException({}, 'fleet.rulings.settled');
     return target;
+  }
+
+  /**
+   * #394: the pre-transaction gate REST, the approval replay and the assistant run before `create`.
+   * Eligibility first, then the item-index forge read, so a refused target never costs a forge call.
+   */
+  async preflight(projectId: string, jobId: string, dto: CreateRulingInput): Promise<void> {
+    await this.assertItemIndex(await this.ruleTarget(projectId, jobId, dto));
+  }
+
+  /**
+   * #394: refuse a ruling nax could never settle because the PR carries no nax item index.
+   * One page of comments, no pagination and no author check: a planted marker only restores today's
+   * behaviour (a later `unknown-item` skip), and the check fails open on any forge failure, on a
+   * missing installation id and on a full page, so an outage never blocks a ruling.
+   */
+  async assertItemIndex(target: RulingJobTarget): Promise<void> {
+    const { repo, prNumber } = target;
+    if (prNumber === null || repo.provider !== 'github' || repo.githubInstallationId === null) return;
+    let bodies: string[];
+    try {
+      // pull_requests:read is what reading a PR's issue comments needs; the thread-read token grants exactly that.
+      const { token } = await this.github.mintThreadReadToken(repo.githubInstallationId, repo.name);
+      bodies = await this.github.listIssueComments(token, repo.owner, repo.name, prNumber);
+    } catch {
+      // Fail open. Deliberately unlogged: a provider error may carry the ephemeral credential.
+      return;
+    }
+    if (bodies.length >= ITEM_INDEX_COMMENT_PAGE) return;
+    if (bodies.some((body) => body.includes(NAX_ITEM_INDEX_MARKER))) return;
+    throw new ConflictAppException({}, 'fleet.rulings.noItemIndex');
   }
 
   latestRunForPr(repoId: string, prNumber: number) { return this.repo.latestRunForPr(repoId, prNumber); }

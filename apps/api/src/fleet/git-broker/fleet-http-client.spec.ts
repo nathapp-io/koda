@@ -49,4 +49,23 @@ describe('FleetHttpClient', () => {
     await expect(client.request('GET', `${forge.url}/stall-body`, {})).rejects.toMatchObject({ reason: 'provider_unreachable' });
     expect(Date.now() - started).toBeLessThan(2500);
   });
+
+  it('AC-15: without an override the request still aborts at the configured httpTimeoutMs', async () => {
+    forge.routes.set('GET /slow-default', () => ({ status: 200, body: {}, delayMs: 3000 }));
+    const started = Date.now();
+    await expect(client.request('GET', `${forge.url}/slow-default`, {})).rejects.toBeInstanceOf(RepoCheckException);
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(700);
+    expect(elapsed).toBeLessThan(2500);
+  });
+
+  it('AC-15: a per-request timeout override applies to that call only', async () => {
+    forge.routes.set('GET /slow-override', () => ({ status: 200, body: {}, delayMs: 3000 }));
+    const started = Date.now();
+    await expect(client.request('GET', `${forge.url}/slow-override`, {}, undefined, { timeoutMs: 300 }))
+      .rejects.toMatchObject({ reason: 'provider_unreachable' });
+    expect(Date.now() - started).toBeLessThan(800);
+    forge.routes.set('GET /after-override', () => ({ status: 200, body: { ok: true } }));
+    await expect(client.request('GET', `${forge.url}/after-override`, {})).resolves.toEqual({ status: 200, body: { ok: true } });
+  });
 });

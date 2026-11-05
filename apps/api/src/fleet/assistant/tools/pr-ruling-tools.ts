@@ -39,7 +39,7 @@ export class PrRulingTools implements OnModuleInit {
       },
       preview: async (ctx, { jobId, ...dto }) => {
         try {
-          await this.rulings.ruleTarget(ctx.projectId, jobId, dto);
+          await this.rulings.preflight(ctx.projectId, jobId, dto);
         } catch (error) {
           const reason = rulingRefusal(error);
           if (reason === null) throw error;
@@ -51,7 +51,7 @@ export class PrRulingTools implements OnModuleInit {
       },
       execute: async (ctx, { jobId, ...dto }) => {
         try {
-          await this.rulings.ruleTarget(ctx.projectId, jobId, dto);
+          await this.rulings.preflight(ctx.projectId, jobId, dto);
           const ruling = await this.rulings.create(ctx.actor, ctx.projectSlug, jobId, dto);
           return `ruling ${ruling.id}: ${ruling.state}`;
         } catch (error) {
@@ -77,6 +77,8 @@ function rulingRefusal(error: unknown): string | null {
     case 'fleet.rulings.notDraft': return 'job is not a draft RUN';
     case 'fleet.rulings.notLatest': return 'job is not the latest RUN';
     case 'fleet.rulings.settled': return 'item ruling is already applied';
+    case 'fleet.rulings.notRulable': return 'CI items cannot be ruled';
+    case 'fleet.rulings.noItemIndex': return 'pull request has no nax item index';
     case 'fleet.rulings.invalidText': return 'text';
     default: return null;
   }

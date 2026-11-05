@@ -24,11 +24,19 @@ export interface FleetPrRuling {
 }
 export interface CreateRulingInput { itemId: string; text: string }
 export type NewFleetPrRuling = Omit<FleetPrRuling, 'id' | 'createdAt' | 'updatedAt'>;
+/** US-014: what the pre-transaction `w-index` forge read needs, projected off the job's repo. */
+export interface RulingTargetRepo {
+  provider: string;
+  owner: string;
+  name: string;
+  githubInstallationId: bigint | null;
+}
 export interface RulingJobTarget {
   projectId: string;
   repoId: string;
   prNumber: number | null;
   openItems: { id: string; kind: string }[];
+  repo: RulingTargetRepo;
 }
 export type PendingFixRuling = Pick<FleetPrRuling, 'id' | 'itemId' | 'text' | 'actorType' | 'createdAt'> & { actorName: string };
 export interface RulingResultPatch { state: 'applied' | 'skipped'; appliedJobId: string; skipReason: string | null }

@@ -32,10 +32,10 @@ export class FleetRulingsController {
   @ApiResponse({ status: 400, description: 'Invalid ruling text or item id' })
   @ApiResponse({ status: 403, description: 'fleet.job.rule is missing' })
   @ApiResponse({ status: 404, description: 'Job or item not found' })
-  @ApiResponse({ status: 409, description: 'Not a latest draft RUN, or item already applied' })
+  @ApiResponse({ status: 409, description: 'Not a latest draft RUN, a CI item, no nax item index, or item already applied' })
   async create(@Param('id') jobId: string, @CurrentProject() ctx: ProjectContext, @Body() ruling: CreateRulingDto) {
     const { id: projectId, slug } = ctx.project;
-    await this.rulings.ruleTarget(projectId, jobId, ruling);
+    await this.rulings.preflight(projectId, jobId, ruling);
     const outcome = await this.gate.run<FleetPrRulingDto>({ key: 'fleet.job.rule', variant: FLEET_RULING_ROUTE_VARIANTS.create, projectId, input: { slug, projectId, jobId, ruling } });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

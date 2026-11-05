@@ -10,13 +10,20 @@ import { RepoCheckException } from './repo-check.exception';
 export class FleetHttpClient {
   constructor(@Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'httpTimeoutMs'>) {}
 
-  async request(method: 'GET' | 'POST', url: string, headers: Record<string, string>, body?: unknown): Promise<{ status: number; body: unknown }> {
+  async request(
+    method: 'GET' | 'POST',
+    url: string,
+    headers: Record<string, string>,
+    body?: unknown,
+    /** Per-request timeout override; absent keeps the configured `httpTimeoutMs` for every existing caller. */
+    options?: { timeoutMs?: number },
+  ): Promise<{ status: number; body: unknown }> {
     let response: Response;
     try {
       response = await fetch(url, {
         method,
         redirect: 'manual',
-        signal: AbortSignal.timeout(this.config.httpTimeoutMs),
+        signal: AbortSignal.timeout(options?.timeoutMs ?? this.config.httpTimeoutMs),
         headers: { accept: 'application/json', 'user-agent': 'koda-fleet', ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
         body: body === undefined ? undefined : JSON.stringify(body),
       });

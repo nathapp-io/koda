@@ -6414,7 +6414,7 @@
             "description": "Job or item not found"
           },
           "409": {
-            "description": "Not a latest draft RUN, or item already applied"
+            "description": "Not a latest draft RUN, a CI item, no nax item index, or item already applied"
           }
         },
         "security": [
