@@ -23,8 +23,41 @@ const grant = (providerId = 'openrouter', key = 'sk-or-1'): ProviderKeyGrant => 
   jobId: 'j1', providerId, key, account: 'koda:global:fleet', fingerprint: '0123456789ab',
   expiresAt: new Date(T0 + 600_000).toISOString(),
 });
-/** Every assertion carries what it saw: a failure here has to name the request and the reply, not just a diff. */
-const sent = (calls: readonly SyncRequest[], index = 0): string => JSON.stringify(calls[index] ?? null);
+
+/**
+ * Every assertion below is written `expect(value, message)` with the message built here first: a failure then names
+ * the sync body, the reply or the socket answer it saw, not just a diff. `captured()` is the same for a value that
+ * has to be awaited or decoded (JSON, an empty answer) before it can be asserted.
+ */
+const captured = (label: string, value: unknown): string => {
+  const seen = value === null || value === undefined ? String(value) : JSON.stringify(value);
+  return `${label}: ${seen ?? String(value)}`;
+};
+
+/**
+ * Awaits `promise`, failing with `message` instead of hanging the test when nothing arrives. A socket that never
+ * answers would otherwise end the test in a timeout with no assertion message at all.
+ */
+async function within<T>(promise: Promise<T>, message: string, ms = 5_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${message}: nothing arrived within ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The JSON the socket answered, `null` when it answered nothing or something that is not JSON, plus the raw text. */
+function decode(rawAnswer: string): { reply: unknown; raw: string } {
+  try {
+    return { reply: JSON.parse(rawAnswer), raw: rawAnswer };
+  } catch {
+    return { reply: null, raw: rawAnswer };
+  }
+}
 
 const dirs: string[] = [];
 afterAll(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -57,7 +90,8 @@ function harness(cache: ProviderKeyCache) {
     if (!resolveSync) throw new Error('release() before the loop called client.sync: no request was in flight');
     resolveSync(response);
   };
-  return { loop: new SyncLoop(deps), journal, calls, release };
+  const body = (index = 0): string => captured('the sync body the loop sent', calls[index] ?? null);
+  return { loop: new SyncLoop(deps), journal, calls, release, body };
 }
 
 describe('US-008 SyncLoop provider keys', () => {
@@ -67,13 +101,17 @@ describe('US-008 SyncLoop provider keys', () => {
     const h = harness(cache);
     try {
       const pending = h.loop.syncOnce();
-      expect(h.calls[0]?.providerRequests, `the sync body must carry the queued provider request: ${sent(h.calls)}`)
+      const body = h.body();
+      expect(h.calls[0]?.providerRequests, `the sync body must carry the queued provider request; ${body}`)
         .toEqual([{ jobId: 'j1', leaseEpoch: 4, providerId: 'openrouter' }]);
       h.release({ ...empty, providerKeys: [grant()] });
-      expect(await pending, `a provider request must be delivered, not retried or aborted: ${sent(h.calls)}`).toEqual({ kind: 'ok' });
-      expect(cache.state('j1', 4, 'openrouter', T0), 'the grant must land on the epoch its request carried')
+      const outcome = await within(pending, 'the sync that carried a provider request');
+      expect(outcome, `a provider request must be delivered, not retried or aborted; ${body}`).toEqual({ kind: 'ok' });
+      const state = cache.state('j1', 4, 'openrouter', T0);
+      expect(state, `the grant must land on the epoch its request carried; ${captured('state', state)}`)
         .toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
-      expect(cache.requests(), 'an answered request must not be asked for again').toEqual([]);
+      const queued = cache.requests();
+      expect(queued, `an answered request must not be asked for again; ${captured('queued', queued)}`).toEqual([]);
     } finally {
       h.loop.stop();
       h.journal.close();
@@ -88,7 +126,8 @@ describe('US-008 SyncLoop provider keys', () => {
       const pending = h.loop.syncOnce();
       h.loop.wake();
       h.release(empty);
-      expect(await pending, `a write must not abort a poll that carries a provider request: ${sent(h.calls)}`).toEqual({ kind: 'ok' });
+      const outcome = await within(pending, 'the poll that carried a provider request');
+      expect(outcome, `a write must not abort a poll that carries a provider request; ${h.body()}`).toEqual({ kind: 'ok' });
     } finally {
       h.loop.stop();
       h.journal.close();
@@ -100,9 +139,11 @@ describe('US-008 SyncLoop provider keys', () => {
     const h = harness(cache);
     try {
       const pending = h.loop.syncOnce();
-      expect(h.calls[0]?.providerRequests, `nothing is queued, so the body carries no provider requests: ${sent(h.calls)}`).toEqual([]);
+      const carried = h.calls[0]?.providerRequests;
+      expect(carried, `nothing is queued, so the body carries no provider requests; ${h.body()}`).toEqual([]);
       h.loop.wake();
-      expect(await pending, `an idle poll is aborted by a write: ${sent(h.calls)}`).toEqual({ kind: 'woken' });
+      const outcome = await within(pending, 'the idle poll');
+      expect(outcome, `an idle poll is aborted by a write; ${h.body()}`).toEqual({ kind: 'woken' });
     } finally {
       h.loop.stop();
       h.journal.close();
@@ -116,9 +157,35 @@ describe('US-008 SyncLoop provider keys', () => {
     try {
       const pending = h.loop.syncOnce();
       h.release({ ...empty, providerKeyErrors: [{ jobId: 'j1', providerId: 'openrouter', reason: 'vault_off' }] });
-      expect(await pending, `an answer carrying providerKeyErrors is still a successful sync: ${sent(h.calls)}`).toEqual({ kind: 'ok' });
-      expect(cache.state('j1', 1, 'openrouter', T0), 'vault_off before any grant is a decline, never a revocation')
+      const outcome = await within(pending, 'the sync that answered providerKeyErrors');
+      expect(outcome, `an answer carrying providerKeyErrors is still a successful sync; ${h.body()}`).toEqual({ kind: 'ok' });
+      const state = cache.state('j1', 1, 'openrouter', T0);
+      expect(state, `vault_off before any grant is a decline, never a revocation; ${captured('state', state)}`)
         .toEqual({ kind: 'denied', reason: 'none' });
+    } finally {
+      h.loop.stop();
+      h.journal.close();
+    }
+  });
+  test('a providerKeyErrors answer reaches the waiting job as its decline message', async () => {
+    const cache = new ProviderKeyCache({ refreshMarginMs: 60_000 });
+    // The reply waits on this clock; sleep advances it, so a reply that never hears back costs no real time.
+    const clock = { now: T0 };
+    const broker = new CredentialBroker({
+      tokens: new TokenCache({ refreshMarginMs: 240_000, cooldownMs: 30_000 }),
+      providerKeys: cache, socketDir: join(tmpdir(), 'pk-sync'), runnerId: 'r1', selfCommand: ['/k/koda-runner'],
+      nowMs: () => clock.now, sleep: async (ms: number) => { await Promise.resolve(); clock.now += ms; }, timing: { waitMs: 2_000, serveWaitMs: 2_000, pollMs: 250 }, uid,
+    });
+    const repo = { provider: 'github' as const, owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'git@github.com:o/n.git' };
+    const row: JobRow = Journal.open(':memory:').insertJob({ assign: assignFor('RUN', { jobId: 'j1', repo }), leaseEpoch: 1, repoKey: 'o/n', jobDir: join(tmpdir(), 'pk-sync-jobs', 'j1') }).row;
+    const h = harness(cache);
+    try {
+      const waiting = broker.providerKeyReply(row, 'openrouter');
+      const pending = h.loop.syncOnce();
+      h.release({ ...empty, providerKeyErrors: [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }] });
+      await within(pending, 'the sync that answered the decline');
+      const reply = await within(waiting, 'the reply the waiting job reads');
+      expect(reply, `the job must be told why no key came; ${captured('reply', reply)}`).toEqual({ ok: false, reason: 'none' });
     } finally {
       h.loop.stop();
       h.journal.close();
@@ -146,14 +213,15 @@ describe.skipIf(isNaxSandboxed())('US-008 SyncLoop to a real provider-key socket
       const answer = askProvider(path, 'provider openrouter\n');
       await waitFor(() => cache.requests().length > 0, { message: `the socket request at ${path} never queued a ProviderKeyRequest` });
       const pending = h.loop.syncOnce();
-      expect(h.calls[0]?.providerRequests, `the socket's request must be the one the sync carries: ${sent(h.calls)}`)
+      const carried = h.calls[0]?.providerRequests;
+      expect(carried, `the socket's request must be the one the sync carries; ${h.body()}`)
         .toEqual([{ jobId: 'j1', leaseEpoch: 1, providerId: 'openrouter' }]);
       h.release({ ...empty, providerKeys: [grant()] });
-      expect(await pending, `the sync that answered the key must still succeed: ${sent(h.calls)}`).toEqual({ kind: 'ok' });
-      const raw = await answer;
-      let reply: unknown = null;
-      try { reply = JSON.parse(raw); } catch { reply = null; }
-      expect(reply, `provider-key socket answered ${JSON.stringify(raw)} (empty means the connection closed with no line)`)
+      const outcome = await within(pending, 'the sync that answered the socket request');
+      expect(outcome, `the sync that answered the key must still succeed; ${h.body()}`).toEqual({ kind: 'ok' });
+      const raw = await within(answer, 'the provider-key socket answer');
+      const decoded = decode(raw);
+      expect(decoded.reply, `the provider-key socket answered ${JSON.stringify(decoded.raw)}; an empty answer means it closed with no line`)
         .toMatchObject({ ok: true, key: 'sk-or-1', account: 'koda:global:fleet' });
     } finally {
       h.loop.stop();
@@ -171,6 +239,6 @@ function askProvider(path: string, line: string): Promise<string> {
     socket.on('connect', () => socket.write(line));
     socket.on('data', (chunk: string) => { out += chunk; });
     socket.on('end', () => resolve(out));
-    socket.on('error', (error: Error) => reject(new Error(`provider-key socket ${path} failed: ${error.message}`)));
+    socket.on('error', (error: Error) => reject(new Error(`the provider-key socket at ${path} failed: ${error.message}`)));
   });
 }
