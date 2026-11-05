@@ -76,14 +76,27 @@ export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Se
 
 const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
-/** S3 §4.4: the placement rules for one profile the runner reports (also used by the credential board). */
+/**
+ * S3 §4.4: the placement rules for one profile the runner reports (also used by the credential board).
+ *
+ * C10: `providerVault` means the runner's nax config carries koda's exec helper, so the job's provider-key socket can
+ * hand it a key koda holds. A provider the machine has no local `nax auth` credential for is therefore NOT a misfit —
+ * a runner with no machine-local login is exactly what the vault is for, and refusing it here made vault-only fleet
+ * jobs unplaceable. The widening is one-way: a locally available credential still satisfies the need, and a runner
+ * without the helper keeps today's refusal (`provider_missing` is permanent to a pinned dispatch, so it must stay a
+ * statement about the machine, not about koda's inventory).
+ */
 export function profileMisfit(needs: ProfileNeeds, caps: RunnerCapabilities): MisfitReason | null {
   if (!caps.nax.protocols.includes(needs.protocol)) return 'protocol';
+  const vault = caps.providerVault === true;
   for (const provider of needs.providers) {
     const credential = caps.credentials.find((c) => c.providerId === provider);
-    if (!credential) return 'provider_missing';
+    if (!credential) {
+      if (vault) continue;
+      return 'provider_missing';
+    }
     // nax's own verdict (slice 3 design §1.1): available deliberately ignores access-token expiry.
-    if (!credential.available) return 'provider_unavailable';
+    if (!credential.available && !vault) return 'provider_unavailable';
   }
   if (needs.sandbox && !caps.sandbox.available) return 'sandbox';
   // #207: nax could not start this profile's interaction plugin in the runner's environment.

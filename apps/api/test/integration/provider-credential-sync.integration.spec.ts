@@ -125,6 +125,9 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
     await prisma.providerCredentialIssue.deleteMany();
     await prisma.providerCredential.deleteMany();
     await prisma.fleetActivity.deleteMany({ where: { action: 'credential.issued' } });
+    // M1: the stale-epoch tests (AC-6/AC-7) queue an ABANDON that the long poll never waits for. Left here it would
+    // make AC-14 pass on commands alone, so every test starts with an empty queue of its own runner's commands.
+    await prisma.fleetCommand.deleteMany({ where: { runnerId: runner.runnerId } });
     await prisma.fleetJob.updateMany({
       where: { state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } },
       data: { state: 'COMPLETED' },
@@ -330,6 +333,10 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
       const started = Date.now();
       const response = await sync({ providerRequests: [requestKey(j.id, j.leaseEpoch)] });
 
+      // The premise of the AC: nothing but the grant is in this answer, so the early return cannot be a queued command
+      // bypassing the wait (M1: a stale-epoch ABANDON would otherwise make this pass without the idle-check change).
+      expect(response.commands).toEqual([]);
+      expect(response.jobAcks).toEqual([]);
       expect(response.providerKeys).toHaveLength(1);
       expect(Date.now() - started).toBeLessThan(1_000);
     } finally {

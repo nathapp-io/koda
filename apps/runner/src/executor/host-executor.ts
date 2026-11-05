@@ -119,7 +119,7 @@ export class HostExecutor implements JobExecutor {
       const { assign } = job;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
-      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(assign, repoDir);   // D104
+      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(job, repoDir);   // D104
       if (mismatch !== null) return { ok: false, reason: mismatch };
       if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;

@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { generateKeyPairSync } from 'crypto';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NathApplication } from '@nathapp/nestjs-app';
@@ -28,11 +28,14 @@ const MARKER = '<!-- nax-bot:v1 key=w-index -->';
   let forge: FakeForge;
   const saved: Record<string, string | undefined> = {};
   let seq = 0;
+  /** The private key's directory: created once, removed with the suite (it holds a generated key, not a fixture). */
+  let keyDir = '';
 
   beforeAll(async () => {
     forge = await startFakeForge();
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const keyFile = join(mkdtempSync(join(tmpdir(), 'gh-item-index-')), 'app.pem');
+    keyDir = mkdtempSync(join(tmpdir(), 'gh-item-index-'));
+    const keyFile = join(keyDir, 'app.pem');
     writeFileSync(keyFile, privateKey.export({ type: 'pkcs1', format: 'pem' }));
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     Object.assign(process.env, {
@@ -57,6 +60,8 @@ const MARKER = '<!-- nax-bot:v1 key=w-index -->';
   afterAll(async () => {
     await app?.close();
     await forge?.close();
+    // M3: the generated key directory goes with the suite; nothing else removes it.
+    if (keyDir !== '') rmSync(keyDir, { recursive: true, force: true });
     for (const key of ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];

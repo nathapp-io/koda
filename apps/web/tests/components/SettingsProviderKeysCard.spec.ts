@@ -122,6 +122,83 @@ describe('US-013 SettingsProviderKeysCard', () => {
     app.unmount()
     Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
   })
+  test('M2: the delete confirmation interpolates {provider}, the name both locales word', async () => {
+    const originalWindow = globalThis.window
+    const confirm = jest.fn(() => false)
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { confirm } })
+    // The real `t` fills `{provider}` from the params; the stub echoes them, so the key the card passes is observable.
+    const t = (key: string, params?: Record<string, unknown>) => `${key} ${JSON.stringify(params ?? {})}`
+    const app = mountSfc(cardFile, { props: { slug: 'web' }, components: uiStubs, alias: { '~/composables/useApi': apiModule }, globals: { useApi: () => ({ $api: { get, post, patch, delete: remove } }), useI18n: () => ({ t, te: () => true }), useAppToast: () => toast, useProjectPermissions: () => projectPermissionsStub(['project.credential.read', 'project.credential.delete']) } })
+    await flush()
+    await (node(app, 'provider-key-delete-c1')?.props.onClick as () => void)()
+    const text = String(confirm.mock.calls[0]?.[0] ?? '')
+    expect(text).toContain('fleet.providerKeys.deleteConfirm')
+    expect(text).toContain('"provider":"openrouter"')
+    expect(text).not.toContain('"name"')
+    app.unmount()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+  })
+  /**
+   * B2 (branch review): a rotation in flight must not be able to erase a draft. The row's field and actions are closed
+   * until its own response lands, a second click never starts a second write, and a key typed meanwhile — which the
+   * input's disabled state already prevents in the browser, so this drives the handler directly — is not cleared by
+   * the answer to the earlier request.
+   */
+  test('B2: a key typed while the rotation is in flight survives, and the row is closed until it lands', async () => {
+    let release: (value: unknown) => void = () => undefined
+    patch.mockImplementationOnce(async () => new Promise((resolve) => { release = resolve }))
+    const app = await mountCard(['project.credential.read', 'project.credential.update'])
+    ;(node(app, 'provider-key-rotate-input-c1')?.props.onInput as (event: Event) => void)({ target: { value: 'sk-first-123456789abcdef' } } as unknown as Event)
+    const inFlight = (node(app, 'provider-key-rotate-c1')?.props.onClick as () => Promise<void>)()
+    await flush()
+
+    expect(node(app, 'provider-key-rotate-input-c1')?.props.disabled).toBe(true)
+    expect(node(app, 'provider-key-rotate-c1')?.props.disabled).toBe(true)
+    expect(node(app, 'provider-key-disable-c1')?.props.disabled).toBe(true)
+    expect(node(app, 'provider-key-rotate-input-c2')?.props.disabled).toBe(false)   // only that row is closed
+    await (node(app, 'provider-key-rotate-c1')?.props.onClick as () => Promise<void>)()
+    expect(patch).toHaveBeenCalledTimes(1)                                          // a repeated click starts no second write
+
+    ;(node(app, 'provider-key-rotate-input-c1')?.props.onInput as (event: Event) => void)({ target: { value: 'sk-second-123456789abcdef' } } as unknown as Event)
+    release(row())
+    await inFlight
+    await flush()
+
+    expect(patch).toHaveBeenCalledWith('/projects/web/provider-credentials/c1', { key: 'sk-first-123456789abcdef' })
+    expect(node(app, 'provider-key-rotate-input-c1')?.props.value).toBe('sk-second-123456789abcdef')
+    expect(node(app, 'provider-key-rotate-input-c1')?.props.disabled).toBe(false)
+    app.unmount()
+  })
+  test('B2: a completed rotation still clears the key it submitted', async () => {
+    const app = await mountCard(['project.credential.read', 'project.credential.update'])
+    ;(node(app, 'provider-key-rotate-input-c1')?.props.onInput as (event: Event) => void)({ target: { value: 'sk-first-123456789abcdef' } } as unknown as Event)
+    await (node(app, 'provider-key-rotate-c1')?.props.onClick as () => Promise<void>)()
+    await flush()
+    expect(node(app, 'provider-key-rotate-input-c1')?.props.value).toBe('')
+    app.unmount()
+  })
+  test('B2: the add form is closed while its write is in flight and keeps a newer draft', async () => {
+    let release: (value: unknown) => void = () => undefined
+    post.mockImplementationOnce(async () => new Promise((resolve) => { release = resolve }))
+    const app = await mountCard()
+    for (const [id, value] of [['provider-key-provider', 'openrouter'], ['provider-key-name', 'New key'], ['provider-key-secret', 'sk-live-0123456789abcdef']]) {
+      const field = node(app, id)
+      const setValue = field?.props['onUpdate:modelValue'] as (value: string) => void
+      setValue(value)
+    }
+    const inFlight = (node(app, 'provider-key-add')?.props.onClick as () => Promise<void>)()
+    await flush()
+    expect(node(app, 'provider-key-add')?.props.disabled).toBe(true)
+    const secret = node(app, 'provider-key-secret')?.props['onUpdate:modelValue'] as (value: string) => void
+    secret('sk-next-0123456789abcdef')
+    release(row())
+    await inFlight
+    await flush()
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(node(app, 'provider-key-secret')?.props.modelValue).toBe('sk-next-0123456789abcdef')
+    expect(node(app, 'provider-key-add')?.props.disabled).toBe(false)
+    app.unmount()
+  })
   test('AC-7: approval response shows pending without adding a credential row', async () => {
     post.mockResolvedValueOnce({ permissionKey: 'project.credential.create', id: 'approval' })
     const app = await mountCard()

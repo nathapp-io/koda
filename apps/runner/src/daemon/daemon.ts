@@ -203,7 +203,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     uid,
   });
 
-  const jobCheck = naxMode ? new NaxJobCheck({ nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs }) : undefined;   // D104
+  // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
+  // does not refuse a vault-only job for a key koda holds (branch review B1).
+  const jobCheck = naxMode
+    ? new NaxJobCheck({
+      nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs,
+      providerKey: (job, providerId) => broker.providerKeyGranted(job, providerId),
+    })
+    : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({
     config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, ...(jobCheck ? { jobCheck } : {}),
   });

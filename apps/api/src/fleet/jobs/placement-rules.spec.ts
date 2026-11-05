@@ -420,6 +420,40 @@ describe('profileMisfit (S3 §4.4: one profile, the placement rules)', () => {
     expect(profileMisfit(needs(), caps({ sandbox: { available: false, probedAt: NOW.toISOString() } }))).toBe('sandbox');
     expect(profileMisfit(needs({ interaction: TG_FAILED }), caps())).toBe('interaction');
   });
+
+  /**
+   * C10 (branch review B1): a runner whose nax config carries koda's exec helper is served the key over the job's
+   * provider-key socket, so a profile needing a provider the machine has no local `nax auth` credential for is
+   * placeable. Without the helper both refusals stand exactly as before.
+   */
+  it('C10: a vault runner fits a profile whose provider it holds no local credential for', () => {
+    expect(profileMisfit(needs({ providers: ['openrouter'] }), caps({ credentials: [], providerVault: true }))).toBeNull();
+    expect(profileMisfit(needs({ providers: ['openrouter'] }), caps({ providerVault: true }))).toBeNull();
+    expect(profileMisfit(needs(), caps({ credentials: [cred({ available: false })], providerVault: true }))).toBeNull();
+    // The refusal is about the machine, so it survives where the machine has no helper.
+    expect(profileMisfit(needs({ providers: ['openrouter'] }), caps({ credentials: [] }))).toBe('provider_missing');
+    expect(profileMisfit(needs(), caps({ credentials: [cred({ available: false })] }))).toBe('provider_unavailable');
+  });
+
+  it('C10: a vault runner does not widen the rules the vault cannot answer (protocol, sandbox, interaction)', () => {
+    const vault = caps({ providerVault: true, credentials: [] });
+    expect(profileMisfit(needs({ protocol: 'acp' }), vault)).toBe('protocol');
+    expect(profileMisfit(needs({ sandbox: true }), { ...vault, sandbox: { available: false, probedAt: NOW.toISOString() } })).toBe('sandbox');
+    expect(profileMisfit(needs({ interaction: TG_FAILED }), vault)).toBe('interaction');
+  });
+});
+
+/** C10 (branch review B1): the same widening through the job-level rule, which is what dispatch actually runs. */
+describe('firstMisfit with a provider-vault runner (C10)', () => {
+  const needsOpenrouter = { fast: { protocol: 'native' as const, providers: ['openrouter'], sandbox: false } };
+
+  it('places a vault-only runner for a reported profile needing a provider koda can serve', () => {
+    expect(misfit(job(), runner({ capabilities: caps({ profiles: needsOpenrouter, credentials: [], providerVault: true }) }))).toBeNull();
+  });
+
+  it('keeps the provider misfit for the same runner with no helper', () => {
+    expect(misfit(job(), runner({ capabilities: caps({ profiles: needsOpenrouter, credentials: [] }) }))).toBe('provider_missing');
+  });
 });
 
 
