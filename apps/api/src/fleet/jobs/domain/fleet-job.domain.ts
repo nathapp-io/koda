@@ -308,6 +308,11 @@ export interface IFleetJobRepository {
   findThreadAssign(jobId: string): Promise<ThreadAssign | null>;
   /** Minimal scope projection for the per-repository read-only token fence. */
   findThreadTokenScope(jobId: string): Promise<{ kind: ChatThreadKind; action: string } | null>;
+  /**
+   * US-006: the credential scope of a THREAD job — the thread's own project and repo. A PROJECT or
+   * WORKSPACE thread has no repo scope (null), so its project key answers; null when the job has no turn.
+   */
+  findThreadCredentialScope(jobId: string): Promise<{ projectId: string; repoId: string | null } | null>;
   pinThreadRunner(threadId: string, runnerId: string): Promise<void>;
 
   /** Takes the next server seq from FleetJob.eventSeq (row-locked by the increment). */

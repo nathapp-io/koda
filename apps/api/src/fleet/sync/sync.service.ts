@@ -5,17 +5,23 @@ import { FleetJobKind } from '../../common/enums';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { LiveFleetJobEvent } from '../../live/live-event';
+import { FleetActivityService } from '../activity/fleet-activity.service';
 import { parseCapabilities } from '../common/capabilities';
 import { isSupportedProtocolVersion } from '../common/protocol';
-import type { FleetCommandOut, GitToken, GitTokenError, JobAck, SyncResponse } from '../common/protocol';
+import type {
+  FleetCommandOut, GitToken, GitTokenError, JobAck, ProviderKeyError, ProviderKeyGrant, ProviderKeyRequest, SyncResponse,
+} from '../common/protocol';
+import { responsibleUserOf } from '../common/responsible-user';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
 import { fetchableProjectRepos } from '../jobs/project-repos-assign';
-import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
+import type { FleetJobRecord, FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { RUNNER_HELD_STATES, isTerminal } from '../jobs/job-state';
+import { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
+import type { ProviderCredential } from '../provider-credentials/provider-credential.domain';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { ProtocolVersionException } from '../runners/protocol-version.exception';
 import { FenceService } from './fence.service';
@@ -25,6 +31,16 @@ import { PrAttributionService } from './pr-attribution.service';
 import { parseSyncRequest } from './sync-request.parser';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
 import { CHAT_THREAD_REPOSITORY, type ChatThreadRepository } from '../threads/domain/chat-thread.domain';
+
+/** US-006: the hand-out lease a provider key grant carries. */
+export const PROVIDER_KEY_LEASE_MS = 10 * 60_000;
+
+/** US-006: what one sync's provider requests produced, merged into the sync response. */
+interface ProviderGrantOutcome {
+  providerKeys: ProviderKeyGrant[];
+  providerKeyErrors: ProviderKeyError[];
+  unknownJobIds: string[];
+}
 
 /**
  * POST /fleet/runner/sync (spec §3.2). Step 1 is several short transactions (plan D5):
@@ -50,6 +66,8 @@ export class SyncService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly threadEffects: ThreadJobEffects,
     @Inject(CHAT_THREAD_REPOSITORY) private readonly threads: ChatThreadRepository,
+    private readonly providerCredentials: ProviderCredentialsService,
+    private readonly activity: FleetActivityService,
   ) {}
 
   async sync(runnerId: string, raw: unknown): Promise<SyncResponse> {
@@ -104,16 +122,20 @@ export class SyncService {
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
     const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);
+    const provider = await this.grantProviderKeys(runnerId, req.providerRequests ?? [], now);
     let commands = await this.deliver(runnerId, now);
     const idle = jobAcks.length === 0 && unknownJobIds.length === 0 && commands.length === 0 &&
-      tokens.gitTokens.length === 0 && tokens.gitTokenErrors.length === 0 && tokens.unknownJobIds.length === 0;
+      tokens.gitTokens.length === 0 && tokens.gitTokenErrors.length === 0 && tokens.unknownJobIds.length === 0 &&
+      // US-006: a grant or a refusal is an answer, so the runner must not wait out the long poll for it.
+      provider.providerKeys.length === 0 && provider.providerKeyErrors.length === 0 && provider.unknownJobIds.length === 0;
     if (idle) {
       await this.notifier.wait(runnerId, this.fleetConfig.syncWaitMs, async () => (await this.repo.findPendingCommands(runnerId)).length > 0);
       commands = await this.deliver(runnerId, new Date());
     }
     return {
       jobAcks, commands, gitTokens: tokens.gitTokens, gitTokenErrors: tokens.gitTokenErrors,
-      unknownJobIds: [...new Set([...unknownJobIds, ...tokens.unknownJobIds])],
+      providerKeys: provider.providerKeys, providerKeyErrors: provider.providerKeyErrors,
+      unknownJobIds: [...new Set([...unknownJobIds, ...tokens.unknownJobIds, ...provider.unknownJobIds])],
       archivedThreadIds: await this.threads.archivedThreadIds(runnerId),
     };
   }
@@ -164,6 +186,99 @@ export class SyncService {
       else gitTokens.push(result.token);
     }
     return { gitTokens, gitTokenErrors, unknownJobIds };
+  }
+
+  /**
+   * US-006: hand out provider keys. Each request is fenced like a token request (row lock first, so two
+   * overlapping syncs queue one ABANDON), then checked for a runner-held state, for an enabled vault,
+   * and for the job's scope — a THREAD job's own thread, a fleet job's project/repo. Nothing is
+   * decrypted before those checks pass, and the issue row and its `credential.issued` activity commit in
+   * the same transaction, so the attribution and the hand-out cannot disagree.
+   */
+  protected async grantProviderKeys(
+    runnerId: string,
+    requests: readonly ProviderKeyRequest[],
+    now: Date,
+  ): Promise<ProviderGrantOutcome> {
+    const providerKeys: ProviderKeyGrant[] = [];
+    const providerKeyErrors: ProviderKeyError[] = [];
+    const unknownJobIds: string[] = [];
+    if (requests.length === 0) return { providerKeys, providerKeyErrors, unknownJobIds };
+    await this.txManager.run(async () => {
+      for (const req of requests) {
+        const job = await this.repo.lockById(req.jobId);
+        if (!job) {
+          unknownJobIds.push(req.jobId);
+          continue;
+        }
+        if (!this.fence.holds(job, runnerId, req.leaseEpoch)) {
+          await this.fence.abandon(runnerId, job, req.leaseEpoch);
+          continue;
+        }
+        const refusal = this.providerRefusalOf(job);
+        if (refusal !== null) {
+          providerKeyErrors.push({ jobId: job.id, providerId: req.providerId, reason: refusal });
+          continue;
+        }
+        const scope = await this.credentialScopeOf(job);
+        // A thread job whose turn is gone has no scope to resolve in: answer none rather than guess one.
+        const credential = scope
+          ? await this.providerCredentials.resolve({ projectId: scope.projectId, repoId: scope.repoId, providerId: req.providerId })
+          : null;
+        const key = credential === null ? null : this.providerCredentials.issueKey(credential);
+        if (credential === null || key === null) {
+          providerKeyErrors.push({ jobId: job.id, providerId: req.providerId, reason: 'none' });
+          continue;
+        }
+        providerKeys.push({
+          jobId: job.id,
+          providerId: credential.providerId,
+          key,
+          expiresAt: new Date(now.getTime() + PROVIDER_KEY_LEASE_MS).toISOString(),
+          account: `koda:${credential.scope.toLowerCase()}:${credential.name}`,
+          fingerprint: credential.fingerprint,
+        });
+        await this.recordIssue(runnerId, job, credential);
+      }
+    });
+    return { providerKeys, providerKeyErrors, unknownJobIds };
+  }
+
+  /** Why this job may not be handed a key, or null when it may. State and vault first: they leak nothing. */
+  private providerRefusalOf(job: FleetJobRecord): ProviderKeyError['reason'] | null {
+    if (!(RUNNER_HELD_STATES as readonly string[]).includes(job.state)) return 'job_not_active';
+    if (!this.providerCredentials.isEnabled()) return 'vault_off';
+    return null;
+  }
+
+  /**
+   * The scope a job's key is resolved in. A fleet job answers from its own row; a THREAD job answers from
+   * the thread's own project and repo, because its `repoId` is only the worktree anchor (a PROJECT thread
+   * must not borrow the REPO key of the repo it happens to be anchored on).
+   */
+  private async credentialScopeOf(job: FleetJobRecord): Promise<{ projectId: string; repoId: string | null } | null> {
+    if (job.command !== FleetJobKind.THREAD) return { projectId: job.projectId, repoId: job.repoId };
+    return this.repo.findThreadCredentialScope(job.id);
+  }
+
+  /**
+   * One hand-out, deduplicated on (job, credential, fingerprint): only the first issue of a key to a job
+   * records `credential.issued`, so a runner that re-requests within the lease adds no feed noise. Both
+   * rows are bookkeeping of the hand-out itself — the sync records no domain audit entry.
+   */
+  private recordIssue(runnerId: string, job: FleetJobRecord, credential: ProviderCredential): Promise<void> {
+    return bookkeeping('runner.provider-key-issue', async () => {
+      const issued = await this.providerCredentials.recordIssue({
+        jobId: job.id, credentialId: credential.id, fingerprint: credential.fingerprint,
+      });
+      if (!issued) return;
+      await this.activity.record({
+        actorType: 'RUNNER', actorId: runnerId, action: 'credential.issued',
+        entityType: 'provider_credential', entityId: credential.id, jobId: job.id, projectId: job.projectId,
+        responsibleUserId: responsibleUserOf(job),
+        payload: { providerId: credential.providerId, scope: credential.scope, name: credential.name, fingerprint: credential.fingerprint },
+      });
+    });
   }
 
   /** Evicts cached tokens; posts the attribution comment (spec §7.1); ticket effects (C9 §3.2). */

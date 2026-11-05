@@ -16,6 +16,7 @@ import {
   PROVIDER_ID_PATTERN,
   type IProviderCredentialRepository,
   type NewProviderCredential,
+  type NewProviderCredentialIssue,
   type ProviderCredential,
   type ProviderCredentialLookup,
   type ProviderCredentialPatch,
@@ -95,6 +96,15 @@ export class ProviderCredentialsService {
       this.logger.warn(`Unable to decrypt provider credential ${credential.id}`);
       return null;
     }
+  }
+
+  /**
+   * Records one hand-out for attribution (spec §"US-006"): true only when the row was inserted, so a
+   * replayed sync of the same key to the same job records nothing. The caller runs it inside its
+   * transaction, next to the activity entry the row unlocks.
+   */
+  async recordIssue(issue: NewProviderCredentialIssue): Promise<boolean> {
+    return this.repository.recordIssue(issue);
   }
 
   /** One bounded page of GLOBAL rows, as write-only metadata. */

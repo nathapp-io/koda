@@ -18,6 +18,7 @@ const EXPECTED_REASON_IDS = [
   'thread.input-ack',
   'runner.event-log',
   'runner.fence-abandon',
+  'runner.provider-key-issue',
   'runner.boot-reconcile',
   'fleet.placement',
   'fleet.pr-link-job',
@@ -124,7 +125,7 @@ describe('audit coverage bookkeeping', () => {
     expect(entries).toBe(1);
   });
 
-  it('AC-9: contains exactly the 26 initial, two progress and two approval reason ids', () => {
+  it('AC-9: contains exactly the 26 initial, two progress, two approval and one provider-key reason ids', () => {
     expect(Object.keys(BOOKKEEPING_REASONS).sort()).toEqual([...EXPECTED_REASON_IDS].sort());
   });
 

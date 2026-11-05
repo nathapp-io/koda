@@ -9,6 +9,8 @@ import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { FenceService } from './fence.service';
 import { SyncService } from './sync.service';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
+import { FleetActivityService } from '../activity/fleet-activity.service';
+import type { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
 
 const base = { protocolVersion: 4, bootId: 'b1', daemonVersion: '1', freeSlots: 0, jobs: [], commandAcks: [] };
 const repo: FleetRepoRef = { id: 'repo-1', projectId: 'project-1', provider: 'github', owner: 'acme', name: 'repo', defaultBranch: 'main', githubInstallationId: 42n };
@@ -33,6 +35,7 @@ function harness(command: FleetJobKind) {
     repository, createMock(), createMock({ process: async () => ({ live: [] }) }), createMock(), createMock(), createMock(),
     { syncWaitMs: 0 }, broker, fence, createMock(), createMock(), txManager, createMock(),
     createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }),
+    createMock<ProviderCredentialsService>(), createMock<FleetActivityService>(),
   );
   const sync = (fresh = false) => service.sync('runner-1', { ...base, tokenRequests: [{ jobId: job.id, leaseEpoch: job.leaseEpoch, ...(fresh ? { fresh: true } : {}) }] });
   return { sync, github, job, repo, broker };

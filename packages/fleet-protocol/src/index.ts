@@ -234,6 +234,12 @@ export interface CommandAck { commandId: string; leaseEpoch: number; result: Com
 /** Fleet S5b 1c-b: `repoId` asks for one project repository's read-only token (a PROJECT session). */
 export interface TokenRequest { jobId: string; leaseEpoch: number; repoId?: string; fresh?: true }
 
+/**
+ * Provider vault: one scoped provider key the runner asks for on behalf of a job it holds
+ * (spec §"US-006"). `providerId` is the nax provider id, `^[a-z0-9][a-z0-9._-]{0,47}$`.
+ */
+export interface ProviderKeyRequest { jobId: string; leaseEpoch: number; providerId: string }
+
 export interface SyncRequest {
   protocolVersion: number;
   bootId: string;
@@ -244,6 +250,8 @@ export interface SyncRequest {
   jobs: JobReport[];
   commandAcks: CommandAck[];
   tokenRequests: TokenRequest[];
+  /** Optional: absent on peers that do not use the provider vault. At most 64 entries. */
+  providerRequests?: ProviderKeyRequest[];
 }
 
 export interface GitIdentity { name: string; email: string }
@@ -298,6 +306,26 @@ export interface GitToken { jobId: string; token: string; expiresAt: string; use
 export interface GitTokenError { jobId: string; reason: string; repoId?: string }
 export interface JobAck { jobId: string; ackedSeq: number }
 
+/**
+ * One provider key handed to a job (spec §"US-006"). `account` is the nax account label the key is
+ * stored under (`koda:<scope lowercase>:<name>`), so a rotation reads as a new key rather than a
+ * silent overwrite; `expiresAt` is the ISO end of the ten-minute lease and `fingerprint` the
+ * non-reversible id of the key it carries.
+ */
+export interface ProviderKeyGrant {
+  jobId: string;
+  providerId: string;
+  key: string;
+  /** ISO time: the end of the hand-out lease. */
+  expiresAt: string;
+  account: string;
+  fingerprint: string;
+}
+
+/** Why a requested provider key was not granted (fixed reason codes). */
+export type ProviderKeyErrorReason = 'none' | 'job_not_active' | 'vault_off';
+export interface ProviderKeyError { jobId: string; providerId: string; reason: ProviderKeyErrorReason }
+
 export interface SyncResponse {
   jobAcks: JobAck[];
   commands: FleetCommandOut[];
@@ -306,6 +334,10 @@ export interface SyncResponse {
   gitTokenErrors: GitTokenError[];
   /** Plan D7: reported jobs the server does not know; the runner abandons them. */
   unknownJobIds: string[];
+  /** Provider vault: the keys this sync granted. Optional, so a peer that does not use the vault is unaffected. */
+  providerKeys?: ProviderKeyGrant[];
+  /** Provider vault: why a requested key was not granted. Optional, like `providerKeys`. */
+  providerKeyErrors?: ProviderKeyError[];
   /** Fleet S5a: archived thread ids the runner should close; at most THREAD_LIMITS.maxArchivedThreadIds. */
   archivedThreadIds?: string[];
   nextPollAfterMs?: number;

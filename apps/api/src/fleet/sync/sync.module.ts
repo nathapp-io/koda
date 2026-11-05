@@ -6,6 +6,7 @@ import { BudgetsModule } from '../budgets/budgets.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { FleetTicketsModule } from '../tickets/fleet-tickets.module';
+import { ProviderCredentialsModule } from '../provider-credentials/provider-credentials.module';
 import { ThreadStoreModule } from '../threads/thread-store.module';
 import { CommandAckProcessor } from './command-ack.processor';
 import { FenceService } from './fence.service';
@@ -16,7 +17,7 @@ import { RunnerSyncController } from './runner-sync.controller';
 import { SyncService } from './sync.service';
 
 @Module({
-  imports: [PrismaModule, ApprovalStoreModule, FleetActivityModule, BudgetsModule, FleetJobsModule, GitBrokerModule, FleetTicketsModule, ThreadStoreModule],
+  imports: [PrismaModule, ApprovalStoreModule, FleetActivityModule, BudgetsModule, FleetJobsModule, GitBrokerModule, FleetTicketsModule, ThreadStoreModule, ProviderCredentialsModule],
   controllers: [RunnerSyncController],
   providers: [FenceService, JobReportProcessor, CommandAckProcessor, PrAttributionService, SyncService, FleetSweeper],
   exports: [FenceService, FleetSweeper],

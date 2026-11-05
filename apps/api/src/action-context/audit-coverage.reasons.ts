@@ -9,6 +9,7 @@ export const BOOKKEEPING_REASONS = {
   'thread.input-ack': "A runner's ack of a thread input, answer or publish command: the message's error mark, the answered question cleared, the command payload trimmed.",
   'runner.event-log': "Runner event rows, the acked sequence, the job fields mirrored from the runner's reported run facts (cost, progress, `naxRunId`, result branch, sha and PR url, finish result, escalation reason, post-run, stories, config result), and a rejected event's activity row; the state transition that ends a run records its own entry.",
   'runner.fence-abandon': 'The ABANDON command and activity row a fence queues for a stale holder.',
+  'runner.provider-key-issue': 'The provider credential issue row of one fenced hand-out, and the `credential.issued` activity row the first issue of a key to a job records.',
   'runner.boot-reconcile': "A pending ASSIGN's boot id moved to the runner's new boot.",
   'fleet.placement': 'A job or thread assigned to a runner: the lease, the ASSIGN command, the thread pin and the assigned row.',
   'fleet.pr-link-job': 'The job id refreshed on a PR link that already exists.',
