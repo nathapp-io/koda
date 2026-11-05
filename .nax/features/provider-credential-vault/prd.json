@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T13:34:42.107Z",
+  "updatedAt": "2026-11-05T15:00:13.954Z",
   "userStories": [
     {
       "id": "US-001",
@@ -676,14 +676,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Exec protocol failure semantics and secret-free process integration span multiple executor lifecycle paths and restart recovery."
+        "reasoning": "Exec protocol failure semantics and secret-free process integration span multiple executor lifecycle paths and restart recovery.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/internal-commands.ts",
@@ -716,7 +719,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9990a1440631a25fae3b98de5ab86fa7125a86fc"
     },
     {
       "id": "US-010",
