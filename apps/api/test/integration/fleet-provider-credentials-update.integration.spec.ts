@@ -14,6 +14,9 @@ const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = 'PROVIDER_CREDENTIAL_ENCRYPTION_KEY';
 const KEY = 'abcdef0123456789'.repeat(4);
 const PATH = '/api/fleet/provider-credentials';
+/** Upper bound for the delete's statement to show up as blocked; `POLL_MS` is the re-check interval. */
+const BLOCKED_WAIT_MS = 10_000;
+const POLL_MS = 10;
 interface Row { id: string; name: string; fingerprint: string; disabled: boolean; scope: string; }
 const payload = (over: Record<string, unknown> = {}) => ({ providerId: 'openrouter', name: 'primary', key: 'sk-or-abcdef123456', ...over });
 
@@ -25,6 +28,28 @@ describeIntegration('GLOBAL provider credential updates (PG)', () => {
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const call = (method: 'patch' | 'delete', id: string, token = world.tokens.root) => request(server())[method](`${PATH}/${id}`).set(auth(token));
   const create = async (extra: Record<string, unknown> = {}) => data<Row>(await request(server()).post(PATH).set(auth(world.tokens.root)).send(payload(extra)).expect(201));
+  /**
+   * Resolves once some session of this database is visibly waiting on a lock for a credential statement,
+   * i.e. once the DELETE has been sent, reached Postgres and blocked on the uncommitted update this spec
+   * holds. Reading the server's own wait state is what makes the interleaving deterministic: a fixed sleep
+   * passes whether or not the request ever started.
+   */
+  const waitForBlockedStatement = async (): Promise<void> => {
+    const deadline = Date.now() + BLOCKED_WAIT_MS;
+    while (Date.now() < deadline) {
+      const rows = await db.$queryRaw<{ blocked: number }[]>`
+        SELECT count(*)::int AS blocked
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock'
+          AND query LIKE ${'%ProviderCredential%'}
+      `;
+      if ((rows[0]?.blocked ?? 0) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+    throw new Error('the DELETE never waited on the row lock held by the concurrent update');
+  };
 
   beforeAll(async () => {
     const old = process.env[ENV]; process.env[ENV] = KEY;
@@ -95,9 +120,19 @@ describeIntegration('GLOBAL provider credential updates (PG)', () => {
       signalLocked(); await hold;
     });
     await locked;
-    const deleting = call('delete', row.id).expect(200);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    release(); await updating; await deleting;
+
+    // Supertest sends nothing until the chain is `then`-ed or awaited, so binding the continuation here
+    // is what actually dispatches the DELETE — it must already be in flight while the update above owns
+    // the row, otherwise the delete would only start after the update committed and prove nothing.
+    const deleting = call('delete', row.id).expect(200).then((response) => response);
+    // If the wait below fails the request is abandoned; keep that from surfacing as an unhandled rejection.
+    deleting.catch(() => undefined);
+    try {
+      await waitForBlockedStatement();
+    } finally {
+      release(); await updating;
+    }
+    expect((await deleting).status).toBe(200);
     const activity = await db.fleetActivity.findFirstOrThrow({ where: { entityId: row.id, action: 'credential.deleted' } });
     expect(activity.payload).toMatchObject({ name: 'concurrent-rename', fingerprint: 'abcdef123456' });
   });
