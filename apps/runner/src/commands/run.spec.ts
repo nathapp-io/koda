@@ -27,6 +27,10 @@ async function enrolledHome(serverUrl = 'https://koda.example.com') {
 function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void) => void, env: NodeJS.ProcessEnv = {}) {
   const handlers: Array<() => void> = [];
   const signals = new Map<string, () => void>();
+  let resolveReady: () => void = () => undefined;
+  // Config and identity reads may take longer than a timer under the full Turbo suite.
+  // Readiness means runCommand has registered every signal, not just called start().
+  const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
   let stopped = 0;
   let reprobes = 0;
   let stoppedOnce = false;
@@ -46,9 +50,13 @@ function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth';
         reprobe: async () => { reprobes += 1; },
       } satisfies DaemonHandle;
     },
-    onSignal: (signal, handler) => { handlers.push(handler); signals.set(signal, handler); },
+    onSignal: (signal, handler) => {
+      handlers.push(handler);
+      signals.set(signal, handler);
+      if (signals.size === 3) resolveReady();
+    },
   };
-  return { deps, handlers, signals, log, started, get stopped() { return stopped; }, get reprobes() { return reprobes; } };
+  return { deps, ready, handlers, signals, log, started, get stopped() { return stopped; }, get reprobes() { return reprobes; } };
 }
 
 describe('runCommand', () => {
@@ -67,7 +75,7 @@ describe('runCommand', () => {
     const home = await enrolledHome();
     const h = harness(() => undefined);
     const finished = runCommand(home.dir, h.deps);
-    await Bun.sleep(20);
+    await Promise.race([h.ready, finished]);
     expect(h.handlers).toHaveLength(3);
     h.handlers[0]();
     expect(await finished).toBe(0);
@@ -107,9 +115,8 @@ describe('runCommand', () => {
     const home = await enrolledHome();
     const h = harness(() => undefined);
     const finished = runCommand(home.dir, h.deps);
-    await Bun.sleep(20);
+    await Promise.race([h.ready, finished]);
     h.signals.get('SIGHUP')?.();
-    await Bun.sleep(5);
     expect(h.reprobes).toBe(1);
     expect(h.stopped).toBe(0);
     h.signals.get('SIGTERM')?.();
@@ -128,7 +135,7 @@ describe('runCommand', () => {
     const home = await enrolledHome();
     const h = harness(() => undefined);
     const finished = runCommand(home.dir, h.deps);
-    await Bun.sleep(20);
+    await Promise.race([h.ready, finished]);
     expect(h.started).toHaveLength(1);
     expect(h.started[0]?.acpProbe).toBe(probeAcpAgents);
     h.signals.get('SIGTERM')?.();
