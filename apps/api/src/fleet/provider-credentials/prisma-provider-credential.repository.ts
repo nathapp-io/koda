@@ -23,6 +23,7 @@ import {
   type ProviderCredentialPatch,
   type ProviderCredentialScope,
   PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
+  PROVIDER_KEY_SUMMARY_LIMIT,
   scopeKeyFor,
 } from './provider-credential.domain';
 
@@ -115,6 +116,20 @@ export class PrismaProviderCredentialRepository
 
   async listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>> {
     return this.listPage({ scopeKey: GLOBAL_SCOPE_KEY }, page);
+  }
+
+  /**
+   * C10 US-007: the board's `kodaKeys`. A GLOBAL key is unique per provider, so this is naturally one
+   * row per provider; `take` still bounds the read (api-data rule) and the order is total, so two
+   * calls answer the same list.
+   */
+  async listActiveGlobal(): Promise<ProviderCredential[]> {
+    const rows = await this.prisma.client.providerCredential.findMany({
+      where: { scopeKey: GLOBAL_SCOPE_KEY, disabledAt: null },
+      orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+      take: PROVIDER_KEY_SUMMARY_LIMIT,
+    });
+    return rows.map((row) => this.toDomain(row));
   }
 
   async listForProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredential>> {

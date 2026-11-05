@@ -4,6 +4,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { IProviderCredentialRepository, ProviderCredential } from './provider-credential.domain';
+import { PROVIDER_KEY_SUMMARY_LIMIT } from './provider-credential.domain';
 import { ProviderCredentialsService } from './provider-credentials.service';
 import type { IProviderCredentialsConfig } from '../../config/provider-credentials.config';
 import { LocalSecretStore, type SecretStore } from './secret-store';
@@ -22,6 +23,7 @@ function setup(enabled = true) {
     findRepoProject: vi.fn().mockResolvedValue(null),
     lockById: vi.fn().mockResolvedValue(null),
     listGlobal: vi.fn(), listForProject: vi.fn(), insert: vi.fn(), patch: vi.fn(), remove: vi.fn(), recordIssue: vi.fn(),
+    listActiveGlobal: vi.fn().mockResolvedValue([]),
   };
   const secretStore: SecretStore = {
     seal: vi.fn((plaintext: string) => ({ encryptedKey: `sealed:${plaintext}`, last4: plaintext.slice(-4), fingerprint: `fp:${plaintext}` })),
@@ -223,6 +225,48 @@ describe('ProviderCredentialsService', () => {
     expect(page).toMatchObject({ total: 1, current: 1, size: 20 });
     expect(page.records[0]).toMatchObject({ id: row.id, providerId: 'openrouter', last4: '1234', disabled: false });
     expect(page.records[0]).not.toHaveProperty('encryptedKey');
+  });
+
+  /**
+   * C10 US-007: the credential board's koda column. The board a global admin reads carries only
+   * active GLOBAL metadata, and a vault that is off has nothing to project — so it answers [] without
+   * touching the table at all.
+   */
+  it('listActiveGlobalKeys projects the active GLOBAL rows to { providerId, name, last4, updatedAt }', async () => {
+    const { service, repository } = setup();
+    const updatedAt = new Date('2026-11-05T10:00:00.000Z');
+    vi.mocked(repository.listActiveGlobal).mockResolvedValue([
+      makeCredential({ scope: 'GLOBAL', scopeKey: 'global', projectId: null, updatedAt }),
+    ]);
+
+    await expect(service.listActiveGlobalKeys()).resolves.toEqual([
+      { providerId: 'openrouter', name: 'primary', last4: '1234', updatedAt: '2026-11-05T10:00:00.000Z' },
+    ]);
+    // No key, no ciphertext and no fingerprint: the projection is a shape, not a filtered copy.
+    expect(Object.keys((await service.listActiveGlobalKeys())[0]).sort())
+      .toEqual(['last4', 'name', 'providerId', 'updatedAt']);
+  });
+
+  it('listActiveGlobalKeys answers [] and reads nothing while the vault is off', async () => {
+    const { service, repository } = setup(false);
+
+    await expect(service.listActiveGlobalKeys()).resolves.toEqual([]);
+    expect(repository.listActiveGlobal).not.toHaveBeenCalled();
+  });
+
+  it('logs a warning when the koda read hits its cap instead of answering a silently short column', async () => {
+    const { service, repository } = setup();
+    vi.mocked(repository.listActiveGlobal).mockResolvedValue(
+      Array.from({ length: PROVIDER_KEY_SUMMARY_LIMIT }, (_, i) =>
+        makeCredential({ scope: 'GLOBAL', scopeKey: 'global', projectId: null, providerId: `provider${i}` })),
+    );
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const keys = await service.listActiveGlobalKeys();
+
+    expect(keys).toHaveLength(PROVIDER_KEY_SUMMARY_LIMIT);
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('capped'));
+    warning.mockRestore();
   });
 });
 

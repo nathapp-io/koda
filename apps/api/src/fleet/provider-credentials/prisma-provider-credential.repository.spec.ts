@@ -9,6 +9,7 @@ import {
 import {
   GLOBAL_SCOPE_KEY,
   PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
+  PROVIDER_KEY_SUMMARY_LIMIT,
   scopeKeyFor,
 } from './provider-credential.domain';
 
@@ -299,6 +300,30 @@ describe('PrismaProviderCredentialRepository', () => {
 
       await expect(repository.recordIssue({ jobId: 'job-1', credentialId: 'cred-1', fingerprint: '0123456789ab' }))
         .resolves.toBe(false);
+    });
+  });
+
+  /**
+   * C10 US-007: the credential board's koda column is one bounded read of the active GLOBAL rows —
+   * disabled rows filtered out by the query, never by the caller — in the same total order the
+   * management list uses, so two renders of the same data agree.
+   */
+  describe('listActiveGlobal', () => {
+    it('reads the active GLOBAL rows in provider order, bounded by the summary limit', async () => {
+      (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        row(),
+        row({ id: 'cred-2', providerId: 'openai' }),
+      ]);
+
+      const rows = await repository.listActiveGlobal();
+
+      expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith({
+        where: { scopeKey: 'global', disabledAt: null },
+        orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+        take: PROVIDER_KEY_SUMMARY_LIMIT,
+      });
+      expect(rows.map((r) => r.providerId)).toEqual(['openrouter', 'openai']);
+      expect(rows[0]).toMatchObject({ id: 'cred-1', scope: 'GLOBAL' });
     });
   });
 });

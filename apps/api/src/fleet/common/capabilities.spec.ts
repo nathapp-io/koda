@@ -156,4 +156,25 @@ describe('parseCapabilitiesCore', () => {
       expect(() => parseCapabilitiesCore({ ...valid, configJobs })).toThrow(CapabilityValidationError);
     });
   });
+
+  /**
+   * C10 US-007: the runner's provider-helper readiness travels as `providerVault`. Unlike the
+   * `botFix` / `configJobs` flags, a non-true value is dropped rather than fatal (AC-2), which is the
+   * `threadModes` precedent: the board then simply reads the runner as "vault off".
+   */
+  describe('providerVault (C10 US-007)', () => {
+    it('AC-1: keeps providerVault: true', () => {
+      expect(parseCapabilitiesCore({ ...valid, providerVault: true }).providerVault).toBe(true);
+    });
+
+    it("AC-2: drops providerVault when it is not the literal true ('yes')", () => {
+      const parsed = parseCapabilitiesCore({ ...valid, providerVault: 'yes' });
+      expect(parsed).not.toHaveProperty('providerVault');
+      expect(parsed).toEqual(valid);
+    });
+
+    it('omits providerVault when absent (a runner without the helper)', () => {
+      expect(parseCapabilitiesCore(valid)).not.toHaveProperty('providerVault');
+    });
+  });
 });

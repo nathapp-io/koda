@@ -94,6 +94,12 @@ export interface RunnerCapabilities {
   botFix?: true;
   /** nax supports caller rulings for an explicit FIX assignment. */
   botRulings?: true;
+  /**
+   * Provider credential vault (C10 US-010): the runner's nax serves koda's provider keys through a
+   * local exec helper, so a job on this machine does not need `nax auth` per provider. Absent on
+   * older runners, and the credential board then reads that runner as "vault off".
+   */
+  providerVault?: true;
 }
 
 export interface EnrollRequest {

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
 import { isRunnerOnline } from '../common/runner-online';
 import { buildCredentialBoard, CredentialBoard } from './credential-board';
 import { readCapabilities } from './dashboard-view';
@@ -13,10 +14,18 @@ export class CredentialBoardService {
   constructor(
     @Inject(DASHBOARD_REPOSITORY) private readonly repo: IDashboardRepository,
     @Inject(FLEET_CFG) private readonly cfg: BoardConfig,
+    /**
+     * C10 US-007: the vault's public service, for the `kodaKeys` column. The repository stays inside
+     * `ProviderCredentialsModule`; this only accepts the metadata projection it answers.
+     */
+    private readonly credentials: ProviderCredentialsService,
   ) {}
 
   async board(now: Date): Promise<CredentialBoard> {
-    const runners = await this.repo.findRunners();
+    const [runners, kodaKeys] = await Promise.all([
+      this.repo.findRunners(),
+      this.credentials.listActiveGlobalKeys(),
+    ]);
     return buildCredentialBoard(
       runners.map((r) => ({
         id: r.id, name: r.name, enabled: r.enabled,
@@ -25,6 +34,7 @@ export class CredentialBoardService {
       })),
       now,
       this.cfg.credentialExpiryWarnDays,
+      kodaKeys,
     );
   }
 }

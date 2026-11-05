@@ -36,6 +36,13 @@ export const NO_WHITESPACE_PATTERN = /^\S+$/;
  */
 export const PROVIDER_CREDENTIAL_PAGE_SIZE_MAX = 200;
 
+/**
+ * Hard cap on the board's `kodaKeys` read (C10 US-007). `@@unique([scopeKey, providerId])` already
+ * limits a GLOBAL key to one row per provider, so this only bounds a pathological inventory: the
+ * board lists providers in code-unit order and the cap is far above any real provider count.
+ */
+export const PROVIDER_KEY_SUMMARY_LIMIT = 200;
+
 export interface ProviderCredential {
   id: string;
   scope: ProviderCredentialScope;
@@ -89,6 +96,18 @@ export interface ProviderCredentialLookup {
   providerId: string;
 }
 
+/**
+ * One active GLOBAL key as the credential board's `kodaKeys` column shows it (C10 US-007): metadata
+ * only. Neither the key nor its ciphertext is a field here, and `updatedAt` is already an ISO string
+ * because this projection crosses the API boundary as-is.
+ */
+export interface ProviderKeySummary {
+  providerId: string;
+  name: string;
+  last4: string;
+  updatedAt: string;
+}
+
 export interface NewProviderCredentialIssue {
   jobId: string;
   credentialId: string;
@@ -133,6 +152,11 @@ export interface IProviderCredentialRepository {
   findActiveCandidates(lookup: ProviderCredentialLookup): Promise<ProviderCredential[]>;
   /** One bounded page of GLOBAL rows (the admin list). */
   listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>>;
+  /**
+   * The active GLOBAL rows as a bounded, provider-ordered read for the credential board (C10 US-007).
+   * Disabled rows are excluded by the filter; the caller projects them to metadata.
+   */
+  listActiveGlobal(): Promise<ProviderCredential[]>;
   /** One bounded page of a project's own scopes: its PROJECT rows and the REPO rows of its repos. */
   listForProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredential>>;
   /** Seals the caller's data under the uniqueness key its scope implies. Throws P2002 on a duplicate. */
