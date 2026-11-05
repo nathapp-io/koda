@@ -1163,7 +1163,7 @@
       "disposition": { "fixed": "已修复", "waived": "已豁免", "overridden": "已覆盖", "confirmed": "已确认", "verified": "已验证" },
       "state": { "pending": "待处理", "applied": "已应用", "skipped": "已跳过", "replaced": "已替换" },
       "skipReason": {
-        "unknown-item": "未知事项",
+        "unknown-item": "此 PR 没有 nax 项目索引（发布时早于 nax 0.91.2）；请重新运行以重新发布索引",
         "stale-key": "事项标识已过期",
         "already-settled": "事项已解决",
         "superseded-by-writer": "已被仓库写入者的裁定取代",

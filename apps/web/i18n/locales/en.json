@@ -1163,7 +1163,7 @@
       "disposition": { "fixed": "Fixed", "waived": "Waived", "overridden": "Overridden", "confirmed": "Confirmed", "verified": "Verified" },
       "state": { "pending": "Pending", "applied": "Applied", "skipped": "Skipped", "replaced": "Replaced" },
       "skipReason": {
-        "unknown-item": "Unknown item",
+        "unknown-item": "This PR has no nax item index (published before nax 0.91.2); re-run to republish",
         "stale-key": "Item key is stale",
         "already-settled": "Already settled",
         "superseded-by-writer": "Superseded by a repository writer",

@@ -150,12 +150,34 @@ describe('draft RUN open items', () => {
     expect(m.app.find('form')).toHaveLength(2)
     m.app.unmount()
   })
-  test('applied items are read-only and unknown skip reasons remain safe text', async () => {
-    const m = mount(undefined, [ruling({ state: 'applied' }), ruling({ itemId: 'B3', state: 'skipped', skipReason: '<img src=x>' })]); await settle()
-    expect(m.app.find('form')).toHaveLength(1)
-    expect(m.app.text()).toContain('Applied')
+  test('AC-1: CI items have no Rule action while the finding action remains available', async () => {
+    const m = mount(); await settle()
+    m.app.setProps({ job: { ...job, workflow: { outcome: 'draft', openItems: [
+      ...(job.workflow?.openItems ?? []), { id: 'CI-1', kind: 'ci', issue: 'check', file: '', line: null },
+    ] } } })
+    await settle()
+    expect(m.app.find('[data-testid="open-item"]')).toHaveLength(3)
+    expect(m.app.find('form')).toHaveLength(2)
+    expect(m.app.find('[data-testid="ruling-form-B3"]')).toHaveLength(1)
+    m.app.unmount()
+  })
+  test('AC-2: finding items retain the Rule action', async () => {
+    const m = mount(); await settle()
+    expect(m.app.find('[data-testid="ruling-form-B3"]')).toHaveLength(1)
+    m.app.unmount()
+  })
+  test('AC-3: unknown-item explains the missing nax item index and unknown skip reasons remain safe text', async () => {
+    const m = mount(undefined, [ruling({ state: 'skipped', skipReason: 'unknown-item' }), ruling({ itemId: 'B3', state: 'skipped', skipReason: '<img src=x>' })]); await settle()
+    expect(m.app.text()).toContain('This PR has no nax item index (published before nax 0.91.2); re-run to republish')
     expect(m.app.text()).toContain('<img src=x>')
     expect(m.app.find('img')).toHaveLength(0)
+    m.app.unmount()
+  })
+  test('AC-5: applied findings remain read-only', async () => {
+    const m = mount(undefined, [ruling({ itemId: 'B3', state: 'applied' })]); await settle()
+    expect(m.app.find('form')).toHaveLength(1)
+    expect(m.app.find('[data-testid="ruling-form-D-1"]')).toHaveLength(1)
+    expect(m.app.find('[data-testid="ruling-form-B3"]')).toHaveLength(0)
     m.app.unmount()
   })
   test('Finish API refusal surfaces its response and restores the button', async () => {

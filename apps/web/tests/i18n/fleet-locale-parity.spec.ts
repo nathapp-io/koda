@@ -96,6 +96,11 @@ describe('Fleet locale parity (en and zh)', () => {
     expect(Object.keys(at(en, path) as Tree).sort()).toEqual([...values].sort())
   })
 
+  test('US-015 unknown-item skip reason is translated in both locales (AC-3/4)', () => {
+    expect(at(en, 'fleet.rulings.skipReason.unknown-item')).toBe('This PR has no nax item index (published before nax 0.91.2); re-run to republish')
+    expect(String(at(zh, 'fleet.rulings.skipReason.unknown-item') ?? '').trim()).not.toBe('')
+  })
+
   test('trust-domain misfit labels are non-empty in both locales (AC-9)', () => {
     expect(String(at(en, 'fleet.misfit.trust_domain') ?? '').trim()).not.toBe('')
     expect(String(at(zh, 'fleet.misfit.trust_domain') ?? '').trim()).not.toBe('')
