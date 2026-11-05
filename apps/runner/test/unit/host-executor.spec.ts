@@ -1133,3 +1133,135 @@ describe('HostExecutor REVIEW token file (US-006)', () => {
     expect(await readFile(w.tokenPath, 'utf8')).toBe(TOKEN);                       // only this attempt's token is there
   });
 });
+
+describe('HostExecutor provider-key socket (US-009)', () => {
+  const BOT_LOGIN = 'koda-fleet[bot]';
+  const HANDLE: SpawnHandle = { pid: 5150, pgid: 5150 };
+  const SOCKET_ENV = 'KODA_PROVIDER_CRED_SOCKET';
+  /** The broker answers one deterministic path per (job, epoch): a readopted job must get the same one back. */
+  const socketFor = (job: JobRow): string => join(job.jobDir, `provider-keys-${job.leaseEpoch}.sock`);
+  type SpawnCall = { readonly argv: readonly string[]; readonly options: SpawnNaxOptions };
+
+  /** A provider that serves and releases the job's provider-key socket, and records every call it gets. */
+  function provider(over: { serve?: (job: JobRow) => Promise<string>; release?: (job: JobRow) => Promise<void> } = {}) {
+    const served: Array<{ job: JobRow; path: string }> = [];
+    const released: JobRow[] = [];
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      currentToken: () => 'tok-provider',
+      freshToken: async () => ({ ok: true, token: 'tok-provider' }),
+      serveProviderKeys: async (job) => {
+        const path = await (over.serve ?? (async (row: JobRow) => socketFor(row)))(job);
+        served.push({ job, path });
+        return path;
+      },
+      releaseProviderKeys: async (job) => {
+        await over.release?.(job);
+        released.push(job);
+      },
+    };
+    return { credentials, served, released };
+  }
+
+  /** A RUN or FIX world whose nax start records argv and env and starts no process. */
+  async function providerWorld(command: 'RUN' | 'FIX' = 'RUN', credentials?: CredentialProvider, overrides: Partial<AssignPayload> = {}) {
+    const over: Partial<AssignPayload> = command === 'FIX'
+      ? { jobId: 'pjob1', feature: 'review-pr-9', review: { prNumber: 9, botLogin: BOT_LOGIN, decisions: [{ id: 'm1', statement: 's' }] }, ...overrides }
+      : { jobId: 'pjob1', ...overrides };
+    const w = await world(command, over);
+    const calls: SpawnCall[] = [];
+    const ex = new HostExecutor({
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials: credentials ?? provider().credentials, approvals: NO_APPROVALS,
+      spawnNax: (argv, options) => { calls.push({ argv, options }); return HANDLE; },
+    });
+    await mkdir(w.row.jobDir, { recursive: true });
+    return { ...w, ex, calls };
+  }
+
+  test('AC-7: a RUN job gets the socket serveProviderKeys returned in its nax environment', async () => {
+    const p = provider();
+    const w = await providerWorld('RUN', p.credentials);
+    await w.ex.spawn(w.row);
+    expect(p.served.map((call) => call.job)).toEqual([w.row]);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.options.env[SOCKET_ENV]).toBe(socketFor(w.row));
+  });
+
+  test('AC-8: the FIX step spawn carries the job\'s provider-key socket too', async () => {
+    const p = provider();
+    const w = await providerWorld('FIX', p.credentials);
+    await w.ex.spawnFixStep(w.row);
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]?.options.env[SOCKET_ENV]).toBe(socketFor(w.row));
+  });
+
+  test('AC-9: cleanup releases the job\'s provider-key socket', async () => {
+    const p = provider();
+    const w = await providerWorld('RUN', p.credentials);
+    await w.ex.spawn(w.row);
+    await w.ex.cleanup(w.row);
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-9: cleanup releases the provider-key socket even when the git release fails', async () => {
+    const p = provider();
+    const credentials: CredentialProvider = { ...p.credentials, release: async () => { throw new Error('git release failed'); } };
+    const w = await providerWorld('RUN', credentials);
+    await expect(w.ex.cleanup(w.row)).rejects.toThrow('git release failed');
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-10: the abandon path (releaseCredentials) releases the provider-key socket', async () => {
+    const p = provider();
+    const w = await providerWorld('RUN', p.credentials);
+    await w.ex.releaseCredentials(w.row);
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-10: an abandon whose git release fails still releases the provider-key socket', async () => {
+    const p = provider();
+    const credentials: CredentialProvider = { ...p.credentials, release: async () => { throw new Error('git release failed'); } };
+    const w = await providerWorld('RUN', credentials);
+    await expect(w.ex.releaseCredentials(w.row)).rejects.toThrow('git release failed');
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-11: resumeCredentials serves the socket again and the readopted job keeps its path', async () => {
+    const p = provider();
+    const before = await providerWorld('RUN', p.credentials);
+    await before.ex.spawn(before.row);
+    // The daemon restarted: a new executor over the same broker, re-adopting the row from the journal.
+    const after = await providerWorld('RUN', p.credentials, { jobId: 'pjob1' });
+    const readopted: JobRow = { ...after.row, jobDir: before.row.jobDir };
+    await after.ex.resumeCredentials(readopted);
+    expect(p.served.map((call) => call.job)).toEqual([before.row, readopted]);
+    expect(p.served[1]?.path).toBe(p.served[0]?.path);
+    expect(p.served[1]?.path).toBe(socketFor(readopted));
+  });
+
+  test('AC-15: an acquire/release-only provider keeps today\'s nax environment, with no socket entry', async () => {
+    const w = await providerWorld('RUN', NO_CREDENTIALS);
+    const inherited = process.env[SOCKET_ENV];
+    process.env[SOCKET_ENV] = '/elsewhere/another-jobs.sock';   // never inherited by nax either
+    try {
+      await w.ex.spawn(w.row);
+    } finally {
+      if (inherited === undefined) delete process.env[SOCKET_ENV];
+      else process.env[SOCKET_ENV] = inherited;
+    }
+    const env = w.calls[0]?.options.env ?? {};
+    expect(SOCKET_ENV in env).toBe(false);
+    expect(env['NAX_GLOBAL_CONFIG_DIR']).toBe(w.naxHome);   // the rest of the environment is unchanged
+  });
+
+  test('a socket that cannot be served does not fail the job: nax starts without koda keys and it is logged', async () => {
+    const p = provider({ serve: async () => { throw new Error('socket dir unsafe'); } });
+    const w = await providerWorld('RUN', p.credentials);
+    await w.ex.spawn(w.row);
+    expect(w.calls).toHaveLength(1);
+    expect(SOCKET_ENV in (w.calls[0]?.options.env ?? {})).toBe(false);
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'provider-key socket unavailable', fields: expect.objectContaining({ jobId: 'pjob1' }) }));
+  });
+});

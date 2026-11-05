@@ -239,6 +239,9 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
    * US-008: what the job's provider-key socket answers for one provider. A cached grant is served while more than the
    * refresh margin is left; otherwise the request is queued for the sync loop and this waits up to 55 s. A denial is
    * `none` for a provider the job never had and `revoked` for one it did, so nax never switches identity mid-job.
+   *
+   * US-009 (US-008 D-1): this lookup waits at the generation its own request asked at, so a lookup that starts later
+   * and revalidates the denial cannot erase the answer already waiting here.
    */
   async providerKeyReply(job: JobRow, providerId: string): Promise<ProviderReply> {
     const cache = this.deps.providerKeys;
@@ -249,20 +252,20 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     const epoch = this.providerEpochs.get(key) ?? {};
     this.providerEpochs.set(key, epoch);
     const deadline = nowMs() + (timing.providerKeyWaitMs ?? PROVIDER_KEY_WAIT_MS);
-    // A new lookup revalidates an earlier denial. Within this lookup, return the sync's denial without requeueing.
-    if (cache.state(job.jobId, job.leaseEpoch, providerId, nowMs()).kind !== 'grant') {
-      cache.want(job.jobId, job.leaseEpoch, providerId);
-    }
+    // A new lookup revalidates an earlier denial; within this lookup, its own answer is returned without requeueing.
+    let generation = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs()).kind === 'grant'
+      ? 0
+      : cache.want(job.jobId, job.leaseEpoch, providerId);
     for (;;) {
       // Check before reading or mutating the cache: a released waiter must never recreate its dropped entry.
       if (this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline) return { ok: false, reason: 'error' };
-      const state = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs());
+      const state = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs(), generation);
       if (state.kind === 'grant') {
         cache.markServed(job.jobId, job.leaseEpoch, providerId);
         return { ok: true, key: state.grant.key, expiresAt: state.grant.expiresAtMs, account: state.grant.account };
       }
       if (state.kind === 'denied') return { ok: false, reason: state.reason };
-      cache.want(job.jobId, job.leaseEpoch, providerId);   // a no-op while this request is already queued
+      generation = cache.want(job.jobId, job.leaseEpoch, providerId);   // a no-op while this request is already queued
       await sleep(timing.pollMs);
     }
   }

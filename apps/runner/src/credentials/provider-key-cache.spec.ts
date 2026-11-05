@@ -191,6 +191,35 @@ describe('ProviderKeyCache serving window (US-008)', () => {
   });
 });
 
+describe('ProviderKeyCache completions (US-008 D-1, wired by US-009)', () => {
+  test('a newer want keeps the earlier answer readable at its own generation', () => {
+    const cache = new ProviderKeyCache(timing);
+    const first = cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [], [denial()]);
+    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the answered request must read its answer').toEqual({ kind: 'denied', reason: 'none' });
+    const second = cache.want('j1', 1, 'openrouter');
+    expect(second, 'a new want must ask at a new generation').toBeGreaterThan(first);
+    expect(cache.state('j1', 1, 'openrouter', T0, first), 'a later want must not erase the answer the first waiter owns')
+      .toEqual({ kind: 'denied', reason: 'none' });
+    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter must wait for its own answer').toEqual({ kind: 'pending' });
+    expect(cache.state('j1', 1, 'openrouter', T0), 'a plain reader sees the newer request, not the answered one').toEqual({ kind: 'pending' });
+    expect(cache.requests(), 'the newer request is still queued').toEqual([ask()]);
+  });
+
+  test('a want while its request is in flight joins it, so the one answer serves both waiters', () => {
+    const cache = new ProviderKeyCache(timing);
+    const first = cache.want('j1', 1, 'openrouter');
+    const sent = cache.requests();   // the sync carries generation 1
+    const second = cache.want('j1', 1, 'openrouter');   // a later lookup arrives while that sync is out
+    expect(second, 'a request already out is not asked for a second time').toBe(first);
+    cache.apply(sent, [], [denial()]);
+    for (const generation of [first, second]) {
+      expect(cache.state('j1', 1, 'openrouter', T0, generation), `the waiter at ${generation} must read the answer`).toEqual({ kind: 'denied', reason: 'none' });
+    }
+    expect(cache.requests(), 'an answered request is never queued again on its own').toEqual([]);
+  });
+});
+
 describe('ProviderKeyCache drop (US-008 release)', () => {
   test('AC-13: drop forgets the grant, the served set and any queued request of that job epoch', () => {
     const cache = new ProviderKeyCache(timing);

@@ -4,8 +4,10 @@ import type { ConfigJobResult } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../../credentials/broker';
 import { withoutCredentialVars } from '../../credentials/credential-env';
 import type { JobRow } from '../../journal/types';
+import type { Logger } from '../../logger';
 import { reasonFromError, type Git } from '../git';
 import type { ConfigJobContext, ConfigJobRun } from '../job-executor';
+import { releaseProviderSocket, serveProviderSocket } from '../provider-socket';
 import { applyEdits } from './apply-edits';
 import { restoreConfigClone } from './cleanup';
 import { commitAndPushConfig } from './commit-push';
@@ -25,6 +27,8 @@ export interface ConfigJobDeps {
   readonly nowMs: () => number;
   /** The push back-off; tests inject a no-op. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** US-009: where a provider-key socket that cannot be served is reported (never a job failure). */
+  readonly log: Logger;
 }
 
 export interface ConfigJobDirs {
@@ -53,7 +57,14 @@ const resolveTool = (argv: readonly string[], path: string): string[] => [Bun.wh
  * fixed-vocabulary reason. A cleanup failure is reported as a step and never changes the returned run.
  */
 export async function runConfigJob(deps: ConfigJobDeps, job: JobRow, dirs: ConfigJobDirs, ctx: ConfigJobContext): Promise<ConfigJobRun> {
-  const run = await decideConfigJob(deps, job, dirs, ctx);
+  let run: ConfigJobRun;
+  try {
+    run = await decideConfigJob(deps, job, dirs, ctx);
+  } finally {
+    // US-009: this epoch's provider-key socket closes whatever the job did, before the clone is restored. Independent
+    // of the git credential release inside the job (that one only wraps the push).
+    await releaseProviderSocket(deps.credentials, job, deps.log);
+  }
   const cleanupFailure = await restoreConfigClone(deps.git, dirs.repoDir, job.assign.repo.defaultBranch, job.jobId);
   if (cleanupFailure !== null) ctx.step(`cleanup failed: ${cleanupFailure}`);
   return run;
@@ -66,7 +77,10 @@ async function decideConfigJob(deps: ConfigJobDeps, job: JobRow, dirs: ConfigJob
   const { repoDir } = dirs;
   const { repo, gitIdentity } = job.assign;
   const inheritedPath = process.env['PATH'] ?? '';
-  const naxEnv: Env = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: deps.naxHome, PATH: inheritedPath };
+  // US-009: served before the environment is built; a provider without the optional method (or one that cannot serve)
+  // adds nothing, and the job's own nax calls then use the machine's credentials as they did before the vault.
+  const providerSocket = await serveProviderSocket(deps.credentials, job, deps.log);
+  const naxEnv: Env = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: deps.naxHome, PATH: inheritedPath, ...providerSocket };
   const call = async (argv: readonly string[], env: Env): Promise<ProcResult> => {
     checkpoint(clock);
     const result = await trackedRun(argv, { cwd: repoDir, env, deadlineMs: ctx.deadlineMs, nowMs: deps.nowMs, isStopped: ctx.isStopped, onProcess: ctx.onProcess });
