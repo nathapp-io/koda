@@ -44,6 +44,12 @@ export interface PlacementJob {
   thread?: PlacementThread;
   /** Only explicit FIX jobs with a non-empty ruling snapshot need this capability. */
   needsBotRulings?: true;
+  /**
+   * C10 (branch review B3): the provider ids koda can hand this job through a runner's provider-key
+   * socket — the active keys of the job's own project/repo scope. Absent means none, and then a
+   * `providerVault` runner keeps exactly the provider refusals a runner without the helper gets.
+   */
+  vaultProviders?: ReadonlySet<string>;
 }
 
 export interface PlacementRunner {
@@ -85,18 +91,24 @@ const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProper
  * jobs unplaceable. The widening is one-way: a locally available credential still satisfies the need, and a runner
  * without the helper keeps today's refusal (`provider_missing` is permanent to a pinned dispatch, so it must stay a
  * statement about the machine, not about koda's inventory).
+ *
+ * Branch review B3: the helper alone is not enough — `vaultProviders` is the set of providers koda can actually serve
+ * for THIS job's scope (its project, its repo, plus the global keys; `ProviderCredentialsService.availableProviders`).
+ * A vault runner whose machine has no credential for a provider koda holds no applicable key for is refused exactly as
+ * a runner without the helper, because the post-checkout check would then fail the job with the same provider named.
  */
-export function profileMisfit(needs: ProfileNeeds, caps: RunnerCapabilities): MisfitReason | null {
+export function profileMisfit(needs: ProfileNeeds, caps: RunnerCapabilities, vaultProviders?: ReadonlySet<string>): MisfitReason | null {
   if (!caps.nax.protocols.includes(needs.protocol)) return 'protocol';
-  const vault = caps.providerVault === true;
+  const vault = caps.providerVault === true ? vaultProviders : undefined;
   for (const provider of needs.providers) {
+    const servedByVault = vault?.has(provider) === true;
     const credential = caps.credentials.find((c) => c.providerId === provider);
     if (!credential) {
-      if (vault) continue;
+      if (servedByVault) continue;
       return 'provider_missing';
     }
     // nax's own verdict (slice 3 design §1.1): available deliberately ignores access-token expiry.
-    if (!credential.available && !vault) return 'provider_unavailable';
+    if (!credential.available && !servedByVault) return 'provider_unavailable';
   }
   if (needs.sandbox && !caps.sandbox.available) return 'sandbox';
   // #207: nax could not start this profile's interaction plugin in the runner's environment.
@@ -121,7 +133,7 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
   for (const name of job.profiles) {
     // A name the runner does not report is repo-provided and unknowable before clone (spec §2.1).
     if (!own(caps.profiles, name)) continue;
-    const misfit = profileMisfit(caps.profiles[name], caps);
+    const misfit = profileMisfit(caps.profiles[name], caps, job.vaultProviders);
     if (misfit) return misfit;
   }
   // #207: a job with no profiles runs on the machine's base config. A job naming profiles is judged on them only:
@@ -230,6 +242,14 @@ export const toPlacementJob = (
   ...(thread ? { thread } : {}),
   ...(job.command === 'FIX' && job.prRulings && 'rulings' in job.prRulings && job.prRulings.rulings.length > 0 ? { needsBotRulings: true as const } : {}),
 });
+
+/**
+ * C10 (branch review B3): the job as placement must judge it, carrying the providers the vault can serve for its
+ * scope. An empty answer leaves the job untouched, so a fleet without the vault — or a scope koda holds no key for —
+ * is judged exactly as before, and a caller that never resolved availability keeps today's stricter rules.
+ */
+export const withVaultProviders = <J extends PlacementJob>(job: J, providers: ReadonlySet<string>): J =>
+  providers.size === 0 ? job : ({ ...job, vaultProviders: providers } as J);
 
 /** S1b §2.3 pre-assign pause check; config jobs spend nothing, so a pause never holds or cancels them (fleet S3 D470). */
 export function jobScopePause<T>(

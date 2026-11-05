@@ -175,5 +175,30 @@ describe('buildCredentialBoard koda keys and vault state (C10 US-007)', () => {
     // The koda column is the kodaKeys list, not a cell: the runner grid keeps saying "missing".
     expect(out.providers[1].cells).toEqual({ a: { state: 'missing', kind: 'none' } });
   });
+
+  /**
+   * C10 (branch review B3): the board derives its per-profile misfit from placement's rule, so a vault runner
+   * only stops being `provider_missing` for a provider a GLOBAL koda key can serve — the keys the board knows.
+   */
+  it('B3: clears the profile misfit for a vault runner only where a koda key can serve it', () => {
+    const vault = board({ id: 'a', name: 'a', capabilities: dashCaps({
+      providerVault: true,
+      credentials: [],
+      profiles: {
+        router: { protocol: 'native', providers: ['openrouter'], sandbox: false },
+        deep: { protocol: 'native', providers: ['deepseek'], sandbox: false },
+      },
+    }) });
+
+    const without = buildCredentialBoard([vault], DASH_NOW, 7);
+    expect(without.profiles.find((p) => p.name === 'router')?.runners.a).toMatchObject({ present: true, misfit: 'provider_missing' });
+
+    const served = buildCredentialBoard([vault], DASH_NOW, 7, [kodaKey({ providerId: 'openrouter' })]);
+    expect(served.profiles.find((p) => p.name === 'router')?.runners.a).toEqual({
+      present: true, needs: { protocol: 'native', providers: ['openrouter'], sandbox: false },
+    });
+    // A key for another provider does not widen this profile.
+    expect(served.profiles.find((p) => p.name === 'deep')?.runners.a).toMatchObject({ misfit: 'provider_missing' });
+  });
 });
 

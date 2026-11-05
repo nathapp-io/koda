@@ -15,6 +15,9 @@ import {
 import { isRecordNotFound } from '../../common/utils/prisma-errors';
 import {
   GLOBAL_SCOPE_KEY,
+  PROVIDER_AVAILABILITY_MAX_ROWS,
+  type ActiveProviderScope,
+  type ActiveProviderScopeQuery,
   type IProviderCredentialRepository,
   type NewProviderCredential,
   type NewProviderCredentialIssue,
@@ -115,6 +118,39 @@ export class PrismaProviderCredentialRepository
       where: { providerId: lookup.providerId, disabledAt: null, scopeKey: { in: scopeKeys } },
     });
     return rows.map((row) => this.toDomain(row));
+  }
+
+  async listActiveScopes(
+    query: ActiveProviderScopeQuery,
+  ): Promise<ActiveProviderScope[]> {
+    const projectIds = [...query.projectIds];
+    const repoIds = [...query.repoIds];
+    if (projectIds.length === 0 && repoIds.length === 0) return [];
+    const rows = await this.prisma.client.providerCredential.findMany({
+      where: {
+        disabledAt: null,
+        OR: [
+          { scopeKey: GLOBAL_SCOPE_KEY },
+          { projectId: { in: projectIds } },
+          { repoId: { in: repoIds } },
+        ],
+      },
+      select: { scope: true, projectId: true, repoId: true, providerId: true },
+      orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+      // One row per scope and provider, so this is bounded by the caller's scopes times their providers.
+      take: PROVIDER_AVAILABILITY_MAX_ROWS + 1,
+    });
+    if (rows.length > PROVIDER_AVAILABILITY_MAX_ROWS) {
+      // Truncating under-reports what the vault can serve, which only keeps a local credential refusal
+      // in place; a caller that reaches this needs its scopes narrowed, not a bigger read.
+      this.logger.warn(`Provider availability read exceeded ${PROVIDER_AVAILABILITY_MAX_ROWS} rows for ${projectIds.length} projects and ${repoIds.length} repos; the answer is truncated`);
+    }
+    return rows.slice(0, PROVIDER_AVAILABILITY_MAX_ROWS).map((row) => ({
+      scope: row.scope as ProviderCredentialScope,
+      projectId: row.projectId,
+      repoId: row.repoId,
+      providerId: row.providerId,
+    }));
   }
 
   async listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>> {

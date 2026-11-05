@@ -104,6 +104,65 @@ export interface ProviderCredentialLookup {
 }
 
 /**
+ * One job scope, without a provider: the shape every availability answer is keyed by, and the shape the
+ * scope-chain predicate judges (C10 branch review B3).
+ */
+export interface ProviderLookupScope {
+  projectId: string;
+  repoId: string | null;
+}
+
+/**
+ * The key one scope's availability answer is filed under. Placement and the dashboard dry-run resolve
+ * many job scopes in one read and each answer must be found again by the scope it came from, so the key
+ * is the pair itself — never a single field, because two jobs can share a project and differ by repo.
+ */
+export function providerScopeLookupKey(scope: ProviderLookupScope): string {
+  return `${scope.projectId}\u0000${scope.repoId ?? ''}`;
+}
+
+/**
+ * Whether an active row is inside a lookup's scope chain (spec §"Resolution"): a GLOBAL key answers every
+ * scope, a PROJECT key only its own project, a REPO key only its own repo. `resolve` and the availability
+ * read share this predicate so a hand-out and a placement can never disagree about what koda holds.
+ */
+export function isApplicableScope(
+  candidate: Pick<ProviderCredential, 'scope' | 'projectId' | 'repoId'>,
+  lookup: ProviderLookupScope,
+): boolean {
+  switch (candidate.scope) {
+    case 'GLOBAL':
+      return true;
+    case 'PROJECT':
+      return candidate.projectId === lookup.projectId;
+    case 'REPO':
+      return lookup.repoId !== null && candidate.repoId === lookup.repoId;
+  }
+}
+
+/** One active row's scope, as the availability read sees it: metadata only, never the key. */
+export interface ActiveProviderScope {
+  scope: ProviderCredentialScope;
+  projectId: string | null;
+  repoId: string | null;
+  providerId: string;
+}
+
+/** The scopes one availability read covers; the GLOBAL scope is always part of an answer. */
+export interface ActiveProviderScopeQuery {
+  projectIds: readonly string[];
+  repoIds: readonly string[];
+}
+
+/**
+ * Hard cap on one availability read. It covers at most the job scopes the caller named (a dashboard
+ * window is `QUEUED_SCAN_LIMIT` jobs) times the providers they hold, so 2000 is far above any real
+ * installation; a truncated answer under-reports what the vault can serve, which keeps a local
+ * credential refusal in place (the safe direction) and is logged.
+ */
+export const PROVIDER_AVAILABILITY_MAX_ROWS = 2000;
+
+/**
  * One active GLOBAL key as the credential board's `kodaKeys` column shows it (C10 US-007): metadata
  * only. Neither the key nor its ciphertext is a field here, and `updatedAt` is already an ISO string
  * because this projection crosses the API boundary as-is.
@@ -157,6 +216,12 @@ export interface IProviderCredentialRepository {
   findRepoProject(repoId: string): Promise<string | null>;
   /** Active (not disabled) rows that can answer a lookup: the GLOBAL, PROJECT and REPO keys of one provider. */
   findActiveCandidates(lookup: ProviderCredentialLookup): Promise<ProviderCredential[]>;
+  /**
+   * Every active row in the given scopes plus every active GLOBAL row, as scope metadata (C10 branch
+   * review B3). This is the one read behind "which providers can the vault serve this job", and it is
+   * bounded by {@link PROVIDER_AVAILABILITY_MAX_ROWS}: a caller that named no scope gets no row.
+   */
+  listActiveScopes(query: ActiveProviderScopeQuery): Promise<ActiveProviderScope[]>;
   /** One bounded page of GLOBAL rows (the admin list). */
   listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>>;
   /**

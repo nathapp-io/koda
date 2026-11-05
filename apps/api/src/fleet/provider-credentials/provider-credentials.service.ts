@@ -14,6 +14,8 @@ import {
   PROVIDER_CREDENTIAL_NAME_MAX_LENGTH,
   PROVIDER_CREDENTIAL_REPOSITORY,
   PROVIDER_ID_PATTERN,
+  isApplicableScope,
+  providerScopeLookupKey,
   type IProviderCredentialRepository,
   type NewProviderCredential,
   type NewProviderCredentialIssue,
@@ -21,6 +23,7 @@ import {
   type ProviderCredentialLookup,
   type ProviderCredentialPatch,
   type ProviderKeySummary,
+  type ProviderLookupScope,
 } from './provider-credential.domain';
 import type { SecretStore } from './secret-store';
 import { LocalSecretStore } from './secret-store';
@@ -48,6 +51,9 @@ export interface CreateProviderCredentialBody {
   name: string;
   key: string;
 }
+
+/** One shared empty answer for a scope the vault can serve nothing for (C10 branch review B3). */
+const NO_PROVIDERS: ReadonlySet<string> = new Set<string>();
 
 /** The project route's body: the same write, plus the repo that makes it a REPO key. */
 export interface CreateProjectProviderCredentialBody extends CreateProviderCredentialBody {
@@ -81,12 +87,37 @@ export class ProviderCredentialsService {
         candidate.providerId === lookup.providerId &&
         candidate.disabledAt === null &&
         candidate.scope === scope &&
-        (scope !== 'PROJECT' || candidate.projectId === lookup.projectId) &&
-        (scope !== 'REPO' || candidate.repoId === lookup.repoId),
+        isApplicableScope(candidate, lookup),
       );
       if (credential) return credential;
     }
     return null;
+  }
+
+  /**
+   * C10 (branch review B3): for each job scope, the provider ids {@link resolve} would answer an active
+   * key for — the union of the active rows in that scope's chain, which is exactly the set of providers
+   * `resolve` cannot answer null for. Placement reads it before it lets a `providerVault` runner skip a
+   * local credential refusal, and the dashboard dry-run reads the same answer so the two agree.
+   *
+   * A vault that is off serves nothing, so every requested scope answers empty; that is what keeps a
+   * runner with the helper but without koda keys judged on its own machine credentials, as before.
+   */
+  async availableProviders(scopes: readonly ProviderLookupScope[]): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
+    const answer = new Map<string, ReadonlySet<string>>(
+      scopes.map((scope) => [providerScopeLookupKey(scope), NO_PROVIDERS] as const),
+    );
+    if (scopes.length === 0 || !this.isEnabled()) return answer;
+    const rows = await this.repository.listActiveScopes({
+      projectIds: [...new Set(scopes.map((scope) => scope.projectId))],
+      repoIds: [...new Set(scopes.flatMap((scope) => (scope.repoId === null ? [] : [scope.repoId])))],
+    });
+    for (const scope of scopes) {
+      answer.set(providerScopeLookupKey(scope), new Set(rows
+        .filter((row) => isApplicableScope(row, scope))
+        .map((row) => row.providerId)));
+    }
+    return answer;
   }
 
   /** Decryption is intentionally a nullable boundary: one corrupt row must not break runner sync. */

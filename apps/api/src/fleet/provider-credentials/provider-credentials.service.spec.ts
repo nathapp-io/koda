@@ -4,7 +4,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { IProviderCredentialRepository, ProviderCredential } from './provider-credential.domain';
-import { PROVIDER_KEY_SUMMARY_PAGE_SIZE } from './provider-credential.domain';
+import { PROVIDER_KEY_SUMMARY_PAGE_SIZE, providerScopeLookupKey } from './provider-credential.domain';
 import { ProviderCredentialsService } from './provider-credentials.service';
 import type { IProviderCredentialsConfig } from '../../config/provider-credentials.config';
 import { LocalSecretStore, type SecretStore } from './secret-store';
@@ -24,6 +24,7 @@ function setup(enabled = true) {
     lockById: vi.fn().mockResolvedValue(null),
     listGlobal: vi.fn(), listForProject: vi.fn(), insert: vi.fn(), patch: vi.fn(), remove: vi.fn(), recordIssue: vi.fn(),
     listActiveGlobal: vi.fn().mockResolvedValue([]),
+    listActiveScopes: vi.fn().mockResolvedValue([]),
   };
   const secretStore: SecretStore = {
     seal: vi.fn((plaintext: string) => ({ encryptedKey: `sealed:${plaintext}`, last4: plaintext.slice(-4), fingerprint: `fp:${plaintext}` })),
@@ -92,6 +93,72 @@ describe('ProviderCredentialsService', () => {
     const { service, repository } = setup(false);
     await expect(service.resolve({ projectId: 'p1', repoId: 'r1', providerId: 'openrouter' })).resolves.toBeNull();
     expect(repository.findActiveCandidates).not.toHaveBeenCalled();
+  });
+
+  /**
+   * C10 (branch review B3): placement asks which providers the vault can serve for one job scope. The answer is
+   * the union of the active rows in that scope's chain — exactly the providers `resolve` cannot answer null for.
+   */
+  describe('availableProviders (branch review B3)', () => {
+    const row = (scope: 'GLOBAL' | 'PROJECT' | 'REPO', providerId: string, over: Record<string, unknown> = {}) => ({
+      scope, projectId: scope === 'GLOBAL' ? null : 'p1', repoId: scope === 'REPO' ? 'r1' : null, providerId, ...over,
+    });
+    const providers = (answer: ReadonlyMap<string, ReadonlySet<string>>, scope = { projectId: 'p1', repoId: 'r1' as string | null }) =>
+      [...(answer.get(providerScopeLookupKey(scope)) ?? [])].sort();
+
+    it('unions the global, project and repo keys that apply, and nothing outside the chain', async () => {
+      const { service, repository } = setup();
+      vi.mocked(repository.listActiveScopes).mockResolvedValue([
+        row('GLOBAL', 'openrouter'),
+        row('PROJECT', 'deepseek'),
+        row('REPO', 'zai'),
+        row('PROJECT', 'openai', { projectId: 'p2' }),
+        row('REPO', 'mistral', { repoId: 'r9' }),
+      ]);
+
+      const answer = await service.availableProviders([{ projectId: 'p1', repoId: 'r1' }]);
+
+      expect(providers(answer)).toEqual(['deepseek', 'openrouter', 'zai']);
+      expect(repository.listActiveScopes).toHaveBeenCalledWith({ projectIds: ['p1'], repoIds: ['r1'] });
+    });
+
+    it('drops the repo part of the chain for a job without a checkout', async () => {
+      const { service, repository } = setup();
+      vi.mocked(repository.listActiveScopes).mockResolvedValue([row('GLOBAL', 'openrouter'), row('PROJECT', 'deepseek'), row('REPO', 'zai')]);
+
+      const answer = await service.availableProviders([{ projectId: 'p1', repoId: null }]);
+
+      expect(providers(answer, { projectId: 'p1', repoId: null })).toEqual(['deepseek', 'openrouter']);
+      expect(providers(answer, { projectId: 'p1', repoId: null }).includes('zai')).toBe(false);
+    });
+
+    it('answers every requested scope in one read, each with its own chain', async () => {
+      const { service, repository } = setup();
+      vi.mocked(repository.listActiveScopes).mockResolvedValue([row('GLOBAL', 'openrouter'), row('REPO', 'zai')]);
+
+      const answer = await service.availableProviders([{ projectId: 'p1', repoId: 'r1' }, { projectId: 'p1', repoId: null }, { projectId: 'p2', repoId: null }]);
+
+      expect(providers(answer, { projectId: 'p1', repoId: 'r1' })).toEqual(['openrouter', 'zai']);
+      expect(providers(answer, { projectId: 'p1', repoId: null })).toEqual(['openrouter']);
+      expect(providers(answer, { projectId: 'p2', repoId: null })).toEqual(['openrouter']);
+      expect(repository.listActiveScopes).toHaveBeenCalledWith({ projectIds: ['p1', 'p2'], repoIds: ['r1'] });
+    });
+
+    it('serves nothing — and reads nothing — with the vault off', async () => {
+      const { service, repository } = setup(false);
+
+      const answer = await service.availableProviders([{ projectId: 'p1', repoId: 'r1' }]);
+
+      expect(providers(answer)).toEqual([]);
+      expect(repository.listActiveScopes).not.toHaveBeenCalled();
+    });
+
+    it('reads nothing when it was asked for no scope', async () => {
+      const { service, repository } = setup();
+
+      await expect(service.availableProviders([])).resolves.toEqual(new Map());
+      expect(repository.listActiveScopes).not.toHaveBeenCalled();
+    });
   });
 
   it('AC-8: decrypts a credential sealed by LocalSecretStore for hand-out', () => {

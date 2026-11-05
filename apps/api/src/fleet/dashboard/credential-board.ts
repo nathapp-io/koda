@@ -56,10 +56,14 @@ export function credentialCell(cred: RunnerCredential | undefined, now: Date, wa
   return { state: stateOf(cred, now, warnDays), kind: kindOf(cred), ...(expires !== undefined ? { expires } : {}) };
 }
 
-function profileCell(caps: RunnerCapabilities, name: string): ProfileCell {
+function profileCell(caps: RunnerCapabilities, name: string, kodaProviders: ReadonlySet<string>): ProfileCell {
   if (!Object.prototype.hasOwnProperty.call(caps.profiles, name)) return { present: false };
   const needs = caps.profiles[name];
-  const misfit = profileMisfit(needs, caps);
+  // C10 (branch review B3): the board only knows the active GLOBAL keys it was handed, and a global key
+  // answers every scope, so those providers are exactly what a vault runner can be served without a
+  // machine-local credential. A project or repo key is outside the board's scope; placement, which does
+  // know the job, uses the narrower question and can still find a misfit here.
+  const misfit = profileMisfit(needs, caps, kodaProviders);
   return { present: true, needs, ...(misfit ? { misfit } : {}) };
 }
 
@@ -80,6 +84,7 @@ export function buildCredentialBoard(
     ...kodaKeys.map((key) => key.providerId),
   ])].sort(byCodeUnit);
   const profileNames = [...new Set(readable.flatMap(({ caps }) => Object.keys(caps.profiles)))].sort(byCodeUnit);
+  const kodaProviders: ReadonlySet<string> = new Set(kodaKeys.map((key) => key.providerId));
   return {
     generatedAt: now.toISOString(),
     warnDays,
@@ -95,7 +100,7 @@ export function buildCredentialBoard(
     })),
     profiles: profileNames.map((name) => ({
       name,
-      runners: Object.fromEntries(readable.map(({ id, caps }) => [id, profileCell(caps, name)] as const)),
+      runners: Object.fromEntries(readable.map(({ id, caps }) => [id, profileCell(caps, name, kodaProviders)] as const)),
     })),
   };
 }

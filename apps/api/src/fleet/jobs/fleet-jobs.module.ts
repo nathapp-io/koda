@@ -21,13 +21,20 @@ import { JobTransitionsService } from './job-transitions.service';
 import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { FLEET_JOB_REPOSITORY } from './domain/fleet-job.domain';
 import { PlacementService } from './placement.service';
+import { ProviderCredentialsModule } from '../provider-credentials/provider-credentials.module';
 import { RunnerNotifier } from './runner-notifier';
 import { ProjectDeletionJobsListener } from './project-deletion-jobs.listener';
 import { ThreadJobEffects } from '../threads/thread-job-effects';
 
-/** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
+/**
+ * Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller.
+ *
+ * `ProviderCredentialsModule` is here for placement's vault availability (C10 branch review B3): a
+ * `providerVault` runner skips a local credential refusal only for a provider koda holds an active key
+ * for in the job's scope, so placement asks the vault's public service — never its repository.
+ */
 @Module({
-  imports: [FleetRulingsModule, MemoryModule, ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ApprovalStoreModule, ScheduleStoreModule, FleetTicketsModule, ConfigEditStoreModule],
+  imports: [FleetRulingsModule, MemoryModule, ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ApprovalStoreModule, ScheduleStoreModule, FleetTicketsModule, ConfigEditStoreModule, ProviderCredentialsModule],
   controllers: [FleetJobsController],
   providers: [
     FleetJobRouteCommands,
