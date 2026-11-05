@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T12:23:26.103Z",
+  "updatedAt": "2026-11-05T13:34:42.107Z",
   "userStories": [
     {
       "id": "US-001",
@@ -598,14 +598,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "TokenCache, CredentialServer and SyncLoop provide concrete precedents, but provider leases add concurrent epoch-aware state, a separate socket lifecycle and transport wiring; credentials require isolated security TDD."
+        "reasoning": "TokenCache, CredentialServer and SyncLoop provide concrete precedents, but provider leases add concurrent epoch-aware state, a separate socket lifecycle and transport wiring; credentials require isolated security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/credentials/cred-server.ts",
@@ -639,7 +642,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c96a33471713cc042d2ddcfae8eff850feb537c3"
     },
     {
       "id": "US-009",
