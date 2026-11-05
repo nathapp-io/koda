@@ -7,6 +7,7 @@ import type { AcpAgentProbe } from '../capabilities/acp-agent-probe';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
+import { vaultHelperEnabled } from '../commands/vault';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
@@ -139,7 +140,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   (options.configureCredentials ?? defaultConfigureCredentials)(naxCredentialsConfig(config.naxHome));
   const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
   const naxMode = config.capabilities === null;   // D95: this runner asks nax; runner.json carries no capabilities block
-  const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax, options.acpProbe), journal, log);
+  // D84, C10 US-010: the argv the broker hands a shim, the git helper and nax's exec helper, and the same argv the
+  // probe compares `<naxHome>/config.json` against. Nothing here edits that file.
+  const self = options.selfCommand ?? selfCommand();
+  const reporter = new CapabilityReporter(
+    createCapabilityProbe(config, now, nax, options.acpProbe, () => vaultHelperEnabled(config.naxHome, self)), journal, log,
+  );
   try {
     await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
     if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
@@ -191,7 +197,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // US-008: the provider keys handed out over sync, in memory only, like the tokens.
   const providerKeys = new ProviderKeyCache({ refreshMarginMs: tuning.providerKeyRefreshMarginMs });
   const broker = new CredentialBroker({
-    tokens, providerKeys, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
+    tokens, providerKeys, socketDir, runnerId: identity.runnerId, selfCommand: self,
     nowMs: () => Date.now(), sleep,
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs, providerKeyWaitMs: tuning.providerKeyServeWaitMs },
     uid,

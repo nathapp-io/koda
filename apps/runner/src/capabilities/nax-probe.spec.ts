@@ -20,12 +20,13 @@ async function naxHome(profiles: readonly string[]): Promise<string> {
   return home;
 }
 
-function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['git', 'gh'], acpProbe?: AcpAgentProbe) {
+function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['git', 'gh'], acpProbe?: AcpAgentProbe, vaultHelper?: () => Promise<boolean>) {
   const removed: string[] = [];
   const empty = join(home, 'empty');
   const prober = new NaxCapabilityProbe({
     nax, naxHome: home, now: clock, toolWorks: async (command) => have.includes(command),
     ...(acpProbe === undefined ? {} : { acpProbe }),
+    ...(vaultHelper === undefined ? {} : { vaultHelper }),
     makeEmptyDir: async () => {
       await mkdir(empty, { recursive: true });
       return { dir: empty, remove: async () => { removed.push(empty); } };
@@ -401,5 +402,63 @@ describe('NaxCapabilityProbe interaction checks (#207 spec §3.2)', () => {
     const leaky = { ...TG_FAILED, message: 'bad token=abc123secret' };
     const { warnings } = await probeWith(home, new FakeNaxCli({ config: { default: { ...NATIVE, interaction: leaky } } })).run();
     expect(warnings).toEqual(['interaction telegram failed for the base config: TELEGRAM_NOT_CONFIGURED (bad token=[redacted])']);
+  });
+});
+
+describe('NaxCapabilityProbe provider vault (C10 US-010)', () => {
+  test('AC-8: a vaultHelper resolving true reports providerVault: true', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], undefined, async () => true).run();
+    expect(capabilities.providerVault).toBe(true);
+  });
+
+  test('AC-8: a vaultHelper resolving false reports no providerVault at all', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], undefined, async () => false).run();
+    expect('providerVault' in capabilities).toBe(false);
+  });
+
+  test('AC-9: with no vaultHelper providerVault is omitted', async () => {
+    const home = await naxHome([]);
+    const { capabilities } = await probeWith(home, new FakeNaxCli()).run();
+    expect('providerVault' in capabilities).toBe(false);
+  });
+
+  test('AC-10: removing providerVault from a vaultHelper report yields exactly the report probed without one', async () => {
+    const home = await naxHome(['fast']);
+    const nax = new FakeNaxCli({ version: '0.83.1', config: { fast: { transport: 'native', providers: ['openrouter'], sandbox: true } } });
+    const withHelper = await probeWith(home, nax, ['git', 'gh'], undefined, async () => true).run();
+    const { providerVault, ...rest } = withHelper.capabilities;
+    expect(providerVault).toBe(true);
+    const without = await probeWith(home, nax).run();
+    expect(rest).toEqual(without.capabilities);
+    expect(withHelper.warnings).toEqual(without.warnings);
+    // The one difference is the flag: every other field is still the one this machine reports.
+    expect(rest).toEqual({
+      nax: { version: '0.83.1', protocols: ['native'] },
+      sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' },
+      profiles: { fast: { protocol: 'native', providers: ['openrouter'], sandbox: true } },
+      credentials: [{ providerId: 'openrouter', available: false, stored: null, ambient: false }],
+      threadBackends: { native: [], acp: [] },
+      tools: { git: true, gh: true, glab: false },
+      executors: ['host'],
+      configJobs: true,
+      threadWrite: true,
+      threadModes: true,
+      projectThreads: true,
+      workspaceThreads: true,
+      kodaTools: true,
+      projectCode: true,
+      approvals: { relay: true },
+    });
+  });
+
+  test('a vaultHelper that throws claims nothing and says why, rather than reporting "vault off"', async () => {
+    const home = await naxHome([]);
+    const { capabilities, warnings } = await probeWith(home, new FakeNaxCli(), ['git', 'gh'], undefined, async () => {
+      throw new Error('config.json is not valid JSON');
+    }).run();
+    expect('providerVault' in capabilities).toBe(false);
+    expect(warnings).toEqual(['vault helper check failed (config.json is not valid JSON); provider keys are reported as not served']);
   });
 });

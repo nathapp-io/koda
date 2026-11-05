@@ -51,6 +51,11 @@ export interface NaxProbeDeps {
    * a caller that does not probe them (every daemon test but the ACP one), which reports `acp: []`.
    */
   readonly acpProbe?: AcpAgentProbe;
+  /**
+   * C10 US-010: true exactly when this machine's global nax config names koda's `provider-cred` helper. Absent on a
+   * caller that does not check (every test but the vault ones), which reports no `providerVault`.
+   */
+  readonly vaultHelper?: () => Promise<boolean>;
 }
 
 export async function makeEmptyDir(): Promise<EmptyDir> {
@@ -156,9 +161,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const empty = await (this.deps.makeEmptyDir ?? makeEmptyDir)();
     try {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
-      const [scan, base, sandbox, protocols, tools, botReview, acp] = await Promise.all([
+      const [scan, base, sandbox, protocols, tools, botReview, acp, vault] = await Promise.all([
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
-        this.acpAgents(),
+        this.acpAgents(), this.vault(),
       ]);
       const botFix = botReview && await this.botFix(empty.dir);
       const botRulings = botReview && await this.botRulings(empty.dir);
@@ -192,6 +197,8 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         // descriptors to the ASSIGN. The tools themselves are defined and executed on the server.
         kodaTools: true,
         projectCode: true,
+        // C10 US-010: this machine's nax asks koda for provider keys, so a job here needs no `nax auth` per provider.
+        ...(vault.enabled ? { providerVault: true as const } : {}),
         ...(botReview ? { botReview: true as const } : {}),
         ...(botRulings ? { botRulings: true as const } : {}),
         ...(botFix ? { botFix: true as const } : {}),
@@ -200,7 +207,10 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       });
       return {
         capabilities: bounded.capabilities,
-        warnings: [...base.warnings, ...scan.warnings, ...credentials.warnings, ...acp.warnings, ...bounded.warnings],
+        warnings: [
+          ...base.warnings, ...scan.warnings, ...credentials.warnings, ...acp.warnings, ...bounded.warnings,
+          ...(vault.warning === undefined ? [] : [vault.warning]),
+        ],
       };
     } finally {
       await empty.remove();
@@ -217,6 +227,19 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       return { offers: await this.deps.acpProbe(), warnings: [] };
     } catch (error) {
       return { offers: [], warnings: [`ACP agent probe failed (${sanitizeDiagnostic(errorMessage(error))}); no ACP agents reported`] };
+    }
+  }
+
+  /**
+   * C10 US-010: `providerVault` is a claim about this machine's global nax config, so a check that cannot read it is a
+   * warning and no claim — never "the vault is off", which the credential board would show as a fact.
+   */
+  private async vault(): Promise<{ enabled: boolean; warning?: string }> {
+    if (this.deps.vaultHelper === undefined) return { enabled: false };
+    try {
+      return { enabled: await this.deps.vaultHelper() };
+    } catch (error) {
+      return { enabled: false, warning: `vault helper check failed (${sanitizeDiagnostic(errorMessage(error))}); provider keys are reported as not served` };
     }
   }
 
