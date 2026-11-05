@@ -14,7 +14,6 @@ import {
   PROVIDER_CREDENTIAL_NAME_MAX_LENGTH,
   PROVIDER_CREDENTIAL_REPOSITORY,
   PROVIDER_ID_PATTERN,
-  PROVIDER_KEY_SUMMARY_LIMIT,
   type IProviderCredentialRepository,
   type NewProviderCredential,
   type NewProviderCredentialIssue,
@@ -116,19 +115,15 @@ export class ProviderCredentialsService {
   }
 
   /**
-   * The credential board's `kodaKeys` (C10 US-007): the active GLOBAL keys as `{ providerId, name,
+   * The credential board's `kodaKeys` (C10 US-007): every active GLOBAL key as `{ providerId, name,
    * last4, updatedAt }`. With the vault off there is nothing to show — the board then has no koda
    * column at all, so this answers an empty list without reading the table. PROJECT and REPO rows are
    * outside a board that a global admin reads, and a disabled row is not in effect, so both are absent.
+   * The read itself pages to the end of the inventory, so this never answers a subset of the keys.
    */
   async listActiveGlobalKeys(): Promise<ProviderKeySummary[]> {
     if (!this.isEnabled()) return [];
     const rows = await this.repository.listActiveGlobal();
-    if (rows.length === PROVIDER_KEY_SUMMARY_LIMIT) {
-      // A GLOBAL key is unique per provider, so this only fires on an inventory no installation has;
-      // say so rather than answering a column that silently lost rows.
-      this.logger.warn(`Credential board koda keys capped at ${PROVIDER_KEY_SUMMARY_LIMIT} providers`);
-    }
     return rows.map((row) => ({
       providerId: row.providerId,
       name: row.name,

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import {
   AbstractPrismaRepository,
@@ -23,7 +23,8 @@ import {
   type ProviderCredentialPatch,
   type ProviderCredentialScope,
   PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
-  PROVIDER_KEY_SUMMARY_LIMIT,
+  PROVIDER_KEY_SUMMARY_MAX_PAGES,
+  PROVIDER_KEY_SUMMARY_PAGE_SIZE,
   scopeKeyFor,
 } from './provider-credential.domain';
 
@@ -52,6 +53,8 @@ export class PrismaProviderCredentialRepository
   extends AbstractPrismaRepository<ProviderCredential, ProviderCredentialRow, string>
   implements IProviderCredentialRepository
 {
+  private readonly logger = new Logger(PrismaProviderCredentialRepository.name);
+
   constructor(
     @Inject(TRANSACTION_MANAGER) tx: ITransactionManager,
     private readonly prisma: PrismaService<PrismaClient>,
@@ -119,17 +122,31 @@ export class PrismaProviderCredentialRepository
   }
 
   /**
-   * C10 US-007: the board's `kodaKeys`. A GLOBAL key is unique per provider, so this is naturally one
-   * row per provider; `take` still bounds the read (api-data rule) and the order is total, so two
-   * calls answer the same list.
+   * C10 US-007: the board's `kodaKeys`, read in bounded pages. Creation accepts any valid provider id
+   * and nothing bounds the GLOBAL inventory, so one page would hide keys that exist; the loop stops at
+   * the first partial page. The order is total (provider, created, id), so two calls agree, and the
+   * {@link PROVIDER_KEY_SUMMARY_MAX_PAGES} bound keeps the loop finite: an inventory that reaches it
+   * fails loudly instead of answering a board that lost keys.
+   *
+   * Paging is by offset and this read holds no transaction, so a credential written between two pages
+   * can shift one row into or out of the window; the board is a derived snapshot and the next request
+   * answers the settled inventory.
    */
   async listActiveGlobal(): Promise<ProviderCredential[]> {
-    const rows = await this.prisma.client.providerCredential.findMany({
-      where: { scopeKey: GLOBAL_SCOPE_KEY, disabledAt: null },
-      orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
-      take: PROVIDER_KEY_SUMMARY_LIMIT,
-    });
-    return rows.map((row) => this.toDomain(row));
+    const rows: ProviderCredential[] = [];
+    for (let page = 0; page < PROVIDER_KEY_SUMMARY_MAX_PAGES; page += 1) {
+      const batch = await this.prisma.client.providerCredential.findMany({
+        where: { scopeKey: GLOBAL_SCOPE_KEY, disabledAt: null },
+        orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+        skip: page * PROVIDER_KEY_SUMMARY_PAGE_SIZE,
+        take: PROVIDER_KEY_SUMMARY_PAGE_SIZE,
+      });
+      for (const row of batch) rows.push(this.toDomain(row));
+      if (batch.length < PROVIDER_KEY_SUMMARY_PAGE_SIZE) return rows;
+    }
+    const cap = PROVIDER_KEY_SUMMARY_MAX_PAGES * PROVIDER_KEY_SUMMARY_PAGE_SIZE;
+    this.logger.error(`Active GLOBAL provider credentials exceed ${cap} rows; the credential board is refused rather than truncated`);
+    throw new Error(`Provider credential GLOBAL inventory exceeds ${cap} rows`);
   }
 
   async listForProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredential>> {

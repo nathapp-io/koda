@@ -4,7 +4,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { IProviderCredentialRepository, ProviderCredential } from './provider-credential.domain';
-import { PROVIDER_KEY_SUMMARY_LIMIT } from './provider-credential.domain';
+import { PROVIDER_KEY_SUMMARY_PAGE_SIZE } from './provider-credential.domain';
 import { ProviderCredentialsService } from './provider-credentials.service';
 import type { IProviderCredentialsConfig } from '../../config/provider-credentials.config';
 import { LocalSecretStore, type SecretStore } from './secret-store';
@@ -254,19 +254,19 @@ describe('ProviderCredentialsService', () => {
     expect(repository.listActiveGlobal).not.toHaveBeenCalled();
   });
 
-  it('logs a warning when the koda read hits its cap instead of answering a silently short column', async () => {
+  it('projects every row the repository answers, never a capped subset', async () => {
     const { service, repository } = setup();
+    // More rows than one repository page: the service must pass them all through, so a future cap
+    // added here would fail this case rather than silently shortening the board.
     vi.mocked(repository.listActiveGlobal).mockResolvedValue(
-      Array.from({ length: PROVIDER_KEY_SUMMARY_LIMIT }, (_, i) =>
+      Array.from({ length: PROVIDER_KEY_SUMMARY_PAGE_SIZE + 1 }, (_, i) =>
         makeCredential({ scope: 'GLOBAL', scopeKey: 'global', projectId: null, providerId: `provider${i}` })),
     );
-    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
     const keys = await service.listActiveGlobalKeys();
 
-    expect(keys).toHaveLength(PROVIDER_KEY_SUMMARY_LIMIT);
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining('capped'));
-    warning.mockRestore();
+    expect(keys).toHaveLength(PROVIDER_KEY_SUMMARY_PAGE_SIZE + 1);
+    expect(keys.at(-1)?.providerId).toBe(`provider${PROVIDER_KEY_SUMMARY_PAGE_SIZE}`);
   });
 });
 

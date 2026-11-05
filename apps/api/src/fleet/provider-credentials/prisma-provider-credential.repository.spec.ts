@@ -1,4 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
@@ -9,7 +10,8 @@ import {
 import {
   GLOBAL_SCOPE_KEY,
   PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
-  PROVIDER_KEY_SUMMARY_LIMIT,
+  PROVIDER_KEY_SUMMARY_MAX_PAGES,
+  PROVIDER_KEY_SUMMARY_PAGE_SIZE,
   scopeKeyFor,
 } from './provider-credential.domain';
 
@@ -304,12 +306,16 @@ describe('PrismaProviderCredentialRepository', () => {
   });
 
   /**
-   * C10 US-007: the credential board's koda column is one bounded read of the active GLOBAL rows —
-   * disabled rows filtered out by the query, never by the caller — in the same total order the
-   * management list uses, so two renders of the same data agree.
+   * C10 US-007: the credential board's koda column reads every active GLOBAL row — disabled rows
+   * filtered out by the query, never by the caller — in the same total order the management list
+   * uses, so two renders of the same data agree. The read pages, because creation accepts any valid
+   * provider id and nothing bounds the inventory: a silently short board would hide keys that exist.
    */
   describe('listActiveGlobal', () => {
-    it('reads the active GLOBAL rows in provider order, bounded by the summary limit', async () => {
+    const page = (offset: number, size = PROVIDER_KEY_SUMMARY_PAGE_SIZE) =>
+      Array.from({ length: size }, (_, i) => row({ id: `cred-${offset + i}`, providerId: `provider${offset + i}` }));
+
+    it('reads the first page of active GLOBAL rows in provider order', async () => {
       (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
         row(),
         row({ id: 'cred-2', providerId: 'openai' }),
@@ -320,10 +326,41 @@ describe('PrismaProviderCredentialRepository', () => {
       expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith({
         where: { scopeKey: 'global', disabledAt: null },
         orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
-        take: PROVIDER_KEY_SUMMARY_LIMIT,
+        skip: 0,
+        take: PROVIDER_KEY_SUMMARY_PAGE_SIZE,
       });
       expect(rows.map((r) => r.providerId)).toEqual(['openrouter', 'openai']);
       expect(rows[0]).toMatchObject({ id: 'cred-1', scope: 'GLOBAL' });
+    });
+
+    it('pages until the inventory ends, so a 201st GLOBAL key is still listed', async () => {
+      const first = page(0);
+      const last = page(PROVIDER_KEY_SUMMARY_PAGE_SIZE, 1);
+      const findMany = prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>;
+      findMany.mockResolvedValueOnce(first).mockResolvedValueOnce(last);
+
+      const rows = await repository.listActiveGlobal();
+
+      expect(rows).toHaveLength(PROVIDER_KEY_SUMMARY_PAGE_SIZE + 1);
+      expect(rows.at(-1)).toMatchObject({ providerId: `provider${PROVIDER_KEY_SUMMARY_PAGE_SIZE}` });
+      expect(findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({ skip: 0, take: PROVIDER_KEY_SUMMARY_PAGE_SIZE }));
+      expect(findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ skip: PROVIDER_KEY_SUMMARY_PAGE_SIZE, take: PROVIDER_KEY_SUMMARY_PAGE_SIZE }),
+      );
+    });
+
+    it('fails loudly past the safety bound instead of answering a short board', async () => {
+      // A page that is always full means the loop can only end at the bound.
+      const findMany = prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>;
+      findMany.mockImplementation(async ({ skip }: { skip: number }) => page(skip));
+      const failure = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      await expect(repository.listActiveGlobal()).rejects.toThrow(/GLOBAL/);
+
+      expect(findMany).toHaveBeenCalledTimes(PROVIDER_KEY_SUMMARY_MAX_PAGES);
+      expect(failure).toHaveBeenCalled();
+      failure.mockRestore();
     });
   });
 });

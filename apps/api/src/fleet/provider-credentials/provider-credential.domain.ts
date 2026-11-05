@@ -37,11 +37,18 @@ export const NO_WHITESPACE_PATTERN = /^\S+$/;
 export const PROVIDER_CREDENTIAL_PAGE_SIZE_MAX = 200;
 
 /**
- * Hard cap on the board's `kodaKeys` read (C10 US-007). `@@unique([scopeKey, providerId])` already
- * limits a GLOBAL key to one row per provider, so this only bounds a pathological inventory: the
- * board lists providers in code-unit order and the cap is far above any real provider count.
+ * The credential board's `kodaKeys` read (C10 US-007) is paged, because creation accepts any valid
+ * provider id and nothing bounds the GLOBAL inventory: a single page would silently hide keys that
+ * exist. `@@unique([scopeKey, providerId])` keeps it to one row per provider, so both numbers are far
+ * above any real installation.
  */
-export const PROVIDER_KEY_SUMMARY_LIMIT = 200;
+export const PROVIDER_KEY_SUMMARY_PAGE_SIZE = 200;
+
+/**
+ * Safety bound on that paging. Reaching it means the inventory is pathological, and the read then
+ * fails loudly rather than answering a board that lost keys (api-data: no unbounded page loops).
+ */
+export const PROVIDER_KEY_SUMMARY_MAX_PAGES = 50;
 
 export interface ProviderCredential {
   id: string;
@@ -153,8 +160,9 @@ export interface IProviderCredentialRepository {
   /** One bounded page of GLOBAL rows (the admin list). */
   listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>>;
   /**
-   * The active GLOBAL rows as a bounded, provider-ordered read for the credential board (C10 US-007).
-   * Disabled rows are excluded by the filter; the caller projects them to metadata.
+   * Every active GLOBAL row for the credential board's koda column (C10 US-007), read in bounded
+   * pages so an inventory larger than one page is still answered whole; disabled rows are excluded by
+   * the filter. The caller projects the rows to metadata.
    */
   listActiveGlobal(): Promise<ProviderCredential[]>;
   /** One bounded page of a project's own scopes: its PROJECT rows and the REPO rows of its repos. */

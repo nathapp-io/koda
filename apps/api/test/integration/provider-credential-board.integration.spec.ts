@@ -1,9 +1,10 @@
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { RunnerCapabilities } from '../../src/fleet/common/protocol';
+import { PROVIDER_KEY_SUMMARY_PAGE_SIZE } from '../../src/fleet/provider-credentials/provider-credential.domain';
 import { fixtureDb } from '../helpers/action-context';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../helpers/fleet-fixtures';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../helpers/http-app';
+import { bootHttpApp, data, TEST_PASSWORD } from '../helpers/http-app';
 import { resetDb } from '../helpers/reset-db';
 import { canRunDbTests } from '../helpers/test-environment';
 
@@ -171,12 +172,40 @@ describeIntegration('credential board koda keys and runner vault state (PG)', ()
     expect(vaultState(vault.runnerId)).toMatchObject({ readable: true, providerVault: true });
     expect(vaultState(plain.runnerId)).toMatchObject({ readable: true, providerVault: false });
   });
+
+  /**
+   * AC-5 at the edge of a page: creation accepts any valid provider id and storage bounds nothing, so
+   * a board that read one page would list 200 of these 201 keys and quietly hide the last one — the
+   * provider row that names it included.
+   */
+  it('AC-5: lists every active GLOBAL key of an inventory past one read page', async () => {
+    const total = PROVIDER_KEY_SUMMARY_PAGE_SIZE + 1;
+    const providerId = (i: number) => `provider-${String(i).padStart(3, '0')}`;
+    const owner = world.ids.root;
+    await db.providerCredential.createMany({
+      data: Array.from({ length: total }, (_, i) => ({
+        scope: 'GLOBAL', scopeKey: 'global', projectId: null, repoId: null,
+        providerId: providerId(i), name: `key-${i}`, encryptedKey: '00:00:00', last4: String(1000 + i),
+        fingerprint: `${String(i).padStart(12, '0')}`, createdById: owner, updatedById: owner,
+      })),
+    });
+
+    const answer = await board();
+
+    expect(answer.kodaKeys).toHaveLength(total);
+    expect(answer.kodaKeys.map((key) => key.providerId)).toEqual(Array.from({ length: total }, (_, i) => providerId(i)));
+    // Every key is represented in the provider inventory too, so the column can render each row.
+    expect(answer.providers.map((provider) => provider.providerId)).toEqual(
+      Array.from({ length: total }, (_, i) => providerId(i)),
+    );
+    expect(answer.kodaKeys.at(-1)).toMatchObject({ providerId: providerId(total - 1), last4: String(1000 + total - 1) });
+  });
 });
 
 /**
- * AC-8 needs a boot whose config has no master key, which is a second application in this file. It
- * reuses the database the suite already reset and inserts a GLOBAL row directly: the vault being off
- * is what must hide it, not the absence of rows.
+ * AC-8 needs a boot whose config has no master key, which is a second application in this file. It is
+ * self-contained — its own reset, its own owner and its own GLOBAL row — so it passes alone against a
+ * fresh database and does not depend on the other suite having seeded anything.
  */
 describeIntegration('credential board with the vault off (PG)', () => {
   let app: NathApplication;
@@ -190,14 +219,17 @@ describeIntegration('credential board with the vault off (PG)', () => {
     previousKey = process.env[ENCRYPTION_KEY_ENV];
     delete process.env[ENCRYPTION_KEY_ENV];
     try {
+      await resetDb();
       app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
       db = fixtureDb(app);
-      const owner = await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } });
-      // A real GLOBAL row: sealed under the master key the previous boot used, unreadable here — the
-      // board must answer [] without decrypting anything. The runners go too, so the only provider
-      // the row could add is the one this case is about.
-      await db.providerCredential.deleteMany();
-      await db.runner.deleteMany();
+      // The first registered user is the installation owner, so it holds `fleet.credential.read`.
+      token = data<{ accessToken: string }>(
+        await request(server()).post('/api/auth/register')
+          .send({ email: 'vault-off@koda.test', name: 'Vault Off', password: TEST_PASSWORD }).expect(201),
+      ).accessToken;
+      const owner = await db.user.findUniqueOrThrow({ where: { email: 'vault-off@koda.test' } });
+      // A real GLOBAL row, sealed under a master key this boot does not have: the vault being off is
+      // what must hide it, not the absence of rows.
       await db.providerCredential.create({
         data: {
           scope: 'GLOBAL', scopeKey: 'global', projectId: null, repoId: null,
@@ -205,7 +237,6 @@ describeIntegration('credential board with the vault off (PG)', () => {
           fingerprint: '0123456789ab', createdById: owner.id, updatedById: owner.id,
         },
       });
-      token = await loginToken(server(), 'root@koda.test', TEST_PASSWORD);
     } finally {
       if (previousKey === undefined) delete process.env[ENCRYPTION_KEY_ENV];
       else process.env[ENCRYPTION_KEY_ENV] = previousKey;
