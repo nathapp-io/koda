@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T07:50:14.228Z",
+  "updatedAt": "2026-11-05T08:33:23.763Z",
   "userStories": [
     {
       "id": "US-001",
@@ -34,14 +34,17 @@
         "encryption"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New encrypted-secret abstraction, transaction-aware persistence and migration; cryptography and credentials require strict isolated TDD."
+        "reasoning": "New encrypted-secret abstraction, transaction-aware persistence and migration; cryptography and credentials require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/common/utils/encryption.util.ts",
@@ -63,7 +66,11 @@
         "apps/api/test/integration/provider-credential-storage.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bb651a6bd67e77763474d31fe34933c61e2fa4a9"
     },
     {
       "id": "US-002",
@@ -121,7 +128,10 @@
         "update and remove throw 503 fleet.providerCredentials.vaultOff when the vault is disabled."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -214,7 +224,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -289,7 +302,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -374,7 +390,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -445,7 +464,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -515,7 +537,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -587,7 +612,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -657,7 +685,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -717,7 +748,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -772,7 +806,10 @@
         "When a session open fails, ThreadJobRun.start's finally releases the job's provider socket."
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -835,7 +872,10 @@
         "Cancelling a delete confirmation sends no DELETE request."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-013",
@@ -890,7 +930,10 @@
         "Switching project slug reloads rows without briefly displaying the previous project's credentials."
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-014",
@@ -964,7 +1007,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-015",
@@ -1015,7 +1061,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "SECOND-PASS ADVERSARIAL AUDIT\nEnumerated and retained all 178 explicit spec acceptance criteria in their original stories: US-001=13, US-002=14, US-003=14, US-004=13, US-005=14, US-006=15, US-007=8, US-008=14, US-009=13, US-010=9, US-011=11, US-012=13, US-013=9, US-014=14, US-015=4. Original criteria remain first in each array; failure-table and regression assertions follow them. Qualifiers retained include stale git-token abandonment equivalence, matching grants and epoch-ms conversion, optional credential fakes, the abandon-path parenthesis, readoption's same deterministic socket path, unchanged fingerprint on rename, exact activity payloads, no repository export, no plaintext response, and the exact unknown-item English copy. Every story has an observable negative path; explicit native invalid-model behavior is also pinned. No deprecated grep/file/verbatim AC tags occur in the spec. All 17 feature exclusions are retained verbatim, with no story-local work promoted to feature exclusions. Binding IDs, workdirs and dependencies remain unchanged.\nThe audit corrected permission-check syntax to the real usePermissions.ts public shape: useGlobalPermissions()/useProjectPermissions(slug) return a Permissions object whose permissions.value has the has method (apps/web/composables/usePermissions.ts:33-42, :75-81), not a direct has method. No new permission composable is needed. The US-008 cached-repeat fixture explicitly sits outside the final 60-second renewal margin, so it cannot contradict the next AC requiring renewal inside that margin. FenceService.abandon queues a runner ABANDON command with reason stale_lease and does not transition FleetJob.state (apps/api/src/fleet/sync/fence.service.ts:22-30); the stale-epoch AC now names that actual observable behavior while keeping its regression qualifier.\nFleetHttpClient.request currently has only method/url/headers/body and uses config.httpTimeoutMs for all requests (apps/api/src/fleet/git-broker/fleet-http-client.ts:14-20). US-014 must extend that existing method with an OPTIONAL per-request timeout override for the 5000 ms comments read, keeping all current callers, redirect refusal, provider error mapping and default timeout unchanged. Do not pretend a timeout option already exists or switch to raw fetch. ThreadSessionFactoryOptions currently lacks self argv (apps/runner/src/thread/session-factory.ts:28-33); US-011 adds optional injectable self argv with a fallback through the existing self-command mechanism so old construction sites remain valid. Existing config-job cleanup at apps/runner/src/executor/config-job/config-job.ts:54-59 restores the clone but has no provider cleanup yet: add a finally around the new provider lifecycle without changing the returned config-job result.\nRegression assertions now make the spec's Modifies anchors executable: existing catalog/entity members, git token purpose/fencing without provider requests, credential-board cells/profiles, git-only socket protocol, optional broker fakes, untouched non-vault probe fields, native invalid-model failures, existing board cells/settings content, in-transaction ruling rechecks, and unknown skip-reason interpolation. US-012 restores the spec-recommended en.json context file within the five-file cap. Complexity is reduced to medium for US-002/004 and complex for US-006/008 because they extend concrete existing patterns rather than introduce a new architecture; all credential/access-control/token/session stories retain the mandatory three-session-tdd security strategy. The apps/cli exclusion does not exclude the explicitly required koda-runner provider-cred/vault commands.\n\nREPOSITORY AND DISCOVERY\nThis is an enhancement to an established Bun/Turborepo monorepo, not greenfield. Execution root: /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. codebase-memory MCP is unavailable in this session; discovery used targeted Read/Grep/Glob instead. The supplied Express/Next.js detection is incorrect: .nax/mono/apps/api/context.md:19 identifies NestJS/Fastify/Prisma 7, and .nax/mono/apps/web/context.md:21 identifies Nuxt 4 SSR with root-level pages/components/composables. Runner is Bun-only ESM. Read the matching .nax/mono/apps/<app>/context.md before implementation; generated AGENTS.md files are not authoring sources. The API context requires nathapp-nestjs-patterns before NestJS coding; no matching skill file was exposed by repository discovery, so implementation must obtain it from its available skill host. The feature spec is .nax/features/provider-credential-vault/spec.md:1; approved design reference is docs/superpowers/specs/2026-11-05-provider-credential-vault-design.md. All 15 story IDs, workdirs and dependencies are binding. Cross-package protocol and generated contract outputs remain in the specified API story workdirs; do not silently change dependencies or split stories.\n\nARCHITECTURE AND STORAGE\nAPI owns persistence, permissions, scope resolution, attribution, and workflow decisions. Runner only transports requests and grants, caches them in memory, exposes per-job sockets, and connects the nax helper/session contracts. Web remains a Nuxt API client. No proxy, per-key budget system, or new secret backend. Reuse AES-256-GCM encryptToken/decryptToken at apps/api/src/common/utils/encryption.util.ts:7 and :32; encryptToken uses a random IV at :12 and emits iv:tag:ciphertext at :25. Add a separate providerCredentials namespace following apps/api/src/config/vcs.config.ts:5 and :32, with optional 64-hex env validation following apps/api/src/config/env.validation.ts:32. Register the new namespace in apps/api/src/app.module.ts:73; merely creating a config file will not load it. Missing master key must not prevent module construction or API boot. LocalSecretStore supplies randomized encryption plus deterministic 12-hex HMAC-SHA256 fingerprint and last4; do not substitute an unkeyed hash or reuse VCS_ENCRYPTION_KEY.\nAdd Prisma models and a committed additive migration in apps/api/prisma/schema.prisma, including inverse relations on Project (:125), FleetRepo (:794), and any chosen issue/job relation on FleetJob (:1052). Scope is a string constant/type, not a Prisma enum. The unique scopeKey/providerId pair avoids NULL uniqueness holes: global, project:<projectId>, repo:<repoId>. Project/repo foreign keys cascade as specified; actor IDs are plain strings. The issue unique tuple is jobId/credentialId/fingerprint, not epoch: retries and lease renewals must not duplicate attribution; rotating a key produces a new fingerprint attribution. Avoid coupling deletion to an issue FK policy that would prevent the required credential DELETE; durable FleetActivity is the usage record. Prisma generated imports must come from src/generated/prisma/client, with createPgAdapter for actual clients. Driver-adapter unique errors require isUniqueViolation rather than error.meta.target; see apps/api/src/vcs/prisma-vcs.repository.ts:4 and API context. Repositories use transaction-aware PrismaService as in apps/api/src/vcs/prisma-vcs.repository.ts:28-36. Export the service for consumers, not PROVIDER_CREDENTIAL_REPOSITORY; module DI tests must stay database-free and co-located. US-001 owns initial infrastructure, US-002 adds/exports the service.\n\nMANAGEMENT, AUTHORIZATION, AND SECRET HYGIENE\nExisting permission inventory already includes fleet.credential.read at apps/api/src/permissions/catalog.ts:199, and fleet.credential. is already high risk at :150. Add only the three new global writes to NEW_KEY_SCOPES (:116). Project credential read/create/update/delete are new project keys; add project.credential. to HIGH_RISK_PREFIXES (:142), preserving the low-risk read exception in the catalog's classification logic. Update catalog.spec.ts mirrored pins/counts and permissions/__snapshots__/role-matrix.json: global writes Owner/Admin only; Project Admin writes, other project roles read only. Guards remain authoritative on the API, with UI gating as affordance only. Cross-project and wrong-scope IDs must return 404, and repo membership must be checked when accepting repoId.\nApproval writes must follow apps/api/src/vcs/vcs-route.commands.ts:44-69 for create and :73-103 for optional-key update: redactSecret replaces values before the approval body/hash/preview is stored; redemption seals the resubmitted secret, not the original one. Preserve an absent key in PATCH rather than manufacturing a redaction marker. Wire commands into ApprovalCommandRegistry and use @ApprovalGated({ redeem: true }), @ApprovalRedeemHeader(), ApprovalRouteGate; global gate projectId is null. Approval authorization must be re-evaluated through existing route-command principal machinery; do not insert a direct unguarded CRUD path. Management DTOs must be projections, never spread encrypted domain records: exactly id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt. Validate providerId regex, name 1-64, key 16-8192 without whitespace at the shared domain boundary as well as DTO/form edges. Vault-off refuses ALL management writes with 503.\nFleetActivityService.record at apps/api/src/fleet/activity/fleet-activity.service.ts:21 expects the mutating transaction and rejects key-like payload field names using /token|secret|key|password|credential/i at :15. Use only providerId, scope, name, fingerprint, never credentialId as a payload key or plaintext/ciphertext in audit summaries. Add provider_credential to the FleetEntityType union in US-003 and update the FleetActivity.entityType schema comment (apps/api/prisma/schema.prisma:927); US-006 also uses that shared entity type and must remain buildable when run directly after US-002, without inventing a dependency on US-003. Register the additive union wherever first required without changing any existing member or delivering management routes early. Follow the atomic activity/audit precedent apps/api/src/fleet/repos/fleet-repos.service.ts:58-75. Preserve activity on credential deletion. API i18n is independent of web i18n: new providerCredentials files must actually resolve fleet.providerCredentials.* prefixes through the existing translation conventions, and both locales must be supplied.\n\nSYNC, PROTOCOL, AND CONCURRENCY\npackages/fleet-protocol/src/index.ts:235-247 contains TokenRequest/SyncRequest, :302-313 contains SyncResponse, and :82 contains threadModes capability. Add optional providerRequests/providerKeys/providerKeyErrors and providerVault, preserving every existing field and old-runner compatibility; no gratuitous protocol-version bump. API imports this workspace package type-only via its common/protocol bridge. US-006 owns provider wire types; US-007 may add the independent providerVault type field itself because it depends only on US-002, not US-006. apps/api/src/fleet/sync/sync-request.parser.ts:4 bounds token requests at 64, :57 parses token requests, and :70 parses the envelope: mirror this for provider requests with the strict providerId grammar and maximum 64.\nSyncService at apps/api/src/fleet/sync/sync.service.ts:64 captures one sync time, :109 grants git tokens, :111 computes idle, and :129-172 fences token requests inside a transaction. Add provider handling with the same job row lock, FenceService and RUNNER_HELD_STATES checks before any key disclosure. A stale lease queues ABANDON and yields no grant; provider errors/grants both suppress long-polling. Keep provider issue insert and credential.issued activity in the same short transaction, skip duplicates safely (not a caught P2002 that leaves PostgreSQL transaction aborted), and never hold a transaction across notifier.wait or forge HTTP. A per-request failure should not expose secret-bearing error details or block unrelated job processing. Account is koda:<lowercase scope>:<name>; lease is exactly sync-time plus 600000 ms and wire expiry is ISO. Ciphertext failures yield none and a warning containing credential id only.\nThread credential scope MUST come from FleetThreadTurn -> ChatThread, not the synthetic ASSIGN repository. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:265-272 currently provides findThreadTokenScope(kind/action); leave it unchanged and add findThreadCredentialScope(projectId/repoId) plus its domain interface. WORKSPACE anchor projectId is real and contributes the PROJECT override; PROJECT/WORKSPACE repoId is null. Update apps/api/src/fleet/sync/sync.module.ts:19 to import the provider service module, and update constructor fakes in sync-token-fence.spec.ts and sync.service.token-purpose.spec.ts without altering existing fence/token-purpose assertions.\n\nBOARD AND VISIBILITY\napps/api/src/fleet/dashboard/credential-board.ts:54 currently derives provider rows only from runner profiles/credentials, :64 maps runner flags, and apps/api/src/fleet/dashboard/credential-board.service.ts:18 reads all runners. Add an explicit active-global-key input, providerVault boolean defaulting false, and kodaKeys projection; provider rows should include keys held only in koda so the UI can display them even when no runner advertises that provider. Vault off gives an empty kodaKeys list; no project/repo keys or plaintext may appear. DashboardModule at apps/api/src/fleet/dashboard/dashboard.module.ts:15 needs the service module dependency. Update CredentialBoardDto, fleet-openapi.contract.spec.ts property pins, credential-board.spec.ts shape expectations and service fakes, preserving existing cells/misfit logic and no placement preference.\n\nRUNNER CREDENTIAL LIFECYCLE\napps/runner/src/credentials/broker.ts:26-36 defines CredentialProvider; new methods MUST be optional to preserve existing fakes. BrokerDeps at :50 gains an optional provider cache. Current servers map at :81 is git-only and release at :170-180 uses it to decide whether shared bin shims are still needed: a provider socket must live in a separate map. Serve irrespective of clone URL; current acquire parses HTTP clone URLs at :87 and therefore cannot be reused for SSH-only provider setup. Reuse socketPathFor/ensureSocketDir for deterministic job+epoch paths with the provider-keys discriminator. CredentialServer.listen at apps/runner/src/credentials/cred-server.ts:53 stages a private 0600 socket then atomically renames it; close at :86 inode-checks before unlinking to avoid deleting a restarted daemon's socket. Preserve that behavior in the sibling provider listener, and keep get-only git listener unchanged.\nTokenCache at apps/runner/src/credentials/token-cache.ts:43, :50, :98 and :115 is the model for in-memory state, wake listeners, bounded requests, and matching responses to requested epochs. ProviderKeyGrant omits leaseEpoch: ProviderKeyCache must bind replies to the exact originating request snapshot, not the newest live job epoch; otherwise overlapping attempts can receive another attempt's secret. Cache scope is job/epoch/provider, with 60 s renewal margin and 55 s pending reply limit. Once a provider has been served, none must become revoked rather than decline, preventing accidental fallback to a different billing identity. An initial vault_off should allow helper decline as the spec failure table requires; a previously served source must still fail, not silently fall back. No key in journal, environment, filesystem, log, commands, or bundles. Only the socket path enters the nax environment. This is not secrecy from an agent running as the same uid, and offset-tracked logs are not value-redacted.\nSyncLoop optional dependency seams belong at apps/runner/src/sync/sync-loop.ts:30-50; request construction and inflightIdle are :123-131, response application :144-171. Newly wanted provider requests must wake idle polls, but must not abort syncs already carrying writes. apps/runner/src/sync/batch.ts also participates in bounded request construction: include provider request bytes within the existing 1 MiB budget, rather than appending unbounded arrays after budgeting. Wire one cache/broker/loop instance in apps/runner/src/daemon/daemon.ts:189-196 and :243-263; unsubscribe provider need listeners and close all provider sockets on daemon shutdown. Tuning constants belong in src/daemon/tuning.ts, with injected clocks/timers for tests.\napps/runner/src/internal-commands.ts:17 dispatches git-cred/shim before Commander: add provider-cred there with stdin JSON validation and protocol-only stdout. Error stderr must be one fixed, non-secret line. HostExecutor.spawn at apps/runner/src/executor/host-executor.ts:166-196 and spawnFixStep at :199-235 each construct their own env; both need their own provider socket overlay after stripping inherited credential vars. Resume at :496 must restore the same deterministic path for surviving nax children, while cleanup (:480) and releaseCredentials (:500) must release independently of git cleanup failures. Config jobs have their own naxEnv and lifecycle in executor/config-job/config-job.ts; do not overlook them. Do not release provider sockets when git credentials are released after checkout.\nOnly explicit vault enable/disable commands may edit naxHome/config.json; use same-directory temp file/rename and preserve unrelated JSON. Reject malformed existing JSON without changing bytes. createCapabilityProbe at apps/runner/src/capabilities/create-probe.ts:13-21 chooses StaticCapabilityProbe first; retain that behavior and inject vaultHelper only into NaxCapabilityProbe. The probe reports providerVault only when global config command exactly matches [...self, provider-cred], not merely when auth.source is exec. apps/runner/package.json:21-22 already pins nax-agent and ACP 0.91.7; older runner context prose mentioning 0.91.6 is stale, so no speculative upgrade is needed.\nThreadSessionFactory.open at apps/runner/src/thread/session-factory.ts:108-117 branches ACP before native model lookup, :120-122 selects pinned/default model, and :134-151 constructs NativeBackendOptions. Add optional providerKeys and self argv input through existing dependency conventions, call granted only for native model IDs containing '/', and pass per-session exec credentials only after a grant. No grant means omit credentials so the process-wide machine store remains available; per-session exec has no file fallback. Keep existing effort, full-mode bashApproval, protected paths, resume/create and session error mappings unchanged. ThreadJobRun.start/finally at apps/runner/src/thread/thread-job-run.ts:245-250, REPO session open :328, runProject open :400, and abandon :1017 are the lifecycle points; cover PROJECT and WORKSPACE, not just REPO. A thread never reaps/kills executor process groups as part of this change.\n\nWEB CLIENT IMPACT\napps/web/composables/useFleetRepos.ts:78-85 demonstrates saved-or-pending discriminated results using permissionKey in the API body; use this for every credential write so approval responses never become saved rows. SSR-safe requests must go through useApi/apiPath, not a generated client or direct external fetch. New global page reuses admin-page conventions, and the project card follows apps/web/components/SettingsVcsCard.vue:39-52 for form/i18n setup but never reveals a saved provider key. The actual permission composable exposes permissions.value.has as seen in apps/web/components/fleet/FleetJobOpenItems.vue:16-18; honor the public semantics requested by the spec without inventing an incompatible has API. Add both locale keys, reset key inputs after save, confirm deletion, and show extractApiError via useAppToast.\nThe credential board page apps/web/pages/admin/fleet/credentials.vue:35 delegates grid rendering to apps/web/components/fleet/credentials/CredentialGrid.vue:24-55; edit the grid and apps/web/lib/fleet-credential-board.ts:9-17 as well as the page. The page currently hides its grid when runners.length is zero (:27), so avoid hiding koda-only keys in that case. Add translated vault-off markers and the koda column without changing existing cell meaning. Settings page gains SettingsProviderKeysCard with project and repo grouping and per-action permissions. Read docs/ux/redesign/MASTER-PLAN.md:33-44 before adding navigation; retain pinned inline nav/source order, add a new top-level destination to CommandPalette when appropriate, use HSL design tokens, and update the redesign status/decisions if navigation/layout changes. Render key metadata and all agent-controlled text through interpolation, not v-html.\n\nRULINGS #394\nFleetPrRulingsService.ruleTarget at apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:84-92 has ordered notDraft/notLatest/unknownItem/invalidText/settled checks. Insert ci refusal while preserving existing refusal precedence; create at :103-128 deliberately rechecks ruleTarget after locking. Add preflight as the external forge boundary, but do NOT replace create's in-transaction recheck with forge I/O. Both target producers already fetch repo: apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:21-56; add its provider/owner/name/installation projection to both and RulingJobTarget. Existing locks are repo-first and job/ruling-row ordered (:29-36); preserve them.\nThree caller families need preflight: controller apps/api/src/fleet/rulings/fleet-rulings.controller.ts:38; approval route command apps/api/src/fleet/rulings/fleet-ruling-route.commands.ts:22; assistant preview AND execute at apps/api/src/fleet/assistant/tools/pr-ruling-tools.ts:41 and :53. The assistant refusal mapper at :72-81 also needs the new refusal codes. GitHubAppClient already has mintThreadReadToken at apps/api/src/fleet/git-broker/github-app-client.ts:119-120 and FleetHttpClient injection at :49: add the issue-comments endpoint using that client with an explicit 5 s timeout and no redirects, not raw fetch. One page of 100 comments only; exact marker substring, no author check, no pagination. Mint/read exceptions and a full page without marker fail open; only a successful shorter page with no marker yields noItemIndex. ci must cause no forge read. Web currently renders Rule regardless of kind at apps/web/components/fleet/FleetJobOpenItems.vue:125; add ci exclusion while retaining finding actions and existing applied/permission/loading checks. Update unknown-item copy in both locales; CLI keeps raw skip reasons.\n\nTESTS, REGRESSION ANCHORS, AND ROLLOUT\nAll credential/access-control/crypto/session/token stories use three-session-tdd (strict isolation); #394 also uses that strategy because it adds a token-authenticated forge integration. US-015 is a small UI-only change using tdd-simple. API tests use vi.* and lazy TypeScript imports, not jest/require. Module wiring tests go alongside source without a database. Real constraints/transactions and HTTP auth/approval flows need integration tests under test/integration, plus existing apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts lifecycle additions in US-003/004/005. Preserve catalog mirrored pins/role snapshots, fleet-openapi.contract.spec.ts board property list, credential-board cell assertions, sync-token-fence.spec.ts and sync.service.token-purpose.spec.ts assertions, rulings service refusal order and snapshot repo fixtures. Runner test/unit/daemon-thread-wiring.spec.ts must accept the added cache without losing existing assertions. Host/config-job tests only expect the socket env when the optional broker method exists. Existing probe tests omit providerVault absent vaultHelper; old thread fakes with acquire/release must remain compatible. Add seam tests using real SyncLoop+broker cache, real helper+socket, and real broker+ThreadJobRun with an injected session backend, not just disconnected mocks. Web Jest component/page tests should stub Nuxt API and board/chart primitives; locale parity remains pinned.\nDB-backed tests use canRunDbTests with KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; DB setup force-resets a local *_test database. Never run two DB-mode suites on one test DB; use KODA_TEST_DB_CONTAINER=1 in a second checkout. Host socket/process checks may explicitly skip in sandbox, but skips are not verification; run DB and socket seams on the host before merge. No real provider billing or keys are needed; use synthetic keys and stubbed forge responses. API scoped command is bun run test:scoped <files>; runner bun run test covers src and test/unit; web uses Jest. Generated acceptance files stay in each app's .nax/features/provider-credential-vault and are not copied or edited.\nMigration/rollout: deploy the additive schema and API/config support first with vault off by default; regenerate Prisma client. Wire modules without repository exports or cycles (provider storage must not import SyncModule/FleetJobsModule just to find job scope). Export spec and run bun run generate from repository root after US-003/004/005/007 controller/DTO changes, committing openapi.json and generated CLI outputs without manual edits; no new CLI commands. Then deploy the backward-compatible runner transport/helper, explicitly enable fleet helpers with vault enable, create scoped keys, and expose web management. Native thread per-session sources work independently of global helper configuration. Setting the master env enables the vault; losing or changing it makes existing ciphertext unavailable, and master-key rotation/re-encryption is deliberately not implemented. Disabling or deleting a key is bounded by nax's last-good 10-minute lease, not an immediate process kill. The binding DAG has independent API storage/board/ruling branches, followed by runner transport/helper/config/native-session branches and web management; do not force a broader dependency chain merely for scheduling convenience.",
