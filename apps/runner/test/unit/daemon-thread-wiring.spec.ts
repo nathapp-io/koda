@@ -59,7 +59,10 @@ describe('US-007 daemon thread wiring', () => {
       journal, bootId: 'boot', daemonVersion: 'test', freeSlots: () => 2,
       capabilityReport: () => emptyCaps, onCapabilitiesSent: () => undefined,
       handleCommands: async () => [], abandonUnknown: async () => undefined,
-      tokenRequests: () => [], onTokens: () => undefined, onStop: () => undefined,
+      tokenRequests: () => [], onTokens: () => undefined,
+      // US-008: the daemon's loop also carries the provider-key cache; here nothing is queued.
+      providerRequests: () => [], onProviderKeys: () => undefined,
+      onStop: () => undefined,
       log: createMemoryLogger(), sleep: async () => undefined, random: () => 0.5, nowMs: () => 0, minGapMs: 0,
       ...({ onArchivedThreads: (ids: readonly string[]) => archived.push([...ids]) }),
     };

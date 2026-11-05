@@ -1,4 +1,4 @@
-import type { CommandAck, FleetCommandOut, GitToken, GitTokenError, RunnerCapabilities, SyncRequest, SyncResponse, TokenRequest } from '@nathapp/fleet-protocol';
+import type { CommandAck, FleetCommandOut, GitToken, GitTokenError, ProviderKeyError, ProviderKeyGrant, ProviderKeyRequest, RunnerCapabilities, SyncRequest, SyncResponse, TokenRequest } from '@nathapp/fleet-protocol';
 import { errorMessage } from '../errors';
 import type { Journal } from '../journal/journal';
 import type { Logger } from '../logger';
@@ -41,6 +41,10 @@ export interface SyncLoopDeps {
   readonly tokenRequests: () => readonly TokenRequest[];
   /** The server's answer to this request's token requests (TokenCache.apply). */
   readonly onTokens: (requested: readonly TokenRequest[], tokens: readonly GitToken[], errors: readonly GitTokenError[]) => void;
+  /** US-008: which provider keys jobs need now (ProviderKeyCache.requests). */
+  readonly providerRequests?: () => readonly ProviderKeyRequest[];
+  /** US-008: the server's answer to this request's provider requests (ProviderKeyCache.apply). */
+  readonly onProviderKeys?: (requested: readonly ProviderKeyRequest[], grants: readonly ProviderKeyGrant[], errors: readonly ProviderKeyError[]) => void;
   /** Fleet S5a §3: the thread ids the server has archived. An absent field keeps the previous list. */
   readonly onArchivedThreads?: (ids: readonly string[]) => void;
   readonly onStop: (reason: StopReason) => void;
@@ -125,9 +129,11 @@ export class SyncLoop {
       journal: this.deps.journal, bootId: this.deps.bootId, daemonVersion: this.deps.daemonVersion, freeSlots: this.deps.freeSlots(),
       acks: this.acksExcluded ? [] : [...this.pendingAcks.values()], capabilities: report?.capabilities, scale: this.scale,
       tokenRequests: this.deps.tokenRequests(),
+      providerRequests: this.deps.providerRequests?.() ?? [],
     });
     const controller = new AbortController();
-    this.inflightIdle = request.jobs.length === 0 && request.commandAcks.length === 0 && request.tokenRequests.length === 0;
+    this.inflightIdle = request.jobs.length === 0 && request.commandAcks.length === 0 && request.tokenRequests.length === 0
+      && (request.providerRequests ?? []).length === 0;
     this.inflight = controller;
     try {
       const response = await this.deps.client.sync(request, controller.signal);
@@ -154,6 +160,7 @@ export class SyncLoop {
     this.failures = 0;
     this.scale = doubleScale(this.scale);
     this.deps.onTokens(request.tokenRequests, response.gitTokens ?? [], response.gitTokenErrors ?? []);
+    this.deps.onProviderKeys?.(request.providerRequests ?? [], response.providerKeys ?? [], response.providerKeyErrors ?? []);
     // Fleet S5a §3: the prune pass keeps the latest list; a response without the field keeps the previous one.
     if (response.archivedThreadIds !== undefined) this.deps.onArchivedThreads?.(response.archivedThreadIds);
     const unknown = response.unknownJobIds ?? [];

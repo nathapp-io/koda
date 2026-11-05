@@ -10,6 +10,7 @@ import { NaxJobCheck } from '../capabilities/job-check';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
+import { ProviderKeyCache } from '../credentials/provider-key-cache';
 import { TokenCache } from '../credentials/token-cache';
 import { defaultSocketDir, ensureSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
@@ -187,10 +188,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const capacity = new CapacityTracker(client, log);
   await capacity.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
+  // US-008: the provider keys handed out over sync, in memory only, like the tokens.
+  const providerKeys = new ProviderKeyCache({ refreshMarginMs: tuning.providerKeyRefreshMarginMs });
   const broker = new CredentialBroker({
-    tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
+    tokens, providerKeys, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
     nowMs: () => Date.now(), sleep,
-    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
+    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs, providerKeyWaitMs: tuning.providerKeyServeWaitMs },
     uid,
   });
 
@@ -249,6 +252,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     handleCommands: (commands) => handler.handle(commands),
     abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
     tokenRequests: () => tokens.requests(Date.now()),
+    // US-008: the provider keys a job's model calls are waiting for, and the server's answer, applied at once.
+    providerRequests: () => providerKeys.requests(),
+    onProviderKeys: (requested, granted, errors) => {
+      providerKeys.apply(requested, granted, errors);
+      for (const error of errors) log.warn('provider key refused', { jobId: error.jobId, providerId: error.providerId, reason: error.reason });
+    },
     onArchivedThreads: (ids) => { archivedThreadIds = [...ids]; },
     onTokens: (requested, granted, errors) => {
       tokens.apply(requested, granted, errors, Date.now());
@@ -261,6 +270,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
   const stopNeedListener = tokens.onNeed(() => loop.wake());
+  const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
 
   const reprobe = async (): Promise<void> => {
@@ -288,6 +298,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       for (const timer of timers) clearInterval(timer);
       loop.stop();
       stopNeedListener();
+      stopProviderKeyNeedListener();
       await running;
       supervisor.shutdown();
       await shipper.close();
@@ -311,6 +322,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     for (const timer of timers) clearInterval(timer);
     loop.stop();
     stopNeedListener();
+    stopProviderKeyNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
     void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot

@@ -20,6 +20,10 @@ export interface Tuning {
   /** D79: how long the socket holds a request open for a token that has not arrived. */
   readonly tokenServeWaitMs: number;
   readonly tokenPollMs: number;
+  /** US-008: how long a provider-key socket holds a request open for a key that has not arrived (55 s). */
+  readonly providerKeyServeWaitMs: number;
+  /** US-008: a cached provider grant is served only while more than this is left before its expiry (60 s). */
+  readonly providerKeyRefreshMarginMs: number;
   /** D102, design §3.2: how often the capability probe runs (it also runs at start and on SIGHUP). */
   readonly capabilityProbeMs: number;
   /** D96: the timeout of one nax call. */
@@ -79,6 +83,8 @@ export const TUNING: Tuning = Object.freeze({
   tokenWaitMs: 120_000,
   tokenServeWaitMs: 30_000,
   tokenPollMs: 250,
+  providerKeyServeWaitMs: 55_000,
+  providerKeyRefreshMarginMs: 60_000,
   capabilityProbeMs: 600_000,
   naxCallTimeoutMs: 30_000,
   jobCheckTimeoutMs: 10_000,
