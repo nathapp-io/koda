@@ -65,6 +65,11 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
+  // C10: the GLOBAL credential update and delete routes (PATCH and DELETE
+  // `/fleet/provider-credentials/:id`) land with the next story; the create route already declares
+  // `fleet.credential.create`, so the catalog is complete and only the surface is missing.
+  'fleet.credential.update',
+  'fleet.credential.delete',
 ]);
 
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */
@@ -131,6 +136,12 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'fleet.repo.fix.unprotected': 'global',
   'thread.mode.ask': 'project',
   'thread.mode.full': 'project',
+  // C10 US-003: the GLOBAL provider key writes. Their surface arrives in two steps — the create route
+  // ships now, the update and delete routes with US-004 — which is why the two later keys are also
+  // listed in `PENDING_SURFACE_KEYS` until those routes declare them.
+  'fleet.credential.create': 'global',
+  'fleet.credential.update': 'global',
+  'fleet.credential.delete': 'global',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);

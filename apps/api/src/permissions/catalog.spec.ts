@@ -98,6 +98,10 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.repo.fix.unprotected': 'global',
   'thread.mode.ask': 'project',
   'thread.mode.full': 'project',
+  // C10 US-003: the GLOBAL provider key writes (the create route ships with US-003).
+  'fleet.credential.create': 'global',
+  'fleet.credential.update': 'global',
+  'fleet.credential.delete': 'global',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 

@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
+import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
+import type { AuditRecorder } from '../../audit/audit-recorder.service';
+import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { IProviderCredentialRepository, ProviderCredential } from './provider-credential.domain';
 import { ProviderCredentialsService } from './provider-credentials.service';
 import type { IProviderCredentialsConfig } from '../../config/provider-credentials.config';
@@ -23,8 +26,15 @@ function setup(enabled = true) {
     open: vi.fn((ciphertext: string) => ciphertext.replace('sealed:', '')),
   };
   const config: IProviderCredentialsConfig = { encryptionKey: enabled ? '0123456789abcdef'.repeat(4) : undefined };
-  const service = new ProviderCredentialsService(repository, secretStore, config);
-  return { service, repository, secretStore, config };
+  // The management writes (C10 US-003) record activity and audit in the mutation transaction; a no-op
+  // transaction and a recording spy keep these unit tests behaviour-only.
+  const activity = { record: vi.fn().mockResolvedValue(undefined), list: vi.fn() } as unknown as FleetActivityService;
+  const audit = { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditRecorder;
+  const txManager: ITransactionManager = {
+    run: <T>(fn: () => Promise<T>) => fn(), getClient: () => undefined, isInTransaction: () => true,
+  };
+  const service = new ProviderCredentialsService(repository, secretStore, config, activity, txManager, audit);
+  return { service, repository, secretStore, config, activity, audit };
 }
 
 describe('ProviderCredentialsService', () => {
@@ -81,10 +91,13 @@ describe('ProviderCredentialsService', () => {
   });
 
   it('AC-8: decrypts a credential sealed by LocalSecretStore for hand-out', () => {
-    const { repository, config } = setup();
+    const { repository, config, activity, audit } = setup();
     const store = new LocalSecretStore(config);
     const plaintext = 'sk-test-abcdef123456';
-    const service = new ProviderCredentialsService(repository, store, config);
+    const txManager: ITransactionManager = {
+      run: <T>(fn: () => Promise<T>) => fn(), getClient: () => undefined, isInTransaction: () => true,
+    };
+    const service = new ProviderCredentialsService(repository, store, config, activity, txManager, audit);
     const credential = makeCredential({ encryptedKey: store.seal(plaintext).encryptedKey });
     expect(service.issueKey(credential)).toBe(plaintext);
   });
@@ -158,5 +171,55 @@ describe('ProviderCredentialsService', () => {
     expect(repository.patch).toHaveBeenLastCalledWith(current.id, { disabledAt: null, updatedById: 'u2' });
     vi.mocked(repository.remove).mockResolvedValue(true);
     await expect(service.remove(current.id)).resolves.toBeUndefined();
+  });
+
+  it('createGlobal seals a GLOBAL row and records its activity and audit entry', async () => {
+    const { service, repository, activity, audit } = setup();
+    const row = makeCredential({ scope: 'GLOBAL', scopeKey: 'global', projectId: null });
+    vi.mocked(repository.insert).mockResolvedValue(row);
+
+    const dto = await service.createGlobal('u1', { providerId: 'openrouter', name: 'fleet', key: 'sk-or-abcdef123456' });
+
+    expect(repository.insert).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'GLOBAL', projectId: null, repoId: null, providerId: 'openrouter', name: 'fleet',
+      encryptedKey: 'sealed:sk-or-abcdef123456', last4: '3456', createdById: 'u1', updatedById: 'u1',
+    }));
+    expect(activity.record).toHaveBeenCalledExactlyOnceWith({
+      actorType: 'USER', actorId: 'u1', action: 'credential.created', entityType: 'provider_credential',
+      entityId: row.id, projectId: null,
+      payload: { providerId: 'openrouter', scope: 'GLOBAL', name: row.name, fingerprint: row.fingerprint },
+    });
+    expect(audit.record).toHaveBeenCalledExactlyOnceWith({
+      key: 'fleet.credential.create', resourceType: 'provider_credential', resourceId: row.id,
+      projectId: null, summary: 'created openrouter',
+    });
+    expect(dto).toMatchObject({ id: row.id, scope: 'GLOBAL', disabled: false, createdBy: row.createdById });
+    expect(dto).not.toHaveProperty('encryptedKey');
+  });
+
+  it('createGlobal answers no row and records nothing when the key is invalid', async () => {
+    const { service, repository, activity, audit } = setup();
+
+    await expect(service.createGlobal('u1', { providerId: 'openrouter', name: 'fleet', key: 'short' }))
+      .rejects.toMatchObject({ args: { key: expect.any(String), property: 'key' } });
+
+    expect(repository.insert).not.toHaveBeenCalled();
+    expect(activity.record).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('listGlobal maps the page to metadata without the sealed key', async () => {
+    const { service, repository } = setup();
+    const row = makeCredential({ scope: 'GLOBAL', scopeKey: 'global', projectId: null });
+    vi.mocked(repository.listGlobal).mockResolvedValue({
+      total: 1, current: 1, size: 20, hasNext: false, hasPrev: false, records: [row],
+    });
+
+    const page = await service.listGlobal({ current: 1, size: 20 });
+
+    expect(repository.listGlobal).toHaveBeenCalledWith({ current: 1, size: 20 });
+    expect(page).toMatchObject({ total: 1, current: 1, size: 20 });
+    expect(page.records[0]).toMatchObject({ id: row.id, providerId: 'openrouter', last4: '1234', disabled: false });
+    expect(page.records[0]).not.toHaveProperty('encryptedKey');
   });
 });

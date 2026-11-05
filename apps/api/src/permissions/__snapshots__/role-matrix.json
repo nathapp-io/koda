@@ -228,7 +228,10 @@
     "fleet.budget.override": ["granted","granted"],
     "fleet.repo.fix.unprotected": ["granted","granted"],
     "thread.mode.ask": ["no-project","granted"],
-    "thread.mode.full": ["no-project","granted"]
+    "thread.mode.full": ["no-project","granted"],
+    "fleet.credential.create": ["granted","granted"],
+    "fleet.credential.update": ["granted","granted"],
+    "fleet.credential.delete": ["granted","granted"]
   },
   "admin": {
     "agent.create": ["granted","granted"],
@@ -459,7 +462,10 @@
     "fleet.budget.override": ["granted","granted"],
     "fleet.repo.fix.unprotected": ["granted","granted"],
     "thread.mode.ask": ["no-project","granted"],
-    "thread.mode.full": ["no-project","granted"]
+    "thread.mode.full": ["no-project","granted"],
+    "fleet.credential.create": ["granted","granted"],
+    "fleet.credential.update": ["granted","granted"],
+    "fleet.credential.delete": ["granted","granted"]
   },
   "member": {
     "agent.create": ["not-granted","not-granted"],
@@ -690,7 +696,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "agent": {
     "agent.create": ["not-granted","not-granted"],
@@ -921,7 +930,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "project-admin": {
     "agent.create": ["not-granted","not-granted"],
@@ -1152,7 +1164,10 @@
     "fleet.budget.override": ["not-granted","granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","granted"],
-    "thread.mode.full": ["no-project","granted"]
+    "thread.mode.full": ["no-project","granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "developer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1383,7 +1398,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "reviewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1614,7 +1632,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "verifier": {
     "agent.create": ["not-granted","not-granted"],
@@ -1845,7 +1866,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "triager": {
     "agent.create": ["not-granted","not-granted"],
@@ -2076,7 +2100,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "approver": {
     "agent.create": ["not-granted","not-granted"],
@@ -2307,7 +2334,10 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   },
   "viewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -2538,6 +2568,9 @@
     "fleet.budget.override": ["not-granted","not-granted"],
     "fleet.repo.fix.unprotected": ["not-granted","not-granted"],
     "thread.mode.ask": ["no-project","not-granted"],
-    "thread.mode.full": ["no-project","not-granted"]
+    "thread.mode.full": ["no-project","not-granted"],
+    "fleet.credential.create": ["not-granted","not-granted"],
+    "fleet.credential.update": ["not-granted","not-granted"],
+    "fleet.credential.delete": ["not-granted","not-granted"]
   }
 }

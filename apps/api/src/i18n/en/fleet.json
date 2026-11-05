@@ -19,6 +19,12 @@
     "unknownItem": { "404": "Workflow item not found" },
     "invalidPr": { "400": "The job must identify a GitHub pull request" }
   },
+  "providerCredentials": {
+    "duplicate": { "409": "A key for this provider already exists at this scope" },
+    "vaultOff": { "503": "The provider credential vault is not configured" },
+    "notFound": { "404": "Provider credential not found" },
+    "validation": { "-2": "{property} is not a valid provider credential" }
+  },
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "configRequeue": { "409": "This config edit failed with {outcome}; reopen the edits instead of requeueing" },

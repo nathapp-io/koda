@@ -8,6 +8,9 @@ describe('permission contract checker', () => {
     'member.remove',
     'fleet.job.shell.escalate',
     'fleet.budget.override',
+    // C10: the GLOBAL credential update and delete routes land with the next story.
+    'fleet.credential.update',
+    'fleet.credential.delete',
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

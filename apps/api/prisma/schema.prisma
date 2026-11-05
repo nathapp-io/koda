@@ -926,7 +926,7 @@ model FleetActivity {
   actorType         String // USER | RUNNER | SYSTEM
   actorId           String
   action            String
-  entityType        String // runner | enrollment | repo | job | budget | schedule | approval
+  entityType        String // runner | enrollment | repo | job | budget | schedule | approval | ingest | analytics | provider_credential
   entityId          String
   jobId             String?
   projectId         String? // set on job rows and on project/repo budget rows

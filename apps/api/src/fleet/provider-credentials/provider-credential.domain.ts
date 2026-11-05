@@ -23,6 +23,14 @@ export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 export const PROVIDER_CREDENTIAL_NAME_MAX_LENGTH = 64;
 
 /**
+ * A key is 16-8192 characters with no whitespace (spec §"US-001"): 16 keeps `last4` to at most a
+ * quarter of the key, and the upper bound is the length the nax helper contract accepts.
+ */
+export const PROVIDER_CREDENTIAL_KEY_MIN_LENGTH = 16;
+export const PROVIDER_CREDENTIAL_KEY_MAX_LENGTH = 8192;
+export const NO_WHITESPACE_PATTERN = /^\S+$/;
+
+/**
  * Hard cap on one page of credentials. A management list is a bounded read: asking for more
  * returns a `hasNext` page of this size instead of fetching the whole table (api-data rule).
  */

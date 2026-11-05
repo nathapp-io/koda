@@ -6316,3 +6316,55 @@ describeIntegration('Fleet ruling endpoint lifecycle', () => {
     refusal(await request(server()).get('/api/projects/web/fleet/jobs/unknown/rulings').set(auth()).expect(404), 'fleet.jobs.404');
   });
 });
+
+/**
+ * C10 US-003: the GLOBAL provider credential routes over the real HTTP stack. The vault is on for this
+ * boot (the suite's `.env.test` leaves the master key unset), so a create really seals; the full
+ * approval/audit lifecycle of the same routes lives in
+ * `test/integration/fleet-provider-credentials-create.integration.spec.ts`.
+ */
+describeIntegration('GLOBAL provider credential endpoints', () => {
+  const ENCRYPTION_KEY_ENV = 'PROVIDER_CREDENTIAL_ENCRYPTION_KEY';
+  const CREATE = '/api/fleet/provider-credentials';
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let previousKey: string | undefined;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  beforeAll(async () => {
+    previousKey = process.env[ENCRYPTION_KEY_ENV];
+    process.env[ENCRYPTION_KEY_ENV] = 'abcdef0123456789'.repeat(4);
+    try {
+      await resetDb();
+      app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    } finally {
+      if (previousKey === undefined) delete process.env[ENCRYPTION_KEY_ENV];
+      else process.env[ENCRYPTION_KEY_ENV] = previousKey;
+    }
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+  }, 90_000);
+
+  afterAll(async () => { await app?.close(); });
+
+  it('creates a GLOBAL key and lists it as metadata, never the key (happy path)', async () => {
+    const created = body<{ id: string; scope: string; last4: string }>(await request(server()).post(CREATE)
+      .set(auth(world.tokens.root)).send({ providerId: 'openrouter', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    expect(created).toMatchObject({ scope: 'GLOBAL', last4: '3456' });
+    expect(created).not.toHaveProperty('key');
+
+    const page = body<{ records: { id: string; providerId: string; last4: string; disabled: boolean }[] }>(
+      await request(server()).get(CREATE).set(auth(world.tokens.root)).expect(200),
+    );
+    expect(page.records).toEqual([expect.objectContaining({ id: created.id, providerId: 'openrouter', last4: '3456', disabled: false })]);
+    expect(page.records[0]).not.toHaveProperty('key');
+  });
+
+  it('refuses a create and a list for a user without the GLOBAL credential keys (error case)', async () => {
+    refusal(await request(server()).post(CREATE).set(auth(world.tokens.dev))
+      .send({ providerId: 'openrouter', name: 'dev', key: 'sk-or-abcdef123456' }).expect(403), 'permissions.40003');
+    refusal(await request(server()).get(CREATE).set(auth(world.tokens.dev)).expect(403), 'permissions.40003');
+  });
+});

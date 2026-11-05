@@ -1,12 +1,19 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
-import { AppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
+import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { PROVIDER_CREDENTIALS_CFG, type IProviderCredentialsConfig } from '../../config/provider-credentials.config';
+import { FleetActivityService } from '../activity/fleet-activity.service';
+import { ProviderCredentialDto } from './dto/provider-credential.dto';
 import {
+  NO_WHITESPACE_PATTERN,
+  PROVIDER_CREDENTIAL_KEY_MAX_LENGTH,
+  PROVIDER_CREDENTIAL_KEY_MIN_LENGTH,
+  PROVIDER_CREDENTIAL_NAME_MAX_LENGTH,
   PROVIDER_CREDENTIAL_REPOSITORY,
   PROVIDER_ID_PATTERN,
-  PROVIDER_CREDENTIAL_NAME_MAX_LENGTH,
   type IProviderCredentialRepository,
   type NewProviderCredential,
   type ProviderCredential,
@@ -15,9 +22,6 @@ import {
 } from './provider-credential.domain';
 import type { SecretStore } from './secret-store';
 import { LocalSecretStore } from './secret-store';
-
-const MIN_KEY_LENGTH = 16;
-const MAX_KEY_LENGTH = 8192;
 
 export interface CreateProviderCredentialInput {
   scope: NewProviderCredential['scope'];
@@ -36,6 +40,13 @@ export interface UpdateProviderCredentialInput {
   updatedById: string;
 }
 
+/** The write body a management route accepts; the scope belongs to the route, not the body. */
+export interface CreateProviderCredentialBody {
+  providerId: string;
+  name: string;
+  key: string;
+}
+
 /** Business operations for encrypted provider keys. Repository and plaintext stay inside the API. */
 @Injectable()
 export class ProviderCredentialsService {
@@ -45,6 +56,9 @@ export class ProviderCredentialsService {
     @Inject(PROVIDER_CREDENTIAL_REPOSITORY) private readonly repository: IProviderCredentialRepository,
     @Inject(LocalSecretStore) private readonly secretStore: SecretStore,
     @Inject(PROVIDER_CREDENTIALS_CFG) private readonly config: IProviderCredentialsConfig,
+    private readonly activity: FleetActivityService,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   isEnabled(): boolean {
@@ -76,6 +90,43 @@ export class ProviderCredentialsService {
       this.logger.warn(`Unable to decrypt provider credential ${credential.id}`);
       return null;
     }
+  }
+
+  /** One bounded page of GLOBAL rows, as write-only metadata. */
+  async listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredentialDto>> {
+    const result = await this.repository.listGlobal(page);
+    return { ...result, records: result.records.map(ProviderCredentialDto.from) };
+  }
+
+  /**
+   * The GLOBAL create (`fleet.credential.create`), recorded like every other fleet write: the row, its
+   * `credential.created` activity entry and its audit entry share one transaction, so an approval
+   * execution and a direct call commit or roll back them together. The activity payload carries the
+   * metadata the feed shows — `providerId`, `scope`, `name`, `fingerprint` — and never the key.
+   */
+  async createGlobal(actorId: string, input: CreateProviderCredentialBody): Promise<ProviderCredentialDto> {
+    const created = await this.txManager.run(async () => {
+      const row = await this.create({
+        scope: 'GLOBAL',
+        projectId: null,
+        repoId: null,
+        providerId: input.providerId,
+        name: input.name,
+        key: input.key,
+        createdById: actorId,
+      });
+      await this.activity.record({
+        actorType: 'USER', actorId, action: 'credential.created', entityType: 'provider_credential',
+        entityId: row.id, projectId: null,
+        payload: { providerId: row.providerId, scope: row.scope, name: row.name, fingerprint: row.fingerprint },
+      });
+      await this.audit.record({
+        key: 'fleet.credential.create', resourceType: 'provider_credential', resourceId: row.id,
+        projectId: null, summary: `created ${row.providerId}`,
+      });
+      return row;
+    });
+    return ProviderCredentialDto.from(created);
   }
 
   async create(input: CreateProviderCredentialInput): Promise<ProviderCredential> {
@@ -134,14 +185,24 @@ export class ProviderCredentialsService {
     if (!(await this.repository.remove(id))) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
   }
 
-  private assertEnabled(): void {
+  /**
+   * Refuses a write while the vault is off (spec §"Failure Handling"): the API boots, management reads
+   * keep working, and only an operation that would seal or open a secret answers 503. A gated route
+   * calls this before it opens a request, so an approval cannot be granted for a call that cannot run.
+   */
+  assertEnabled(): void {
     if (!this.isEnabled()) {
       throw new AppException(HttpStatus.SERVICE_UNAVAILABLE, {}, 'fleet.providerCredentials.vaultOff', HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 
   private validateKey(key: string): void {
-    if (typeof key !== 'string' || key.length < MIN_KEY_LENGTH || key.length > MAX_KEY_LENGTH || /\s/.test(key)) {
+    if (
+      typeof key !== 'string' ||
+      key.length < PROVIDER_CREDENTIAL_KEY_MIN_LENGTH ||
+      key.length > PROVIDER_CREDENTIAL_KEY_MAX_LENGTH ||
+      !NO_WHITESPACE_PATTERN.test(key)
+    ) {
       throw this.validationError('key');
     }
   }
@@ -159,6 +220,8 @@ export class ProviderCredentialsService {
   }
 
   private validationError(field: string): ValidationAppException {
-    return new ValidationAppException({ [field]: 'invalid' }, 'fleet.providerCredentials.validation');
+    // `{property}` is what the i18n sentence interpolates; the field's own key keeps the older
+    // `{ <field>: 'invalid' }` shape US-002 settled, so both readers name the field.
+    return new ValidationAppException({ [field]: 'invalid', property: field }, 'fleet.providerCredentials.validation');
   }
 }
