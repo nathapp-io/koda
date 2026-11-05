@@ -75,6 +75,44 @@ describe('buildThreadInstructions (US-004)', () => {
   });
 });
 
+describe('REPO instructions follow the session mode', () => {
+  it('explicit read mode preserves the legacy brainstorming instructions', () => {
+    expect(buildThreadInstructions({ ...input, mode: 'read' })).toBe(buildThreadInstructions(input));
+  });
+
+  it.each(['ask', 'full'] as const)('%s mode supports coding and shell tools without a spec-only workflow', (mode) => {
+    const text = buildThreadInstructions({ ...input, mode, brief: 'Project brief:\nBuild authentication.' });
+    expect(text).toContain('You are a coding partner');
+    expect(text).toContain('edit code');
+    expect(text).toContain('run shell commands');
+    expect(text).not.toContain('You have no shell');
+    expect(text).not.toContain('Goal: agree with the person');
+    expect(text).not.toContain('1. Brainstorm');
+    expect(text).toContain('write_doc writes Markdown (.md) files under docs/ and .nax/features/add-auth/ only.');
+    expect(text).toContain('Publish commits code and documentation changes');
+    expect(text).toContain('Project brief:\nBuild authentication.');
+    expect(text).toContain('acme/app (base ref main)');
+    expect(text).toContain('.nax/features/add-auth/spec.md');
+    expect(text).toContain('- spec-review — Review a spec');
+    expect(lineBeforeSkills(text)).toBe(KODA_TOOLS_LINE);
+  });
+
+  it('ask mode explains Approve/Deny and requires waiting for a decision', () => {
+    const text = buildThreadInstructions({ ...input, mode: 'ask' });
+    expect(text).toContain('Mutating actions require an Approve/Deny decision in the thread');
+    expect(text).toContain('wait for approval');
+    expect(text).toContain('respect denials');
+    expect(text).not.toContain('without approval prompts');
+  });
+
+  it('full mode describes execution without approval prompts', () => {
+    const text = buildThreadInstructions({ ...input, mode: 'full' });
+    expect(text).toContain('without approval prompts');
+    expect(text).not.toContain('wait for approval');
+    expect(text).not.toContain('require an Approve/Deny');
+  });
+});
+
 const projectInput = { project: 'sandbox', skills: [] as ThreadSkillSource[] };
 
 describe('buildProjectThreadInstructions (S5b US-004)', () => {

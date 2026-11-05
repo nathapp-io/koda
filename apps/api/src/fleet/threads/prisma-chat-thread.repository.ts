@@ -645,7 +645,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
     const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
     if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
-    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills, brief: await this.readBriefBlock(thread.projectId, repoContext) }) };
+    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills, mode: (thread.mode ?? 'read') as ThreadMode, brief: await this.readBriefBlock(thread.projectId, repoContext) }) };
   }
 
   /**

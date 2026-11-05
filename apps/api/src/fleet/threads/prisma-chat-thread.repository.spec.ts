@@ -568,6 +568,24 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
     expect(turnCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'SESSION' }) });
   });
 
+  it.each(['read', 'ask', 'full'] as const)('snapshots %s instructions with the turn mode for native and ACP sessions', async (mode) => {
+    for (const backend of [{ kind: 'native' }, { kind: 'acp', agent: 'cursor' }]) {
+      const { repo, turnCreate } = sendRepo(threadRow({ mode, backend }));
+      await repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1' });
+
+      expect(turnCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'SESSION', mode, backend }) });
+      const text = instructionsOf(turnCreate);
+      if (mode === 'read') {
+        expect(text).toContain('You have no shell and no web access.');
+      } else {
+        expect(text).toContain('You are a coding partner');
+        expect(text).toContain('run shell commands');
+        expect(text).not.toContain('You have no shell');
+        expect(text).toContain(mode === 'ask' ? 'wait for approval' : 'without approval prompts');
+      }
+    }
+  });
+
   it('US-003 AC-11: a REPO SESSION turn stores the project brief as lines two and three', async () => {
     const { repo, turnCreate, projectFindUnique, repoFindUnique } = sendRepo(threadRow());
 

@@ -1,4 +1,5 @@
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
+import type { ThreadMode } from '../common/thread-jobs';
 
 /**
  * S5b US-003: the line both thread kinds carry, right before the skills block. It tells the agent that anything
@@ -18,7 +19,24 @@ export function renderBriefBlock(input: { brief: string | null; repoContext: str
   return `Project brief:\n${brief}\n${input.repoContext}`;
 }
 
-export function buildThreadInstructions(input: { repo: string; baseRef: string; feature: string; specPath: string; skills: ThreadSkillSource[]; brief?: string }): string {
+export function buildThreadInstructions(input: { repo: string; baseRef: string; feature: string; specPath: string; skills: ThreadSkillSource[]; brief?: string; mode?: ThreadMode }): string {
+  // Missing mode keeps the original read-only brainstorming workflow for legacy callers.
+  if (input.mode === 'ask' || input.mode === 'full') {
+    const lines = [
+      `You are a coding partner for the repository ${input.repo} (base ref ${input.baseRef}), working on the feature "${input.feature}".`,
+      ...briefLines(input.brief),
+      'Goal: help the person with their requested work, including implementing and testing code changes. Read and search the code before you claim anything about it; clarify intent when needed.',
+      `Use the available skills when relevant. If a spec is requested, it belongs at ${input.specPath}; use spec-writing and spec-review if listed below.`,
+      'Tools: use your file tools to read and edit code in the worktree, and your shell tool to run shell commands, including tests. list_files and search_repo find files and text; write_doc writes docs.',
+      input.mode === 'ask'
+        ? 'Mode: ask. Mutating actions require an Approve/Deny decision in the thread; wait for approval and respect denials. Never bypass the approval mechanism.'
+        : 'Mode: full. Code edits and shell commands run without approval prompts; stay within the requested scope.',
+      `write_doc writes Markdown (.md) files under docs/ and ${featureDir(input.feature)} only. Other file tools can edit code outside those doc paths.`,
+      'Leave changes in the worktree for the person to review. Publish commits code and documentation changes; do not commit or push them yourself. Tell the person what changed and which tests ran when the work is ready to publish.',
+      KODA_TOOLS_LINE,
+    ];
+    return [...lines, ...skillLines(input.skills)].join('\n');
+  }
   const lines = [
     `You are a brainstorming partner for the repository ${input.repo} (base ref ${input.baseRef}), working on the feature "${input.feature}".`,
     ...briefLines(input.brief),
