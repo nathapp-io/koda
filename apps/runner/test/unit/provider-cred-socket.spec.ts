@@ -136,6 +136,25 @@ describe.skipIf(isNaxSandboxed())('runProviderCred over a real provider-key sock
     }
   });
 
+  test('AC-13: a key at nax\'s schema limit survives the socket, however it serializes', async () => {
+    const w = await world();
+    // The worst case a schema-valid key can serialize to: 8192 characters at 6 bytes each (JSON escapes).
+    const key = '\u0000'.repeat(8_192);
+    try {
+      const path = await within(w.broker.serveProviderKeys(w.row), 'the provider-key socket listen');
+      const io = helper((sock, providerId) => requestProviderKey(sock, providerId), path);
+      const answer = runProviderCred(['get'], io);
+      await waitFor(() => w.cache.requests().length > 0, { message: `the helper never queued a request on ${path}` });
+      w.cache.apply(w.cache.requests(), [grant(key)], []);
+      expect(await within(answer, 'the helper\'s answer for the maximal key')).toBe(0);
+      const reply = JSON.parse(io.out.join('')) as { key?: string };
+      expect(reply.key, `the helper wrote a ${io.out.join('').length}-byte line for an 8192-character key`).toBe(key);
+      expect(io.err).toEqual([]);
+    } finally {
+      await w.broker.closeAll();
+    }
+  });
+
   test('AC-14: vault_off for a provider with no lease reaches the helper as a decline over the socket', async () => {
     const w = await world();
     const calls: SyncRequest[] = [];

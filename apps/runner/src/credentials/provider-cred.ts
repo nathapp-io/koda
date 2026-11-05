@@ -15,10 +15,21 @@ export const PROVIDER_CRED_SOCKET_ENV = 'KODA_PROVIDER_CRED_SOCKET';
  */
 export const PROVIDER_CRED_TIMEOUT_MS = 57_000;
 
-const MAX_REPLY_BYTES = 16_384;
+/**
+ * The most a socket reply may occupy before it is called unusable. It must fit every reply nax's helper schema accepts,
+ * not just a plain-ASCII one: an 8192-character key serialized with JSON escapes (`\u0000`, 6 bytes per character) is
+ * 49 152 bytes, plus a 200-character account, so nax's own 64 KiB helper-output limit is the bound — and the buffer
+ * stays bounded at it.
+ */
+export const MAX_PROVIDER_REPLY_BYTES = 65_536;
 /** nax's helper schema (`helper-protocol`): a longer key or account is a reply nax refuses. */
 const MAX_KEY_CHARS = 8_192;
 const MAX_ACCOUNT_CHARS = 200;
+
+/** True once the answer read so far cannot be a reply nax's schema would accept (a socket that never ends is not ours). */
+export function replyTooLarge(buffered: string): boolean {
+  return Buffer.byteLength(buffered, 'utf8') > MAX_PROVIDER_REPLY_BYTES;
+}
 const DECLINE = { version: 1, decline: true } as const;
 
 /** What the job's socket answers, plus the failures only the client can see (the socket is gone, or unusable). */
@@ -63,7 +74,7 @@ export function requestProviderKey(path: string, providerId: string, timeoutMs: 
     socket.on('connect', () => socket.write(`provider ${providerId}\n`));
     socket.on('data', (chunk: string) => {
       out += chunk;
-      if (Buffer.byteLength(out, 'utf8') > MAX_REPLY_BYTES) finish({ ok: false, reason: 'reply too large' });
+      if (replyTooLarge(out)) finish({ ok: false, reason: 'reply too large' });
     });
     socket.on('end', () => finish(parseProviderReply(out)));
     socket.on('close', () => finish(parseProviderReply(out)));   // a close without FIN must not wait for the timeout

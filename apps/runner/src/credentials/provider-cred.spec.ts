@@ -2,8 +2,8 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
-  PROVIDER_CRED_SOCKET_ENV, PROVIDER_CRED_TIMEOUT_MS, parseProviderReply, parseProviderRequest, requestProviderKey, runProviderCred,
-  type ProviderCredIo, type ProviderCredReply,
+  MAX_PROVIDER_REPLY_BYTES, PROVIDER_CRED_SOCKET_ENV, PROVIDER_CRED_TIMEOUT_MS, parseProviderReply, parseProviderRequest, replyTooLarge,
+  requestProviderKey, runProviderCred, type ProviderCredIo, type ProviderCredReply,
 } from './provider-cred';
 import { makeTempDirs } from '../../test/helpers/tmp';
 
@@ -168,6 +168,31 @@ describe('koda-runner provider-cred through the real binary (US-009)', () => {
     expect(out.code).toBe(1);
     expect(out.stdout).toBe('');
     expect(out.stderr.trim().split('\n')).toHaveLength(1);
+  });
+});
+
+describe('the socket reply bound (US-009)', () => {
+  const KEY_CHARS = 8_192;   // nax's helper schema: `key` <= 8192 characters
+  const ACCOUNT_CHARS = 200;
+  /** The largest reply nax's schema allows, JSON-serialized: the shape the client has to accept. */
+  const reply = (key: string): string => JSON.stringify({ ok: true, key, expiresAt: 1, account: 'a'.repeat(ACCOUNT_CHARS) });
+  const KEYS = [
+    ['plain', 'k'.repeat(KEY_CHARS)],
+    ['backslash-escaped', '\\'.repeat(KEY_CHARS)],            // 2 bytes each once serialized: 16 384
+    ['control-escaped', '\u0000'.repeat(KEY_CHARS)],          // 6 bytes each once serialized: 49 152
+    ['multibyte', '漢'.repeat(KEY_CHARS)],                     // 3 bytes each in UTF-8: 24 576
+    ['astral', '😀'.repeat(KEY_CHARS / 2)],                    // a surrogate pair each: 16 384
+  ] as const;
+
+  test('a schema-valid reply fits the bound however its key serializes', () => {
+    for (const [label, key] of KEYS) {
+      expect(replyTooLarge(reply(key)), `an ${label} key at nax's 8192-character limit must not be "reply too large"`).toBe(false);
+    }
+  });
+
+  test('the buffer stays bounded', () => {
+    expect(replyTooLarge('x'.repeat(MAX_PROVIDER_REPLY_BYTES)), 'a reply exactly at the bound still fits').toBe(false);
+    expect(replyTooLarge('x'.repeat(MAX_PROVIDER_REPLY_BYTES + 1)), 'one byte over the bound does not').toBe(true);
   });
 });
 
