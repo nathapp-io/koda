@@ -8,6 +8,7 @@ import {
 } from './provider-credential.domain';
 import { ProviderCredentialsModule } from './provider-credentials.module';
 import { LocalSecretStore } from './secret-store';
+import { ProviderCredentialsService } from './provider-credentials.service';
 
 const MASTER_KEY = '0123456789abcdef'.repeat(4);
 
@@ -35,7 +36,7 @@ describe('ProviderCredentialsModule', () => {
     return builder.compile();
   };
 
-  it('AC-13: compiles with mocked PrismaService, TRANSACTION_MANAGER and config', async () => {
+  it('AC-15: resolves the service with mocked PrismaService, TRANSACTION_MANAGER and config', async () => {
     module = await compile();
 
     expect(module.get(LocalSecretStore)).toBeInstanceOf(LocalSecretStore);
@@ -43,11 +44,13 @@ describe('ProviderCredentialsModule', () => {
       .toBeInstanceOf(PrismaProviderCredentialRepository);
   });
 
-  it('AC-13: the repository token aliases the class the module provides', async () => {
+  it('AC-15: keeps the repository token private to the module', async () => {
     module = await compile();
 
-    expect(module.get(PROVIDER_CREDENTIAL_REPOSITORY)).toBe(
-      module.get(PrismaProviderCredentialRepository),
+    expect(module.get(ProviderCredentialsService)).toBeInstanceOf(ProviderCredentialsService);
+    expect(() => module.get(PROVIDER_CREDENTIAL_REPOSITORY, { strict: true })).toThrow();
+    expect(module.select(ProviderCredentialsModule).get(PROVIDER_CREDENTIAL_REPOSITORY, { strict: true })).toBe(
+      module.select(ProviderCredentialsModule).get(PrismaProviderCredentialRepository, { strict: true }),
     );
   });
 
@@ -57,13 +60,13 @@ describe('ProviderCredentialsModule', () => {
     expect(() => module?.get(LocalSecretStore).seal('sk-test-abcdef123456')).toThrow(/not configured/i);
   });
 
-  it('AC-13: exports no repository token', async () => {
+  it('AC-15: exports only the public service and never the repository', async () => {
     module = await compile();
 
     const exported = (Reflect.getMetadata('exports', ProviderCredentialsModule) ?? []) as unknown[];
     expect(exported).not.toContain(PROVIDER_CREDENTIAL_REPOSITORY);
     expect(exported).not.toContain(PrismaProviderCredentialRepository);
-    expect(exported).toEqual([]);
+    expect(exported).toEqual([ProviderCredentialsService]);
   });
 
   it('AC-13: seals through the configured master key once one is set', async () => {
