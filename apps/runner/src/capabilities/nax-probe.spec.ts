@@ -5,7 +5,7 @@ import { NaxUnavailableError } from '../nax/nax-cli';
 import { FakeNaxCli, TIMED_OUT, naxError, type FakeRequirements } from '../../test/helpers/fake-nax-cli';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import type { AcpAgentProbe } from './acp-agent-probe';
-import { NaxCapabilityProbe, listProfileNames } from './nax-probe';
+import { MAX_REPORT_BYTES, NaxCapabilityProbe, listProfileNames } from './nax-probe';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -451,6 +451,47 @@ describe('NaxCapabilityProbe provider vault (C10 US-010)', () => {
       projectCode: true,
       approvals: { relay: true },
     });
+  });
+
+  test('AC-10 regression: the flag\'s bytes are reserved in the byte budget, so enabling it never sheds another capability', async () => {
+    const FLAG_BYTES = Buffer.byteLength(JSON.stringify({ providerVault: true }), 'utf8') - 1;   // the property plus its comma
+    const NAMES = Array.from({ length: 64 }, (_, i) => `p${String(i).padStart(2, '0')}`);
+    const PER_PROFILE = 16;
+    // The first 64 needed providers are also the 64 credentials the report lists; padding those would grow both
+    // halves of the report, so the padding goes into profiles 4-63 only, one report byte per padding byte.
+    const PAD_START = 4 * PER_PROFILE;
+    const PAD_SLOTS = NAMES.length * PER_PROFILE - PAD_START;
+    const config = (padding: number): Record<string, FakeRequirements> => {
+      const each = Math.floor(padding / PAD_SLOTS);
+      const extra = padding % PAD_SLOTS;
+      return Object.fromEntries(NAMES.map((name, i) => [name, {
+        transport: 'native' as const, sandbox: true,
+        providers: Array.from({ length: PER_PROFILE }, (_, j) => {
+          const slot = i * PER_PROFILE + j;
+          const grow = slot < PAD_START ? 0 : each + (slot - PAD_START < extra ? 1 : 0);
+          return `${name}-${j}-${'x'.repeat(40 + grow)}`;
+        }),
+      }]));
+    };
+    const report = async (padding: number, vaultHelper?: () => Promise<boolean>) =>
+      (await probeWith(await naxHome(NAMES), new FakeNaxCli({ config: config(padding) }), ['git', 'gh'], undefined, vaultHelper).run()).capabilities;
+
+    // Land the untrimmed report six bytes under the cap without the flag, so the flag alone is what pushes it over.
+    const base = await report(0);
+    const padding = MAX_REPORT_BYTES - 6 - Buffer.byteLength(JSON.stringify(base), 'utf8');
+    const without = await report(padding);
+    const withFlag = await report(padding, async () => true);
+
+    expect(padding).toBeGreaterThan(0);
+    expect(Buffer.byteLength(JSON.stringify(without), 'utf8')).toBeLessThanOrEqual(MAX_REPORT_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(withFlag), 'utf8')).toBeLessThanOrEqual(MAX_REPORT_BYTES);
+    expect(FLAG_BYTES).toBeGreaterThan(0);
+    // Both are trimmed (the reserved flag's bytes are what make the fixture over the cap) and neither trims more.
+    expect(Object.keys(without.profiles).length).toBe(NAMES.length - 1);
+    expect(Object.keys(withFlag.profiles)).toEqual(Object.keys(without.profiles));
+    const { providerVault, ...rest } = withFlag;
+    expect(providerVault).toBe(true);
+    expect(rest).toEqual(without);
   });
 
   test('a vaultHelper that throws claims nothing and says why, rather than reporting "vault off"', async () => {

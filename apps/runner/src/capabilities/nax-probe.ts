@@ -125,6 +125,11 @@ const neededProviders = (profiles: RunnerCapabilities['profiles']): ReadonlySet<
  * disables placement for this runner, so the probe sheds entries instead of sending one. Least load-bearing first:
  * credentials no kept profile needs, then profiles from the end (placement already reads a name it does not report as
  * unknowable, so the kept set stays a stable prefix), then whatever is still over.
+ *
+ * C10 US-010 (AC-10): the caller passes an optional boolean flag (`providerVault`) that it may strip afterwards, so
+ * that flag is always part of the object measured here — a runner without it reserves the same bytes and sheds the
+ * same entries. The cost is that such a runner may drop one entry it could have kept; the gain is that enabling the
+ * vault never changes which other capabilities this machine reports.
  */
 function boundReport(caps: RunnerCapabilities): { readonly capabilities: RunnerCapabilities; readonly warnings: readonly string[] } {
   if (reportBytes(caps) <= MAX_REPORT_BYTES) return { capabilities: caps, warnings: [] };
@@ -151,6 +156,12 @@ function boundReport(caps: RunnerCapabilities): { readonly capabilities: RunnerC
   }
   if (shedCredentials > 0) warnings.push(`dropped ${shedCredentials} more credential(s): ${over}`);
   return { capabilities: bounded, warnings };
+}
+
+/** C10 US-010 (AC-10): the flag is a reserved byte in every report, and a runner that has no vault does not report it. */
+function withoutProviderVault(caps: RunnerCapabilities): RunnerCapabilities {
+  const { providerVault: _reserved, ...rest } = caps;
+  return rest;
 }
 
 /** Design §3.2 over nax's JSON commands (D98-D101). Throws NaxUnavailableError when nax is missing or older than 0.83.1. */
@@ -198,7 +209,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         kodaTools: true,
         projectCode: true,
         // C10 US-010: this machine's nax asks koda for provider keys, so a job here needs no `nax auth` per provider.
-        ...(vault.enabled ? { providerVault: true as const } : {}),
+        // The key is always present while `boundReport` measures, so the byte budget (and therefore every trimming
+        // decision) is the same with and without a helper; it is stripped again below when there is none.
+        providerVault: true,
         ...(botReview ? { botReview: true as const } : {}),
         ...(botRulings ? { botRulings: true as const } : {}),
         ...(botFix ? { botFix: true as const } : {}),
@@ -206,7 +219,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         ...(base.check ? { interaction: base.check } : {}),
       });
       return {
-        capabilities: bounded.capabilities,
+        capabilities: vault.enabled ? bounded.capabilities : withoutProviderVault(bounded.capabilities),
         warnings: [
           ...base.warnings, ...scan.warnings, ...credentials.warnings, ...acp.warnings, ...bounded.warnings,
           ...(vault.warning === undefined ? [] : [vault.warning]),
