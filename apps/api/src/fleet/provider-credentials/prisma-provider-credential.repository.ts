@@ -1,11 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import {
   AbstractPrismaRepository,
+  Paginate,
   PrismaService,
   type PrismaModelDelegate,
 } from '@nathapp/nestjs-prisma';
-import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
-import type { PrismaClient, ProviderCredential as ProviderCredentialRow } from '../../generated/prisma/client';
+import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
+import type {
+  Prisma,
+  PrismaClient,
+  ProviderCredential as ProviderCredentialRow,
+} from '../../generated/prisma/client';
 import { isRecordNotFound } from '../../common/utils/prisma-errors';
 import {
   GLOBAL_SCOPE_KEY,
@@ -16,8 +22,20 @@ import {
   type ProviderCredentialLookup,
   type ProviderCredentialPatch,
   type ProviderCredentialScope,
+  PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
   scopeKeyFor,
 } from './provider-credential.domain';
+
+/**
+ * Deterministic page order: provider, then creation time, then the id as the final total order.
+ * Two PROJECT/REPO rows can share a `providerId` (and a millisecond), so `id` is what keeps a page
+ * boundary from repeating or skipping a row.
+ */
+export const PROVIDER_CREDENTIAL_ORDER_BY: Prisma.ProviderCredentialOrderByWithRelationInput[] = [
+  { providerId: 'asc' },
+  { createdAt: 'asc' },
+  { id: 'asc' },
+];
 
 /**
  * Persistence for the provider credential vault (spec §"US-001").
@@ -74,21 +92,31 @@ export class PrismaProviderCredentialRepository
     return rows.map((row) => this.toDomain(row));
   }
 
-  async listGlobal(): Promise<ProviderCredential[]> {
-    const rows = await this.prisma.client.providerCredential.findMany({
-      where: { scopeKey: GLOBAL_SCOPE_KEY },
-      orderBy: [{ providerId: 'asc' }, { createdAt: 'asc' }],
-    });
-    return rows.map((row) => this.toDomain(row));
+  async listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>> {
+    return this.listPage({ scopeKey: GLOBAL_SCOPE_KEY }, page);
   }
 
-  async listForProject(projectId: string): Promise<ProviderCredential[]> {
+  async listForProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredential>> {
     // REPO rows carry their project too, so one project filter answers both project scopes.
-    const rows = await this.prisma.client.providerCredential.findMany({
-      where: { projectId },
-      orderBy: [{ providerId: 'asc' }, { createdAt: 'asc' }],
-    });
-    return rows.map((row) => this.toDomain(row));
+    return this.listPage({ projectId }, page);
+  }
+
+  /**
+   * One bounded page of credentials. The requested `size` is clamped to
+   * {@link PROVIDER_CREDENTIAL_PAGE_SIZE_MAX} and the page reports `total`/`hasNext`, so a large
+   * request yields another page instead of an unbounded table read or a silent truncation.
+   */
+  private async listPage(
+    where: Prisma.ProviderCredentialWhereInput,
+    page: IPageOption,
+  ): Promise<IPageResult<ProviderCredential>> {
+    const { current, size } = resolvePageOption(page, PROVIDER_CREDENTIAL_PAGE_SIZE_MAX);
+    const rows = await Paginate(
+      this.prisma.client.providerCredential,
+      { current, size },
+      { where, orderBy: PROVIDER_CREDENTIAL_ORDER_BY },
+    );
+    return rows.remap((row: ProviderCredentialRow) => this.toDomain(row));
   }
 
   async insert(data: NewProviderCredential): Promise<ProviderCredential> {

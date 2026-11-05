@@ -1,5 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import type { NathApplication } from '@nathapp/nestjs-app';
+import type { PrismaService } from '@nathapp/nestjs-prisma';
+import type { ITransactionManager } from '@nathapp/nestjs-data';
 import request from 'supertest';
 import { bootHttpApp } from '../helpers/http-app';
 import { resetDb } from '../helpers/reset-db';
@@ -11,6 +13,8 @@ import {
   PROVIDER_CREDENTIALS_CFG,
 } from '../../src/config/provider-credentials.config';
 import { LocalSecretStore } from '../../src/fleet/provider-credentials/secret-store';
+import { PrismaProviderCredentialRepository } from '../../src/fleet/provider-credentials/prisma-provider-credential.repository';
+import { PROVIDER_CREDENTIAL_PAGE_SIZE_MAX } from '../../src/fleet/provider-credentials/provider-credential.domain';
 
 // The nax sandbox withholds host Postgres; DB behaviour is verified on the host quality run.
 const describeDb = canRunDbTests() ? describe : describe.skip;
@@ -115,6 +119,51 @@ describeDb('provider credential storage (PG)', () => {
     });
 
     expect(await prisma.providerCredentialIssue.count()).toBe(2);
+  });
+
+  it('F1: list pages are bounded, ordered and contiguous across the page boundary', async () => {
+    for (const providerId of ['alpha', 'beta', 'gamma']) {
+      await prisma.providerCredential.create({ data: credentialData({ providerId }) });
+    }
+    const repository = new PrismaProviderCredentialRepository(
+      {
+        run: <T>(fn: () => Promise<T>) => fn(),
+        getClient: () => prisma,
+        isInTransaction: () => false,
+      } as unknown as ITransactionManager,
+      { client: prisma } as unknown as PrismaService,
+    );
+
+    const first = await repository.listGlobal({ current: 1, size: 2 });
+    const second = await repository.listGlobal({ current: 2, size: 2 });
+
+    expect(first.records.map((record) => record.providerId)).toEqual(['alpha', 'beta']);
+    expect(first).toMatchObject({ total: 3, current: 1, size: 2, hasNext: true, hasPrev: false });
+    expect(second.records.map((record) => record.providerId)).toEqual(['gamma']);
+    expect(second).toMatchObject({ total: 3, current: 2, size: 2, hasNext: false, hasPrev: true });
+    // Contiguous: every stored row appears exactly once across the two pages.
+    expect([...first.records, ...second.records].map((record) => record.id).sort()).toEqual(
+      (await prisma.providerCredential.findMany({ select: { id: true } })).map((row) => row.id).sort(),
+    );
+  });
+
+  it('F1: a list page never exceeds the page size cap', async () => {
+    for (const providerId of ['alpha', 'beta', 'gamma']) {
+      await prisma.providerCredential.create({ data: credentialData({ providerId }) });
+    }
+    const repository = new PrismaProviderCredentialRepository(
+      {
+        run: <T>(fn: () => Promise<T>) => fn(),
+        getClient: () => prisma,
+        isInTransaction: () => false,
+      } as unknown as ITransactionManager,
+      { client: prisma } as unknown as PrismaService,
+    );
+
+    const page = await repository.listGlobal({ current: 1, size: 10_000 });
+
+    expect(page.size).toBe(PROVIDER_CREDENTIAL_PAGE_SIZE_MAX);
+    expect(page.records).toHaveLength(3);
   });
 
   it('AC-14: the API boots with the vault disabled when the master key is unset', async () => {

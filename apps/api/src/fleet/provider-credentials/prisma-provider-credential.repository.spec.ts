@@ -2,8 +2,15 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
-import { PrismaProviderCredentialRepository } from './prisma-provider-credential.repository';
-import { GLOBAL_SCOPE_KEY, scopeKeyFor } from './provider-credential.domain';
+import {
+  PROVIDER_CREDENTIAL_ORDER_BY,
+  PrismaProviderCredentialRepository,
+} from './prisma-provider-credential.repository';
+import {
+  GLOBAL_SCOPE_KEY,
+  PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
+  scopeKeyFor,
+} from './provider-credential.domain';
 
 const now = new Date('2026-11-05T00:00:00.000Z');
 
@@ -42,6 +49,7 @@ describe('PrismaProviderCredentialRepository', () => {
     prisma.client.providerCredential = {
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       deleteMany: vi.fn(),
@@ -170,24 +178,63 @@ describe('PrismaProviderCredentialRepository', () => {
       });
     });
 
-    it('lists GLOBAL rows only for the admin list', async () => {
+    it('lists one bounded page of GLOBAL rows for the admin list', async () => {
       (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([row()]);
+      (prisma.client.providerCredential.count as ReturnType<typeof vi.fn>).mockResolvedValue(3);
 
-      expect(await repository.listGlobal()).toHaveLength(1);
+      const page = await repository.listGlobal({ current: 1, size: 1 });
+
       expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 1,
         where: { scopeKey: 'global' },
-        orderBy: [{ providerId: 'asc' }, { createdAt: 'asc' }],
+        orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
       });
+      expect(prisma.client.providerCredential.count).toHaveBeenCalledWith({
+        where: { scopeKey: 'global' },
+      });
+      expect(page).toMatchObject({ total: 3, current: 1, size: 1, hasNext: true, hasPrev: false });
+      expect(page.records).toHaveLength(1);
     });
 
-    it('lists a project\'s PROJECT and REPO rows by project id', async () => {
+    it('reads a later page of GLOBAL rows by skipping the earlier ones', async () => {
       (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (prisma.client.providerCredential.count as ReturnType<typeof vi.fn>).mockResolvedValue(5);
 
-      await repository.listForProject('p1');
+      const page = await repository.listGlobal({ current: 2, size: 2 });
+
+      expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 2, take: 2 }),
+      );
+      expect(page).toMatchObject({ total: 5, current: 2, size: 2, hasNext: true, hasPrev: true });
+    });
+
+    it('caps a page at PROVIDER_CREDENTIAL_PAGE_SIZE_MAX instead of fetching everything', async () => {
+      (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (prisma.client.providerCredential.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+      const page = await repository.listGlobal({ current: 1, size: 10_000 });
+
+      expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: PROVIDER_CREDENTIAL_PAGE_SIZE_MAX }),
+      );
+      expect(page.size).toBe(PROVIDER_CREDENTIAL_PAGE_SIZE_MAX);
+    });
+
+    it('lists one bounded page of a project\'s PROJECT and REPO rows by project id', async () => {
+      (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (prisma.client.providerCredential.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+      await repository.listForProject('p1', { current: 3, size: 4 });
 
       expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith({
+        skip: 8,
+        take: 4,
         where: { projectId: 'p1' },
-        orderBy: [{ providerId: 'asc' }, { createdAt: 'asc' }],
+        orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+      });
+      expect(prisma.client.providerCredential.count).toHaveBeenCalledWith({
+        where: { projectId: 'p1' },
       });
     });
 

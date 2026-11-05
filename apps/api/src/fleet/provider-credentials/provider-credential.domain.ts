@@ -1,3 +1,6 @@
+import type { IPageResult } from '@nathapp/nestjs-data';
+import type { IPageOption } from '@nathapp/nestjs-common';
+
 /**
  * Provider credential vault domain (spec §"US-001").
  *
@@ -18,6 +21,12 @@ export const GLOBAL_SCOPE_KEY = 'global';
 export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 
 export const PROVIDER_CREDENTIAL_NAME_MAX_LENGTH = 64;
+
+/**
+ * Hard cap on one page of credentials. A management list is a bounded read: asking for more
+ * returns a `hasNext` page of this size instead of fetching the whole table (api-data rule).
+ */
+export const PROVIDER_CREDENTIAL_PAGE_SIZE_MAX = 200;
 
 export interface ProviderCredential {
   id: string;
@@ -106,9 +115,10 @@ export interface IProviderCredentialRepository {
   findById(id: string): Promise<ProviderCredential | null>;
   /** Active (not disabled) rows that can answer a lookup: the GLOBAL, PROJECT and REPO keys of one provider. */
   findActiveCandidates(lookup: ProviderCredentialLookup): Promise<ProviderCredential[]>;
-  listGlobal(): Promise<ProviderCredential[]>;
-  /** A project's own scopes: its PROJECT rows and the REPO rows whose repo belongs to it. */
-  listForProject(projectId: string): Promise<ProviderCredential[]>;
+  /** One bounded page of GLOBAL rows (the admin list). */
+  listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>>;
+  /** One bounded page of a project's own scopes: its PROJECT rows and the REPO rows of its repos. */
+  listForProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredential>>;
   /** Seals the caller's data under the uniqueness key its scope implies. Throws P2002 on a duplicate. */
   insert(data: NewProviderCredential): Promise<ProviderCredential>;
   /** Answers the updated row, or null when the row no longer exists. */
