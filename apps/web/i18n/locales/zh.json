@@ -1251,7 +1251,6 @@
       "enable": "启用",
       "disable": "禁用",
       "delete": "删除",
-      "validation": { "invalid": "请检查提供商密钥字段。", "repoRequired": "请选择代码库。" },
       "subtitle": "koda 为所有运行器保存并通过 nax 提供的密钥。密钥只可写入：保存后仅显示末四位和指纹。",
       "refresh": "刷新",
       "empty": "尚未保存任何提供商密钥",

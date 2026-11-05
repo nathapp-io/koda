@@ -1251,7 +1251,6 @@
       "enable": "Enable",
       "disable": "Disable",
       "delete": "Delete",
-      "validation": { "invalid": "Check the provider key fields.", "repoRequired": "Choose a repository." },
       "subtitle": "Keys koda holds for every runner and serves through nax. A key is write-only: after saving, only its last four characters and fingerprint are shown.",
       "refresh": "Refresh",
       "empty": "No provider keys stored",
