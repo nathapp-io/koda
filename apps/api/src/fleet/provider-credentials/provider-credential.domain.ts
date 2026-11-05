@@ -123,6 +123,12 @@ export interface IProviderCredentialRepository {
   findById(id: string): Promise<ProviderCredential | null>;
   /** Locks the row for the lifetime of the caller's transaction, then returns its current version. */
   lockById(id: string): Promise<ProviderCredential | null>;
+  /**
+   * The project a fleet repo belongs to, or null when there is no such repo. A REPO key may only be
+   * created for a repo of the project the route pinned (spec §"US-005"), and the answer is a 404 — so
+   * this reads one column and never the repo itself.
+   */
+  findRepoProject(repoId: string): Promise<string | null>;
   /** Active (not disabled) rows that can answer a lookup: the GLOBAL, PROJECT and REPO keys of one provider. */
   findActiveCandidates(lookup: ProviderCredentialLookup): Promise<ProviderCredential[]>;
   /** One bounded page of GLOBAL rows (the admin list). */

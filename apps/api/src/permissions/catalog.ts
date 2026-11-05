@@ -65,11 +65,9 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
-  // C10: the GLOBAL credential update and delete routes (PATCH and DELETE
-  // `/fleet/provider-credentials/:id`) land with the next story; the create route already declares
-  // `fleet.credential.create`, so the catalog is complete and only the surface is missing.
-  'fleet.credential.update',
-  'fleet.credential.delete',
+  // C10 US-004 declared the two GLOBAL credential update and delete routes, so
+  // `fleet.credential.update` and `fleet.credential.delete` left this list; US-005's project routes
+  // declare `project.credential.*` from the start, so no credential key waits for a surface.
 ]);
 
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */
@@ -142,6 +140,12 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'fleet.credential.create': 'global',
   'fleet.credential.update': 'global',
   'fleet.credential.delete': 'global',
+  // C10 US-005: the project-scoped provider key management routes. Same actions, but on a project's
+  // own PROJECT and REPO rows, so a project grant manages them without reaching a GLOBAL key.
+  'project.credential.read': 'project',
+  'project.credential.create': 'project',
+  'project.credential.update': 'project',
+  'project.credential.delete': 'project',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);
@@ -159,6 +163,8 @@ const HIGH_RISK_PREFIXES: readonly string[] = [
   'fleet.budget.',
   'fleet.enrollment.',
   'fleet.credential.',
+  // C10 US-005: a project provider key is the same secret as a GLOBAL one, only narrower in reach.
+  'project.credential.',
   'fleet.job.shell.',
   'thread.mode.',
 ];

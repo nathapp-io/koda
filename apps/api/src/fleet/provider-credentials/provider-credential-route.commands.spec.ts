@@ -8,6 +8,7 @@ import { findCatalogEntry } from '../../permissions/catalog';
 import type { ProviderCredentialDto } from './dto/provider-credential.dto';
 import type { ProviderCredentialsService } from './provider-credentials.service';
 import {
+  PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS,
   PROVIDER_CREDENTIAL_ROUTE_VARIANTS,
   ProviderCredentialRouteCommands,
 } from './provider-credential-route.commands';
@@ -145,3 +146,120 @@ function localeSentence(lang: 'en' | 'zh', key: string): string {
   }
   return sentence;
 }
+
+/**
+ * C10 US-005: the project routes' approval commands. The project id is pinned input — it is part of
+ * the stored body, so a redemption has to match the project it was opened for, and the redaction keeps
+ * the key out of the request row exactly as the GLOBAL commands do.
+ */
+describe('ProviderCredentialRouteCommands project scope (US-005)', () => {
+  const row: ProviderCredentialDto = Object.assign(new (class {
+    id = 'cred-p1';
+    scope = 'PROJECT';
+    projectId = 'p1';
+    repoId = null;
+    providerId = 'openrouter';
+    name = 'project';
+    last4 = '3456';
+    fingerprint = '0123456789ab';
+    disabled = false;
+    createdBy = 'u1';
+    updatedAt = '2026-11-05T00:00:00.000Z';
+  })()) as ProviderCredentialDto;
+
+  function build() {
+    const registry = new ApprovalCommandRegistry();
+    const credentials = {
+      createProject: vi.fn().mockResolvedValue(row),
+      updateProject: vi.fn().mockResolvedValue(row),
+      removeProject: vi.fn().mockResolvedValue(undefined),
+    };
+    const loader = { forContext: vi.fn().mockResolvedValue({ actorType: 'user', id: 'u1' }) };
+    new ProviderCredentialRouteCommands(
+      registry,
+      credentials as unknown as ProviderCredentialsService,
+      loader as unknown as ActorPrincipalLoader,
+    ).onModuleInit();
+    return { registry, credentials, loader };
+  }
+
+  it('registers the three project variants under the project catalog keys', () => {
+    const { registry } = build();
+
+    expect(PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS).toEqual({
+      create: 'rest:project-provider-credentials.create',
+      update: 'rest:project-provider-credentials.update',
+      delete: 'rest:project-provider-credentials.delete',
+    });
+    for (const [key, variant] of [
+      ['project.credential.create', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.create],
+      ['project.credential.update', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update],
+      ['project.credential.delete', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.delete],
+    ] as const) {
+      expect([key, registry.get(key, variant)?.key]).toEqual([key, key]);
+    }
+  });
+
+  it('create parses the pinned project, the body and the repo scope', () => {
+    const { registry } = build();
+    const command = registry.get('project.credential.create', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.create);
+
+    const parsed = command?.parse({
+      projectId: 'p1', providerId: 'openrouter', name: 'project', key: 'sk-or-abcdef123456', repoId: 'r1', scope: 'GLOBAL',
+    });
+
+    expect(parsed).toEqual({ projectId: 'p1', providerId: 'openrouter', name: 'project', key: 'sk-or-abcdef123456', repoId: 'r1' });
+  });
+
+  it('create redacts only the key and keeps the pinned project and repo', () => {
+    const { registry } = build();
+    const command = registry.get('project.credential.create', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.create);
+    const parsed = command?.parse({ projectId: 'p1', providerId: 'openrouter', name: 'project', key: 'sk-or-abcdef123456', repoId: null });
+
+    expect(command?.redeem?.redact?.(parsed)).toEqual({
+      projectId: 'p1', providerId: 'openrouter', name: 'project', key: REDACTED_SECRET, repoId: null,
+    });
+  });
+
+  it('create runs the service as the requester against the pinned project', async () => {
+    const { registry, credentials } = build();
+    const command = registry.get('project.credential.create', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.create);
+    const parsed = command?.parse({ projectId: 'p1', providerId: 'openrouter', name: 'project', key: 'sk-or-abcdef123456' });
+
+    const output = await command?.execute(parsed);
+
+    expect(credentials.createProject).toHaveBeenCalledExactlyOnceWith('u1', 'p1', parsed);
+    expect(output).toBe(row);
+  });
+
+  it('update redacts a rotated key and leaves an absent one absent', () => {
+    const { registry } = build();
+    const command = registry.get('project.credential.update', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update);
+
+    const rotated = command?.parse({ projectId: 'p1', id: 'cred-p1', patch: { key: 'sk-or-abcdef123456' } });
+    expect(command?.redeem?.redact?.(rotated)).toEqual({ projectId: 'p1', id: 'cred-p1', patch: { key: REDACTED_SECRET } });
+
+    const renamed = command?.parse({ projectId: 'p1', id: 'cred-p1', patch: { name: 'renamed' } });
+    expect(command?.redeem?.redact?.(renamed)).toEqual({ projectId: 'p1', id: 'cred-p1', patch: { name: 'renamed' } });
+  });
+
+  it('update runs the service with the caller as the updater', async () => {
+    const { registry, credentials } = build();
+    const command = registry.get('project.credential.update', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update);
+
+    await command?.execute(command.parse({ projectId: 'p1', id: 'cred-p1', patch: { disabled: true } }));
+
+    expect(credentials.updateProject).toHaveBeenCalledExactlyOnceWith('p1', 'cred-p1', { disabled: true, updatedById: 'u1' });
+  });
+
+  it('delete requires the pinned project, then deletes as the requester', async () => {
+    const { registry, credentials } = build();
+    const command = registry.get('project.credential.delete', PROJECT_PROVIDER_CREDENTIAL_ROUTE_VARIANTS.delete);
+
+    expect(() => command?.parse({ id: 'cred-p1' })).toThrow(ValidationAppException);
+    await command?.execute(command.parse({ projectId: 'p1', id: 'cred-p1' }));
+
+    expect(credentials.removeProject).toHaveBeenCalledExactlyOnceWith('p1', 'cred-p1', 'u1');
+    expect(command?.redeem).toEqual({});
+  });
+});

@@ -19,6 +19,8 @@ function setup(enabled = true) {
   const repository: IProviderCredentialRepository = {
     findById: vi.fn().mockResolvedValue(null),
     findActiveCandidates: vi.fn().mockResolvedValue([]),
+    findRepoProject: vi.fn().mockResolvedValue(null),
+    lockById: vi.fn().mockResolvedValue(null),
     listGlobal: vi.fn(), listForProject: vi.fn(), insert: vi.fn(), patch: vi.fn(), remove: vi.fn(), recordIssue: vi.fn(),
   };
   const secretStore: SecretStore = {
@@ -220,6 +222,114 @@ describe('ProviderCredentialsService', () => {
     expect(repository.listGlobal).toHaveBeenCalledWith({ current: 1, size: 20 });
     expect(page).toMatchObject({ total: 1, current: 1, size: 20 });
     expect(page.records[0]).toMatchObject({ id: row.id, providerId: 'openrouter', last4: '1234', disabled: false });
+    expect(page.records[0]).not.toHaveProperty('encryptedKey');
+  });
+});
+
+/**
+ * C10 US-005: the project-scoped management `ProviderProviderCredentialsService` methods. The HTTP
+ * behaviour they answer (tenant isolation, activity, audit) is asserted over the real stack in
+ * `test/integration/project-provider-credentials.integration.spec.ts`; these unit cases pin the scope
+ * decision each one makes and the fact that a refused scope writes and records nothing.
+ */
+describe('ProviderCredentialsService project scope (US-005)', () => {
+  it('createProject seals a PROJECT row of the pinned project and records it there', async () => {
+    const { service, repository, activity, audit } = setup();
+    const row = makeCredential({ projectId: 'p1' });
+    vi.mocked(repository.insert).mockResolvedValue(row);
+
+    const dto = await service.createProject('u1', 'p1', { providerId: 'openrouter', name: 'primary', key: 'sk-or-abcdef123456' });
+
+    expect(repository.insert).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'PROJECT', projectId: 'p1', repoId: null, createdById: 'u1', updatedById: 'u1',
+    }));
+    expect(repository.findRepoProject).not.toHaveBeenCalled();
+    expect(activity.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      action: 'credential.created', entityId: row.id, projectId: 'p1',
+      payload: { providerId: 'openrouter', scope: 'PROJECT', name: row.name, fingerprint: row.fingerprint },
+    }));
+    expect(audit.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      key: 'project.credential.create', resourceId: row.id, projectId: 'p1',
+    }));
+    expect(dto).toMatchObject({ id: row.id, projectId: 'p1', repoId: null });
+  });
+
+  it('createProject seals a REPO row once the repo proves it belongs to the project', async () => {
+    const { service, repository } = setup();
+    vi.mocked(repository.findRepoProject).mockResolvedValue('p1');
+    vi.mocked(repository.insert).mockResolvedValue(makeCredential({ scope: 'REPO', repoId: 'r1' }));
+
+    await service.createProject('u1', 'p1', { providerId: 'openrouter', name: 'primary', key: 'sk-or-abcdef123456', repoId: 'r1' });
+
+    expect(repository.findRepoProject).toHaveBeenCalledWith('r1');
+    expect(repository.insert).toHaveBeenCalledWith(expect.objectContaining({ scope: 'REPO', projectId: 'p1', repoId: 'r1' }));
+  });
+
+  it('createProject refuses a repo of another project with fleet.repos and writes nothing', async () => {
+    const { service, repository, activity, audit } = setup();
+    vi.mocked(repository.findRepoProject).mockResolvedValue('p2');
+
+    await expect(service.createProject('u1', 'p1', {
+      providerId: 'openrouter', name: 'primary', key: 'sk-or-abcdef123456', repoId: 'r1',
+    })).rejects.toMatchObject({ prefix: 'fleet.repos', httpStatus: 404 });
+
+    expect(repository.insert).not.toHaveBeenCalled();
+    expect(activity.record).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('assertProject refuses a GLOBAL row, another project row and a missing id alike', async () => {
+    const { service, repository } = setup();
+
+    vi.mocked(repository.findById).mockResolvedValue(makeCredential({ scope: 'GLOBAL', projectId: null }));
+    await expect(service.assertProject('p1', 'cred-1')).rejects.toMatchObject({ prefix: 'fleet.providerCredentials.notFound' });
+
+    vi.mocked(repository.findById).mockResolvedValue(makeCredential({ projectId: 'p2' }));
+    await expect(service.assertProject('p1', 'cred-1')).rejects.toMatchObject({ prefix: 'fleet.providerCredentials.notFound' });
+
+    vi.mocked(repository.findById).mockResolvedValue(null);
+    await expect(service.assertProject('p1', 'cred-1')).rejects.toMatchObject({ prefix: 'fleet.providerCredentials.notFound' });
+
+    vi.mocked(repository.findById).mockResolvedValue(makeCredential({ projectId: 'p1' }));
+    await expect(service.assertProject('p1', 'cred-1')).resolves.toBeUndefined();
+  });
+
+  it('updateProject refuses another project row and records the rotation in the project', async () => {
+    const { service, repository, activity } = setup();
+    vi.mocked(repository.findById).mockResolvedValue(makeCredential({ projectId: 'p2' }));
+    await expect(service.updateProject('p1', 'cred-1', { name: 'x', updatedById: 'u2' }))
+      .rejects.toMatchObject({ prefix: 'fleet.providerCredentials.notFound' });
+
+    const current = makeCredential({ projectId: 'p1' });
+    vi.mocked(repository.findById).mockResolvedValue(current);
+    vi.mocked(repository.patch).mockResolvedValue({ ...current, fingerprint: 'rotated' });
+    await service.updateProject('p1', current.id, { key: '0123456789abcdef', updatedById: 'u2' });
+    expect(activity.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      action: 'credential.rotated', projectId: 'p1', actorId: 'u2',
+    }));
+  });
+
+  it('removeProject refuses another project row without deleting it', async () => {
+    const { service, repository } = setup();
+    vi.mocked(repository.lockById).mockResolvedValue(makeCredential({ projectId: 'p2' }));
+
+    await expect(service.removeProject('p1', 'cred-1', 'u1'))
+      .rejects.toMatchObject({ prefix: 'fleet.providerCredentials.notFound' });
+
+    expect(repository.remove).not.toHaveBeenCalled();
+  });
+
+  it('listProject asks the repository for the project page and answers metadata only', async () => {
+    const { service, repository } = setup();
+    const row = makeCredential();
+    vi.mocked(repository.listForProject).mockResolvedValue({
+      total: 1, current: 1, size: 20, hasNext: false, hasPrev: false, records: [row],
+    });
+
+    const page = await service.listProject('p1', { current: 1, size: 20 });
+
+    expect(repository.listForProject).toHaveBeenCalledWith('p1', { current: 1, size: 20 });
+    expect(page.records[0]).toMatchObject({ id: row.id, projectId: 'p1' });
     expect(page.records[0]).not.toHaveProperty('encryptedKey');
   });
 });

@@ -221,7 +221,7 @@ describe('the seeded-role allow/deny matrix', () => {
 
     for (const row of rows) {
       expect(Object.keys(row.cells)).toEqual(PERMISSION_CATALOG.map((entry) => entry.key));
-      expect(Object.keys(row.cells)).toHaveLength(232);
+      expect(Object.keys(row.cells)).toHaveLength(236);
     }
   });
 
@@ -241,6 +241,20 @@ describe('the seeded-role allow/deny matrix', () => {
     expect(PINNED_CELLS.map((cell) => cell.reason)).toEqual([...PINNED_REASONS]);
     expect(readPinned(matrix)).toEqual([...PINNED_REASONS]);
     expect(readPinned(readCommittedMatrix())).toEqual([...PINNED_REASONS]);
+  });
+
+  it('US-005: Project Admin holds every project credential key, and the other project roles read only', () => {
+    const writes = ['project.credential.create', 'project.credential.update', 'project.credential.delete'];
+    const read = 'project.credential.read';
+
+    for (const key of [read, ...writes]) expect([key, matrix['project-admin'][key][1]]).toEqual([key, 'granted']);
+    for (const role of ['developer', 'reviewer', 'verifier', 'triager', 'approver', 'viewer']) {
+      expect([role, matrix[role][read][1]]).toEqual([role, 'granted']);
+      for (const key of writes) expect([role, key, matrix[role][key][1]]).toEqual([role, key, 'not-granted']);
+    }
+    for (const role of ['owner', 'admin', 'member', 'agent']) {
+      expect([role, matrix[role][read][0]]).toEqual([role, 'no-project']);
+    }
   });
 
   it('AC-13: approval.decide is a decision in every row, granted globally to owner and admin only', () => {

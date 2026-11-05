@@ -34,6 +34,16 @@ export class CreateProviderCredentialDto {
   declare key: string;
 }
 
+/**
+ * The project route's create body (spec §"US-005"): the GLOBAL write plus the repo that makes the key
+ * a REPO key. Without `repoId` the key is a PROJECT key of the route's project.
+ */
+export class CreateProjectProviderCredentialDto extends CreateProviderCredentialDto {
+  @ApiPropertyOptional({ description: 'A fleet repo of this project; present makes the key a REPO key' })
+  @IsOptional() @IsString() @MinLength(1)
+  declare repoId?: string;
+}
+
 /** GLOBAL metadata, rotation and enablement patch. */
 export class UpdateProviderCredentialDto {
   @ApiPropertyOptional({ description: 'Display name, 1-64 characters' })

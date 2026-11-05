@@ -73,6 +73,19 @@ export class PrismaProviderCredentialRepository
     return this.findById(id);
   }
 
+  /**
+   * US-005: the scope check of a REPO key. `FleetRepo` belongs to the fleet-repo module, and this module
+   * depends on no fleet-repo service, so the check is one primary-key read of the owning project here
+   * rather than a new cross-module dependency for a single column.
+   */
+  async findRepoProject(repoId: string): Promise<string | null> {
+    const row = await this.prisma.client.fleetRepo.findUnique({
+      where: { id: repoId },
+      select: { projectId: true },
+    });
+    return row?.projectId ?? null;
+  }
+
   protected toDomain(row: ProviderCredentialRow): ProviderCredential {
     return { ...row, scope: row.scope as ProviderCredentialScope };
   }

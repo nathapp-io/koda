@@ -47,6 +47,11 @@ export interface CreateProviderCredentialBody {
   key: string;
 }
 
+/** The project route's body: the same write, plus the repo that makes it a REPO key. */
+export interface CreateProjectProviderCredentialBody extends CreateProviderCredentialBody {
+  repoId?: string | null;
+}
+
 /** Business operations for encrypted provider keys. Repository and plaintext stay inside the API. */
 @Injectable()
 export class ProviderCredentialsService {
@@ -99,6 +104,15 @@ export class ProviderCredentialsService {
   }
 
   /**
+   * One bounded page of a project's own rows (spec §"US-005"): its PROJECT keys and the REPO keys of
+   * its repos. GLOBAL keys and another project's rows are outside the filter by construction.
+   */
+  async listProject(projectId: string, page: IPageOption): Promise<IPageResult<ProviderCredentialDto>> {
+    const result = await this.repository.listForProject(projectId, page);
+    return { ...result, records: result.records.map(ProviderCredentialDto.from) };
+  }
+
+  /**
    * The GLOBAL create (`fleet.credential.create`), recorded like every other fleet write: the row, its
    * `credential.created` activity entry and its audit entry share one transaction, so an approval
    * execution and a direct call commit or roll back them together. The activity payload carries the
@@ -124,6 +138,36 @@ export class ProviderCredentialsService {
         key: 'fleet.credential.create', resourceType: 'provider_credential', resourceId: row.id,
         projectId: null, summary: `created ${row.providerId}`,
       });
+      return row;
+    });
+    return ProviderCredentialDto.from(created);
+  }
+
+  /**
+   * The project create (`project.credential.create`, spec §"US-005"): a PROJECT key for the pinned
+   * project, or a REPO key when the body names one of its repos. Both the repo scope and the writes
+   * are re-read inside the transaction, so a repo moved, a project deleted or an approval redeemed
+   * later cannot widen the scope the route pinned.
+   */
+  async createProject(
+    actorId: string,
+    projectId: string,
+    input: CreateProjectProviderCredentialBody,
+  ): Promise<ProviderCredentialDto> {
+    this.assertEnabled();
+    const repoId = input.repoId ?? null;
+    const created = await this.txManager.run(async () => {
+      if (repoId !== null) await this.assertRepoInProject(projectId, repoId);
+      const row = await this.create({
+        scope: repoId === null ? 'PROJECT' : 'REPO',
+        projectId,
+        repoId,
+        providerId: input.providerId,
+        name: input.name,
+        key: input.key,
+        createdById: actorId,
+      });
+      await this.recordProjectWrite('project.credential.create', 'credential.created', row, actorId, 'created');
       return row;
     });
     return ProviderCredentialDto.from(created);
@@ -221,6 +265,71 @@ export class ProviderCredentialsService {
   async remove(id: string): Promise<void> {
     this.assertEnabled();
     if (!(await this.repository.remove(id))) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+  }
+
+  /**
+   * Rejects an id that is not this project's before approval creation; the mutation handlers repeat the
+   * check transactionally. A GLOBAL row and another project's row answer the same 404, so a caller that
+   * may not touch a credential cannot learn from an id that it exists (spec §"US-005").
+   */
+  async assertProject(projectId: string, id: string): Promise<void> {
+    const row = await this.repository.findById(id);
+    if (!row || row.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+  }
+
+  /** A REPO key may only name a repo of the pinned project; any other repo is a 404 (`fleet.repos`). */
+  async assertRepoInProject(projectId: string, repoId: string): Promise<void> {
+    const owner = await this.repository.findRepoProject(repoId);
+    if (owner === null || owner !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
+  }
+
+  /** The project patch (`project.credential.update`): rotate, rename, disable or enable one own row. */
+  async updateProject(projectId: string, id: string, input: UpdateProviderCredentialInput): Promise<ProviderCredentialDto> {
+    this.assertEnabled();
+    const updated = await this.txManager.run(async () => {
+      await this.assertProject(projectId, id);
+      const row = await this.update(id, input);
+      const action = input.key !== undefined ? 'credential.rotated'
+        : input.disabled !== undefined ? (input.disabled ? 'credential.disabled' : 'credential.enabled')
+          : 'credential.updated';
+      await this.recordProjectWrite('project.credential.update', action, row, input.updatedById, action);
+      return row;
+    });
+    return ProviderCredentialDto.from(updated);
+  }
+
+  /** The project delete (`project.credential.delete`), with the row locked for a stable activity record. */
+  async removeProject(projectId: string, id: string, actorId: string): Promise<void> {
+    this.assertEnabled();
+    await this.txManager.run(async () => {
+      const current = await this.repository.lockById(id);
+      if (!current || current.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+      if (!(await this.repository.remove(id))) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+      await this.recordProjectWrite('project.credential.delete', 'credential.deleted', current, actorId, 'deleted');
+    });
+  }
+
+  /**
+   * The activity and audit entry of one project credential write, inside the caller's transaction: the
+   * same entity type, action vocabulary and non-secret payload the GLOBAL writes record, plus the
+   * project on both rows so a project feed shows the write and the audit trail scopes it.
+   */
+  private async recordProjectWrite(
+    key: string,
+    action: string,
+    row: ProviderCredential,
+    actorId: string,
+    summary: string,
+  ): Promise<void> {
+    await this.activity.record({
+      actorType: 'USER', actorId, action, entityType: 'provider_credential', entityId: row.id,
+      projectId: row.projectId,
+      payload: { providerId: row.providerId, scope: row.scope, name: row.name, fingerprint: row.fingerprint },
+    });
+    await this.audit.record({
+      key, resourceType: 'provider_credential', resourceId: row.id, projectId: row.projectId,
+      summary: `${summary} ${row.providerId}`,
+    });
   }
 
   /**

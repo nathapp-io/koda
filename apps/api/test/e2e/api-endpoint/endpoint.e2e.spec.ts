@@ -6390,3 +6390,80 @@ describeIntegration('GLOBAL provider credential endpoints', () => {
     refusal(await request(server()).get(CREATE).set(auth(world.tokens.dev)).expect(403), 'permissions.40003');
   });
 });
+
+/**
+ * C10 US-005: the PROJECT and REPO provider credential routes over the real HTTP stack. The vault is on
+ * for this boot (the suite's `.env.test` leaves the master key unset), so a create really seals; the
+ * tenant-isolation, activity and audit details live in
+ * `test/integration/project-provider-credentials.integration.spec.ts`.
+ */
+describeIntegration('PROJECT provider credential endpoints', () => {
+  const ENCRYPTION_KEY_ENV = 'PROVIDER_CREDENTIAL_ENCRYPTION_KEY';
+  const PATH = '/api/projects/web/provider-credentials';
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let previousKey: string | undefined;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  /** `viewer` holds the project-admin role on `web`: the story's Project Admin actor. */
+  const admin = () => auth(world.tokens.viewer);
+  const send = (over: Record<string, unknown> = {}) => ({ providerId: 'openrouter', name: 'project', key: 'sk-or-abcdef123456', ...over });
+
+  beforeAll(async () => {
+    previousKey = process.env[ENCRYPTION_KEY_ENV];
+    process.env[ENCRYPTION_KEY_ENV] = 'abcdef0123456789'.repeat(4);
+    try {
+      await resetDb();
+      app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    } finally {
+      if (previousKey === undefined) delete process.env[ENCRYPTION_KEY_ENV];
+      else process.env[ENCRYPTION_KEY_ENV] = previousKey;
+    }
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    // Granted before `viewer` makes its first project request, so the cold effective-key cache holds it.
+    await grantRole(db, { type: 'USER', id: world.ids.viewer }, 'project-admin', world.projectId);
+  }, 90_000);
+
+  afterAll(async () => { await app?.close(); });
+
+  it('creates and lists PROJECT and REPO keys as metadata (happy path)', async () => {
+    const project = body<{ id: string; scope: string; projectId: string; repoId: string | null }>(
+      await request(server()).post(PATH).set(admin()).send(send()).expect(201),
+    );
+    expect(project).toMatchObject({ scope: 'PROJECT', projectId: world.projectId, repoId: null });
+    const repo = body<{ id: string; scope: string; repoId: string | null }>(
+      await request(server()).post(PATH).set(admin()).send(send({ providerId: 'anthropic', repoId: world.repoId })).expect(201),
+    );
+    expect(repo).toMatchObject({ scope: 'REPO', repoId: world.repoId });
+
+    const listed = body<{ records: { id: string; last4: string }[] }>(
+      await request(server()).get(PATH).set(auth(world.tokens.dev)).expect(200),
+    );
+    expect(listed.records.map(({ id }) => id).sort()).toEqual([project.id, repo.id].sort());
+    expect(listed.records[0]).not.toHaveProperty('key');
+  });
+
+  it('rotates and deletes a PROJECT key (happy path)', async () => {
+    const created = body<{ id: string; fingerprint: string }>(
+      await request(server()).post(PATH).set(admin()).send(send({ providerId: 'openrouter-rotate-project' })).expect(201),
+    );
+    const rotated = body<{ fingerprint: string }>(
+      await request(server()).patch(`${PATH}/${created.id}`).set(admin()).send({ key: 'sk-or-zyxwvu987654' }).expect(200),
+    );
+    expect(rotated.fingerprint).not.toBe(created.fingerprint);
+    await request(server()).delete(`${PATH}/${created.id}`).set(admin()).expect(200);
+    expect(await db.providerCredential.findUnique({ where: { id: created.id } })).toBeNull();
+  });
+
+  it('refuses a Developer create, a foreign repo and a foreign credential (error cases)', async () => {
+    refusal(await request(server()).post(PATH).set(auth(world.tokens.dev)).send(send()).expect(403), 'permissions.40003');
+    refusal(await request(server()).post(PATH).set(admin()).send(send({ repoId: world.foreignRepoId })).expect(404), 'fleet.repos.404');
+    const foreign = body<{ id: string }>(
+      await request(server()).post('/api/projects/ops/provider-credentials').set(auth(world.tokens.root)).send(send()).expect(201),
+    );
+    refusal(await request(server()).patch(`${PATH}/${foreign.id}`).set(admin()).send({ name: 'hijacked' }).expect(404), 'fleet.providerCredentials.notFound.404');
+    refusal(await request(server()).delete(`${PATH}/${foreign.id}`).set(admin()).expect(404), 'fleet.providerCredentials.notFound.404');
+  });
+});
