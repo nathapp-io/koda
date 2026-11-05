@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import type { ChipTone } from '~/lib/fleet-capabilities'
-import { cellLabelKey, cellTone } from '~/lib/fleet-credential-board'
-import type { BoardCell, CredentialBoard } from '~/lib/fleet-credential-board'
+import { cellLabelKey, cellTone, kodaKeyFor } from '~/lib/fleet-credential-board'
+import type { BoardCell, CredentialBoard, KodaKey } from '~/lib/fleet-credential-board'
 
-/** Fleet S3 §6: providers x runners; a runner with unreadable capabilities has no cells. */
-defineProps<{ board: CredentialBoard }>()
+/**
+ * Fleet S3 §6: providers x runners; a runner with unreadable capabilities has no cells. C10 US-007
+ * added the koda column (the GLOBAL key koda holds for that provider) and the per-runner "vault off"
+ * marker, which is a runner capability, not a credential state.
+ */
+const props = defineProps<{ board: CredentialBoard }>()
 const { t } = useI18n()
 
 function variantOf(tone: ChipTone): 'secondary' | 'outline' | 'destructive' {
@@ -18,6 +22,10 @@ function cellText(cell: BoardCell): string {
   const until = cell.expires ? ` ${t('fleet.credentials.grid.expires', { date: cell.expires.slice(0, 10) })}` : ''
   return cell.state === 'missing' ? state : `${state} · ${kind}${until}`
 }
+
+function kodaKey(providerId: string): KodaKey | undefined {
+  return kodaKeyFor(props.board, providerId)
+}
 </script>
 
 <template>
@@ -25,6 +33,7 @@ function cellText(cell: BoardCell): string {
     <TableHeader>
       <TableRow>
         <TableHead>{{ t('fleet.credentials.grid.provider') }}</TableHead>
+        <TableHead data-testid="fleet-credentials-koda-head">{{ t('fleet.credentials.grid.koda') }}</TableHead>
         <TableHead
           v-for="runner in board.runners"
           :key="runner.id"
@@ -35,12 +44,25 @@ function cellText(cell: BoardCell): string {
         >
           <div class="font-medium">{{ runner.name }}</div>
           <div v-if="!runner.readable" class="text-xs text-muted-foreground">{{ t('fleet.credentials.grid.unreadable') }}</div>
+          <div v-if="!runner.providerVault" class="text-xs text-muted-foreground" data-testid="fleet-credentials-vault-off">{{ t('fleet.credentials.grid.vaultOff') }}</div>
         </TableHead>
       </TableRow>
     </TableHeader>
     <TableBody>
-      <TableRow v-for="row in board.providers" :key="row.providerId">
+      <TableRow
+        v-for="row in board.providers"
+        :key="row.providerId"
+        data-testid="fleet-credentials-row"
+        :data-provider="row.providerId"
+      >
         <TableCell class="font-medium">{{ row.providerId }}</TableCell>
+        <TableCell data-testid="fleet-credentials-koda" :data-provider="row.providerId">
+          <template v-if="kodaKey(row.providerId)">
+            <span class="font-medium">{{ kodaKey(row.providerId)?.name }}</span>
+            <span class="text-xs text-muted-foreground"> · {{ kodaKey(row.providerId)?.last4 }}</span>
+          </template>
+          <span v-else class="text-muted-foreground">-</span>
+        </TableCell>
         <TableCell
           v-for="runner in board.runners"
           :key="runner.id"

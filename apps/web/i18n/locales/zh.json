@@ -1214,16 +1214,58 @@
       "title": "凭据面板",
       "subtitle": "所有运行器上的提供商凭据与配置档。{days} 天内到期的 OAuth 凭据会被标记。",
       "refresh": "刷新",
+      "manageKeys": "提供商密钥",
       "empty": "尚未注册运行器",
       "loadFailed": "无法加载凭据面板",
       "tabs": { "grid": "凭据", "profiles": "配置档" },
-      "grid": { "provider": "提供商", "unreadable": "能力信息无法读取", "expires": "至 {date}" },
+      "grid": {
+        "provider": "提供商", "unreadable": "能力信息无法读取", "expires": "至 {date}",
+        "koda": "koda 密钥", "vaultOff": "密钥库未启用"
+      },
       "state": {
         "ok": "正常", "expiring": "即将到期", "expired": "已过期", "unavailable": "不可用", "missing": "缺失", "unknown": "未知"
       },
       "profiles": {
         "profile": "配置档", "needs": "需求", "needsValue": "{protocol} · {providers}", "sandbox": "沙箱",
         "differs": "各运行器不一致", "ready": "就绪", "absent": "未安装", "unknown": "未知"
+      }
+    },
+    "providerKeys": {
+      "title": "提供商密钥",
+      "subtitle": "koda 为所有运行器保存并通过 nax 提供的密钥。密钥只可写入：保存后仅显示末四位和指纹。",
+      "refresh": "刷新",
+      "empty": "尚未保存任何提供商密钥",
+      "pending": "审批待处理，密钥列表未发生变化。",
+      "deleteConfirm": "删除 {provider} 的提供商密钥？",
+      "state": { "enabled": "已启用", "disabled": "已禁用" },
+      "table": {
+        "provider": "提供商", "name": "名称", "last4": "末四位", "fingerprint": "指纹", "state": "状态"
+      },
+      "form": {
+        "providerId": "提供商 ID",
+        "providerIdPlaceholder": "openrouter",
+        "name": "名称",
+        "namePlaceholder": "团队密钥",
+        "key": "密钥",
+        "keyPlaceholder": "粘贴提供商密钥",
+        "newKey": "新密钥",
+        "submit": "添加密钥",
+        "saving": "保存中...",
+        "writeOnly": "密钥加密保存，之后不再显示。"
+      },
+      "actions": { "rotate": "轮换", "enable": "启用", "disable": "禁用", "delete": "删除" },
+      "validation": {
+        "providerId": "请使用小写字母、数字、点、短横线或下划线（最多 48 个字符）。",
+        "nameLength": "名称长度为 1 到 64 个字符。",
+        "keyLength": "密钥长度为 16 到 8192 个字符。",
+        "keyWhitespace": "密钥不能包含空格。"
+      },
+      "toast": {
+        "created": "提供商密钥已添加。",
+        "rotated": "提供商密钥已轮换。",
+        "enabled": "提供商密钥已启用。",
+        "disabled": "提供商密钥已禁用。",
+        "deleted": "提供商密钥已删除。"
       }
     },
     "runners": {
