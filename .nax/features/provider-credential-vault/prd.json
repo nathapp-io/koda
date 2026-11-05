@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T10:00:49.003Z",
+  "updatedAt": "2026-11-05T11:13:00.408Z",
   "userStories": [
     {
       "id": "US-001",
@@ -350,14 +350,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Project/repo access control and secret approval redemption add tenant-isolation risks to a shared CRUD boundary."
+        "reasoning": "Project/repo access control and secret approval redemption add tenant-isolation risks to a shared CRUD boundary.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -405,7 +408,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2748469b45c62e6758724d631ff9c03e7c15e42e"
     },
     {
       "id": "US-006",
