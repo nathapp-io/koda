@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T11:13:00.408Z",
+  "updatedAt": "2026-11-05T11:45:23.723Z",
   "userStories": [
     {
       "id": "US-001",
@@ -443,14 +443,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The new grant path mirrors existing grantTokens/FenceService but spans protocol, parsing, thread scope and transactional attribution; credential disclosure requires isolated security TDD."
+        "reasoning": "The new grant path mirrors existing grantTokens/FenceService but spans protocol, parsing, thread scope and transactional attribution; credential disclosure requires isolated security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/index.ts",
@@ -483,7 +486,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e787309fdbbc0dfd03d8a2842ae35aaf38af9103"
     },
     {
       "id": "US-007",
