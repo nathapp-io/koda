@@ -123,10 +123,10 @@ function mountCard(over: {
       const found = byId(id)
       return found === undefined ? '' : app.textOf(found)
     },
-    click: (id: string): void => {
+    click: (id: string): unknown => {
       const found = byId(id)
       const onClick = found?.props.onClick
-      if (typeof onClick === 'function') (onClick as () => void)()
+      if (typeof onClick === 'function') return (onClick as () => unknown)()
     },
     disabled: (id: string): unknown => byId(id)?.props.disabled,
   }
@@ -252,13 +252,18 @@ describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
   })
 
   test('B3: a retry that the API refuses clears the queued mark and shows the message', async () => {
-    const m = mountCard({ postError: { data: { message: 'The session already closed.' } } })
+    const m = mountCard()
     await settle()
 
     m.click('thread-approval-approve')
     await settle()
+    expect(m.byId('thread-approval-queued')).toBeDefined()
 
-    expect(m.byId('thread-approval-queued')).toBeUndefined()
+    m.post.mockRejectedValueOnce({ data: { message: 'The session already closed.' } })
+    m.click('thread-approval-retry')
+    await settle()
+
+    expect(m.textOf('thread-approval-queued')).toBe('')
     expect(m.textOf('thread-approval-error')).toBe('The session already closed.')
     expect(m.disabled('thread-approval-approve')).toBe(false)
     m.app.unmount()
@@ -291,6 +296,39 @@ describe('US-012 AC-6..AC-9, AC-12: ThreadApprovalCard', () => {
     expect(m.byId('thread-approval')).toBeDefined()
     m.app.unmount()
   })
+
+  test.each(['API refusal', 'thrown error'] as const)(
+    'B3: enqueue then runner rejection then %s on resend preserves the rejection and enables decisions',
+    async (failure) => {
+      const m = mountCard({ approval: approval({ requestId: 'req-7' }) })
+      try {
+        await settle()
+        await m.click('thread-approval-approve')
+        await settle()
+        expect(m.byId('thread-approval-queued')).toBeDefined()
+
+        m.app.setProps({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery() }) })
+        await settle()
+        expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: expired')
+
+        const error = { data: { message: 'The session already closed.' } }
+        if (failure === 'API refusal') m.post.mockRejectedValueOnce(error)
+        else m.app.setProps({ decide: async () => { throw error } })
+        await settle()
+
+        await expect(m.click('thread-approval-deny')).resolves.toBeUndefined()
+        await settle()
+
+        expect(m.textOf('thread-approval-queued')).toBe('')
+        expect(m.textOf('thread-approval-rejected')).toBe('The runner did not apply the decision: expired')
+        expect(m.textOf('thread-approval-error')).toBe('The session already closed.')
+        expect(m.disabled('thread-approval-approve')).toBe(false)
+        expect(m.disabled('thread-approval-deny')).toBe(false)
+      } finally {
+        m.app.unmount()
+      }
+    },
+  )
 
   test('B3: a rejection the runner gives without a detail is worded without one', async () => {
     const m = mountCard({ approval: approval({ requestId: 'req-7', delivery: rejectedDelivery({ detail: null }) }) })

@@ -23,7 +23,8 @@ import type { ThreadApprovalDecision, ThreadApprovalDelivery, ThreadPendingAppro
  * arrives on the thread (`approval.delivery`, B3 review round 2). A rejected acknowledgement clears the queued mark, is
  * worded on the card, and re-enables both decisions so the request can be decided again; an `ok` one keeps the card
  * waiting for the session to resolve the request. `supersededDelivery` is what keeps a resend honest: the outcome the
- * card already held when the new attempt started belongs to the previous attempt, so it is not shown as this one's.
+ * card already held when an accepted attempt started belongs to the previous attempt, so it is not shown as this one's.
+ * A refused send preserves that rejection and clears the queued mark because no new command was accepted.
  */
 const props = defineProps<{
   approval: ThreadPendingApprovalDto
@@ -40,7 +41,7 @@ function deliveryKeyOf(delivery: ThreadApprovalDelivery | undefined): string {
 const busy = ref(false)
 /** The API accepted a decision for this request; it stays true until the page drops the request or the runner refuses. */
 const sent = ref(false)
-/** The acknowledgement the card already held when the current attempt started: an identical one is not this attempt's. */
+/** The acknowledgement held when the last accepted attempt started: an identical one is not that attempt's. */
 const supersededDelivery = ref('')
 /** The decision to resend, so a dropped or rejected acknowledgement can be sent again by hand. */
 const lastDecision = ref<ThreadApprovalDecision | null>(null)
@@ -69,13 +70,18 @@ const rejectionText = computed(() => {
 async function send(decision: ThreadApprovalDecision): Promise<void> {
   if (busy.value) return
   busy.value = true
+  sent.value = false
   errorText.value = ''
   lastDecision.value = decision
-  supersededDelivery.value = deliveryKeyOf(props.approval.delivery)
+  const previousDelivery = deliveryKeyOf(props.approval.delivery)
   try {
     const result = await props.decide(props.approval.requestId, decision)
-    if (result.ok) sent.value = true
-    else errorText.value = extractApiError(result.error)
+    if (result.ok) {
+      sent.value = true
+      supersededDelivery.value = previousDelivery
+    } else errorText.value = extractApiError(result.error)
+  } catch (error) {
+    errorText.value = extractApiError(error)
   } finally {
     busy.value = false
   }
