@@ -180,6 +180,38 @@ export class ProviderCredentialsService {
     return updated;
   }
 
+  async updateGlobal(id: string, input: UpdateProviderCredentialInput): Promise<ProviderCredentialDto> {
+    this.assertEnabled();
+    const updated = await this.txManager.run(async () => {
+      const current = await this.repository.findById(id);
+      if (!current || current.scope !== 'GLOBAL') throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+      const row = await this.update(id, input);
+      const action = input.key !== undefined ? 'credential.rotated'
+        : input.disabled !== undefined ? (input.disabled ? 'credential.disabled' : 'credential.enabled')
+          : 'credential.updated';
+      await this.activity.record({
+        actorType: 'USER', actorId: input.updatedById, action, entityType: 'provider_credential', entityId: id,
+        projectId: null,
+        payload: { providerId: row.providerId, scope: row.scope, name: row.name, fingerprint: row.fingerprint },
+      });
+      await this.audit.record({ key: 'fleet.credential.update', resourceType: 'provider_credential', resourceId: id, projectId: null, summary: `${action} ${row.providerId}` });
+      return row;
+    });
+    return ProviderCredentialDto.from(updated);
+  }
+
+  async removeGlobal(id: string, actorId: string): Promise<void> {
+    this.assertEnabled();
+    await this.txManager.run(async () => {
+      const current = await this.repository.findById(id);
+      if (!current || current.scope !== 'GLOBAL') throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');
+      await this.remove(id);
+      await this.activity.record({ actorType: 'USER', actorId, action: 'credential.deleted', entityType: 'provider_credential', entityId: id, projectId: null,
+        payload: { providerId: current.providerId, scope: current.scope, name: current.name, fingerprint: current.fingerprint } });
+      await this.audit.record({ key: 'fleet.credential.delete', resourceType: 'provider_credential', resourceId: id, projectId: null, summary: `deleted ${current.providerId}` });
+    });
+  }
+
   async remove(id: string): Promise<void> {
     this.assertEnabled();
     if (!(await this.repository.remove(id))) throw new NotFoundAppException({}, 'fleet.providerCredentials.notFound');

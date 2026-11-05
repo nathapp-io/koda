@@ -13535,6 +13535,139 @@
         ]
       }
     },
+    "/api/fleet/provider-credentials/{id}": {
+      "patch": {
+        "operationId": "FleetProviderCredentialsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderCredentialDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "GLOBAL credential not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate or update a GLOBAL provider key (metadata only)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "FleetProviderCredentialsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential deleted"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "GLOBAL credential not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a GLOBAL provider key",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -24266,6 +24399,27 @@
           "createdBy",
           "updatedAt"
         ]
+      },
+      "UpdateProviderCredentialDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name, 1-64 characters"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 8192,
+            "description": "Replacement provider key; stored encrypted and never returned"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "Whether the credential is disabled"
+          }
+        }
       },
       "HomeActivityDto": {
         "type": "object",

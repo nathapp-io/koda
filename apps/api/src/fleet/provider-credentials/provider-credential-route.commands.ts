@@ -1,14 +1,15 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { parseBody } from '../../approvals/route/parse-body';
+import { parseRouteInput } from '../../approvals/route/parse-route-input';
 import { redactSecret } from '../../approvals/route/redact-secret';
 import { routeCommand } from '../../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
-import { CreateProviderCredentialDto, ProviderCredentialDto } from './dto/provider-credential.dto';
+import { CreateProviderCredentialDto, ProviderCredentialDto, UpdateProviderCredentialDto } from './dto/provider-credential.dto';
 import { ProviderCredentialsService } from './provider-credentials.service';
 
 export const PROVIDER_CREDENTIAL_ROUTE_VARIANTS = {
-  create: 'rest:fleet-provider-credentials.create',
+  create: 'rest:fleet-provider-credentials.create', update: 'rest:fleet-provider-credentials.update', delete: 'rest:fleet-provider-credentials.delete',
 } as const;
 
 /**
@@ -37,6 +38,24 @@ export class ProviderCredentialRouteCommands implements OnModuleInit {
       },
       run: (principal, input) => this.credentials.createGlobal(principal.id, input),
       toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ id: string; patch: UpdateProviderCredentialDto }, ProviderCredentialDto>({
+      key: 'fleet.credential.update', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update,
+      parse: (input) => {
+        const { id } = parseRouteInput(input, ['id']);
+        return { id, patch: parseBody(UpdateProviderCredentialDto, (input as Record<string, unknown>).patch ?? {}) };
+      },
+      redeem: { redact: ({ id, patch }) => {
+        const { key, ...rest } = patch;
+        return { id, patch: key === undefined ? rest : { ...rest, key: redactSecret(key) } };
+      } },
+      run: (principal, input) => this.credentials.updateGlobal(input.id, { ...input.patch, updatedById: principal.id }),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ id: string }, null>({
+      key: 'fleet.credential.delete', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.delete,
+      parse: (input) => parseRouteInput(input, ['id']), redeem: {},
+      run: async (principal, input) => { await this.credentials.removeGlobal(input.id, principal.id); return null; },
     }, this.loader));
   }
 }

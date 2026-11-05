@@ -6362,6 +6362,28 @@ describeIntegration('GLOBAL provider credential endpoints', () => {
     expect(page.records[0]).not.toHaveProperty('key');
   });
 
+  it('rotates, disables and deletes a GLOBAL credential (happy path)', async () => {
+    const created = body<{ id: string; fingerprint: string }>(await request(server()).post(CREATE).set(auth(world.tokens.root))
+      .send({ providerId: 'openrouter-rotate-e2e', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    const rotated = body<{ fingerprint: string; disabled: boolean }>(await request(server()).patch(`${CREATE}/${created.id}`)
+      .set(auth(world.tokens.root)).send({ key: 'sk-or-zyxwvu987654' }).expect(200));
+    expect(rotated.fingerprint).not.toBe(created.fingerprint);
+    expect((await request(server()).patch(`${CREATE}/${created.id}`).set(auth(world.tokens.root)).send({ disabled: true }).expect(200)).body.data.disabled).toBe(true);
+    await request(server()).delete(`${CREATE}/${created.id}`).set(auth(world.tokens.root)).expect(200);
+  });
+
+  it('refuses an update without the GLOBAL credential key and hides project credentials (error case)', async () => {
+    const created = body<{ id: string }>(await request(server()).post(CREATE).set(auth(world.tokens.root))
+      .send({ providerId: 'openrouter-deny-e2e', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    await request(server()).patch(`${CREATE}/${created.id}`).set(auth(world.tokens.dev)).send({ name: 'blocked' }).expect(403);
+    const project = await db.project.findFirstOrThrow();
+    const projectCredential = await db.providerCredential.create({ data: {
+      scope: 'PROJECT', scopeKey: `project:${project.id}`, projectId: project.id, providerId: 'openrouter', name: 'project',
+      encryptedKey: 'ciphertext', last4: '1234', fingerprint: '123456789abc', createdById: world.ids.root, updatedById: world.ids.root,
+    } });
+    await request(server()).delete(`${CREATE}/${projectCredential.id}`).set(auth(world.tokens.root)).expect(404);
+  });
+
   it('refuses a create and a list for a user without the GLOBAL credential keys (error case)', async () => {
     refusal(await request(server()).post(CREATE).set(auth(world.tokens.dev))
       .send({ providerId: 'openrouter', name: 'dev', key: 'sk-or-abcdef123456' }).expect(403), 'permissions.40003');

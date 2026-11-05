@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { KodaPageQuery } from '../../../common/dto/koda-page.query';
 import {
   PROVIDER_CREDENTIAL_KEY_MAX_LENGTH,
@@ -32,6 +32,21 @@ export class CreateProviderCredentialDto {
   @MaxLength(PROVIDER_CREDENTIAL_KEY_MAX_LENGTH)
   @Matches(NO_WHITESPACE_PATTERN)
   declare key: string;
+}
+
+/** GLOBAL metadata, rotation and enablement patch. */
+export class UpdateProviderCredentialDto {
+  @ApiPropertyOptional({ description: 'Display name, 1-64 characters' })
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(PROVIDER_CREDENTIAL_NAME_MAX_LENGTH)
+  declare name?: string;
+
+  @ApiPropertyOptional({ description: 'Replacement provider key; stored encrypted and never returned' })
+  @IsOptional() @IsString() @MinLength(PROVIDER_CREDENTIAL_KEY_MIN_LENGTH) @MaxLength(PROVIDER_CREDENTIAL_KEY_MAX_LENGTH) @Matches(NO_WHITESPACE_PATTERN)
+  declare key?: string;
+
+  @ApiPropertyOptional({ description: 'Whether the credential is disabled' })
+  @IsOptional() @IsBoolean()
+  declare disabled?: boolean;
 }
 
 /**

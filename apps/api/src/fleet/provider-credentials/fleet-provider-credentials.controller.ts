@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
@@ -8,7 +8,7 @@ import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
-import { CreateProviderCredentialDto, ListProviderCredentialsQuery, ProviderCredentialDto } from './dto/provider-credential.dto';
+import { CreateProviderCredentialDto, ListProviderCredentialsQuery, ProviderCredentialDto, UpdateProviderCredentialDto } from './dto/provider-credential.dto';
 import { PROVIDER_CREDENTIAL_ROUTE_VARIANTS } from './provider-credential-route.commands';
 import { ProviderCredentialsService } from './provider-credentials.service';
 
@@ -63,5 +63,40 @@ export class FleetProviderCredentialsController {
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);
+  }
+
+  @Patch(':id')
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.credential.update')
+  @ApprovalGated({ redeem: true })
+  @ApiOperation({ summary: 'Rotate or update a GLOBAL provider key (metadata only)' })
+  @ApiResponse({ status: 200, type: ProviderCredentialDto })
+  @ApiResponse({ status: 404, description: 'GLOBAL credential not found' })
+  async update(@Param('id') id: string, @Body() patch: UpdateProviderCredentialDto, @ApprovalRedeemHeader() redeem?: string) {
+    this.credentials.assertEnabled();
+    const outcome = await this.routeGate.run<ProviderCredentialDto>({
+      key: 'fleet.credential.update', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.update,
+      projectId: null, input: { id, patch }, redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.credential.delete')
+  @ApprovalGated({ redeem: true })
+  @ApiOperation({ summary: 'Delete a GLOBAL provider key' })
+  @ApiResponse({ status: 200, description: 'Credential deleted' })
+  @ApiResponse({ status: 404, description: 'GLOBAL credential not found' })
+  async remove(@Param('id') id: string, @ApprovalRedeemHeader() redeem?: string) {
+    this.credentials.assertEnabled();
+    const outcome = await this.routeGate.run<null>({
+      key: 'fleet.credential.delete', variant: PROVIDER_CREDENTIAL_ROUTE_VARIANTS.delete,
+      projectId: null, input: { id }, redeem,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok({ deleted: true });
   }
 }
