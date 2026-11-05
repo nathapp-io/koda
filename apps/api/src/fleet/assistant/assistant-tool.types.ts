@@ -44,6 +44,12 @@ export interface AssistantTool<I = unknown> {
   kind?: 'read' | 'write';
   /** 2a-D2: what the user approves, so a `write` tool must have one. The executor calls it instead of `execute`. */
   preview?(ctx: ToolContext, input: I): Promise<string>;
+  /**
+   * US-014 F1: the write's external reads (a forge call), which the approval engine runs *outside* its
+   * transaction; the returned callback is the mutation it runs inside it. Absent means `execute` does both,
+   * as every other write tool does.
+   */
+  prepare?(ctx: ToolContext, input: I): Promise<() => Promise<string>>;
   /** Throws ToolInputError(reason) for input the tool cannot use. */
   parse(input: unknown): I;
   execute(ctx: ToolContext, input: I): Promise<string>;

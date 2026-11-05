@@ -11,7 +11,9 @@ import { seedFleetHttpAgent, seedFleetHttpWorld } from '../helpers/fleet-fixture
 import { resetDb } from '../helpers/reset-db';
 import { FakeForge, startFakeForge } from '../helpers/fake-forge';
 import { grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
+import { seedWaitPolicy } from '../../src/approvals/test-helpers/approval-fixtures';
 import { PermissionCache } from '../../src/permissions/permission-cache';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetPrRulingsService } from '../../src/fleet/rulings/fleet-pr-rulings.service';
 
 /** US-014 (#394): the ruling preflight over HTTP — CI items and a PR with no nax item index. */
@@ -47,6 +49,11 @@ const MARKER = '<!-- nax-bot:v1 key=w-index -->';
     await grantRole(db, { type: 'AGENT', id: agent.id }, 'developer', world.projectId);
     await app.get(PermissionCache).invalidate();
   }, 120000);
+  beforeEach(async () => {
+    await db.approvalDecision.deleteMany();
+    await db.approvalRequest.deleteMany();
+    await db.approvalPolicy.deleteMany();
+  });
   afterAll(async () => {
     await app?.close();
     await forge?.close();
@@ -119,5 +126,38 @@ const MARKER = '<!-- nax-bot:v1 key=w-index -->';
     ] }));
     expect(data(await post(target.id, { itemId: 'D-1', text: 'confirm: green' }).expect(201))).toMatchObject({ state: 'pending', disposition: 'confirmed' });
     expect(await db.fleetPrRuling.count({ where: { jobId: target.id } })).toBe(1);
+  });
+
+  it('F1: a deferred approval runs both preflights outside any transaction', async () => {
+    const target = await job([{ id: 'D-1', kind: 'finding' }]);
+    forge.routes.set(`GET /repos/acme/app/issues/${seq}/comments`, () => ({ status: 200, body: [
+      { id: 1, body: `nax item index for this review\n${MARKER}` },
+    ] }));
+    const policy = await seedWaitPolicy(db, 'fleet.job.rule', world.projectId);
+    await db.approvalPolicy.update({ where: { id: policy.id }, data: { mode: 'human' } });
+
+    const service = app.get(FleetPrRulingsService);
+    const transactions = app.get<{ isInTransaction(): boolean }>(TRANSACTION_MANAGER);
+    const original = service.preflight.bind(service);
+    const active: boolean[] = [];
+    const spy = vi.spyOn(service, 'preflight').mockImplementation((projectId, jobId, dto) => {
+      active.push(transactions.isInTransaction());
+      return original(projectId, jobId, dto);
+    });
+    let requestId: string;
+    try {
+      requestId = data<{ id: string }>(await post(target.id, { itemId: 'D-1', text: 'confirm: green' }).expect(202)).id;
+      expect(await db.fleetPrRuling.count({ where: { jobId: target.id } })).toBe(0);
+      const decided = data<{ status: string }>(await request(app.getHttpServer()).post(`/api/approvals/${requestId}/decisions`)
+        .set({ Authorization: `Bearer ${world.tokens.root}` }).send({ decision: 'approve' }).expect(200));
+      expect(decided.status).toBe('executed');
+    } finally { spy.mockRestore(); }
+
+    // Request-time preflight and the deferred one: both read the forge with no transaction open.
+    expect(active).toEqual([false, false]);
+    expect(await db.fleetPrRuling.findMany({ where: { jobId: target.id } })).toEqual([
+      expect.objectContaining({ state: 'pending', disposition: 'confirmed', approvalRequestId: requestId }),
+    ]);
+    expect(forge.requests.filter((sent) => sent.path === `/repos/acme/app/issues/${seq}/comments`)).toHaveLength(2);
   });
 });

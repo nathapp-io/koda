@@ -51,4 +51,31 @@ describe('assistantToolCommand', () => {
   it('AC-11: masks and byte caps results', async () => { const s = setup(); const text = 'ghp_123456789012345678901234567890123456 ' + '界'.repeat(20000); vi.mocked(s.tool.execute).mockResolvedValue(text); const result = await s.run(); expect(result).toEqual({ text: capText(maskSecrets(text), RESULT_CAP_BYTES) }); expect(result.text).not.toContain('ghp_123456'); expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(RESULT_CAP_BYTES); });
   it.each([new NotFoundAppException({}, 'projects'), new ToolActionError('partial'), new Error('boom')])('AC-12: rethrows same error', async (error) => { const s = setup(); vi.mocked(s.tool.execute).mockRejectedValue(error); await expect(s.run()).rejects.toBe(error); });
   it('AC-13: returns result unchanged', () => { const s = setup(); const result = { text: 'ok' }; expect(s.command.toResult?.(result)).toBe(result); });
+
+  it('F1: a write tool with prepare builds the command prepare hook, which runs no mutation itself', async () => {
+    const prepared = vi.fn().mockResolvedValue('mutated');
+    const prepare = vi.fn().mockResolvedValue(prepared);
+    const tool: AssistantTool = {
+      descriptor: KODA_ADD_COMMENT, key: 'comment.create', kind: 'write', parse: vi.fn((args) => args),
+      execute: vi.fn().mockResolvedValue('executed'), prepare,
+    };
+    const command = assistantToolCommand(tool, {
+      calls: { findUserActor: vi.fn().mockResolvedValue({ id: 'u1', email: 'u@test', role: 'MEMBER', disabled: false }), findAgentActor: vi.fn(), findProjectSlug: vi.fn().mockResolvedValue('project') },
+      access: { resolveMembership: vi.fn().mockResolvedValue(null) },
+      permissions: { can: vi.fn().mockResolvedValue({ allowed: true }) },
+    } as unknown as AssistantCommandDeps);
+    const mutate = await runWithActionContext({ actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: { type: 'USER', id: 'u1' }, origin: 'thread' }, () => command.prepare?.(input, undefined));
+    expect(prepare).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ projectId: 'p1', projectSlug: 'project', threadId: 't1', jobId: 'j1' }), input.args);
+    // The external reads happen in prepare; nothing runs the tool or the mutation until the engine calls back.
+    expect(tool.execute).not.toHaveBeenCalled();
+    expect(prepared).not.toHaveBeenCalled();
+    await expect(mutate?.()).resolves.toEqual({ text: 'mutated' });
+    expect(tool.execute).not.toHaveBeenCalled();
+    expect(prepared).toHaveBeenCalledOnce();
+  });
+
+  it('F1: a write tool without prepare keeps the deferred path on execute', () => {
+    const s = setup();
+    expect(s.command.prepare).toBeUndefined();
+  });
 });

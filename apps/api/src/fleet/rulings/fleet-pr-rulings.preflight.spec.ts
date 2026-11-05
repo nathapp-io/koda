@@ -157,6 +157,27 @@ describe('assistant ruling tool preflight', () => {
     expect(rulings.preflight).toHaveBeenCalledOnce();
     expect(rulings.create).toHaveBeenCalledOnce();
   });
+
+  it('F1: prepare runs the preflight and returns a create-only mutation', async () => {
+    const { rulings, write } = registered();
+    rulings.preflight.mockResolvedValue(undefined);
+    rulings.create.mockResolvedValue({ id: 'ruling', state: 'pending' });
+    expect(write.prepare).toBeTypeOf('function');
+    const mutate = await write.prepare?.(ctx, input);
+    expect(rulings.preflight).toHaveBeenCalledExactlyOnceWith('project', 'run', { itemId: 'D-1', text: 'confirm: green' });
+    expect(rulings.create).not.toHaveBeenCalled();
+    await expect(mutate?.()).resolves.toBe('ruling ruling: pending');
+    expect(rulings.create).toHaveBeenCalledExactlyOnceWith(agent, 'web', 'run', { itemId: 'D-1', text: 'confirm: green' });
+    // One forge read per ruling: deferred execution must not repeat it under the approval transaction.
+    expect(rulings.preflight).toHaveBeenCalledOnce();
+  });
+
+  it('F1: prepare maps a preflight refusal and creates nothing', async () => {
+    const { rulings, write } = registered();
+    rulings.preflight.mockRejectedValue(new ConflictAppException({}, 'fleet.rulings.noItemIndex'));
+    await expect(write.prepare?.(ctx, input)).rejects.toMatchObject({ text: 'pull request has no nax item index' });
+    expect(rulings.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('ruling target repo projection', () => {

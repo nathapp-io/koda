@@ -23,6 +23,15 @@ export class FleetRulingRouteCommands implements OnModuleInit {
         await this.rulings.preflight(input.projectId, input.jobId, input.ruling);
         return FleetPrRulingDto.from(await this.rulings.create(principal, input.slug, input.jobId, input.ruling));
       },
+      /**
+       * US-014 F1: deferred execution calls this *before* it opens its transaction. The item-index forge read
+       * belongs here, so a slow provider can never hold the approval row lock or exhaust the transaction
+       * deadline; the returned callback is the locked write only, and `create` still rechecks eligibility.
+       */
+      prepare: async (principal, input) => {
+        await this.rulings.preflight(input.projectId, input.jobId, input.ruling);
+        return async () => FleetPrRulingDto.from(await this.rulings.create(principal, input.slug, input.jobId, input.ruling));
+      },
       toResult: (result) => result,
     }, this.loader));
   }
