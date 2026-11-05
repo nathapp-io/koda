@@ -162,6 +162,24 @@ describe('sync provider credential requests', () => {
     expect(h.repo.lockById.mock.invocationCallOrder[0]).toBeLessThan(h.credentials.resolve.mock.invocationCallOrder[0]);
   });
 
+  it('review F1: locks every distinct job in jobId order, whatever order the batch arrives in', async () => {
+    const h = harness();
+    h.repo.lockById.mockImplementation(async (id: string) => ({ ...h.job, id }));
+
+    const response = await h.sync([
+      { jobId: 'j3', leaseEpoch: lease, providerId: 'openrouter' },
+      { jobId: 'j1', leaseEpoch: lease, providerId: 'openrouter' },
+      { jobId: 'j2', leaseEpoch: lease, providerId: 'openrouter' },
+      { jobId: 'j1', leaseEpoch: lease, providerId: 'openrouter' },
+    ]);
+
+    // A consistent order is what keeps two overlapping reversed batches from deadlocking on each other.
+    expect(h.repo.lockById.mock.calls.map(([jobId]) => jobId)).toEqual(['j1', 'j2', 'j3']);
+    // The answer still follows the request order, and a repeated job is locked once.
+    expect(response.providerKeys.map((grant) => grant.jobId)).toEqual(['j3', 'j1', 'j2', 'j1']);
+    expect(response.providerKeyErrors).toEqual([]);
+  });
+
   it('scopes a thread job from the thread, not from the job row', async () => {
     const h = harness();
     h.job.command = FleetJobKind.THREAD;

@@ -33,6 +33,8 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
   let store: LocalSecretStore;
   let world: FleetHttpWorld;
   let runner: { runnerId: string; apiKey: string };
+  /** A second repo of the same project, so one runner can hold two active jobs at once. */
+  let vaultRepoId: string;
   const saved: Record<string, string | undefined> = {};
 
   const sync = async (over: Partial<SyncRequest> = {}) =>
@@ -40,15 +42,15 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
       .set({ Authorization: `Bearer ${runner.apiKey}` }).send(syncBody(over)).expect(200));
   const asDev = () => ({ Authorization: `Bearer ${world.tokens.dev}` });
   const job = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
-  const dispatch = async (feature: string) =>
+  const dispatch = async (feature: string, repoId = world.repoId) =>
     data<{ job: { id: string; leaseEpoch: number } }>(
       await request(server).post('/api/projects/web/fleet/jobs').set(asDev())
-        .send({ repoId: world.repoId, command: 'RUN', maxCostUsd: 5, feature }).expect(201),
+        .send({ repoId, command: 'RUN', maxCostUsd: 5, feature }).expect(201),
     ).job;
 
   /** Dispatch, take the ASSIGN, ack it and report RUNNING: a held job with a clean command queue. */
-  const startRunning = async (feature: string) => {
-    const j = await dispatch(feature);
+  const startRunning = async (feature: string, repoId = world.repoId) => {
+    const j = await dispatch(feature, repoId);
     const assign = (await sync()).commands.find((c) => c.jobId === j.id && c.type === 'ASSIGN');
     if (assign === undefined) throw new Error(`no ASSIGN delivered for job ${j.id}`);
     await sync({
@@ -102,6 +104,13 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
     store = app.get(LocalSecretStore, { strict: false });
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'vault-box');
+    // A second repo of the same project: placement never puts two active jobs of one repo on one runner.
+    vaultRepoId = (await prisma.fleetRepo.create({
+      data: {
+        projectId: world.projectId, provider: 'github', owner: 'acme', name: 'vault', defaultBranch: 'main',
+        githubInstallationId: BigInt(77), createdById: world.ids.root,
+      },
+    })).id;
   }, 60_000);
 
   afterAll(async () => {
@@ -285,6 +294,30 @@ describeIntegration('provider credential sync hand-out (PG)', () => {
     expect(second.providerKeys).toHaveLength(1);
     expect(await issuedRows(j.id)).toHaveLength(1);
     expect(await prisma.providerCredentialIssue.count({ where: { jobId: j.id } })).toBe(1);
+  });
+
+  it('review F1: two overlapping syncs with reversed provider batches both answer', async () => {
+    await prisma.runner.update({ where: { id: runner.runnerId }, data: { capacity: 2 } });
+    try {
+      const first = await startRunning('vault-batch-a');
+      const second = await startRunning('vault-batch-b', vaultRepoId);
+      await createCredential({ scope: 'GLOBAL', name: 'fleet', key: 'sk-or-abcdef123456' });
+
+      // Opposite orders in one transaction each: the lock order must not follow the batch order, or
+      // these two transactions hold their first job and wait on each other forever.
+      const [a, b] = await Promise.all([
+        sync({ providerRequests: [requestKey(first.id, first.leaseEpoch), requestKey(second.id, second.leaseEpoch)] }),
+        sync({ providerRequests: [requestKey(second.id, second.leaseEpoch), requestKey(first.id, first.leaseEpoch)] }),
+      ]);
+
+      expect(a.providerKeys.map((grant) => grant.jobId)).toEqual([first.id, second.id]);
+      expect(b.providerKeys.map((grant) => grant.jobId)).toEqual([second.id, first.id]);
+      // The concurrent hand-outs still dedupe to one issue and one activity row per job.
+      expect(await issuedRows(first.id)).toHaveLength(1);
+      expect(await issuedRows(second.id)).toHaveLength(1);
+    } finally {
+      await prisma.runner.update({ where: { id: runner.runnerId }, data: { capacity: 1 } });
+    }
   });
 
   it('AC-14: returns without waiting for the long poll when the only content is a provider grant', async () => {

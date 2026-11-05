@@ -193,7 +193,8 @@ export class SyncService {
    * overlapping syncs queue one ABANDON), then checked for a runner-held state, for an enabled vault,
    * and for the job's scope — a THREAD job's own thread, a fleet job's project/repo. Nothing is
    * decrypted before those checks pass, and the issue row and its `credential.issued` activity commit in
-   * the same transaction, so the attribution and the hand-out cannot disagree.
+   * the same transaction, so the attribution and the hand-out cannot disagree. The batch takes its job
+   * locks in jobId order (see below), so two overlapping reversed batches cannot deadlock.
    */
   protected async grantProviderKeys(
     runnerId: string,
@@ -205,8 +206,16 @@ export class SyncService {
     const unknownJobIds: string[] = [];
     if (requests.length === 0) return { providerKeys, providerKeyErrors, unknownJobIds };
     await this.txManager.run(async () => {
+      // Lock every distinct job first, in jobId order: two overlapping syncs whose batches name the same
+      // jobs in opposite orders would otherwise each hold their first lock and wait on the other's, and
+      // the transaction manager does not retry a deadlock — the whole sync would fail. The locks are held
+      // until the transaction ends either way, so this only changes the order they are taken in.
+      const locked = new Map<string, FleetJobRecord | null>();
+      for (const jobId of [...new Set(requests.map((req) => req.jobId))].sort()) {
+        locked.set(jobId, await this.repo.lockById(jobId));
+      }
       for (const req of requests) {
-        const job = await this.repo.lockById(req.jobId);
+        const job = locked.get(req.jobId);
         if (!job) {
           unknownJobIds.push(req.jobId);
           continue;
