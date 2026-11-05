@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T11:45:23.723Z",
+  "updatedAt": "2026-11-05T12:23:26.103Z",
   "userStories": [
     {
       "id": "US-001",
@@ -515,14 +515,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Credential metadata visibility and untrusted capability parsing span protocol, service, derivation and protected HTTP DTOs."
+        "reasoning": "Credential metadata visibility and untrusted capability parsing span protocol, service, derivation and protected HTTP DTOs.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/common/capabilities-core.ts",
@@ -560,7 +563,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "73aebb2fa0dde1108aebfa6dbbf70d845ae15142"
     },
     {
       "id": "US-008",
