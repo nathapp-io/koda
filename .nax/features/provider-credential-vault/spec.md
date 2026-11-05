@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Provider credential vault (C10)
 
 Closes: #371, #394
@@ -50,8 +49,11 @@ source. Design: `docs/superpowers/specs/2026-11-05-provider-credential-vault-des
   (job, credential, fingerprint); a new row records one `credential.issued` activity.
 - Revocation latency: after a key is disabled or deleted, a running nax keeps its current lease until `expiresAt`
   (nax-agent serves the last good lease when the helper fails), so a running job is cut off at most 10 minutes later.
-- Thread jobs resolve from the thread's own `projectId` and `repoId` (null for PROJECT and WORKSPACE threads); fleet jobs
-  from `FleetJob.projectId` and `FleetJob.repoId`.
+- Thread jobs resolve from the thread's own `projectId` and `repoId` (`repoId` null for PROJECT and WORKSPACE threads;
+  a WORKSPACE thread's anchor `projectId` is non-null, so its PROJECT key applies); fleet jobs from `FleetJob.projectId`
+  and `FleetJob.repoId`.
+- Relations: `ProviderCredential.projectId` and `repoId` reference `Project` and `FleetRepo` with `onDelete: Cascade`;
+  `createdById`/`updatedById` are plain strings (no FK), as on other fleet rows.
 - Permission keys: `fleet.credential.create|update|delete` (global; the prefix is already high risk) and
   `project.credential.read|create|update|delete` (project; `project.credential.` joins `HIGH_RISK_PREFIXES`).
 - Writes follow the `vcs.connection.create` precedent exactly: route commands whose `redeem.redact` replaces the key
@@ -76,7 +78,9 @@ Symbols this feature only reads (verified):
 - `vcsConfig` / `VCS_CFG` / `IVcsConfig` in `apps/api/src/config/vcs.config.ts`; `VCS_ENCRYPTION_KEY:
   Joi.string().hex().length(64).optional()` in `apps/api/src/config/env.validation.ts:32` — the pattern for the new key.
 - `vcs-route.commands.ts` `routeCommand({ key, variant, parse, redeem: { redact }, run })` with `redactSecret`
-  (`apps/api/src/vcs/vcs-route.commands.ts:44-58`) and the controller's `routeGate.run` call
+  (`apps/api/src/approvals/route/redact-secret.ts`; precedent `apps/api/src/vcs/vcs-route.commands.ts:44-58`), the
+  sibling route decorators `@ApprovalGated({ redeem: true })` and `@ApprovalRedeemHeader()`, and `routeGate.run({ projectId:
+  null, ... })` for a global route (`apps/api/src/outbox/admin.controller.ts:53`) and the controller's `routeGate.run` call
   (`apps/api/src/vcs/vcs.controller.ts:68-90`) — the approval-gated secret write precedent.
 - `AuditRecorder.record({ key, resourceType, resourceId, projectId?, summary })`
   (`apps/api/src/audit/audit-recorder.service.ts`; used at `fleet-repos.service.ts:74`).
@@ -121,8 +125,12 @@ The baselines below exist only to locate the code. Never implement a baseline; i
   `'provider_credential'`.
 - `RunnerCapabilities` (`packages/fleet-protocol/src/index.ts:82`, parsed in `apps/api/src/fleet/common/
   capabilities-core.ts:214`). Baseline: `threadModes?: true`. Target: also `providerVault?: true`.
-- `CredentialBroker` (`apps/runner/src/credentials/broker.ts`). Baseline: `acquire`, `acquireRepo`, `release`,
-  `releaseRepo`, `closeAll`. Target: adds `serveProviderKeys(job: JobRow): Promise<string>` (opens, once per job and
+- `CredentialProvider` and `CredentialBroker` (`apps/runner/src/credentials/broker.ts:27-36`). Baseline: the interface has
+  `acquire`, `release` and optional `currentToken?`, `freshToken?`; the class adds `acquireRepo`, `releaseRepo`,
+  `closeAll`. Target: the interface gains OPTIONAL `serveProviderKeys?`, `providerKeyGranted?` and
+  `releaseProviderKeys?` (callers skip them when absent, so existing fakes with only `acquire`/`release` keep working);
+  `BrokerDeps` gains an optional provider-key cache; provider-key sockets live in their own map, never in `servers`
+  (so `release`'s sibling check for `<jobDir>/bin` ignores them). The class implements `serveProviderKeys(job: JobRow): Promise<string>` (opens, once per job and
   epoch, a provider-key socket at `socketPathFor(dir, runnerId, jobId, leaseEpoch, 'provider-keys')` and returns its
   path, whatever the clone URL), `providerKeyGranted(job, providerId): Promise<boolean>` (the same lookup the socket
   uses, true on a grant) and `releaseProviderKeys(job)` (closes the socket, drops the job's cached grants and served
@@ -145,13 +153,15 @@ The baselines below exist only to locate the code. Never implement a baseline; i
   `granted` resolves true for the session model's provider.
 - `NaxProbeDeps` (`apps/runner/src/capabilities/nax-probe.ts:41`). Baseline: no vault input. Target: optional
   `vaultHelper?: () => Promise<boolean>`; capabilities carry `providerVault: true` only when it resolves true.
-- `RulingJobTarget` and `findTarget` (`apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts`,
-  `prisma-fleet-pr-ruling.repository.ts:56`). Baseline: `{ projectId, repoId, prNumber, openItems }`. Target: adds
+- `RulingJobTarget`, `findTarget` and `lockTarget` (`apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts`,
+  `prisma-fleet-pr-ruling.repository.ts:21-56`). Baseline: `{ projectId, repoId, prNumber, openItems }`. Target: adds
   `repo: { provider: string; owner: string; name: string; githubInstallationId: bigint | null }`.
 - `FleetPrRulingsService.ruleTarget(projectId, jobId, dto)` (`fleet-pr-rulings.service.ts:84`). Baseline: refuses
   `notDraft`, `notLatest`, `unknownItem`, `invalidText`, `settled`. Target: also refuses `notRulable` (item kind `ci`).
-  A new `assertItemIndex(target)` runs the forge check; the controller and the ruling route command call it before
-  `create`, never inside `create`'s transaction.
+  A new `preflight(projectId, jobId, dto)` runs `ruleTarget` then `assertItemIndex(target)` (the forge check); all three
+  callers (the controller, the ruling route command and the assistant `pr-ruling-tools.ts`) call `preflight` before
+  `create`, never inside `create`'s transaction. Both `RulingJobTarget` producers, `findTarget` and `lockTarget`,
+  populate `repo`.
 
 Patterns to follow: `apps/api/src/vcs/` (encrypted secret, project routes, route commands with redaction),
 `apps/api/src/fleet/repos/fleet-repos.service.ts` (fleet CRUD with activity and audit),
@@ -197,9 +207,11 @@ epoch. Its reply for `provider <id>` queues a `ProviderKeyRequest` in a `Provide
 `expiresAt` (ISO converted to epoch ms), and remembers which providers it served the job: once served, a later `none`
 becomes `revoked`. `releaseProviderKeys(job)` closes it and forgets the job.
 
-**Runner, fleet jobs.** The host executor and the config job call `serveProviderKeys(job)` before spawning nax, put
-`KODA_PROVIDER_CRED_SOCKET=<path>` in the nax env, and call `releaseProviderKeys(job)` in the same cleanup that
-releases git credentials. The helper `koda-runner provider-cred [--socket <path>] get` reads the nax request from
+**Runner, fleet jobs.** The host executor calls `serveProviderKeys(job)` and puts `KODA_PROVIDER_CRED_SOCKET=<path>`
+in the nax env at both spawn sites (`spawn`, which covers RUN, PLAN and REVIEW, and `spawnFixStep`), re-serves it in
+`resumeCredentials` (a readopted nax keeps its deterministic socket path), and calls `releaseProviderKeys(job)` in
+both `cleanup()` and `releaseCredentials()`. The config job serves before it builds `naxEnv` and releases in its own
+cleanup. The helper `koda-runner provider-cred [--socket <path>] get` reads the nax request from
 stdin; the socket is `--socket` when given, else `KODA_PROVIDER_CRED_SOCKET`; it maps: neither given -> decline;
 `none` -> decline; ok -> the api-key reply; `revoked`, `error`, `bad request`, socket failure -> exit 1 with one
 stderr line and nothing on stdout.
@@ -209,10 +221,12 @@ stderr line and nothing on stdout.
 temp file + rename; `vault disable` removes `auth`. The probe's `vaultHelper` dep (wired in the daemon) is true exactly
 when `config.json`'s `auth.exec.command` equals `[...self, "provider-cred"]`.
 
-**Runner, threads.** `ThreadJobRun` calls `serveProviderKeys(row)` before the first `sessions.open` of the job (REPO,
-PROJECT and WORKSPACE threads alike), passes `providerKeys: { socket, granted: (p) => broker.providerKeyGranted(row,
-p) }` into every `open`, and calls `releaseProviderKeys(row)` where the job ends. The factory derives `providerId` from
-the session model id (text before the first `/`; the runner default model when the thread pins none) and, when
+**Runner, threads.** `ThreadJobRun` calls `serveProviderKeys(row)` before both `sessions.open` call sites (the REPO
+path and `runProject`, so REPO, PROJECT and WORKSPACE threads alike), passes `providerKeys: { socket, granted: (p) =>
+broker.providerKeyGranted(row, p) }` into every `open`, and calls `releaseProviderKeys(row)` in `start()`'s `finally`
+and in `abandon()`. The factory derives `providerId` from
+the session model id (text before the first `/`; the runner default model when the thread pins none; a model id with
+no `/` gets no koda key) and, when
 `granted` is true, sets the per-session exec `credentials`; otherwise it opens without `credentials`
 (process-wide store, machine-local). ACP threads never consult it.
 
@@ -260,6 +274,8 @@ Web `FleetJobOpenItems.vue` hides Rule on `ci` items; the `fleet.rulings.skipRea
 - GitLab merge requests get no `w-index` pre-check; rulings are GitHub-only today.
 - Agents (MCP tools) get no provider-key tools.
 - The `w-index` pre-check does not verify the marker comment's author.
+- A model switch inside one open native session to a provider koda holds no key for is not re-resolved; the next session open re-resolves (the per-session exec source has no file fallback).
+- A runner whose `runner.json` overrides capabilities (`StaticCapabilityProbe`) never reports `providerVault`.
 
 ## Stories
 
@@ -313,8 +329,9 @@ daemon wiring.
 
 ### US-009: nax exec helper and fleet job env
 
-Workdir: `apps/runner`. Depends on US-008. `provider-cred` internal command (`runProviderCred`); host executor and
-config job serve the provider-key socket, set `KODA_PROVIDER_CRED_SOCKET`, and release it in cleanup.
+Workdir: `apps/runner`. Depends on US-008. `provider-cred` internal command (`runProviderCred`); host executor (both
+spawn sites, `resumeCredentials`, `cleanup`, `releaseCredentials`) and config job serve the provider-key socket, set
+`KODA_PROVIDER_CRED_SOCKET`, and release it.
 
 ### US-010: Runner vault enable and disable, and the providerVault capability
 
@@ -323,8 +340,8 @@ atomically; `NaxProbeDeps.vaultHelper` and its daemon wiring; the `providerVault
 
 ### US-011: Native thread sessions use koda keys
 
-Workdir: `apps/runner`. Depends on US-009. `ThreadJobRun` serves and releases the provider-key socket and passes
-`providerKeys` into `open`; `ThreadSessionFactory.open` derives the provider and sets the per-session exec
+Workdir: `apps/runner`. Depends on US-009. `ThreadJobRun` serves the provider-key socket before both session opens,
+releases it in `start()`'s `finally` and in `abandon()`, and passes `providerKeys` into `open`; `ThreadSessionFactory.open` derives the provider and sets the per-session exec
 `credentials` on a grant.
 
 ### US-012: Web admin provider keys page and board column
@@ -339,8 +356,9 @@ per-REPO rows, gated on `project.credential.*`, with the approval-pending notice
 
 ### US-014: Rulings refuse items nax can never settle
 
-Workdir: `apps/api`. No dependencies. `ruleTarget` refuses `ci` items; `RulingJobTarget.repo`;
-`assertItemIndex` with `GitHubAppClient.listIssueComments`, called before `create`; i18n keys (en, zh).
+Workdir: `apps/api`. No dependencies. `ruleTarget` refuses `ci` items; `RulingJobTarget.repo` from `findTarget` and
+`lockTarget`; `assertItemIndex` with `GitHubAppClient.listIssueComments`; `preflight` used by the controller, the route
+command and the assistant ruling tool before `create`; i18n keys (en, zh).
 
 ### US-015: Web hides Rule on CI items and explains unknown-item
 
@@ -365,7 +383,7 @@ label explains the missing item index (en, zh).
 **US-003**
 - `apps/api/src/permissions/catalog.ts` — `NEW_KEY_SCOPES`
 - `apps/api/src/vcs/vcs-route.commands.ts` — route command with redaction
-- `apps/api/src/vcs/vcs.controller.ts` — `routeGate.run` precedent
+- `apps/api/src/approvals/route/redact-secret.ts` — `redactSecret`
 - `apps/api/src/fleet/repos/fleet-repos.service.ts` — activity and audit precedent
 - `apps/api/src/fleet/activity/domain/fleet-activity.domain.ts` — `FleetEntityType`
 
@@ -436,7 +454,7 @@ label explains the missing item index (en, zh).
 - `apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts` — `findTarget`
 - `apps/api/src/fleet/rulings/fleet-rulings.controller.ts` — preflight call site
 - `apps/api/src/fleet/rulings/fleet-ruling-route.commands.ts` — route command call site
-- `apps/api/src/fleet/git-broker/github-app-client.ts` — `mintThreadReadToken`, `getPullRequest`
+- `apps/api/src/fleet/assistant/tools/pr-ruling-tools.ts` — assistant call site
 
 **US-015**
 - `apps/web/components/fleet/FleetJobOpenItems.vue` — Rule action and skip reason
@@ -517,6 +535,7 @@ None. A new service only.
 - `apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts` — its sync service fakes gain the provider-credential service stub; its assertions are unchanged.
 
 **US-007**
+- `apps/api/src/fleet/fleet-openapi.contract.spec.ts` — its expected `CredentialBoardDto` property list gains `kodaKeys` (sorted: `generatedAt`, `kodaKeys`, `profiles`, `providers`, `runners`, `warnDays`); its other assertions are unchanged.
 - `apps/api/src/fleet/dashboard/credential-board.spec.ts` — its expected board shape gains `kodaKeys` and a per-runner `providerVault` boolean; every existing cell expectation unchanged.
 - `openapi.json` — regenerated for the board DTO.
 - `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate`; never hand-edited.
@@ -525,14 +544,14 @@ None. A new service only.
 - `apps/runner/test/unit/daemon-thread-wiring.spec.ts` — its daemon wiring fakes gain the provider-key cache; its wiring assertions are unchanged.
 
 **US-009**
-- `apps/runner/test/unit/host-executor.spec.ts` — its credential fakes gain `serveProviderKeys` and `releaseProviderKeys`; the env assertions also expect `KODA_PROVIDER_CRED_SOCKET`.
-- `apps/runner/test/unit/config-job.spec.ts` — its credential fakes gain `serveProviderKeys` and `releaseProviderKeys`; the nax env also carries `KODA_PROVIDER_CRED_SOCKET`.
+- `apps/runner/test/unit/host-executor.spec.ts` — where a case injects a fake with `serveProviderKeys`, its env assertions also expect `KODA_PROVIDER_CRED_SOCKET`; fakes without the optional methods keep today's env.
+- `apps/runner/test/unit/config-job.spec.ts` — where a case injects a fake with `serveProviderKeys`, the nax env also carries `KODA_PROVIDER_CRED_SOCKET`; fakes without it keep today's env.
 
 **US-010**
 - `apps/runner/src/capabilities/nax-probe.spec.ts` — its expected capability object omits `providerVault` when no `vaultHelper` is injected; every other expected field unchanged.
 
 **US-011**
-- `apps/runner/test/unit/daemon-thread.spec.ts` — its broker fakes gain `serveProviderKeys`, `providerKeyGranted` and `releaseProviderKeys`; thread job assertions are unchanged.
+None. The provider-key methods are optional on `CredentialProvider`, so existing thread job fakes with only `acquire` and `release` keep working unchanged.
 
 **US-012**
 None. New page and composable; the board page gains a column without changing existing assertions.
@@ -542,7 +561,7 @@ None. New card; the settings page gains one card without changing existing asser
 
 **US-014**
 - `apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts` — its accepted-ruling fixtures use a non-`ci` item; the existing refusal order is unchanged.
-- `apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts` — its `findTarget` fakes gain the `repo` field.
+- `apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts` — its `findTarget` and `lockTarget` fakes gain the `repo` field.
 
 **US-015**
 - `apps/web/tests/components/FleetJobOpenItems.spec.ts` — any case expecting a Rule action on an open item of kind `ci` becomes: no Rule action for `ci`; Rule stays for every other kind.
@@ -655,7 +674,7 @@ None. New card; the settings page gains one card without changing existing asser
 - [integration] With the vault off, a provider request returns reason `vault_off`.
 - [integration] A provider request for a REPO thread job is granted the REPO key of the thread's `repoId`.
 - [integration] A provider request for a PROJECT thread job, where a REPO key exists for a repo of the project and a PROJECT key exists, is granted the PROJECT key.
-- [integration] A provider request for a WORKSPACE thread job, with only a GLOBAL key, is granted the GLOBAL key.
+- [integration] A provider request for a WORKSPACE thread job, with a PROJECT key on the thread's `projectId` and a GLOBAL key, is granted the PROJECT key.
 - [integration] The first grant for a job records one `credential.issued` activity row on that job with actor type `RUNNER` and payload `{ providerId, scope, name, fingerprint }`.
 - [integration] A second sync granting the same credential with the same fingerprint to the same job records no second `credential.issued` row.
 - [integration] A sync whose only content is a provider grant returns without waiting for the long-poll timeout.
@@ -697,9 +716,11 @@ None. New card; the settings page gains one card without changing existing asser
 - [unit] `runProviderCred` with a socket answering reason `none` writes the decline reply and returns 0.
 - [unit] `runProviderCred` with a socket answering reason `revoked` returns 1 with nothing written to stdout.
 - [unit] `runProviderCred` with a socket path nothing listens on returns 1 with nothing written to stdout.
-- [unit] `dispatchInternal(['provider-cred', '--socket', <path>, 'get'])` runs the provider helper and returns its exit code.
 - [unit] The host executor calls `serveProviderKeys` for a RUN job and the nax env carries `KODA_PROVIDER_CRED_SOCKET` equal to the returned path.
-- [unit] The host executor calls `releaseProviderKeys` for the job when the job ends.
+- [unit] The host executor's FIX step spawn (`spawnFixStep`) env carries `KODA_PROVIDER_CRED_SOCKET`.
+- [unit] The host executor calls `releaseProviderKeys` for the job in `cleanup()`.
+- [unit] The host executor calls `releaseProviderKeys` for the job in `releaseCredentials()` (the abandon path).
+- [unit] The host executor's `resumeCredentials` for a readopted job calls `serveProviderKeys` and gets the same path as before the restart.
 - [unit] The config job's nax env carries `KODA_PROVIDER_CRED_SOCKET` equal to the path `serveProviderKeys` returned.
 - [integration] `runProviderCred` against a real provider-key socket from `CredentialBroker.serveProviderKeys`, with the cache granting `k1`, writes the api-key reply with `key: 'k1'`.
 
@@ -723,8 +744,10 @@ None. New card; the settings page gains one card without changing existing asser
 - [unit] When the thread pins no model, `open` calls `granted` with the provider of the runner's default model.
 - [unit] `open` for an ACP thread never calls `granted`.
 - [unit] `open` with no `providerKeys` builds native backend options without `credentials`.
+- [unit] `open` for a native model id with no `/` builds native backend options without `credentials` and never calls `granted`.
 - [unit] `ThreadJobRun` for a PROJECT thread calls `serveProviderKeys` before opening the session.
-- [unit] `ThreadJobRun` calls `releaseProviderKeys` for the job when the job ends.
+- [unit] `ThreadJobRun` calls `releaseProviderKeys` for the job when `start()` returns.
+- [unit] `ThreadJobRun.abandon()` calls `releaseProviderKeys` for the job.
 - [integration] A REPO thread turn through `ThreadJobRun` with a real `CredentialBroker`, whose provider cache grants `openrouter`, opens the native session with exec `credentials` whose `--socket` is a socket that answers `provider openrouter` with the grant.
 
 ### US-012: Web admin provider keys page and board column
@@ -763,7 +786,8 @@ None. New card; the settings page gains one card without changing existing asser
 - [unit] `assertItemIndex` resolves when `listIssueComments` throws.
 - [unit] `assertItemIndex` resolves when `listIssueComments` returns 100 comments and none carries the marker.
 - [unit] `assertItemIndex` resolves without a forge read when the target repo has no GitHub installation id.
-- [unit] `findTarget` returns the job's repo `provider`, `owner`, `name` and `githubInstallationId` under `repo`.
+- [unit] `findTarget` and `lockTarget` both return the job's repo `provider`, `owner`, `name` and `githubInstallationId` under `repo`.
+- [unit] The assistant ruling tool refuses with `fleet.rulings.noItemIndex` when `preflight` throws it, and creates no ruling.
 - [unit] `GitHubAppClient.listIssueComments(token, 'o', 'n', 7)` requests `GET /repos/o/n/issues/7/comments?per_page=100` with the given token and returns each comment's `body`.
 - [unit] `GitHubAppClient.listIssueComments` throws a provider error on a non-200 response.
 - [unit] `GitHubAppClient.listIssueComments` aborts the request after 5 seconds.
