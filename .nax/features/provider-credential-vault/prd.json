@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T17:16:37.957Z",
+  "updatedAt": "2026-11-05T17:56:59.781Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1013,14 +1013,17 @@
         "394"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Token-authenticated forge preflight crosses API, approval replay and assistant writes while preserving transaction locks and fail-open behavior."
+        "reasoning": "Token-authenticated forge preflight crosses API, approval replay and assistant writes while preserving transaction locks and fail-open behavior.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
@@ -1058,7 +1061,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b6329e6d2718321a8b770778b9f6bd67cd7e1438"
     },
     {
       "id": "US-015",
