@@ -1,0 +1,1042 @@
+{
+  "project": "koda",
+  "feature": "provider-credential-vault",
+  "branchName": "feat/provider-credential-vault",
+  "createdAt": "2026-11-05T00:00:00.000Z",
+  "updatedAt": "2026-11-05T07:50:14.228Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Encrypted provider credential storage",
+      "description": "**Goal** — Add the encrypted provider vault persistence, configuration, secret-store interface and injectable module.\n\n**Motivation** — Today each runner needs every provider credential stored on the machine (`nax auth`).\n\n**Approach** — Model `ProviderCredential` (`id`, `scope` `GLOBAL|PROJECT|REPO` as a string, `scopeKey`, `projectId?`, `repoId?`, `providerId`, `name`, `encryptedKey`, `last4`, `fingerprint`, `createdById`, `updatedById`, `disabledAt?`, timestamps), `@@unique([scopeKey, providerId])`, `@@index([projectId])`, `@@index([repoId])`. Model `ProviderCredentialIssue` (`id`, `jobId`, `credentialId`, `fingerprint`, `createdAt`), `@@unique([jobId, credentialId, fingerprint])`. `providerId` matches `^[a-z0-9][a-z0-9._-]{0,47}$`; `name` 1-64 chars. A `SecretStore` interface (`seal(plaintext) -> { encryptedKey, last4, fingerprint }`, `open(encryptedKey) -> plaintext`) with one implementation, `LocalSecretStore`, over `encryptToken`/`decryptToken` and the config namespace `providerCredentials` (`PROVIDER_CREDENTIAL_ENCRYPTION_KEY`).\n\nUniqueness uses a computed `scopeKey` string (`global`, `project:<projectId>`, `repo:<repoId>`) with `@@unique([scopeKey, providerId])`, because Postgres treats NULL columns as distinct. Fingerprint = first 12 hex chars of HMAC-SHA256(master key, plaintext key); `last4` = last 4 chars of the key. Relations: `ProviderCredential.projectId` and `repoId` reference `Project` and `FleetRepo` with `onDelete: Cascade`; `createdById`/`updatedById` are plain strings (no FK), as on other fleet rows. New env `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` (64 hex chars), separate from `VCS_ENCRYPTION_KEY`. Unset = the vault is off: management writes refuse with 503 and hand-outs answer `vault_off`; the API still boots.\n\nImplement the repository behind PROVIDER_CREDENTIAL_REPOSITORY with transaction-aware PrismaService and generated Prisma imports; add schema inverse relations and a committed additive migration. Register the config namespace in application config loading. The module must compile without a master key and exports no repository token; subsequent service work belongs to US-002.\n\n**Scope** — In: models, migration, config namespace/env validation, SecretStore/LocalSecretStore, repository contract/implementation and ProviderCredentialsModule wiring. Out: service resolution/CRUD (US-002), management controllers/permissions (US-003–005), sync issuance (US-006). HashiCorp Vault, OpenBao and cloud KMS backends are not built; only the local encrypted `SecretStore` exists. Re-encrypting stored keys under a new master key (master key rotation) is not built.\n\n**Interface** — `encryptToken(plaintext: string, masterKey: string): string`; `decryptToken(ciphertext: string, masterKey: string): string`; `SecretStore` — `seal(plaintext) -> { encryptedKey, last4, fingerprint }`, `open(encryptedKey) -> plaintext`; repository injection token `PROVIDER_CREDENTIAL_REPOSITORY`. Use the existing AES-256-GCM iv:tag:ciphertext implementation rather than replacing it.",
+      "acceptanceCriteria": [
+        "[unit] LocalSecretStore.open(LocalSecretStore.seal('sk-test-abcdef123456').encryptedKey) returns 'sk-test-abcdef123456'.",
+        "[unit] LocalSecretStore.seal('sk-test-abcdef123456').last4 is '3456'.",
+        "[unit] LocalSecretStore.seal returns a fingerprint of exactly 12 lowercase hex characters.",
+        "[unit] Two LocalSecretStore.seal calls on the same key under the same master key return the same fingerprint.",
+        "[unit] Two LocalSecretStore.seal calls on the same key return different encryptedKey values.",
+        "[unit] LocalSecretStore.seal returns an encryptedKey in the iv:tag:ciphertext hex format of encryptToken.",
+        "[unit] Env validation accepts a missing PROVIDER_CREDENTIAL_ENCRYPTION_KEY.",
+        "[unit] Env validation refuses a PROVIDER_CREDENTIAL_ENCRYPTION_KEY that is not 64 hex characters.",
+        "[unit] The providerCredentials config namespace exposes encryptionKey from PROVIDER_CREDENTIAL_ENCRYPTION_KEY, and undefined when it is unset.",
+        "[integration] Inserting two ProviderCredential rows with the same scopeKey and providerId fails the second insert with Prisma error code P2002.",
+        "[integration] A GLOBAL row (scopeKey: 'global') and a PROJECT row (scopeKey: 'project:<id>') for the same providerId coexist.",
+        "[integration] Inserting two ProviderCredentialIssue rows with the same jobId, credentialId and fingerprint fails the second with P2002.",
+        "[unit] Compiling ProviderCredentialsModule with mocked PrismaService, TRANSACTION_MANAGER and config succeeds and the module exports no repository token.",
+        "[integration] When PROVIDER_CREDENTIAL_ENCRYPTION_KEY is unset, the API boots with the vault disabled.",
+        "[unit] Env validation still rejects an invalid VCS_ENCRYPTION_KEY when PROVIDER_CREDENTIAL_ENCRYPTION_KEY is absent, preserving the existing VCS key validation."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "prisma",
+        "encryption"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New encrypted-secret abstraction, transaction-aware persistence and migration; cryptography and credentials require strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/common/utils/encryption.util.ts",
+        "apps/api/src/config/vcs.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/vcs/prisma-vcs.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/config/provider-credentials.config.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential.domain.ts",
+        "apps/api/src/fleet/provider-credentials/secret-store.ts",
+        "apps/api/src/fleet/provider-credentials/prisma-provider-credential.repository.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.module.ts",
+        "apps/api/prisma/migrations/20261105000000_provider_credentials/migration.sql",
+        "apps/api/src/config/provider-credentials.config.spec.ts",
+        "apps/api/src/fleet/provider-credentials/secret-store.spec.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.module.spec.ts",
+        "apps/api/test/integration/provider-credential-storage.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Resolve and issue the most specific key",
+      "description": "**Goal** — Implement the vault service for active scoped resolution, safe decryption and shared create/update/remove domain operations.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — `ProviderCredentialsService.resolve({ projectId, repoId | null, providerId })` returns the active (`disabledAt` null) REPO key for `repoId`, else the PROJECT key, else the GLOBAL key, else null.\n\n`ProviderCredentialsService` with `isEnabled`, `resolve` (REPO, then PROJECT, then GLOBAL, active rows only), `issueKey` (decrypt for a hand-out) and `create`/`update`/`remove` domain methods used by the routes (key validation, sealing, `P2002` -> duplicate). A key is 16-8192 characters with no whitespace (16 keeps `last4` to at most a quarter of the key). `providerId` matches `^[a-z0-9][a-z0-9._-]{0,47}$`; `name` 1-64 chars.\n\nVault off means resolve returns null without querying storage and all domain writes refuse with 503 fleet.providerCredentials.vaultOff. A unique-constraint violation (Prisma `P2002`) maps to 409 `fleet.providerCredentials.duplicate`. Ciphertext cannot be decrypted: Hand-out answers `none` and logs a warning with the credential id only. Implement issueKey as nullable plaintext so sync can map a decryption failure to none; never log ciphertext, plaintext, or the crypto exception message. PATCH domain behavior supports independent name, key rotation and disabled boolean changes; name-only retains fingerprint. Extend ProviderCredentialsModule to provide/export the service, keeping its repository private.\n\n**Scope** — In: validation/sealing, active scope lookup, decryption boundary, vault-off guard, safe duplicate mapping and write primitives. Out: HTTP/approval/audit/activity adapters (US-003–005), issue attribution/runner transport (US-006). Spend caps or rate limits per provider key are not enforced; existing C1 job budgets are unchanged. An LLM proxy or gateway in front of providers (one koda key for all providers) is not built.\n\n**Interface** — `ProviderCredentialsService.resolve({ projectId, repoId | null, providerId })`; `isEnabled()`; `issueKey(credential)`; `create`/`update`/`remove`. `issueKey` returns plaintext or null; `resolve` returns the chosen credential or null. LocalSecretStore and PROVIDER_CREDENTIAL_REPOSITORY are supplied by US-001.",
+      "acceptanceCriteria": [
+        "[unit] With the providerCredentials encryptionKey unset, ProviderCredentialsService.isEnabled() returns false.",
+        "[unit] resolve({ projectId: 'p1', repoId: 'r1', providerId: 'openrouter' }) returns the REPO key when active REPO, PROJECT and GLOBAL keys exist for openrouter.",
+        "[unit] resolve with repoId: 'r1' returns the PROJECT key when the only REPO key for r1 is disabled.",
+        "[unit] resolve with repoId: null returns the GLOBAL key when no PROJECT key exists for p1.",
+        "[unit] resolve returns null when the only openrouter key is a PROJECT key of another project.",
+        "[unit] resolve returns null when the only openrouter key is a disabled GLOBAL key.",
+        "[unit] resolve returns null when the vault is off, and does not call the repository.",
+        "[unit] issueKey(credential) returns the decrypted plaintext of a credential sealed by LocalSecretStore.",
+        "[unit] issueKey returns null when decryption throws.",
+        "[unit] issueKey logs a warning containing the credential id and not the ciphertext when decryption throws.",
+        "[unit] create refuses a key shorter than 16 characters with a validation error naming key.",
+        "[unit] create refuses a key containing whitespace with a validation error naming key.",
+        "[unit] create maps a repository P2002 error to a conflict with code fleet.providerCredentials.duplicate.",
+        "[unit] create with the vault off throws a 503 error with code fleet.providerCredentials.vaultOff.",
+        "[unit] ProviderCredentialsModule resolves ProviderCredentialsService with mocked collaborators while keeping PROVIDER_CREDENTIAL_REPOSITORY unavailable to an importing module, preserving US-001's private repository boundary."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "scope-resolution"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One new service and its module registration reuse the upstream repository/SecretStore and VCS validation patterns; secret resolution and decryption still require the security TDD override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/provider-credentials/provider-credential.domain.ts",
+        "apps/api/src/fleet/provider-credentials/prisma-provider-credential.repository.ts",
+        "apps/api/src/fleet/provider-credentials/secret-store.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.module.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/provider-credentials/provider-credentials.service.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "create rejects a key longer than 8192 characters with a validation error naming key.",
+        "update with only name leaves encryptedKey, last4 and fingerprint unchanged.",
+        "update and remove throw 503 fleet.providerCredentials.vaultOff when the vault is disabled."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Create and list GLOBAL provider keys",
+      "description": "**Goal** — Expose permission-checked GLOBAL key creation and write-only metadata listing through approval-aware API routes.\n\n**Motivation** — Today each runner needs every provider credential stored on the machine (`nax auth`).\n\n**Approach** — Global routes `GET|POST /fleet/provider-credentials`, `PATCH|DELETE /fleet/provider-credentials/:id` (`fleet.credential.read|create|update|delete`). Every response row is `{ id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt }`, never the key. Writes run through route commands (approval-gated, `redeem.redact` with `redactSecret`), record `FleetActivity` (`credential.created|rotated|updated|disabled|enabled|deleted`, entityType `provider_credential`, entityId the credential id) and an audit entry (`AuditRecorder.record` with the route key). A unique-constraint violation (Prisma `P2002`) maps to 409 `fleet.providerCredentials.duplicate`.\n\nThis story implements GET and POST only; US-004 adds PATCH/DELETE. Add catalog keys fleet.credential.create|update|delete in NEW_KEY_SCOPES (global), retaining existing fleet.credential.read. Owner/Admin manage GLOBAL keys. The prefix fleet.credential. is already high risk. Update catalog mirrors/count and role matrix so only Owner/Admin inherit global writes. `FleetEntityType` adds `'provider_credential'` without changing other members; update the schema comment.\n\nWrites follow the `vcs.connection.create` precedent exactly: route commands whose `redeem.redact` replaces the key with `redactSecret(key)`, so no approval request row carries the key. Use @ApprovalGated({ redeem: true }), @ApprovalRedeemHeader() and routeGate.run with projectId null. Redemption seals the key resubmitted in the redeem body. Activity/audit share the mutation transaction. `FleetActivityService.record(entry)` rejects payload keys matching `/token|secret|key|password|credential/i`, so payloads use `providerId`, `scope`, `name`, `fingerprint` only. Add en/zh API providerCredentials translations and route/module registration. Regenerate OpenAPI and generated CLI via bun run generate, never by hand; extend existing endpoint e2e create/list happy and error cases.\n\n**Scope** — In: GLOBAL GET/POST, DTOs, new write permissions, create route command/redaction, created activity/audit and translations. Out: PATCH/DELETE execution (US-004), project routes (US-005), sync hand-outs (US-006), provider-key CLI or MCP tools.\n\n**Interface** — `GET|POST /fleet/provider-credentials`; POST body `{ providerId, name, key }`; response `{ id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt }`; `routeCommand({ key, variant, parse, redeem: { redact }, run })`; `AuditRecorder.record({ key, resourceType, resourceId, projectId?, summary })`.",
+      "acceptanceCriteria": [
+        "[integration] POST /fleet/provider-credentials by a global Admin with { providerId: 'openrouter', name: 'fleet', key: 'sk-or-abcdef123456' } returns 201 with scope: 'GLOBAL' and last4: '3456'.",
+        "[integration] The POST /fleet/provider-credentials response body has neither a key nor an encryptedKey field.",
+        "[integration] GET /fleet/provider-credentials returns the created row with name, last4, fingerprint and disabled: false, and no key field.",
+        "[integration] POST /fleet/provider-credentials by a user without fleet.credential.create returns 403.",
+        "[integration] POST /fleet/provider-credentials with providerId: 'Bad Id' returns 400 naming providerId.",
+        "[integration] A second POST /fleet/provider-credentials for the same providerId returns 409 with code fleet.providerCredentials.duplicate.",
+        "[integration] With the vault off, POST /fleet/provider-credentials returns 503 with code fleet.providerCredentials.vaultOff.",
+        "[integration] POST /fleet/provider-credentials records one credential.created activity row with entityType provider_credential whose payload keys are exactly providerId, scope, name and fingerprint.",
+        "[integration] POST /fleet/provider-credentials records one audit entry with key fleet.credential.create and the credential id as resource id.",
+        "[integration] POST /fleet/provider-credentials by an agent principal holding fleet.credential.create returns an approval request and creates no ProviderCredential row.",
+        "[integration] The approval request created for that agent POST stores a body whose key is the redactSecret value, not sk-or-abcdef123456.",
+        "[integration] Redeeming that approved request with a body carrying key sk-or-zyxwvu987654 creates a row whose last4 is '7654'.",
+        "[unit] PERMISSION_CATALOG gives fleet.credential.create scope global and risk high.",
+        "[unit] The en and zh API i18n files both carry fleet.providerCredentials.duplicate and fleet.providerCredentials.vaultOff.",
+        "[unit] FleetActivityService.record persists the existing entityType values runner, enrollment, repo, job, budget, schedule, approval, ingest and analytics unchanged for secret-free payloads, preserving every pre-existing FleetEntityType member."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "permissions",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Global secret writes cross authorization, redacted approval redemption, transactional audit/activity and HTTP contracts."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/vcs/vcs-route.commands.ts",
+        "apps/api/src/approvals/route/redact-secret.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/activity/domain/fleet-activity.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/provider-credentials/fleet-provider-credentials.controller.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/fleet/provider-credentials/dto/provider-credential.dto.ts",
+        "apps/api/src/i18n/en/providerCredentials.json",
+        "apps/api/src/i18n/zh/providerCredentials.json",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.spec.ts",
+        "apps/api/test/integration/fleet-provider-credentials-create.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its mirrored `NEW_KEY_SCOPES` gains `fleet.credential.create`, `fleet.credential.update` and `fleet.credential.delete` with scope `global`; the catalog length assertion counts them."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "the role matrix gains `fleet.credential.create|update|delete`, held by Owner and Admin through `*` and by no other role."
+        },
+        {
+          "path": "apps/api/src/fleet/activity/domain/fleet-activity.domain.ts",
+          "reason": "`FleetEntityType` gains `'provider_credential'`; every other member unchanged."
+        },
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "the `FleetActivity.entityType` comment lists `provider_credential`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the new routes."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "regenerated by `bun run generate` after the API spec export; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate` after the API spec export; never hand-edited."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains GLOBAL create and list (one happy path and one error case each)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Rotate, disable and delete GLOBAL provider keys",
+      "description": "**Goal** — Add approved GLOBAL key rotation, metadata edits, disable/enable and deletion without returning saved secrets.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — PATCH takes any of `name`, `key` (rotate), `disabled` (boolean). Every response row is `{ id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt }`, never the key. Writes run through route commands (approval-gated, `redeem.redact` with `redactSecret`), record `FleetActivity` (`credential.created|rotated|updated|disabled|enabled|deleted`, entityType `provider_credential`, entityId the credential id) and an audit entry (`AuditRecorder.record` with the route key).\n\nPATCH and DELETE on `/fleet/provider-credentials/:id`; route commands for update (key redacted) and delete; activity and audit. Credential id of another scope on a project or global route: 404. Scope/provider identity is not reassigned through PATCH. Rotation changes fingerprint/last4/encryptedKey; name-only keeps fingerprint; disabled changes disabledAt and response disabled. Emit credential.rotated, credential.updated, credential.disabled, credential.enabled and credential.deleted as applicable, with exactly providerId, scope, name, fingerprint payload fields and no secret-bearing audit text. Use the US-002 service primitives, keep all writes guarded by vault enabled, and keep the mutation/activity/audit atomic. Update command redaction only when a new key was supplied; approval storage never holds the plaintext. Regenerate OpenAPI/CLI via bun run generate and extend existing endpoint e2e rotate/disable/delete happy and error cases.\n\nRevocation latency: after a key is disabled or deleted, a running nax keeps its current lease until `expiresAt` (nax-agent serves the last good lease when the helper fails), so a running job is cut off at most 10 minutes later. Do not introduce immediate process interruption here.\n\n**Scope** — In: GLOBAL PATCH/DELETE, update/delete route commands, metadata projections and transactional activity/audit. Out: project/repo lifecycle (US-005), sync denial/renewal (US-006/008), runner helper revocation behavior (US-009).\n\n**Interface** — `PATCH|DELETE /fleet/provider-credentials/:id`; PATCH `{ name?, key?, disabled? }`; route keys `fleet.credential.update` and `fleet.credential.delete`; management response projection remains unchanged from US-003.",
+      "acceptanceCriteria": [
+        "[integration] PATCH /fleet/provider-credentials/:id with a new key returns 200 with a fingerprint different from the old one.",
+        "[integration] The rotate PATCH records one credential.rotated activity row whose payload keys are exactly providerId, scope, name and fingerprint.",
+        "[integration] The rotate PATCH records one audit entry with key fleet.credential.update.",
+        "[integration] PATCH /fleet/provider-credentials/:id with { disabled: true } returns 200 with disabled: true.",
+        "[integration] PATCH /fleet/provider-credentials/:id with { disabled: true } records credential.disabled.",
+        "[integration] PATCH /fleet/provider-credentials/:id with { disabled: false } on a disabled key returns 200 with disabled: false.",
+        "[integration] PATCH /fleet/provider-credentials/:id with { name: 'renamed' } returns 200 with name: 'renamed' and the same fingerprint.",
+        "[integration] After DELETE /fleet/provider-credentials/:id, GET /fleet/provider-credentials no longer lists the row.",
+        "[integration] DELETE /fleet/provider-credentials/:id records credential.deleted.",
+        "[integration] PATCH /fleet/provider-credentials/:id with the id of a PROJECT credential returns 404.",
+        "[integration] DELETE /fleet/provider-credentials/:id with the id of a REPO credential returns 404.",
+        "[integration] An agent rotate PATCH stores an approval request whose body key is the redactSecret value.",
+        "[integration] PATCH /fleet/provider-credentials/:id by a user without fleet.credential.update returns 403.",
+        "[integration] A successful rotate PATCH response contains neither key nor encryptedKey, preserving the existing write-only credential response contract."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "approvals",
+        "rotation"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "PATCH/DELETE extend the established controller, command and service from US-003 with standard VCS variants; secret rotation and redacted approval handling mandate isolated security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/provider-credentials/fleet-provider-credentials.controller.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.service.ts",
+        "apps/api/src/vcs/vcs-route.commands.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet-provider-credentials-update.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "PATCH with disabled: false on a disabled GLOBAL key records credential.enabled.",
+        "PATCH with only a changed name records credential.updated without changing fingerprint.",
+        "DELETE by a principal lacking fleet.credential.delete returns 403 and leaves the credential in place."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for PATCH and DELETE."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains GLOBAL rotate, disable and delete (one happy path and one error case each)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Manage PROJECT and REPO provider keys",
+      "description": "**Goal** — Let project admins manage PROJECT defaults and per-REPO overrides through tenant-isolated approval-aware routes.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — Project routes `GET|POST /projects/:slug/provider-credentials`, `PATCH|DELETE /projects/:slug/provider-credentials/:id` (`project.credential.read|create|update|delete`); a POST with `repoId` creates a REPO key for a repo of that project; the project routes see only that project's PROJECT and REPO rows (any other id is 404). PATCH takes any of `name`, `key` (rotate), `disabled` (boolean). Every response row is `{ id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt }`, never the key. Writes run through route commands (approval-gated, `redeem.redact` with `redactSecret`), record `FleetActivity` (`credential.created|rotated|updated|disabled|enabled|deleted`, entityType `provider_credential`, entityId the credential id) and an audit entry (`AuditRecorder.record` with the route key). A unique-constraint violation (Prisma `P2002`) maps to 409 `fleet.providerCredentials.duplicate`.\n\nPermission keys: `fleet.credential.create|update|delete` (global; the prefix is already high risk) and `project.credential.read|create|update|delete` (project; `project.credential.` joins `HIGH_RISK_PREFIXES`). Scope writes here use only project keys; US-003 owns global keys. Add the project catalog keys/mirrors and role snapshot: Project Admin all four, other project roles read through *.read and no write. read risk is low; writes high. ProjectMembershipGuard and RequiresGuard remain the authorization boundary. REPO key for a repo of another project: 404 `fleet.repos`. Credential id of another scope on a project or global route: 404. Do not leak whether another project's credential exists.\n\nExtend shared commands with pinned project scope, @ApprovalGated({ redeem: true }) and redemption header; redact incoming key for agent approvals, use resubmitted key on redemption. Record projectId on activity/audit, using the same non-secret payload as GLOBAL writes. Regenerate OpenAPI and CLI client via bun run generate and extend existing endpoint e2e coverage for PROJECT/REPO lifecycle with happy/error per route.\n\n**Scope** — In: project GET/POST/PATCH/DELETE, PROJECT/REPO creation, membership checks, catalog/role integration, scoped commands and activity/audit. Out: GLOBAL management (US-003/004), scope-precedence transport (US-006), project settings UI (US-013).\n\n**Interface** — `GET|POST /projects/:slug/provider-credentials`; `PATCH|DELETE /projects/:slug/provider-credentials/:id`; POST `{ providerId, name, key, repoId? }`; PATCH `{ name?, key?, disabled? }`; response is the shared secret-free ProviderCredentialDto.",
+      "acceptanceCriteria": [
+        "[integration] POST /projects/:slug/provider-credentials by a Project Admin without repoId returns 201 with scope: 'PROJECT' and that project's id.",
+        "[integration] POST /projects/:slug/provider-credentials with the repoId of a repo in the project returns 201 with scope: 'REPO' and that repoId.",
+        "[integration] POST /projects/:slug/provider-credentials with the repoId of a repo in another project returns 404 with code fleet.repos.",
+        "[integration] POST /projects/:slug/provider-credentials by a Developer returns 403.",
+        "[integration] GET /projects/:slug/provider-credentials by a Developer returns 200 with rows that have no key field.",
+        "[integration] GET /projects/:slug/provider-credentials lists the project's PROJECT and REPO rows and no GLOBAL row.",
+        "[integration] PATCH /projects/:slug/provider-credentials/:id for a credential of another project returns 404.",
+        "[integration] PATCH /projects/:slug/provider-credentials/:id with the id of a GLOBAL credential returns 404.",
+        "[integration] DELETE /projects/:slug/provider-credentials/:id for a credential of another project returns 404 and leaves it in place.",
+        "[integration] PATCH /projects/:slug/provider-credentials/:id with a new key returns 200 with a new fingerprint and records credential.rotated.",
+        "[integration] DELETE /projects/:slug/provider-credentials/:id returns 200 and records credential.deleted with the project's projectId.",
+        "[integration] An agent POST /projects/:slug/provider-credentials stores an approval request whose body key is the redactSecret value.",
+        "[unit] PERMISSION_CATALOG gives project.credential.create risk high and scope project.",
+        "[unit] PERMISSION_CATALOG gives project.credential.read risk low and scope project.",
+        "[integration] After creating a PROJECT or REPO key, GET /fleet/provider-credentials still lists only GLOBAL rows, preserving the pre-existing global-route scope boundary."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "permissions",
+        "multi-tenant"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Project/repo access control and secret approval redemption add tenant-isolation risks to a shared CRUD boundary."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/vcs/vcs.controller.ts",
+        "apps/api/src/fleet/provider-credentials/fleet-provider-credentials.controller.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/provider-credentials/project-provider-credentials.controller.ts",
+        "apps/api/test/integration/project-provider-credentials.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A second POST for the same provider at the same project/repo scope returns 409 fleet.providerCredentials.duplicate.",
+        "Project PATCH with disabled: false on a disabled credential returns disabled: false and records credential.enabled.",
+        "Project DELETE with a GLOBAL credential id returns 404 and leaves the GLOBAL row unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its mirrored `NEW_KEY_SCOPES` gains `project.credential.read|create|update|delete` with scope `project`, and its mirrored `HIGH_RISK_PREFIXES` gains `project.credential.`; the length assertion counts the new keys."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "gains `project.credential.read|create|update|delete`: Project Admin holds all four through `*`; every other project role holds `project.credential.read` through `*.read` and no write key."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the project routes."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains the PROJECT and REPO lifecycle (one happy path and one error case per route)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Hand provider keys to runners through sync",
+      "description": "**Goal** — Extend the optional sync protocol to grant scoped provider leases with fencing and deduplicated job attribution.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — `SyncService` handles `providerRequests` like `tokenRequests`: fence (a stale epoch abandons, as for tokens), job state in `RUNNER_HELD_STATES` (else `job_not_active`), vault off (`vault_off`), scope (thread job: `findThreadCredentialScope`; fleet job: the job's `projectId`/`repoId`), resolve (null or undecryptable = `none`), else a grant with `account = koda:<scope lowercase>:<name>` and `expiresAt = now + 10 min`. In the same transaction it inserts `ProviderCredentialIssue` with skip-on-duplicate and, when a row was inserted, records `credential.issued` (actor `RUNNER`/runnerId, entityType `provider_credential`, entityId the credential id, `jobId`, `projectId`, payload `{ providerId, scope, name, fingerprint }`). A response with any provider grant or error skips the long-poll wait.\n\nHand-out lease `expiresAt = now + 10 min`. Attribution dedupe uses a `ProviderCredentialIssue` row unique on (job, credential, fingerprint); a new row records one `credential.issued` activity. Thread jobs resolve from the thread's own `projectId` and `repoId` (`repoId` null for PROJECT and WORKSPACE threads; a WORKSPACE thread's anchor `projectId` is non-null, so its PROJECT key applies); fleet jobs from `FleetJob.projectId` and `FleetJob.repoId`. Leave findThreadTokenScope unchanged. Here abandonment means FenceService queues ABANDON for the requesting runner/job/epoch with reason stale_lease; it is not a transition of FleetJob.state.\n\nAdd wire types to packages/fleet-protocol/src/index.ts and API type-only protocol bridge; make all new envelope fields optional for old peers. Parse a maximum 64 provider requests, validating jobId, epoch and provider regex. Lock each job before FenceService.holds and abandonment; never disclose a key before ownership/state checks. Issue row and activity commit together with duplicate-safe insertion, no forge HTTP or long-poll inside that transaction. Add the provider module to SyncModule and service stubs to existing token-fence/token-purpose tests, preserving their assertions. This story depends only on US-002: coordinate the additive provider_credential type with US-003 without changing the binding DAG or importing management routes into the sync boundary.\n\n**Scope** — In: wire types, parser, new thread credential scope query/interface, fenced sync grants/errors and issuance attribution. Out: management routes (US-003–005), runner cache/socket (US-008), helper implementation (US-009), key usage billing.\n\n**Interface** — `SyncRequest.providerRequests?: ProviderKeyRequest[]` with `ProviderKeyRequest { jobId: string; leaseEpoch: number; providerId: string }`; `SyncResponse.providerKeys?: ProviderKeyGrant[]` with `ProviderKeyGrant { jobId; providerId; key; expiresAt: string (ISO); account: string; fingerprint: string }`; `SyncResponse.providerKeyErrors?: ProviderKeyError[]` with `ProviderKeyError { jobId; providerId; reason: 'none' | 'job_not_active' | 'vault_off' }`. New repository sibling `findThreadCredentialScope(jobId): Promise<{ projectId: string; repoId: string | null } | null>`. `FenceService.holds(job, runnerId, leaseEpoch)` remains authoritative.",
+      "acceptanceCriteria": [
+        "[integration] POST /fleet/runner/sync with providerRequests: [{ jobId, leaseEpoch, providerId: 'openrouter' }] for the runner's RUNNING job, with an active GLOBAL openrouter key named fleet, returns one providerKeys entry with that jobId, providerId and the plaintext key.",
+        "[integration] That grant carries account: 'koda:global:fleet' and the credential's fingerprint.",
+        "[integration] That grant's expiresAt is 10 minutes after the sync time.",
+        "[integration] The same sync with no resolvable key, or whose resolved ciphertext cannot be decrypted, returns providerKeyErrors: [{ jobId, providerId: 'openrouter', reason: 'none' }].",
+        "[integration] A provider request for a job not in a runner-held state returns reason job_not_active.",
+        "[integration] A provider request with a stale leaseEpoch returns no grant.",
+        "[integration] A provider request with a stale leaseEpoch queues an ABANDON command for the requesting runner/job/epoch with reason stale_lease, as a stale git token request does; it does not transition the server's FleetJob.state.",
+        "[integration] With the vault off, a provider request returns reason vault_off.",
+        "[integration] A provider request for a REPO thread job is granted the REPO key of the thread's repoId.",
+        "[integration] A provider request for a PROJECT thread job, where a REPO key exists for a repo of the project and a PROJECT key exists, is granted the PROJECT key.",
+        "[integration] A provider request for a WORKSPACE thread job, with a PROJECT key on the thread's projectId and a GLOBAL key, is granted the PROJECT key.",
+        "[integration] The first grant for a job records one credential.issued activity row on that job with actor type RUNNER and payload { providerId, scope, name, fingerprint }.",
+        "[integration] A second sync granting the same credential with the same fingerprint to the same job records no second credential.issued row.",
+        "[integration] A sync whose only content is a provider grant returns without waiting for the long-poll timeout.",
+        "[unit] parseSyncRequest refuses a providerRequests array longer than 64 entries."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "protocol",
+        "sync",
+        "attribution"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The new grant path mirrors existing grantTokens/FenceService but spans protocol, parsing, thread scope and transactional attribution; credential disclosure requires isolated security TDD."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/sync-request.parser.ts",
+        "apps/api/src/fleet/sync/fence.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/sync/sync-provider-credentials.spec.ts",
+        "apps/api/test/integration/provider-credential-sync.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A sync whose only output is a providerKeyErrors entry returns without waiting for the long-poll timeout.",
+        "A grant after rotation records one new credential.issued activity for the new fingerprint on the same job.",
+        "parseSyncRequest refuses a provider request with providerId 'Bad Id'.",
+        "A provider request from a different runner receives no plaintext grant."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/sync-token-fence.spec.ts",
+          "reason": "its sync service fakes gain the provider-credential service and `findThreadCredentialScope` stubs; its token-fence assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.token-purpose.spec.ts",
+          "reason": "its sync service fakes gain the provider-credential service stub; its assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Credential board shows koda keys and runner vault state",
+      "description": "**Goal** — Extend the admin credential board contract with active GLOBAL vault metadata and each runner's helper readiness.\n\n**Motivation** — Today each runner needs every provider credential stored on the machine (`nax auth`).\n\n**Approach** — Credential board gains `kodaKeys: { providerId, name, last4, updatedAt }[]` (active GLOBAL keys) and a per-runner `providerVault` boolean; the admin page shows a koda column and a \"vault off\" marker. The UI rendering belongs to US-012; this story supplies the API projection.\n\n`RunnerCapabilities` also gains `providerVault?: true`. `providerVault` parsed in `parseCapabilitiesCore`; `buildCredentialBoard` and `CredentialBoardDto` gain `kodaKeys` and per-runner `providerVault`; openapi regen. Accept only literal true in untrusted capabilities; omission maps to board false. Obtain safe active GLOBAL projections through ProviderCredentialsService, without exporting its repository. Include providers represented only by koda keys in the board's provider inventory so the new column can render those rows. Vault disabled gives kodaKeys: []; exclude PROJECT, REPO and disabled rows. Keep all existing credential cell/profile/misfit calculations unchanged and do not change placement.\n\nWire DashboardModule to the provider service module. Update board unit/service expectations and the CredentialBoardDto contract property pin to sorted generatedAt, kodaKeys, profiles, providers, runners, warnDays. This story depends only on US-002, so add its independent providerVault protocol type without assuming US-006 ran. Export OpenAPI and regenerate CLI types via bun run generate; never hand-edit generated files.\n\n**Scope** — In: capability parsing, board derivation/service/DTO/module, metadata-only GLOBAL list and contract regeneration. Out: helper probing (US-010), admin rendering/management (US-012), project metadata UI (US-013). Placement does not prefer or require runners with `providerVault`; a job on a runner without the helper uses that machine's own credentials.\n\n**Interface** — `RunnerCapabilities.providerVault?: true`; board `kodaKeys: { providerId, name, last4, updatedAt }[]`; each board runner has `providerVault: boolean`. Existing GET `/fleet/credential-board` remains the route and retains its authorization.",
+      "acceptanceCriteria": [
+        "[unit] parseCapabilitiesCore with providerVault: true returns capabilities with providerVault: true.",
+        "[unit] parseCapabilitiesCore with providerVault: 'yes' returns capabilities without providerVault.",
+        "[unit] buildCredentialBoard gives a runner whose capabilities carry providerVault: true the board flag providerVault: true.",
+        "[unit] buildCredentialBoard gives a runner without providerVault the board flag providerVault: false.",
+        "[integration] GET /fleet/credential-board lists each active GLOBAL key under kodaKeys as { providerId, name, last4, updatedAt } with no key field.",
+        "[integration] GET /fleet/credential-board omits disabled GLOBAL keys from kodaKeys.",
+        "[integration] GET /fleet/credential-board omits PROJECT and REPO keys from kodaKeys.",
+        "[integration] GET /fleet/credential-board with the vault off returns kodaKeys: [].",
+        "[unit] buildCredentialBoard still maps an available OAuth credential expiring in two days to { state: 'expiring', kind: 'oauth', expires } when warnDays is 7, preserving the existing runner credential cell expectation.",
+        "[unit] buildCredentialBoard still returns misfit: 'sandbox' for a sandbox-required profile on a runner whose sandbox is unavailable, preserving the existing profile/placement derivation."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "dashboard",
+        "capabilities"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential metadata visibility and untrusted capability parsing span protocol, service, derivation and protected HTTP DTOs."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/common/capabilities-core.ts",
+        "apps/api/src/fleet/dashboard/credential-board.ts",
+        "apps/api/src/fleet/dashboard/credential-board.service.ts",
+        "apps/api/src/fleet/dashboard/dto/credential-board.dto.ts",
+        "packages/fleet-protocol/src/index.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/provider-credential-board.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "buildCredentialBoard includes a provider row for an active GLOBAL key even when no runner reports that provider.",
+        "GET /fleet/credential-board never includes encryptedKey or fingerprint in a kodaKeys entry."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "its expected `CredentialBoardDto` property list gains `kodaKeys` (sorted: `generatedAt`, `kodaKeys`, `profiles`, `providers`, `runners`, `warnDays`); its other assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/credential-board.spec.ts",
+          "reason": "its expected board shape gains `kodaKeys` and a per-runner `providerVault` boolean; every existing cell expectation unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the board DTO."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "regenerated by `bun run generate`; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Runner provider-key sockets and cache",
+      "description": "**Goal** — Add in-memory provider leases, per-job provider-key sockets and real sync-loop transport without changing git credential sockets.\n\n**Motivation** — Today each runner needs every provider credential stored on the machine (`nax auth`).\n\n**Approach** — `CredentialBroker.serveProviderKeys(job)` opens one provider-key socket per job and epoch. Its reply for `provider <id>` queues a `ProviderKeyRequest` in a `ProviderKeyCache` (in memory, mirroring `TokenCache`), wakes the sync loop, waits up to 55 s for the grant, serves a cached grant until 60 s before `expiresAt` (ISO converted to epoch ms), and remembers which providers it served the job: once served, a later `none` becomes `revoked`. `releaseProviderKeys(job)` closes it and forgets the job.\n\nEach job gets its own provider-key socket, separate from the git credential socket, open for the whole job (git credentials are released after checkout; provider keys are needed for every model call). `BrokerDeps` gains an optional provider-key cache; provider-key sockets live in their own map, never in `servers` (so `release`'s sibling check for `<jobDir>/bin` ignores them). `serveProviderKeys(job: JobRow): Promise<string>` opens, once per job and epoch, at `socketPathFor(dir, runnerId, jobId, leaseEpoch, 'provider-keys')` and returns its path, whatever the clone URL. `providerKeyGranted(job, providerId): Promise<boolean>` uses the same lookup the socket uses, true on a grant. `releaseProviderKeys(job)` closes the socket, drops the job's cached grants and served set. `closeAll` also closes provider-key sockets.\n\nKeep CredentialServer.listen/get behavior unchanged; add listenProviderKeys using private socket permissions and existing atomic socket replacement/inode-safe close. A socket accepts only `provider <providerId>\\n`, with `^[a-z0-9][a-z0-9._-]{0,47}$`. Pending expiry is error, never an invented grant. Initial none (including an initially disabled vault) can decline via the helper; after a grant, none becomes revoked so no identity switch occurs. State and waiters are keyed by job/epoch/provider and never journaled/logged/persisted. Bind grants to the originating request epoch because responses do not carry leaseEpoch. Keep other epochs untouched on release.\n\nSyncLoop gains optional providerRequests/onProviderKeys deps and is non-idle while provider requests are queued; newly queued requests wake it as token needs do. Wire cache apply using the originating sync request snapshot, the broker and onNeed listener in daemon.ts, including listener teardown. Integrate with sync/batch.ts request budgeting and the 64-request bound rather than bypassing the 1 MiB envelope budget. Keep existing daemon-thread wiring assertions unchanged when extending fakes. Put 55 s and 60 s timing constants in daemon/tuning.ts with test clock overrides.\n\n**Scope** — In: provider server protocol, cache, optional broker methods, sync/batch/daemon transport and shutdown. Out: nax exec helper and executor env (US-009), config commands/probe (US-010), thread session source (US-011). Secrecy from the agent is not claimed: the agent's Bash runs as the runner uid and can reach the job's provider-key socket. Value redaction of runner-shipped job logs, thread logs, bundles and diagnostics for served provider keys is not done; the key is never in the job env or on disk, and nax-agent's own redaction is unchanged.\n\n**Interface** — `CredentialServer.listenProviderKeys(path, providerReply: (providerId: string) => Promise<ProviderReply>)`; `ProviderReply = { ok: true; key: string; expiresAt: number; account: string } | { ok: false; reason: 'none' | 'revoked' | 'error' | 'bad request' }`. `CredentialProvider` gains OPTIONAL `serveProviderKeys?`, `providerKeyGranted?` and `releaseProviderKeys?`; callers skip them when absent. `SyncLoop` optional deps: `providerRequests?(): readonly ProviderKeyRequest[]` and `onProviderKeys?(grants, errors)`; provider cache application must retain the matching originating request epochs internally.",
+      "acceptanceCriteria": [
+        "[unit] A socket from CredentialServer.listenProviderKeys answers the line 'provider openrouter' with the provider reply's JSON on one line.",
+        "[unit] A provider-key socket answers 'provider Bad!' with { ok: false, reason: 'bad request' } and does not call the provider reply.",
+        "[unit] A provider-key socket answers 'get' with { ok: false, reason: 'bad request' }.",
+        "[unit] serveProviderKeys(job) for a job whose clone URL is git@github.com:o/n.git returns a socket path that exists.",
+        "[unit] Two serveProviderKeys calls for the same job and epoch return the same path and open one socket.",
+        "[unit] A 'provider openrouter' request on the job's socket queues a ProviderKeyRequest with the job's jobId, leaseEpoch and openrouter.",
+        "[unit] That request resolves { ok: true, key, expiresAt, account }, with expiresAt in epoch milliseconds, once ProviderKeyCache.apply receives the matching grant.",
+        "[unit] A second request for the same provider within the lease, while more than 60 s remain before the cached grant's expiresAt, is served from the cache without queuing a new request.",
+        "[unit] A request within 60 s of the cached grant's expiresAt queues a new request.",
+        "[unit] A request resolves { ok: false, reason: 'none' } when the sync answers none for a provider never served to the job.",
+        "[unit] A request resolves { ok: false, reason: 'revoked' } when the sync answers none for a provider served to the job before.",
+        "[unit] A request resolves { ok: false, reason: 'error' } when no answer arrives within 55 s.",
+        "[unit] releaseProviderKeys(job) removes the socket file and drops the job's cached grants.",
+        "[integration] The real SyncLoop with the broker's provider cache sends queued requests in providerRequests, is not idle while they are queued, and applies providerKeys from a stubbed server response so a waiting socket request resolves ok.",
+        "[unit] CredentialServer.listen still answers get with the git CredentialReply JSON and still rejects 'provider openrouter' with { ok: false, reason: 'bad request' }, preserving the git-only socket protocol."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "runner",
+        "security",
+        "sockets",
+        "sync",
+        "leases"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "TokenCache, CredentialServer and SyncLoop provide concrete precedents, but provider leases add concurrent epoch-aware state, a separate socket lifecycle and transport wiring; credentials require isolated security TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/credentials/cred-server.ts",
+        "apps/runner/src/credentials/broker.ts",
+        "apps/runner/src/credentials/token-cache.ts",
+        "apps/runner/src/sync/sync-loop.ts",
+        "apps/runner/src/daemon/daemon.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/credentials/provider-key-cache.ts",
+        "apps/runner/src/credentials/provider-key-cache.spec.ts",
+        "apps/runner/src/credentials/provider-key-broker.spec.ts",
+        "apps/runner/src/credentials/provider-key-server.spec.ts",
+        "apps/runner/test/unit/provider-key-sync.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A provider grant received for an older originating sync request cannot satisfy a higher epoch's waiting socket request.",
+        "releaseProviderKeys for one epoch leaves another epoch's socket and cache live.",
+        "closeAll closes every provider socket without removing a replacement socket owned by a restarted daemon.",
+        "A job's git release leaves its provider-key socket usable until releaseProviderKeys is called.",
+        "An initial vault_off response resolves the waiting provider socket with reason none.",
+        "A newly queued provider request aborts an idle poll but does not abort a sync carrying pending job events."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/daemon-thread-wiring.spec.ts",
+          "reason": "its daemon wiring fakes gain the provider-key cache; its wiring assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "nax exec helper and fleet job environment",
+      "description": "**Goal** — Implement nax's provider-cred exec contract and connect provider sockets to all fleet executor paths and readoption.\n\n**Motivation** — The nax side is ready: nax-agent 0.91.7 (koda's pin) ships the exec helper contract and a per-session credential source.\n\n**Approach** — The host executor calls `serveProviderKeys(job)` and puts `KODA_PROVIDER_CRED_SOCKET=<path>` in the nax env at both spawn sites (`spawn`, which covers RUN, PLAN and REVIEW, and `spawnFixStep`), re-serves it in `resumeCredentials` (a readopted nax keeps its deterministic socket path), and calls `releaseProviderKeys(job)` in both `cleanup()` and `releaseCredentials()`. The config job serves before it builds `naxEnv` and releases in its own cleanup. The helper `koda-runner provider-cred [--socket <path>] get` reads the nax request from stdin; the socket is `--socket` when given, else `KODA_PROVIDER_CRED_SOCKET`; it maps: neither given -> decline; `none` -> decline; ok -> the api-key reply; `revoked`, `error`, `bad request`, socket failure -> exit 1 with one stderr line and nothing on stdout.\n\nThe helper contract: argv `[...command, \"get\"]`; stdin `{\"version\":1,\"providerId\":\"<id>\"}`; reply `{\"version\":1,\"kind\":\"api-key\",\"key\":\"...\",\"expiresAt\":<epoch ms>,\"account\":\"...\"}` or `{\"version\":1,\"decline\":true}`; non-zero exit = failure. A failure while a lease is held serves the last good lease until its `expiresAt`. A decline for a provider that already holds a lease is invalid. `key` <= 8192 chars; `account` <= 200 chars. Helper timeout 60000 ms (nax's schema maximum); the socket holds a provider reply open up to 55 s.\n\nDispatch provider-cred before Commander alongside git-cred/shim; isolate stdin/stdout/socket/env/stderr through injectable dependencies for tests. Only the socket path, never the key, enters the nax environment or argv. Override inherited socket env with the current job's returned path. Optional provider methods mean existing acquire/release-only fakes keep today's env. Invoke release independently of git release failures, including config job failure cleanup; preserve nax forge-token-file behavior unrelated to this provider vault. A first request with vault_off ultimately declines through the broker's initial none mapping. Revocation latency: after a key is disabled or deleted, a running nax keeps its current lease until `expiresAt` (nax-agent serves the last good lease when the helper fails), so a running job is cut off at most 10 minutes later.\n\n**Scope** — In: helper implementation/dispatch, socket client, both host spawn envs, resume/cleanup/release and config-job lifecycle. Out: writing nax global config (US-010), native sessions (US-011). Value redaction of runner-shipped job logs, thread logs, bundles and diagnostics for served provider keys is not done; the key is never in the job env or on disk, and nax-agent's own redaction is unchanged. Revocation does not interrupt a running nax before its current lease expires (at most 10 minutes).\n\n**Interface** — `runProviderCred(['get'])`; `runProviderCred(['--socket', <path>, 'get'])`; CLI `koda-runner provider-cred [--socket <path>] get`; socket request `provider <providerId>\\n`; nax exec reply and decline schema above. `dispatchInternal(argv)` additionally recognizes `provider-cred`.",
+      "acceptanceCriteria": [
+        "[unit] runProviderCred(['get']) with stdin {\"version\":1,\"providerId\":\"openrouter\"} and a socket answering { ok: true, key: 'k1', expiresAt: 1, account: 'koda:global:fleet' } writes {\"version\":1,\"kind\":\"api-key\",\"key\":\"k1\",\"expiresAt\":1,\"account\":\"koda:global:fleet\"} and returns 0.",
+        "[unit] runProviderCred(['--socket', <path>, 'get']) uses <path> even when KODA_PROVIDER_CRED_SOCKET names another socket.",
+        "[unit] runProviderCred(['get']) with neither KODA_PROVIDER_CRED_SOCKET nor --socket writes {\"version\":1,\"decline\":true} and returns 0.",
+        "[unit] runProviderCred with a socket answering reason none writes the decline reply and returns 0.",
+        "[unit] runProviderCred with a socket answering reason revoked, error or bad request returns 1 with one non-secret stderr line and nothing written to stdout.",
+        "[unit] runProviderCred with a socket path nothing listens on returns 1 with one non-secret stderr line, nothing written to stdout, and never writes a decline reply.",
+        "[unit] The host executor calls serveProviderKeys for a RUN job and the nax env carries KODA_PROVIDER_CRED_SOCKET equal to the returned path.",
+        "[unit] The host executor's FIX step spawn (spawnFixStep) env carries KODA_PROVIDER_CRED_SOCKET.",
+        "[unit] The host executor calls releaseProviderKeys for the job in cleanup().",
+        "[unit] The host executor calls releaseProviderKeys for the job in releaseCredentials() (the abandon path).",
+        "[unit] The host executor's resumeCredentials for a readopted job calls serveProviderKeys and gets the same path as before the restart.",
+        "[unit] The config job's nax env carries KODA_PROVIDER_CRED_SOCKET equal to the path serveProviderKeys returned.",
+        "[integration] runProviderCred against a real provider-key socket from CredentialBroker.serveProviderKeys, with the cache granting k1, writes the api-key reply with key: 'k1'.",
+        "[integration] When a stubbed sync server returns providerKeyErrors reason vault_off for a provider with no prior lease, runProviderCred against the real broker socket writes {\"version\":1,\"decline\":true}.",
+        "[unit] Host executor spawn and config-job execution with an acquire/release-only credential fake retain the existing nax environment without adding KODA_PROVIDER_CRED_SOCKET."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "runner",
+        "security",
+        "exec-helper",
+        "executor"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Exec protocol failure semantics and secret-free process integration span multiple executor lifecycle paths and restart recovery."
+      },
+      "contextFiles": [
+        "apps/runner/src/internal-commands.ts",
+        "apps/runner/src/credentials/git-credential.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/executor/config-job/config-job.ts",
+        "apps/runner/src/credentials/broker.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/credentials/provider-cred.ts",
+        "apps/runner/src/credentials/provider-cred.spec.ts",
+        "apps/runner/test/unit/provider-cred-socket.spec.ts",
+        "apps/runner/test/unit/provider-lease-revocation.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runProviderCred returns 1 with no stdout for malformed stdin JSON or unsupported request version.",
+        "The config job releases its provider-key socket when its nax step fails."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "where a case injects a fake with `serveProviderKeys`, its env assertions also expect `KODA_PROVIDER_CRED_SOCKET`; fakes without the optional methods keep today's env."
+        },
+        {
+          "path": "apps/runner/test/unit/config-job.spec.ts",
+          "reason": "where a case injects a fake with `serveProviderKeys`, the nax env also carries `KODA_PROVIDER_CRED_SOCKET`; fakes without it keep today's env."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Runner vault enable and disable, and providerVault capability",
+      "description": "**Goal** — Add explicit atomic nax helper configuration commands and report whether the installed global helper is koda's.\n\n**Motivation** — Today each runner needs every provider credential stored on the machine (`nax auth`).\n\n**Approach** — `koda-runner vault enable` writes `auth: { source: \"exec\", exec: { command: [...self, \"provider-cred\"], timeoutMs: 60000 }, onChange: \"warn\" }` into `<naxHome>/config.json`, keeping every other key, via a temp file + rename; `vault disable` removes `auth`. The probe's `vaultHelper` dep (wired in the daemon) is true exactly when `config.json`'s `auth.exec.command` equals `[...self, \"provider-cred\"]`.\n\nThe runner never edits nax config on its own; `koda-runner vault enable|disable` does, atomically. nax `auth` is global-only: read only from `<NAX_GLOBAL_CONFIG_DIR>/config.json`, shape `auth: { source: \"file\" | \"exec\", exec?: { command: string[], timeoutMs: number }, onChange: \"warn\" | \"refuse\" }`. The process-wide store asks the helper first and falls back to the credentials file on a decline. Helper timeout 60000 ms (nax's schema maximum); the socket holds a provider reply open up to 55 s.\n\nResolve naxHome from existing runner configuration and self argv from self-command.ts. Enable creates a missing config file; invalid existing JSON must fail nonzero and remain byte-identical. Disable removes the whole auth property only. Use same-directory staging and rename, not direct in-place writes. Expose vaultHelper through createCapabilityProbe into NaxProbeDeps and daemon wiring; emit providerVault: true only on true, omit otherwise. StaticCapabilityProbe retains its early override behavior and never reports providerVault. No daemon startup/config-job/executor path may mutate the file automatically. Concurrent external edits are not locked beyond atomic rename.\n\n**Scope** — In: vault commands/Commander wiring, atomic global config edits, helper detection and capability injection. Out: helper/socket implementation (US-008/009), board rendering (US-012), per-session native source (US-011), automatic config edits or static capability reporting.\n\n**Interface** — `koda-runner vault enable|disable`; `NaxProbeDeps.vaultHelper?: () => Promise<boolean>`; `RunnerCapabilities.providerVault?: true`; helper command exact equality is `[...self argv, 'provider-cred']`.",
+      "acceptanceCriteria": [
+        "[unit] vault enable on a config.json holding { \"agent\": { \"x\": 1 } } leaves { \"agent\": { \"x\": 1 }, \"auth\": { \"source\": \"exec\", \"exec\": { \"command\": [...self argv, \"provider-cred\"], \"timeoutMs\": 60000 }, \"onChange\": \"warn\" } }.",
+        "[unit] vault enable with no config.json creates one holding only that auth block.",
+        "[unit] vault enable writes through a temporary file in the same directory and renames it onto config.json.",
+        "[unit] vault enable on a config.json that is not valid JSON exits non-zero and leaves the file byte-identical.",
+        "[unit] vault disable removes auth and keeps every other key.",
+        "[unit] The daemon's vaultHelper returns true when config.json's auth.exec.command equals [...self argv, 'provider-cred'].",
+        "[unit] The daemon's vaultHelper returns false when auth.exec.command names another helper.",
+        "[unit] The capability probe with a vaultHelper resolving true reports providerVault: true.",
+        "[unit] The capability probe with no vaultHelper omits providerVault.",
+        "[unit] Given identical injected nax responses and clock, removing providerVault from a probe result with vaultHelper resolving true yields the same capability object as probing without vaultHelper, preserving every other expected field."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "runner",
+        "security",
+        "configuration",
+        "capabilities"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential-source configuration changes authentication behavior and spans atomic filesystem edits, CLI, daemon and capability probing."
+      },
+      "contextFiles": [
+        "apps/runner/src/main.ts",
+        "apps/runner/src/config/runner-config.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/src/capabilities/create-probe.ts",
+        "apps/runner/src/self-command.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/commands/vault.ts",
+        "apps/runner/src/commands/vault.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "vault disable on invalid JSON exits non-zero and leaves the file byte-identical.",
+        "A StaticCapabilityProbe report omits providerVault even when the daemon's helper detector would return true.",
+        "A failed temporary-file rename leaves the original config.json unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "its expected capability object omits `providerVault` when no `vaultHelper` is injected; every other expected field unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Native thread sessions use koda keys",
+      "description": "**Goal** — Resolve the native session's provider before open and supply per-session exec credentials while preserving machine-local fallback and ACP isolation.\n\n**Motivation** — The nax side is ready: nax-agent 0.91.7 (koda's pin) ships the exec helper contract and a per-session credential source.\n\n**Approach** — `ThreadJobRun` calls `serveProviderKeys(row)` before both `sessions.open` call sites (the REPO path and `runProject`, so REPO, PROJECT and WORKSPACE threads alike), passes `providerKeys: { socket, granted: (p) => broker.providerKeyGranted(row, p) }` into every `open`, and calls `releaseProviderKeys(row)` in `start()`'s `finally` and in `abandon()`. The factory derives `providerId` from the session model id (text before the first `/`; the runner default model when the thread pins none; a model id with no `/` gets no koda key) and, when `granted` is true, sets the per-session exec `credentials`; otherwise it opens without `credentials` (process-wide store, machine-local). ACP threads never consult it.\n\n`OpenThreadSessionOptions` adds `providerKeys?: { socket: string; granted(providerId: string): Promise<boolean> }`; native options carry `credentials: { kind: 'exec', command: [...self, 'provider-cred', '--socket', socket], timeoutMs: 60000 }` when `granted` resolves true for the session model's provider. nax-agent per-session source: `NativeBackendOptions.credentials?: CredentialSource`, where the exec member is `{ kind: \"exec\"; command: readonly string[]; timeoutMs?: number; onChange?: \"warn\" | \"refuse\" }` (no file fallback).\n\nUse the model selected by existing pinned/default model validation, not the effort-decorated model text. Add optional self argv to the existing ThreadSessionFactoryOptions and pass it from daemon wiring, defaulting through the existing selfCommand() helper for construction sites that omit it. Do not make existing factory constructors supply a new required argument. Keep ACP branch before all provider lookup; no provider key may reach an ACP backend. Existing CredentialProvider fakes with acquire/release continue working because all provider methods are optional, and missing providerKeys preserves current backend options. Ensure failures before or during session open still release sockets in finally, and abandonment remains bounded. Retain current thread profiles, protected paths, session resume/create behavior, turn handling and no-process-reaping invariants.\n\n**Scope** — In: optional session options, native provider lookup/exec source, both thread open call sites, release/finally/abandon and self-command wiring. Out: fleet process env (US-009), global config edits (US-010). ACP thread backends (Claude Code, Codex, Cursor) keep their own sign-ins on the runner host and never receive koda keys. A model switch inside one open native session to a provider koda holds no key for is not re-resolved; the next session open re-resolves (the per-session exec source has no file fallback).\n\n**Interface** — `OpenThreadSessionOptions.providerKeys?: { socket: string; granted(providerId: string): Promise<boolean> }`; `ThreadSessionFactory.open`; `NativeBackendOptions.credentials?: CredentialSource`; exec command `[...self argv, 'provider-cred', '--socket', socket]`, timeoutMs 60000. The granted predicate must use the broker's real socket lookup, not an independent resolution implementation.",
+      "acceptanceCriteria": [
+        "[unit] ThreadSessionFactory.open for a native thread on model openrouter/qwen3 calls providerKeys.granted('openrouter').",
+        "[unit] When granted resolves true, open builds native backend options with credentials: { kind: 'exec', command: [...self argv, 'provider-cred', '--socket', <providerKeys.socket>], timeoutMs: 60000 }.",
+        "[unit] When granted resolves false, open builds native backend options without credentials.",
+        "[unit] When the thread pins no model, open calls granted with the provider of the runner's default model.",
+        "[unit] open for an ACP thread never calls granted.",
+        "[unit] open with no providerKeys builds native backend options without credentials.",
+        "[unit] open for a native model id with no '/' builds native backend options without credentials and never calls granted.",
+        "[unit] ThreadJobRun for a PROJECT thread calls serveProviderKeys before opening the session.",
+        "[unit] ThreadJobRun calls releaseProviderKeys for the job when start() returns.",
+        "[unit] ThreadJobRun.abandon() calls releaseProviderKeys for the job.",
+        "[integration] A REPO thread turn through ThreadJobRun with a real CredentialBroker, whose provider cache grants openrouter, opens the native session with exec credentials whose --socket is a socket that answers 'provider openrouter' with the grant.",
+        "[unit] ThreadSessionFactory.open for a pinned native model absent from nativeModels().models returns { ok: false, reason: 'model_unknown' } without calling granted, preserving the existing model validation failure.",
+        "[unit] When the credential provider implements only acquire/release, ThreadJobRun still opens the session without providerKeys, preserving existing thread broker fakes."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "runner",
+        "security",
+        "threads",
+        "native-sessions"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Session-scoped credentials, provider fallback and lifecycle cleanup cross broker, native backend and all thread kinds."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/session-factory.ts",
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/src/credentials/broker.ts",
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/runner/test/unit/thread-session-factory.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/test/unit/thread-provider-credentials.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ThreadJobRun for a WORKSPACE thread supplies providerKeys before opening its native session.",
+        "When a session open fails, ThreadJobRun.start's finally releases the job's provider socket."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Web admin provider keys page and board column",
+      "description": "**Goal** — Add GLOBAL key administration and render koda-held credentials alongside runner readiness on the admin board.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — Credential board gains `kodaKeys: { providerId, name, last4, updatedAt }[]` (active GLOBAL keys) and a per-runner `providerVault` boolean; the admin page shows a koda column and a \"vault off\" marker. The admin page `/admin/fleet/provider-keys` manages GLOBAL keys; project settings gain a \"Provider keys\" card with PROJECT and REPO rows. A write that returns an approval request shows a pending notice instead of a saved row.\n\nThis story implements the admin page/composable and board rendering; US-013 implements the settings card. Page `/admin/fleet/provider-keys` (list, add, rotate, disable/enable, delete, approval-pending notice) gated on `fleet.credential.*`; board koda column and \"vault off\" runner marker. Reuse the Nuxt useApi/apiPath pattern and useFleetRepos.ts saved-or-pending behavior, not a generated client. Project-scope support in the shared composable must be reusable by US-013 without mixing GLOBAL/project row stores.\n\nList only safe response metadata (providerId, name, last4, fingerprint, disabled state); keys are write-only after save. Validate providerId against `^[a-z0-9][a-z0-9._-]{0,47}$`, name 1-64 and key 16-8192 without whitespace with translated messages. Reset key fields after successful add; rotate submits key only. Separate permission checks for create/update/delete and do not turn pending requests into rows. Confirmation precedes DELETE, errors use extractApiError through useAppToast. Update both en/zh locales.\n\nUpdate lib/fleet-credential-board.ts, the grid component and board page to consume the US-007 fields; include koda-only provider rows and do not hide stored GLOBAL keys just because there are no runners. Preserve existing runner cells, profiles, status meanings and refresh-only fetching. Read/update UX redesign guidance if adding navigation and keep pinned nav source order; use existing tokens and interpolation-only metadata.\n\n**Scope** — In: new admin page, reusable credential composable, permission-gated forms/actions, pending notices, board types/grid and translations. Out: PROJECT/REPO settings card (US-013), API CRUD (US-003–005), runner config/probe (US-010), raw key reveal, new provider-key CLI/MCP commands.\n\n**Interface** — GLOBAL API `GET|POST /fleet/provider-credentials`, `PATCH|DELETE /fleet/provider-credentials/:id`; add `{ providerId, name, key }`; rotate `{ key }`; disable/enable `{ disabled: boolean }`; board `kodaKeys: { providerId, name, last4, updatedAt }[]`, runners `providerVault: boolean`. Writes discriminate saved metadata versus an ApprovalRequestSummary, following the existing permissionKey marker.",
+      "acceptanceCriteria": [
+        "[unit] /admin/fleet/provider-keys lists rows from GET /fleet/provider-credentials showing providerId, name, last4, fingerprint and disabled state.",
+        "[unit] Submitting the add form calls POST /fleet/provider-credentials with { providerId, name, key }.",
+        "[unit] After a successful add, the key input is empty.",
+        "[unit] The add form refuses a providerId with uppercase letters with a translated validation message and sends no request.",
+        "[unit] Rotate calls PATCH /fleet/provider-credentials/:id with { key } only.",
+        "[unit] Disable calls PATCH /fleet/provider-credentials/:id with { disabled: true }.",
+        "[unit] Enable calls PATCH /fleet/provider-credentials/:id with { disabled: false }.",
+        "[unit] Delete calls DELETE /fleet/provider-credentials/:id only after the confirmation is accepted.",
+        "[unit] A write answered with an approval request shows the translated pending notice and adds no row.",
+        "[unit] The add control is hidden when useGlobalPermissions().permissions.value.has('fleet.credential.create') is false.",
+        "[unit] A refused request shows extractApiError(err) through the app toast.",
+        "[unit] The credential board page shows a koda column with each kodaKeys entry's name and last4 on its provider row.",
+        "[unit] The credential board page shows a 'vault off' marker for a runner with providerVault: false.",
+        "[unit] A runner/provider cell with state missing still displays the English label 'Missing' when kodaKeys is populated, preserving existing runner-cell rendering alongside the new koda column."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "web",
+        "security",
+        "admin",
+        "dashboard",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential input and permission-gated admin actions with approval-pending semantics require strict security TDD across page, composable and board."
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/fleet/credentials.vue",
+        "apps/web/pages/admin/fleet/repos.vue",
+        "apps/web/composables/useFleetRepos.ts",
+        "apps/web/components/fleet/credentials/CredentialGrid.vue",
+        "apps/web/i18n/locales/en.json"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/admin/fleet/provider-keys.vue",
+        "apps/web/composables/useProviderCredentials.ts",
+        "apps/web/tests/pages/admin-fleet-provider-keys.spec.ts",
+        "apps/web/tests/composables/useProviderCredentials.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The credential board displays GLOBAL koda keys when its runners array is empty.",
+        "Rotate and disable/enable controls are hidden when fleet.credential.update is absent.",
+        "Delete controls are hidden when fleet.credential.delete is absent.",
+        "Cancelling a delete confirmation sends no DELETE request."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-013",
+      "title": "Web project provider keys card",
+      "description": "**Goal** — Add project settings management of PROJECT keys and named REPO overrides using the shared approval-aware composable.\n\n**Motivation** — Setting up a runner, rotating a key, or keeping separate billing per project means touching every machine, and nothing records which job used which key.\n\n**Approach** — The admin page `/admin/fleet/provider-keys` manages GLOBAL keys; project settings gain a \"Provider keys\" card with PROJECT and REPO rows. A write that returns an approval request shows a pending notice instead of a saved row.\n\n`SettingsProviderKeysCard.vue` on project settings with PROJECT and per-REPO rows, gated on `project.credential.*`, with the approval-pending notice. Mirror SettingsVcsCard.vue and reuse useProviderCredentials.ts from US-012, targeting the project routes. Group PROJECT rows under Project and REPO rows by the actual repo name. Populate the repo picker from this project's existing API repo list, not a copy of server scope rules. Omit repoId for a PROJECT add, include selected repoId for a REPO add. Rotation sends only key, disable/enable only disabled, and DELETE requires confirmation. All saved metadata is write-only with respect to the plaintext key.\n\nUse useProjectPermissions(slug) for per-action affordances (read/create/update/delete); the API remains authoritative for membership and scope. Reuse translated validation and saved-or-pending results; pending approval must not add or replace a credential row. Errors use extractApiError and the app toast. Supply both en/zh text, mount the card on pages/[project]/settings.vue without changing unrelated settings workflow, and read/update redesign guidance if layout/navigation changes.\n\n**Scope** — In: settings card, project/repo grouping, scope picker, permission-aware lifecycle controls, pending notices, settings integration and locales. Out: GLOBAL page/board (US-012), API tenant validation (US-005), runner resolution (US-006/008), saved-key reveal or provider-key MCP tools.\n\n**Interface** — `GET|POST /projects/:slug/provider-credentials`; `PATCH|DELETE /projects/:slug/provider-credentials/:id`; PROJECT add `{ providerId, name, key }`; REPO add `{ providerId, name, key, repoId }`; rotate `{ key }`; disabled `{ disabled: boolean }`. `SettingsProviderKeysCard.vue` consumes the shared composable and project slug.",
+      "acceptanceCriteria": [
+        "[unit] SettingsProviderKeysCard lists rows from GET /projects/:slug/provider-credentials, PROJECT rows under a Project heading and REPO rows under their repo's name.",
+        "[unit] Adding a project key calls POST /projects/:slug/provider-credentials with { providerId, name, key } and no repoId.",
+        "[unit] Adding a repo key calls POST /projects/:slug/provider-credentials with the chosen repo's repoId.",
+        "[unit] Rotate calls PATCH /projects/:slug/provider-credentials/:id with { key } only.",
+        "[unit] Disable calls PATCH /projects/:slug/provider-credentials/:id with { disabled: true }.",
+        "[unit] Delete calls DELETE /projects/:slug/provider-credentials/:id only after the confirmation is accepted.",
+        "[unit] A write answered with an approval request shows the translated pending notice and adds no row.",
+        "[unit] The add control is hidden when useProjectPermissions(slug).permissions.value.has('project.credential.create') is false.",
+        "[unit] A refused request shows extractApiError(err) through the app toast.",
+        "[unit] When the existing SettingsVcsCard emits changed on the project settings page, the page still calls refreshConnection(), preserving the existing VCS workflow after the provider-key card is added."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "web",
+        "security",
+        "project-settings",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-012"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuses upstream composable and form patterns, but credential inputs, project permissions and scoped writes trigger the security override."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/settings.vue",
+        "apps/web/components/SettingsVcsCard.vue",
+        "apps/web/composables/useProviderCredentials.ts",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/components/SettingsProviderKeysCard.vue",
+        "apps/web/tests/components/SettingsProviderKeysCard.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Enable calls PATCH /projects/:slug/provider-credentials/:id with { disabled: false }.",
+        "After a successful project/repo add or rotate, the plaintext key input is empty.",
+        "Switching project slug reloads rows without briefly displaying the previous project's credentials."
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-014",
+      "title": "Rulings refuse items nax can never settle",
+      "description": "**Goal** — Refuse CI-item rulings and draft PRs known to lack the nax item index before creating or approving ineffective rulings.\n\n**Motivation** — The ruling looks accepted until a billed FIX reports `skipped: unknown-item`.\n\n**Approach** — `ruleTarget` refuses `kind === 'ci'` (no forge read). `assertItemIndex(target)`, for a GitHub repo with an installation id, mints the thread-read token, calls new `GitHubAppClient.listIssueComments(token, owner, name, number)` (`GET /repos/{o}/{n}/issues/{number}/comments?per_page=100`, 5 s timeout, returns bodies), and refuses `noItemIndex` only when the page has fewer than 100 comments and none contains `<!-- nax-bot:v1 key=w-index -->`.\n\nThe `w-index` pre-check runs before the ruling transaction, matches the exact nax marker `<!-- nax-bot:v1 key=w-index -->`, reads one page of 100 comments with a 5 s timeout, and fails open on any forge error or a full page with no marker. No author check: a planted marker only restores today's behaviour (a later skip).\n\n`RulingJobTarget`, `findTarget` and `lockTarget` add `repo: { provider: string; owner: string; name: string; githubInstallationId: bigint | null }`. `FleetPrRulingsService.ruleTarget(projectId, jobId, dto)` also refuses `notRulable` (item kind `ci`). A new `preflight(projectId, jobId, dto)` runs `ruleTarget` then `assertItemIndex(target)` (the forge check); all three callers (the controller, the ruling route command and the assistant `pr-ruling-tools.ts`) call `preflight` before `create`, never inside `create`'s transaction. Both `RulingJobTarget` producers, `findTarget` and `lockTarget`, populate `repo`.\n\nRetain create's lock/re-read ruleTarget checks and existing notDraft/notLatest/unknownItem/invalidText/settled refusal precedence. Do not put forge I/O in that transaction or weaken transactional eligibility rechecks. Assistant preview and execute both need preflight and refusal mapping for the new codes. listIssueComments must use FleetHttpClient with no redirects, an explicit 5 s timeout, the supplied bearer token and provider-error mapping on non-200; mintThreadReadToken already supplies pull_requests:read. FleetHttpClient.request currently accepts only method, url, headers and optional body, so extend that existing method with an optional per-request timeout options parameter for this 5000 ms read. Existing calls without an override must still use config.httpTimeoutMs, preserve non-2xx status returns and refuse redirects. Do not change its default timeout globally or introduce a second forge HTTP implementation. Catch forge mint/read failures for fail-open, but do not swallow the deliberate noItemIndex conflict. Return only first-page comment bodies; do not add pagination or author verification. Update API en/zh fleet.rulings.notRulable/noItemIndex and existing ruling fixtures to non-ci accepted items, preserving existing assertions and snapshot repo shape.\n\n**Scope** — In: target repo projection, ci refusal, external preflight, GitHub comments client and controller/command/assistant wiring. Out: web Rule/skip copy (US-015), provider vault stories (US-001–013), changes to nax settling logic. GitLab merge requests get no `w-index` pre-check; rulings are GitHub-only today. The `w-index` pre-check does not verify the marker comment's author.\n\n**Interface** — `preflight(projectId, jobId, dto)`; `assertItemIndex(target)`; `GitHubAppClient.listIssueComments(token, owner, name, number)`; `repo: { provider: string; owner: string; name: string; githubInstallationId: bigint | null }`; conflicts `fleet.rulings.notRulable` and `fleet.rulings.noItemIndex`.",
+      "acceptanceCriteria": [
+        "[unit] ruleTarget for an open item whose kind is ci throws a conflict with code fleet.rulings.notRulable.",
+        "[unit] assertItemIndex for a GitHub target whose PR comments include one containing '<!-- nax-bot:v1 key=w-index -->' resolves.",
+        "[unit] assertItemIndex for a GitHub target whose 3 PR comments contain no such marker throws a conflict with code fleet.rulings.noItemIndex.",
+        "[unit] assertItemIndex resolves when listIssueComments throws.",
+        "[unit] assertItemIndex resolves when listIssueComments returns 100 comments and none carries the marker.",
+        "[unit] assertItemIndex resolves without a forge read when the target repo has no GitHub installation id.",
+        "[unit] findTarget and lockTarget both return the job's repo provider, owner, name and githubInstallationId under repo.",
+        "[unit] The assistant ruling tool refuses with fleet.rulings.noItemIndex when preflight throws it, and creates no ruling.",
+        "[unit] GitHubAppClient.listIssueComments(token, 'o', 'n', 7) requests GET /repos/o/n/issues/7/comments?per_page=100 with the given token and returns each comment's body.",
+        "[unit] GitHubAppClient.listIssueComments throws a provider error on a non-200 response.",
+        "[unit] GitHubAppClient.listIssueComments aborts the request after 5 seconds.",
+        "[integration] POST /projects/:slug/fleet/jobs/:id/rulings for a ci item returns 409 with code fleet.rulings.notRulable and creates no ruling.",
+        "[integration] POST /projects/:slug/fleet/jobs/:id/rulings for a finding on a GitHub draft whose stubbed comments lack the marker returns 409 with code fleet.rulings.noItemIndex.",
+        "[unit] The en and zh API i18n files both carry fleet.rulings.notRulable and fleet.rulings.noItemIndex.",
+        "[unit] FleetHttpClient.request without a timeout override still aborts at the configured httpTimeoutMs, preserving the default for all existing forge callers."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "api",
+        "security",
+        "rulings",
+        "github",
+        "394"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Token-authenticated forge preflight crosses API, approval replay and assistant writes while preserving transaction locks and fail-open behavior."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+        "apps/api/src/fleet/rulings/fleet-rulings.controller.ts",
+        "apps/api/src/fleet/rulings/fleet-ruling-route.commands.ts",
+        "apps/api/src/fleet/assistant/tools/pr-ruling-tools.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.preflight.spec.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.comments.spec.ts",
+        "apps/api/test/integration/fleet-ruling-preflight.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "preflight for a ci item throws notRulable without minting a token or reading forge comments.",
+        "assertItemIndex resolves when mintThreadReadToken throws.",
+        "A marker from any comment author is accepted by assertItemIndex.",
+        "Approval command replay invokes preflight outside create's transaction before inserting a ruling."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts",
+          "reason": "its accepted-ruling fixtures use a non-`ci` item; the existing refusal order is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts",
+          "reason": "its `findTarget` and `lockTarget` fakes gain the `repo` field."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/fleet-http-client.ts",
+          "reason": "`FleetHttpClient.request` gains an optional per-request timeout override so the `w-index` comments read can use 5 s; without an override it keeps `httpTimeoutMs` and still refuses redirects."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-015",
+      "title": "Web hides Rule on CI items and explains unknown-item",
+      "description": "**Goal** — Hide ineffective CI Rule actions and explain why an unknown-item ruling was skipped.\n\n**Motivation** — The ruling looks accepted until a billed FIX reports `skipped: unknown-item`.\n\n**Approach** — Web `FleetJobOpenItems.vue` hides Rule on `ci` items; the `fleet.rulings.skipReason.unknown-item` label explains.\n\nKeep the existing permission, loading, failed and latest-applied checks; add the ci-kind exclusion only to the per-item Rule action so finding and every other currently rulable non-ci kind retain their action. Preserve list visibility and ruling status text for CI items; this is not hiding CI findings or changing dispatch. The en label is exactly \"This PR has no nax item index (published before nax 0.91.2); re-run to republish\"; supply the zh translation in its separate web locale. Existing codeLabel fallback for other skip reasons stays unchanged. Update FleetJobOpenItems.spec.ts cases that expected CI Rule to instead expect none, retaining non-ci assertions, and keep fleet-locale-parity.spec.ts in sync with both locales.\n\n**Scope** — In: per-item Rule visibility and en/zh unknown-item copy. Out: API eligibility/forge preflight (US-014), vault management UI (US-012/013), CLI skip-reason wording, new access-control logic or automatic republishing.\n\n**Interface** — `FleetJobOpenItems` reads each open item's `kind`; `fleet.rulings.skipReason.unknown-item` is the existing web translation key. No API shape or permission semantics change.",
+      "acceptanceCriteria": [
+        "[unit] FleetJobOpenItems renders no Rule action for an open item whose kind is ci.",
+        "[unit] FleetJobOpenItems renders the Rule action for an open item whose kind is finding.",
+        "[unit] FleetJobOpenItems renders the skip reason unknown-item with the en label \"This PR has no nax item index (published before nax 0.91.2); re-run to republish\".",
+        "[unit] The zh locale carries a translation for fleet.rulings.skipReason.unknown-item.",
+        "[unit] FleetJobOpenItems still renders no Rule action for a finding whose latest ruling state is applied, preserving the existing read-only settled-item behavior.",
+        "[unit] FleetJobOpenItems still renders an unknown skip reason '<img src=x>' as literal text and creates no img element, preserving the existing codeLabel fallback and untrusted-text rendering."
+      ],
+      "tags": [
+        "provider-credential-vault",
+        "web",
+        "rulings",
+        "i18n",
+        "394"
+      ],
+      "dependencies": [
+        "US-014"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small presentation-only predicate and bilingual copy change; existing authorization semantics remain untouched."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/FleetJobOpenItems.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json",
+        "apps/web/tests/components/FleetJobOpenItems.spec.ts",
+        "apps/web/tests/i18n/fleet-locale-parity.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/FleetJobOpenItems.spec.ts",
+          "reason": "any case expecting a Rule action on an open item of kind `ci` becomes: no Rule action for `ci`; Rule stays for every other kind."
+        },
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "parity holds with the changed `unknown-item` label in en and zh."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "SECOND-PASS ADVERSARIAL AUDIT\nEnumerated and retained all 178 explicit spec acceptance criteria in their original stories: US-001=13, US-002=14, US-003=14, US-004=13, US-005=14, US-006=15, US-007=8, US-008=14, US-009=13, US-010=9, US-011=11, US-012=13, US-013=9, US-014=14, US-015=4. Original criteria remain first in each array; failure-table and regression assertions follow them. Qualifiers retained include stale git-token abandonment equivalence, matching grants and epoch-ms conversion, optional credential fakes, the abandon-path parenthesis, readoption's same deterministic socket path, unchanged fingerprint on rename, exact activity payloads, no repository export, no plaintext response, and the exact unknown-item English copy. Every story has an observable negative path; explicit native invalid-model behavior is also pinned. No deprecated grep/file/verbatim AC tags occur in the spec. All 17 feature exclusions are retained verbatim, with no story-local work promoted to feature exclusions. Binding IDs, workdirs and dependencies remain unchanged.\nThe audit corrected permission-check syntax to the real usePermissions.ts public shape: useGlobalPermissions()/useProjectPermissions(slug) return a Permissions object whose permissions.value has the has method (apps/web/composables/usePermissions.ts:33-42, :75-81), not a direct has method. No new permission composable is needed. The US-008 cached-repeat fixture explicitly sits outside the final 60-second renewal margin, so it cannot contradict the next AC requiring renewal inside that margin. FenceService.abandon queues a runner ABANDON command with reason stale_lease and does not transition FleetJob.state (apps/api/src/fleet/sync/fence.service.ts:22-30); the stale-epoch AC now names that actual observable behavior while keeping its regression qualifier.\nFleetHttpClient.request currently has only method/url/headers/body and uses config.httpTimeoutMs for all requests (apps/api/src/fleet/git-broker/fleet-http-client.ts:14-20). US-014 must extend that existing method with an OPTIONAL per-request timeout override for the 5000 ms comments read, keeping all current callers, redirect refusal, provider error mapping and default timeout unchanged. Do not pretend a timeout option already exists or switch to raw fetch. ThreadSessionFactoryOptions currently lacks self argv (apps/runner/src/thread/session-factory.ts:28-33); US-011 adds optional injectable self argv with a fallback through the existing self-command mechanism so old construction sites remain valid. Existing config-job cleanup at apps/runner/src/executor/config-job/config-job.ts:54-59 restores the clone but has no provider cleanup yet: add a finally around the new provider lifecycle without changing the returned config-job result.\nRegression assertions now make the spec's Modifies anchors executable: existing catalog/entity members, git token purpose/fencing without provider requests, credential-board cells/profiles, git-only socket protocol, optional broker fakes, untouched non-vault probe fields, native invalid-model failures, existing board cells/settings content, in-transaction ruling rechecks, and unknown skip-reason interpolation. US-012 restores the spec-recommended en.json context file within the five-file cap. Complexity is reduced to medium for US-002/004 and complex for US-006/008 because they extend concrete existing patterns rather than introduce a new architecture; all credential/access-control/token/session stories retain the mandatory three-session-tdd security strategy. The apps/cli exclusion does not exclude the explicitly required koda-runner provider-cred/vault commands.\n\nREPOSITORY AND DISCOVERY\nThis is an enhancement to an established Bun/Turborepo monorepo, not greenfield. Execution root: /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. codebase-memory MCP is unavailable in this session; discovery used targeted Read/Grep/Glob instead. The supplied Express/Next.js detection is incorrect: .nax/mono/apps/api/context.md:19 identifies NestJS/Fastify/Prisma 7, and .nax/mono/apps/web/context.md:21 identifies Nuxt 4 SSR with root-level pages/components/composables. Runner is Bun-only ESM. Read the matching .nax/mono/apps/<app>/context.md before implementation; generated AGENTS.md files are not authoring sources. The API context requires nathapp-nestjs-patterns before NestJS coding; no matching skill file was exposed by repository discovery, so implementation must obtain it from its available skill host. The feature spec is .nax/features/provider-credential-vault/spec.md:1; approved design reference is docs/superpowers/specs/2026-11-05-provider-credential-vault-design.md. All 15 story IDs, workdirs and dependencies are binding. Cross-package protocol and generated contract outputs remain in the specified API story workdirs; do not silently change dependencies or split stories.\n\nARCHITECTURE AND STORAGE\nAPI owns persistence, permissions, scope resolution, attribution, and workflow decisions. Runner only transports requests and grants, caches them in memory, exposes per-job sockets, and connects the nax helper/session contracts. Web remains a Nuxt API client. No proxy, per-key budget system, or new secret backend. Reuse AES-256-GCM encryptToken/decryptToken at apps/api/src/common/utils/encryption.util.ts:7 and :32; encryptToken uses a random IV at :12 and emits iv:tag:ciphertext at :25. Add a separate providerCredentials namespace following apps/api/src/config/vcs.config.ts:5 and :32, with optional 64-hex env validation following apps/api/src/config/env.validation.ts:32. Register the new namespace in apps/api/src/app.module.ts:73; merely creating a config file will not load it. Missing master key must not prevent module construction or API boot. LocalSecretStore supplies randomized encryption plus deterministic 12-hex HMAC-SHA256 fingerprint and last4; do not substitute an unkeyed hash or reuse VCS_ENCRYPTION_KEY.\nAdd Prisma models and a committed additive migration in apps/api/prisma/schema.prisma, including inverse relations on Project (:125), FleetRepo (:794), and any chosen issue/job relation on FleetJob (:1052). Scope is a string constant/type, not a Prisma enum. The unique scopeKey/providerId pair avoids NULL uniqueness holes: global, project:<projectId>, repo:<repoId>. Project/repo foreign keys cascade as specified; actor IDs are plain strings. The issue unique tuple is jobId/credentialId/fingerprint, not epoch: retries and lease renewals must not duplicate attribution; rotating a key produces a new fingerprint attribution. Avoid coupling deletion to an issue FK policy that would prevent the required credential DELETE; durable FleetActivity is the usage record. Prisma generated imports must come from src/generated/prisma/client, with createPgAdapter for actual clients. Driver-adapter unique errors require isUniqueViolation rather than error.meta.target; see apps/api/src/vcs/prisma-vcs.repository.ts:4 and API context. Repositories use transaction-aware PrismaService as in apps/api/src/vcs/prisma-vcs.repository.ts:28-36. Export the service for consumers, not PROVIDER_CREDENTIAL_REPOSITORY; module DI tests must stay database-free and co-located. US-001 owns initial infrastructure, US-002 adds/exports the service.\n\nMANAGEMENT, AUTHORIZATION, AND SECRET HYGIENE\nExisting permission inventory already includes fleet.credential.read at apps/api/src/permissions/catalog.ts:199, and fleet.credential. is already high risk at :150. Add only the three new global writes to NEW_KEY_SCOPES (:116). Project credential read/create/update/delete are new project keys; add project.credential. to HIGH_RISK_PREFIXES (:142), preserving the low-risk read exception in the catalog's classification logic. Update catalog.spec.ts mirrored pins/counts and permissions/__snapshots__/role-matrix.json: global writes Owner/Admin only; Project Admin writes, other project roles read only. Guards remain authoritative on the API, with UI gating as affordance only. Cross-project and wrong-scope IDs must return 404, and repo membership must be checked when accepting repoId.\nApproval writes must follow apps/api/src/vcs/vcs-route.commands.ts:44-69 for create and :73-103 for optional-key update: redactSecret replaces values before the approval body/hash/preview is stored; redemption seals the resubmitted secret, not the original one. Preserve an absent key in PATCH rather than manufacturing a redaction marker. Wire commands into ApprovalCommandRegistry and use @ApprovalGated({ redeem: true }), @ApprovalRedeemHeader(), ApprovalRouteGate; global gate projectId is null. Approval authorization must be re-evaluated through existing route-command principal machinery; do not insert a direct unguarded CRUD path. Management DTOs must be projections, never spread encrypted domain records: exactly id, scope, projectId, repoId, providerId, name, last4, fingerprint, disabled, createdBy, updatedAt. Validate providerId regex, name 1-64, key 16-8192 without whitespace at the shared domain boundary as well as DTO/form edges. Vault-off refuses ALL management writes with 503.\nFleetActivityService.record at apps/api/src/fleet/activity/fleet-activity.service.ts:21 expects the mutating transaction and rejects key-like payload field names using /token|secret|key|password|credential/i at :15. Use only providerId, scope, name, fingerprint, never credentialId as a payload key or plaintext/ciphertext in audit summaries. Add provider_credential to the FleetEntityType union in US-003 and update the FleetActivity.entityType schema comment (apps/api/prisma/schema.prisma:927); US-006 also uses that shared entity type and must remain buildable when run directly after US-002, without inventing a dependency on US-003. Register the additive union wherever first required without changing any existing member or delivering management routes early. Follow the atomic activity/audit precedent apps/api/src/fleet/repos/fleet-repos.service.ts:58-75. Preserve activity on credential deletion. API i18n is independent of web i18n: new providerCredentials files must actually resolve fleet.providerCredentials.* prefixes through the existing translation conventions, and both locales must be supplied.\n\nSYNC, PROTOCOL, AND CONCURRENCY\npackages/fleet-protocol/src/index.ts:235-247 contains TokenRequest/SyncRequest, :302-313 contains SyncResponse, and :82 contains threadModes capability. Add optional providerRequests/providerKeys/providerKeyErrors and providerVault, preserving every existing field and old-runner compatibility; no gratuitous protocol-version bump. API imports this workspace package type-only via its common/protocol bridge. US-006 owns provider wire types; US-007 may add the independent providerVault type field itself because it depends only on US-002, not US-006. apps/api/src/fleet/sync/sync-request.parser.ts:4 bounds token requests at 64, :57 parses token requests, and :70 parses the envelope: mirror this for provider requests with the strict providerId grammar and maximum 64.\nSyncService at apps/api/src/fleet/sync/sync.service.ts:64 captures one sync time, :109 grants git tokens, :111 computes idle, and :129-172 fences token requests inside a transaction. Add provider handling with the same job row lock, FenceService and RUNNER_HELD_STATES checks before any key disclosure. A stale lease queues ABANDON and yields no grant; provider errors/grants both suppress long-polling. Keep provider issue insert and credential.issued activity in the same short transaction, skip duplicates safely (not a caught P2002 that leaves PostgreSQL transaction aborted), and never hold a transaction across notifier.wait or forge HTTP. A per-request failure should not expose secret-bearing error details or block unrelated job processing. Account is koda:<lowercase scope>:<name>; lease is exactly sync-time plus 600000 ms and wire expiry is ISO. Ciphertext failures yield none and a warning containing credential id only.\nThread credential scope MUST come from FleetThreadTurn -> ChatThread, not the synthetic ASSIGN repository. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:265-272 currently provides findThreadTokenScope(kind/action); leave it unchanged and add findThreadCredentialScope(projectId/repoId) plus its domain interface. WORKSPACE anchor projectId is real and contributes the PROJECT override; PROJECT/WORKSPACE repoId is null. Update apps/api/src/fleet/sync/sync.module.ts:19 to import the provider service module, and update constructor fakes in sync-token-fence.spec.ts and sync.service.token-purpose.spec.ts without altering existing fence/token-purpose assertions.\n\nBOARD AND VISIBILITY\napps/api/src/fleet/dashboard/credential-board.ts:54 currently derives provider rows only from runner profiles/credentials, :64 maps runner flags, and apps/api/src/fleet/dashboard/credential-board.service.ts:18 reads all runners. Add an explicit active-global-key input, providerVault boolean defaulting false, and kodaKeys projection; provider rows should include keys held only in koda so the UI can display them even when no runner advertises that provider. Vault off gives an empty kodaKeys list; no project/repo keys or plaintext may appear. DashboardModule at apps/api/src/fleet/dashboard/dashboard.module.ts:15 needs the service module dependency. Update CredentialBoardDto, fleet-openapi.contract.spec.ts property pins, credential-board.spec.ts shape expectations and service fakes, preserving existing cells/misfit logic and no placement preference.\n\nRUNNER CREDENTIAL LIFECYCLE\napps/runner/src/credentials/broker.ts:26-36 defines CredentialProvider; new methods MUST be optional to preserve existing fakes. BrokerDeps at :50 gains an optional provider cache. Current servers map at :81 is git-only and release at :170-180 uses it to decide whether shared bin shims are still needed: a provider socket must live in a separate map. Serve irrespective of clone URL; current acquire parses HTTP clone URLs at :87 and therefore cannot be reused for SSH-only provider setup. Reuse socketPathFor/ensureSocketDir for deterministic job+epoch paths with the provider-keys discriminator. CredentialServer.listen at apps/runner/src/credentials/cred-server.ts:53 stages a private 0600 socket then atomically renames it; close at :86 inode-checks before unlinking to avoid deleting a restarted daemon's socket. Preserve that behavior in the sibling provider listener, and keep get-only git listener unchanged.\nTokenCache at apps/runner/src/credentials/token-cache.ts:43, :50, :98 and :115 is the model for in-memory state, wake listeners, bounded requests, and matching responses to requested epochs. ProviderKeyGrant omits leaseEpoch: ProviderKeyCache must bind replies to the exact originating request snapshot, not the newest live job epoch; otherwise overlapping attempts can receive another attempt's secret. Cache scope is job/epoch/provider, with 60 s renewal margin and 55 s pending reply limit. Once a provider has been served, none must become revoked rather than decline, preventing accidental fallback to a different billing identity. An initial vault_off should allow helper decline as the spec failure table requires; a previously served source must still fail, not silently fall back. No key in journal, environment, filesystem, log, commands, or bundles. Only the socket path enters the nax environment. This is not secrecy from an agent running as the same uid, and offset-tracked logs are not value-redacted.\nSyncLoop optional dependency seams belong at apps/runner/src/sync/sync-loop.ts:30-50; request construction and inflightIdle are :123-131, response application :144-171. Newly wanted provider requests must wake idle polls, but must not abort syncs already carrying writes. apps/runner/src/sync/batch.ts also participates in bounded request construction: include provider request bytes within the existing 1 MiB budget, rather than appending unbounded arrays after budgeting. Wire one cache/broker/loop instance in apps/runner/src/daemon/daemon.ts:189-196 and :243-263; unsubscribe provider need listeners and close all provider sockets on daemon shutdown. Tuning constants belong in src/daemon/tuning.ts, with injected clocks/timers for tests.\napps/runner/src/internal-commands.ts:17 dispatches git-cred/shim before Commander: add provider-cred there with stdin JSON validation and protocol-only stdout. Error stderr must be one fixed, non-secret line. HostExecutor.spawn at apps/runner/src/executor/host-executor.ts:166-196 and spawnFixStep at :199-235 each construct their own env; both need their own provider socket overlay after stripping inherited credential vars. Resume at :496 must restore the same deterministic path for surviving nax children, while cleanup (:480) and releaseCredentials (:500) must release independently of git cleanup failures. Config jobs have their own naxEnv and lifecycle in executor/config-job/config-job.ts; do not overlook them. Do not release provider sockets when git credentials are released after checkout.\nOnly explicit vault enable/disable commands may edit naxHome/config.json; use same-directory temp file/rename and preserve unrelated JSON. Reject malformed existing JSON without changing bytes. createCapabilityProbe at apps/runner/src/capabilities/create-probe.ts:13-21 chooses StaticCapabilityProbe first; retain that behavior and inject vaultHelper only into NaxCapabilityProbe. The probe reports providerVault only when global config command exactly matches [...self, provider-cred], not merely when auth.source is exec. apps/runner/package.json:21-22 already pins nax-agent and ACP 0.91.7; older runner context prose mentioning 0.91.6 is stale, so no speculative upgrade is needed.\nThreadSessionFactory.open at apps/runner/src/thread/session-factory.ts:108-117 branches ACP before native model lookup, :120-122 selects pinned/default model, and :134-151 constructs NativeBackendOptions. Add optional providerKeys and self argv input through existing dependency conventions, call granted only for native model IDs containing '/', and pass per-session exec credentials only after a grant. No grant means omit credentials so the process-wide machine store remains available; per-session exec has no file fallback. Keep existing effort, full-mode bashApproval, protected paths, resume/create and session error mappings unchanged. ThreadJobRun.start/finally at apps/runner/src/thread/thread-job-run.ts:245-250, REPO session open :328, runProject open :400, and abandon :1017 are the lifecycle points; cover PROJECT and WORKSPACE, not just REPO. A thread never reaps/kills executor process groups as part of this change.\n\nWEB CLIENT IMPACT\napps/web/composables/useFleetRepos.ts:78-85 demonstrates saved-or-pending discriminated results using permissionKey in the API body; use this for every credential write so approval responses never become saved rows. SSR-safe requests must go through useApi/apiPath, not a generated client or direct external fetch. New global page reuses admin-page conventions, and the project card follows apps/web/components/SettingsVcsCard.vue:39-52 for form/i18n setup but never reveals a saved provider key. The actual permission composable exposes permissions.value.has as seen in apps/web/components/fleet/FleetJobOpenItems.vue:16-18; honor the public semantics requested by the spec without inventing an incompatible has API. Add both locale keys, reset key inputs after save, confirm deletion, and show extractApiError via useAppToast.\nThe credential board page apps/web/pages/admin/fleet/credentials.vue:35 delegates grid rendering to apps/web/components/fleet/credentials/CredentialGrid.vue:24-55; edit the grid and apps/web/lib/fleet-credential-board.ts:9-17 as well as the page. The page currently hides its grid when runners.length is zero (:27), so avoid hiding koda-only keys in that case. Add translated vault-off markers and the koda column without changing existing cell meaning. Settings page gains SettingsProviderKeysCard with project and repo grouping and per-action permissions. Read docs/ux/redesign/MASTER-PLAN.md:33-44 before adding navigation; retain pinned inline nav/source order, add a new top-level destination to CommandPalette when appropriate, use HSL design tokens, and update the redesign status/decisions if navigation/layout changes. Render key metadata and all agent-controlled text through interpolation, not v-html.\n\nRULINGS #394\nFleetPrRulingsService.ruleTarget at apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:84-92 has ordered notDraft/notLatest/unknownItem/invalidText/settled checks. Insert ci refusal while preserving existing refusal precedence; create at :103-128 deliberately rechecks ruleTarget after locking. Add preflight as the external forge boundary, but do NOT replace create's in-transaction recheck with forge I/O. Both target producers already fetch repo: apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:21-56; add its provider/owner/name/installation projection to both and RulingJobTarget. Existing locks are repo-first and job/ruling-row ordered (:29-36); preserve them.\nThree caller families need preflight: controller apps/api/src/fleet/rulings/fleet-rulings.controller.ts:38; approval route command apps/api/src/fleet/rulings/fleet-ruling-route.commands.ts:22; assistant preview AND execute at apps/api/src/fleet/assistant/tools/pr-ruling-tools.ts:41 and :53. The assistant refusal mapper at :72-81 also needs the new refusal codes. GitHubAppClient already has mintThreadReadToken at apps/api/src/fleet/git-broker/github-app-client.ts:119-120 and FleetHttpClient injection at :49: add the issue-comments endpoint using that client with an explicit 5 s timeout and no redirects, not raw fetch. One page of 100 comments only; exact marker substring, no author check, no pagination. Mint/read exceptions and a full page without marker fail open; only a successful shorter page with no marker yields noItemIndex. ci must cause no forge read. Web currently renders Rule regardless of kind at apps/web/components/fleet/FleetJobOpenItems.vue:125; add ci exclusion while retaining finding actions and existing applied/permission/loading checks. Update unknown-item copy in both locales; CLI keeps raw skip reasons.\n\nTESTS, REGRESSION ANCHORS, AND ROLLOUT\nAll credential/access-control/crypto/session/token stories use three-session-tdd (strict isolation); #394 also uses that strategy because it adds a token-authenticated forge integration. US-015 is a small UI-only change using tdd-simple. API tests use vi.* and lazy TypeScript imports, not jest/require. Module wiring tests go alongside source without a database. Real constraints/transactions and HTTP auth/approval flows need integration tests under test/integration, plus existing apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts lifecycle additions in US-003/004/005. Preserve catalog mirrored pins/role snapshots, fleet-openapi.contract.spec.ts board property list, credential-board cell assertions, sync-token-fence.spec.ts and sync.service.token-purpose.spec.ts assertions, rulings service refusal order and snapshot repo fixtures. Runner test/unit/daemon-thread-wiring.spec.ts must accept the added cache without losing existing assertions. Host/config-job tests only expect the socket env when the optional broker method exists. Existing probe tests omit providerVault absent vaultHelper; old thread fakes with acquire/release must remain compatible. Add seam tests using real SyncLoop+broker cache, real helper+socket, and real broker+ThreadJobRun with an injected session backend, not just disconnected mocks. Web Jest component/page tests should stub Nuxt API and board/chart primitives; locale parity remains pinned.\nDB-backed tests use canRunDbTests with KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; DB setup force-resets a local *_test database. Never run two DB-mode suites on one test DB; use KODA_TEST_DB_CONTAINER=1 in a second checkout. Host socket/process checks may explicitly skip in sandbox, but skips are not verification; run DB and socket seams on the host before merge. No real provider billing or keys are needed; use synthetic keys and stubbed forge responses. API scoped command is bun run test:scoped <files>; runner bun run test covers src and test/unit; web uses Jest. Generated acceptance files stay in each app's .nax/features/provider-credential-vault and are not copied or edited.\nMigration/rollout: deploy the additive schema and API/config support first with vault off by default; regenerate Prisma client. Wire modules without repository exports or cycles (provider storage must not import SyncModule/FleetJobsModule just to find job scope). Export spec and run bun run generate from repository root after US-003/004/005/007 controller/DTO changes, committing openapi.json and generated CLI outputs without manual edits; no new CLI commands. Then deploy the backward-compatible runner transport/helper, explicitly enable fleet helpers with vault enable, create scoped keys, and expose web management. Native thread per-session sources work independently of global helper configuration. Setting the master env enables the vault; losing or changing it makes existing ciphertext unavailable, and master-key rotation/re-encryption is deliberately not implemented. Disabling or deleting a key is bounded by nax's last-good 10-minute lease, not an immediate process kill. The binding DAG has independent API storage/board/ruling branches, followed by runner transport/helper/config/native-session branches and web management; do not force a broader dependency chain merely for scheduling convenience.",
+  "outOfScope": [
+    "OAuth or subscription logins (Claude, ChatGPT, Copilot, Gemini) are not stored or served by koda; nax's exec helper accepts only `kind: \"api-key\"`.",
+    "ACP thread backends (Claude Code, Codex, Cursor) keep their own sign-ins on the runner host and never receive koda keys.",
+    "An LLM proxy or gateway in front of providers (one koda key for all providers) is not built.",
+    "Spend caps or rate limits per provider key are not enforced; existing C1 job budgets are unchanged.",
+    "HashiCorp Vault, OpenBao and cloud KMS backends are not built; only the local encrypted `SecretStore` exists.",
+    "Re-encrypting stored keys under a new master key (master key rotation) is not built.",
+    "Secrecy from the agent is not claimed: the agent's Bash runs as the runner uid and can reach the job's provider-key socket.",
+    "Value redaction of runner-shipped job logs, thread logs, bundles and diagnostics for served provider keys is not done; the key is never in the job env or on disk, and nax-agent's own redaction is unchanged.",
+    "Revocation does not interrupt a running nax before its current lease expires (at most 10 minutes).",
+    "Placement does not prefer or require runners with `providerVault`; a job on a runner without the helper uses that machine's own credentials.",
+    "The runner never edits `<naxHome>/config.json` except through `koda-runner vault enable` and `vault disable`; concurrent edits by other tools during those commands are not guarded beyond the atomic rename.",
+    "The CLI gets no provider-key commands and keeps printing the raw ruling skip reason.",
+    "GitLab merge requests get no `w-index` pre-check; rulings are GitHub-only today.",
+    "Agents (MCP tools) get no provider-key tools.",
+    "The `w-index` pre-check does not verify the marker comment's author.",
+    "A model switch inside one open native session to a provider koda holds no key for is not re-resolved; the next session open re-resolves (the per-session exec source has no file fallback).",
+    "A runner whose `runner.json` overrides capabilities (`StaticCapabilityProbe`) never reports `providerVault`."
+  ],
+  "routingProfile": "native-codex-ds"
+}

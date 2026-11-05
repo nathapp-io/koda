@@ -237,7 +237,7 @@ rows. A write that returns an approval request shows a pending notice instead of
 
 **#394.** `ruleTarget` refuses `kind === 'ci'` (no forge read). `assertItemIndex(target)`, for a GitHub repo with an
 installation id, mints the thread-read token, calls new `GitHubAppClient.listIssueComments(token, owner, name,
-number)` (`GET /repos/{o}/{n}/issues/{number}/comments?per_page=100`, 5 s timeout, returns bodies), and refuses
+number)` (`GET /repos/{o}/{n}/issues/{number}/comments?per_page=100`, 5 s timeout through an optional per-request timeout override on `FleetHttpClient.request`, returns bodies), and refuses
 `noItemIndex` only when the page has fewer than 100 comments and none contains `<!-- nax-bot:v1 key=w-index -->`.
 Web `FleetJobOpenItems.vue` hides Rule on `ci` items; the `fleet.rulings.skipReason.unknown-item` label explains.
 
@@ -562,6 +562,7 @@ None. New card; the settings page gains one card without changing existing asser
 **US-014**
 - `apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts` — its accepted-ruling fixtures use a non-`ci` item; the existing refusal order is unchanged.
 - `apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts` — its `findTarget` and `lockTarget` fakes gain the `repo` field.
+- `apps/api/src/fleet/git-broker/fleet-http-client.ts` — `FleetHttpClient.request` gains an optional per-request timeout override so the `w-index` comments read can use 5 s; without an override it keeps `httpTimeoutMs` and still refuses redirects.
 
 **US-015**
 - `apps/web/tests/components/FleetJobOpenItems.spec.ts` — any case expecting a Rule action on an open item of kind `ci` becomes: no Rule action for `ci`; Rule stays for every other kind.
@@ -761,7 +762,7 @@ None. New card; the settings page gains one card without changing existing asser
 - [unit] Enable calls `PATCH /fleet/provider-credentials/:id` with `{ disabled: false }`.
 - [unit] Delete calls `DELETE /fleet/provider-credentials/:id` only after the confirmation is accepted.
 - [unit] A write answered with an approval request shows the translated pending notice and adds no row.
-- [unit] The add control is hidden when `useGlobalPermissions().has('fleet.credential.create')` is false.
+- [unit] The add control is hidden when `useGlobalPermissions().permissions.value.has('fleet.credential.create')` is false.
 - [unit] A refused request shows `extractApiError(err)` through the app toast.
 - [unit] The credential board page shows a koda column with each `kodaKeys` entry's `name` and `last4` on its provider row.
 - [unit] The credential board page shows a "vault off" marker for a runner with `providerVault: false`.
@@ -775,7 +776,7 @@ None. New card; the settings page gains one card without changing existing asser
 - [unit] Disable calls `PATCH /projects/:slug/provider-credentials/:id` with `{ disabled: true }`.
 - [unit] Delete calls `DELETE /projects/:slug/provider-credentials/:id` only after the confirmation is accepted.
 - [unit] A write answered with an approval request shows the translated pending notice and adds no row.
-- [unit] The add control is hidden when `useProjectPermissions(slug).has('project.credential.create')` is false.
+- [unit] The add control is hidden when `useProjectPermissions(slug).permissions.value.has('project.credential.create')` is false.
 - [unit] A refused request shows `extractApiError(err)` through the app toast.
 
 ### US-014: Rulings refuse items nax can never settle
