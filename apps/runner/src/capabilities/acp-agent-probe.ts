@@ -111,7 +111,8 @@ async function probeAgent(agent: ThreadAgent, deps: AcpProbeDeps): Promise<Threa
   try {
     workdir = await (deps.makeWorkdir ?? makeTempWorkdir)();
     const backend = (deps.backend ?? acpBackend)({
-      agent, allowUnsandboxed: true, initializeTimeoutMs: ACP_INITIALIZE_TIMEOUT_MS,
+      // Match thread sessions so environment-selected authentication homes are also available during discovery.
+      agent, allowUnsandboxed: true, inheritEnv: true, initializeTimeoutMs: ACP_INITIALIZE_TIMEOUT_MS,
     });
     // `createAgentSession` requires a workdir for a profile other than `none`; the store keeps the probe's
     // transcript in memory, so nothing of it survives the probe.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AgentSessionError, type OpenedBackend, type SessionBackend } from '@nathapp/nax-agent';
 import type { AcpBackendOptions, LaunchCandidateKind } from '@nathapp/nax-agent-acp/client';
 import type { ThreadAcpOffer, ThreadAgent } from '@nathapp/fleet-protocol';
@@ -249,9 +250,39 @@ describe('probeAcpAgents: the open it builds (US-002 AC-8, AC-9)', () => {
     const h = harness({ launchable: ['claude', 'codex'] });
     await probeAcpAgents(h.deps);
     expect(h.calls.backend).toEqual([
-      { agent: 'claude', allowUnsandboxed: true, initializeTimeoutMs: 20_000 },
-      { agent: 'codex', allowUnsandboxed: true, initializeTimeoutMs: 20_000 },
+      { agent: 'claude', allowUnsandboxed: true, inheritEnv: true, initializeTimeoutMs: 20_000 },
+      { agent: 'codex', allowUnsandboxed: true, inheritEnv: true, initializeTimeoutMs: 20_000 },
     ]);
+  });
+
+  test('discovery authenticates with an environment-selected Codex home like thread sessions', async () => {
+    const previousHome = process.env['CODEX_HOME'];
+    const customHome = join(tmpdir(), 'koda-probe-custom-codex-home');
+    const observedHomes: (string | undefined)[] = [];
+    const h = harness({ launchable: ['codex'] });
+    process.env['CODEX_HOME'] = customHome;
+    try {
+      const offers = await probeAcpAgents({
+        ...h.deps,
+        backend: (options) => ({
+          kind: 'acp:codex',
+          open: async () => {
+            // Model the ACP backend's environment policy without starting a real agent or reading credentials.
+            const home = options.inheritEnv === true ? process.env['CODEX_HOME'] : undefined;
+            observedHomes.push(home);
+            if (home !== customHome) throw new AgentSessionError('codex needs a login', 'AGENT_SESSION_AUTH_REQUIRED');
+            return h.openedFor('codex');
+          },
+        }),
+      });
+      expect(observedHomes).toEqual([customHome]);
+      expect(offerFor(offers, 'codex')).toMatchObject({ launchable: true, loggedIn: true });
+      expect(h.calls.closed).toEqual(['codex']);
+      expect(h.calls.workdirsRemoved).toBe(1);
+    } finally {
+      if (previousHome === undefined) delete process.env['CODEX_HOME'];
+      else process.env['CODEX_HOME'] = previousHome;
+    }
   });
 
   test('AC-9: the opens of two launchable agents start before either resolves', async () => {
