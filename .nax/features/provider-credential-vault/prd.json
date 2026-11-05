@@ -3,7 +3,7 @@
   "feature": "provider-credential-vault",
   "branchName": "feat/provider-credential-vault",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-11-05T08:42:52.870Z",
+  "updatedAt": "2026-11-05T09:26:43.974Z",
   "userStories": [
     {
       "id": "US-001",
@@ -168,14 +168,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Global secret writes cross authorization, redacted approval redemption, transactional audit/activity and HTTP contracts."
+        "reasoning": "Global secret writes cross authorization, redacted approval redemption, transactional audit/activity and HTTP contracts.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -231,7 +234,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1eb8c5c3dd1ec42c86a307cc4d7bb31a419ef773"
     },
     {
       "id": "US-004",
