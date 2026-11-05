@@ -1,7 +1,7 @@
 // apps/runner/src/credentials/provider-key-cache.spec.ts
 import { describe, expect, test } from 'bun:test';
 import type { ProviderKeyError, ProviderKeyGrant, ProviderKeyRequest } from '@nathapp/fleet-protocol';
-import { MAX_PROVIDER_KEY_REQUESTS, ProviderKeyCache } from './provider-key-cache';
+import { MAX_PROVIDER_KEY_COMPLETIONS, MAX_PROVIDER_KEY_REQUESTS, ProviderKeyCache } from './provider-key-cache';
 
 const T0 = Date.parse('2026-10-01T00:00:00.000Z');
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -204,6 +204,40 @@ describe('ProviderKeyCache completions (US-008 D-1, wired by US-009)', () => {
     expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter must wait for its own answer').toEqual({ kind: 'pending' });
     expect(cache.state('j1', 1, 'openrouter', T0), 'a plain reader sees the newer request, not the answered one').toEqual({ kind: 'pending' });
     expect(cache.requests(), 'the newer request is still queued').toEqual([ask()]);
+  });
+
+  test('a grant answered to a newer request never replaces an older request\'s denial', () => {
+    const cache = new ProviderKeyCache(timing);
+    const first = cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [], [denial()]);
+    const second = cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [grant()], []);
+    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the first waiter\'s completed decline is its own').toEqual({ kind: 'denied', reason: 'none' });
+    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter gets the grant it asked for').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
+    expect(cache.state('j1', 1, 'openrouter', T0), 'a plain reader sees the live grant').toMatchObject({ kind: 'grant' });
+  });
+
+  test('a denial answered to a newer request never replaces an older request\'s grant', () => {
+    const cache = new ProviderKeyCache(timing);
+    const first = cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [grant()], []);
+    cache.markServed('j1', 1, 'openrouter');
+    const second = cache.want('j1', 1, 'openrouter');
+    cache.apply(cache.requests(), [], [denial()]);
+    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the first waiter keeps the key it was handed').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
+    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter reads its own answer').toEqual({ kind: 'denied', reason: 'revoked' });
+  });
+
+  test('the completion window is bounded, and an evicted answer only makes its lookup ask again', () => {
+    const cache = new ProviderKeyCache(timing);
+    const generations: number[] = [];
+    for (let i = 0; i < MAX_PROVIDER_KEY_COMPLETIONS + 1; i += 1) {
+      generations.push(cache.want('j1', 1, 'openrouter'));
+      cache.apply(cache.requests(), [], [denial()]);
+    }
+    const [oldest, ...rest] = generations;
+    expect(cache.state('j1', 1, 'openrouter', T0, oldest), 'the answer beyond the window is dropped').toEqual({ kind: 'pending' });
+    expect(cache.state('j1', 1, 'openrouter', T0, rest.at(-1)), 'the newest answer is kept for its lookup').toEqual({ kind: 'denied', reason: 'none' });
   });
 
   test('a want while its request is in flight joins it, so the one answer serves both waiters', () => {

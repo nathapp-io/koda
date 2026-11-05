@@ -111,4 +111,53 @@ describe('provider-key lookups keep their own answer (US-008 D-1)', () => {
       w.resume(10);
     }
   });
+
+  test('a grant answered to a later lookup never replaces a suspended lookup\'s none', async () => {
+    const w = world();
+    try {
+      const first = w.broker.providerKeyReply(w.row, 'openrouter');
+      expect(w.parked(), 'the first lookup must be suspended in its poll').toBe(1);
+      w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
+      const secondLookup = w.broker.providerKeyReply(w.row, 'openrouter');
+      expect(w.parked(), 'both lookups must be suspended in their own poll').toBe(2);
+      // The server recovers the provider for the later lookup while the first is still suspended: its own grant must
+      // not become the first lookup's answer.
+      w.cache.apply(w.cache.requests(), [w.grant({ key: 'sk-or-2' })], []);
+      w.resume();
+      expect(await within(first, 'the first lookup\'s completed decline'), 'the first lookup must read its own answer')
+        .toEqual({ ok: false, reason: 'none' });
+      w.resume();
+      expect(await within(secondLookup, 'the later lookup\'s grant'), 'the later lookup must be handed the recovered key')
+        .toMatchObject({ ok: true, key: 'sk-or-2' });
+    } finally {
+      await w.broker.closeAll();
+      w.resume(10);
+    }
+  });
+
+  test('a grant answered to a later lookup never replaces a suspended lookup\'s revocation', async () => {
+    const w = world();
+    try {
+      const served = w.broker.providerKeyReply(w.row, 'openrouter');
+      w.cache.apply(w.cache.requests(), [w.grant()], []);
+      w.resume();
+      expect(await within(served, 'the first grant')).toMatchObject({ ok: true, key: 'sk-or-1' });
+      w.clock.now = T0 + 600_000 - 30_000;   // inside the refresh margin: the renewal asks again
+      const first = w.broker.providerKeyReply(w.row, 'openrouter');
+      expect(w.parked(), 'the renewal must be suspended in its poll').toBe(1);
+      w.cache.apply(w.cache.requests(), [], [{ jobId: 'j1', providerId: 'openrouter', reason: 'none' }]);
+      const secondLookup = w.broker.providerKeyReply(w.row, 'openrouter');
+      expect(w.parked(), 'both lookups must be suspended in their own poll').toBe(2);
+      w.cache.apply(w.cache.requests(), [w.grant({ key: 'sk-or-2', expiresAt: iso(w.clock.now + 600_000) })], []);
+      w.resume();
+      expect(await within(first, 'the renewal\'s completed revocation'), 'the renewal must read its own answer')
+        .toEqual({ ok: false, reason: 'revoked' });
+      w.resume();
+      expect(await within(secondLookup, 'the later lookup\'s grant'), 'the later lookup must be handed the renewed key')
+        .toMatchObject({ ok: true, key: 'sk-or-2' });
+    } finally {
+      await w.broker.closeAll();
+      w.resume(10);
+    }
+  });
 });
