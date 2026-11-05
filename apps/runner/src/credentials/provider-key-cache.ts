@@ -112,8 +112,8 @@ export class ProviderKeyCache {
 
   /**
    * The queued requests, one per (job, provider) — the highest epoch asking — capped at the server's limit. Each one is
-   * marked in flight at its generation, so the answer the server sends back is bound to the request that carried it
-   * even when a later lookup has queued a newer one while this sync was out.
+   * marked in flight at its generation, so the answer the server sends back is tagged with the request that carried it
+   * and never with a later one.
    */
   requests(): ProviderKeyRequest[] {
     const highest = new Map<string, Entry>();
