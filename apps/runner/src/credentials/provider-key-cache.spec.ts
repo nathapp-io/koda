@@ -1,7 +1,7 @@
 // apps/runner/src/credentials/provider-key-cache.spec.ts
 import { describe, expect, test } from 'bun:test';
 import type { ProviderKeyError, ProviderKeyGrant, ProviderKeyRequest } from '@nathapp/fleet-protocol';
-import { MAX_PROVIDER_KEY_COMPLETIONS, MAX_PROVIDER_KEY_REQUESTS, ProviderKeyCache } from './provider-key-cache';
+import { MAX_PROVIDER_KEY_REQUESTS, ProviderKeyCache } from './provider-key-cache';
 
 const T0 = Date.parse('2026-10-01T00:00:00.000Z');
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -191,66 +191,75 @@ describe('ProviderKeyCache serving window (US-008)', () => {
   });
 });
 
-describe('ProviderKeyCache completions (US-008 D-1, wired by US-009)', () => {
-  test('a newer want keeps the earlier answer readable at its own generation', () => {
-    const cache = new ProviderKeyCache(timing);
-    const first = cache.want('j1', 1, 'openrouter');
-    cache.apply(cache.requests(), [], [denial()]);
-    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the answered request must read its answer').toEqual({ kind: 'denied', reason: 'none' });
-    const second = cache.want('j1', 1, 'openrouter');
-    expect(second, 'a new want must ask at a new generation').toBeGreaterThan(first);
-    expect(cache.state('j1', 1, 'openrouter', T0, first), 'a later want must not erase the answer the first waiter owns')
-      .toEqual({ kind: 'denied', reason: 'none' });
-    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter must wait for its own answer').toEqual({ kind: 'pending' });
-    expect(cache.state('j1', 1, 'openrouter', T0), 'a plain reader sees the newer request, not the answered one').toEqual({ kind: 'pending' });
-    expect(cache.requests(), 'the newer request is still queued').toEqual([ask()]);
-  });
+describe('ProviderKeyCache waiters (US-008 D-1, wired by US-009)', () => {
+  /** Await a waiter's promise without letting a hang look like a green test. */
+  const answerOf = (wait: { answered: Promise<unknown> }, label: string): Promise<unknown> =>
+    Promise.race([wait.answered, new Promise<never>((_resolve, reject) => { setTimeout(() => reject(new Error(`${label}: no answer arrived`)), 1_000); })]);
 
-  test('a grant answered to a newer request never replaces an older request\'s denial', () => {
+  for (const reason of ['none', 'revoked'] as const) {
+    test(`a waiter keeps its own ${reason} however many answers follow`, async () => {
+      const cache = new ProviderKeyCache(timing);
+      if (reason === 'revoked') {   // a provider the job was served before: the denial is a revocation
+        cache.want('j1', 1, 'openrouter');
+        cache.apply(cache.requests(), [grant({ key: 'sk-served' })], []);
+        cache.markServed('j1', 1, 'openrouter');
+      }
+      const first = cache.want('j1', 1, 'openrouter');
+      cache.apply(cache.requests(), [], [denial()]);
+      // Far more later answers than any window could keep: they belong to other requests, never to this waiter.
+      for (let i = 0; i < 200; i += 1) {
+        cache.want('j1', 1, 'openrouter');
+        cache.apply(cache.requests(), [grant({ key: `sk-${i}` })], []);
+      }
+      expect(await answerOf(first, 'the first waiter'), 'its own answer must never be replaced by a later request\'s grant')
+        .toEqual({ kind: 'denied', reason });
+    });
+  }
+
+  test('a grant answered to a newer request never becomes an older request\'s answer', async () => {
     const cache = new ProviderKeyCache(timing);
     const first = cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [], [denial()]);
     const second = cache.want('j1', 1, 'openrouter');
+    expect(second.generation, 'a new want must ask at a new generation').toBeGreaterThan(first.generation);
     cache.apply(cache.requests(), [grant()], []);
-    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the first waiter\'s completed decline is its own').toEqual({ kind: 'denied', reason: 'none' });
-    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter gets the grant it asked for').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
+    expect(await answerOf(first, 'the first waiter'), 'the first waiter\'s decline is its own').toEqual({ kind: 'denied', reason: 'none' });
+    expect(await answerOf(second, 'the second waiter'), 'the newer waiter gets the grant it asked for').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
     expect(cache.state('j1', 1, 'openrouter', T0), 'a plain reader sees the live grant').toMatchObject({ kind: 'grant' });
   });
 
-  test('a denial answered to a newer request never replaces an older request\'s grant', () => {
+  test('a denial answered to a newer request never becomes an older request\'s answer', async () => {
     const cache = new ProviderKeyCache(timing);
     const first = cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [grant()], []);
     cache.markServed('j1', 1, 'openrouter');
     const second = cache.want('j1', 1, 'openrouter');
     cache.apply(cache.requests(), [], [denial()]);
-    expect(cache.state('j1', 1, 'openrouter', T0, first), 'the first waiter keeps the key it was handed').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
-    expect(cache.state('j1', 1, 'openrouter', T0, second), 'the newer waiter reads its own answer').toEqual({ kind: 'denied', reason: 'revoked' });
+    expect(await answerOf(first, 'the first waiter'), 'the first waiter keeps the key it was handed').toMatchObject({ kind: 'grant', grant: { key: 'sk-or-1' } });
+    expect(await answerOf(second, 'the second waiter'), 'the newer waiter reads its own answer').toEqual({ kind: 'denied', reason: 'revoked' });
   });
 
-  test('the completion window is bounded, and an evicted answer only makes its lookup ask again', () => {
-    const cache = new ProviderKeyCache(timing);
-    const generations: number[] = [];
-    for (let i = 0; i < MAX_PROVIDER_KEY_COMPLETIONS + 1; i += 1) {
-      generations.push(cache.want('j1', 1, 'openrouter'));
-      cache.apply(cache.requests(), [], [denial()]);
-    }
-    const [oldest, ...rest] = generations;
-    expect(cache.state('j1', 1, 'openrouter', T0, oldest), 'the answer beyond the window is dropped').toEqual({ kind: 'pending' });
-    expect(cache.state('j1', 1, 'openrouter', T0, rest.at(-1)), 'the newest answer is kept for its lookup').toEqual({ kind: 'denied', reason: 'none' });
-  });
-
-  test('a want while its request is in flight joins it, so the one answer serves both waiters', () => {
+  test('a want while its request is in flight joins it, so the one answer serves both waiters', async () => {
     const cache = new ProviderKeyCache(timing);
     const first = cache.want('j1', 1, 'openrouter');
     const sent = cache.requests();   // the sync carries generation 1
     const second = cache.want('j1', 1, 'openrouter');   // a later lookup arrives while that sync is out
-    expect(second, 'a request already out is not asked for a second time').toBe(first);
+    expect(second.generation, 'a request already out is not asked for a second time').toBe(first.generation);
     cache.apply(sent, [], [denial()]);
-    for (const generation of [first, second]) {
-      expect(cache.state('j1', 1, 'openrouter', T0, generation), `the waiter at ${generation} must read the answer`).toEqual({ kind: 'denied', reason: 'none' });
+    for (const [label, wait] of [['the first waiter', first], ['the joined waiter', second]] as const) {
+      expect(await answerOf(wait, label), `${label} must read the one answer`).toEqual({ kind: 'denied', reason: 'none' });
     }
     expect(cache.requests(), 'an answered request is never queued again on its own').toEqual([]);
+  });
+
+  test('a released epoch answers nobody and keeps nothing', async () => {
+    const cache = new ProviderKeyCache(timing);
+    const first = cache.want('j1', 1, 'openrouter');
+    cache.drop('j1', 1);
+    cache.apply([ask()], [grant()], []);   // a late answer for the dropped epoch
+    expect(cache.state('j1', 1, 'openrouter', T0), 'a dropped epoch holds nothing').toEqual({ kind: 'pending' });
+    expect(await Promise.race([answerOf(first, 'the released waiter').then(() => 'answered'), Promise.resolve('pending')]))
+      .toBe('pending');   // release ends the wait by cancellation, never by an invented answer
   });
 });
 

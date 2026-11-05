@@ -23,17 +23,24 @@ export interface ProviderKeyCacheTiming {
 /** The server accepts at most 64 provider key requests per sync (apps/api/src/fleet/sync/sync-request.parser.ts). */
 export const MAX_PROVIDER_KEY_REQUESTS = 64;
 
-/**
- * How many settled answers one (job, epoch, provider) keeps. A suspended lookup reads the answer of the request it
- * asked at, so the answers have to outlive later ones; keeping the recent window bounds that memory. Evicting one can
- * only make a lookup too old to have waited this long ask again — never hand it a later request's answer.
- */
-export const MAX_PROVIDER_KEY_COMPLETIONS = 64;
-
-/** One settled answer, kept per request generation until the window overflows. */
-type Completion =
+/** What one request is answered with: its own grant, or the reason koda has none for it. */
+export type ProviderKeyAnswer =
   | { readonly kind: 'grant'; readonly grant: CachedProviderKey }
   | { readonly kind: 'denied'; readonly reason: 'none' | 'revoked' };
+
+/**
+ * US-008 D-1: one request's answer, shared by every lookup waiting on it. The value lives in the promise the waiter
+ * holds, so no later request (however many follow) can replace it and the cache keeps nothing once it is answered.
+ */
+export interface ProviderKeyWait {
+  /** The request generation this wait is answered by. */
+  readonly generation: number;
+  readonly answered: Promise<ProviderKeyAnswer>;
+}
+
+interface Waiter extends ProviderKeyWait {
+  readonly settle: (answer: ProviderKeyAnswer) => void;
+}
 
 interface Entry {
   readonly jobId: string;
@@ -41,8 +48,8 @@ interface Entry {
   readonly providerId: string;
   /** The last granted key of this scope: what a lookup that asks now is served while its lease has margin left. */
   readonly grant: CachedProviderKey | null;
-  /** The last denial, for the readers that ask without a generation (a plain lookup deciding whether to revalidate). */
-  readonly answer: { readonly reason: 'none' | 'revoked'; readonly generation: number } | null;
+  /** The last denial, for a plain reader deciding whether to revalidate. */
+  readonly denial: 'none' | 'revoked' | null;
   /** A grant was served for this (job, epoch, provider): a later denial is a revocation, never a decline. */
   readonly served: boolean;
   /** A request for this entry is queued and not yet answered. */
@@ -51,24 +58,25 @@ interface Entry {
   readonly generation: number;
   /** The generation the last sync carried, so its answer binds to that request and never to a newer want. */
   readonly inflight: number;
-  /**
-   * Every recent request's settled answer, by generation (US-008 D-1): a lookup that asked at generation G reads G's
-   * answer even after a later lookup asked again and was answered — a grant for the later one never becomes the
-   * earlier one's result.
-   */
-  readonly completions: ReadonlyMap<number, Completion>;
+  /** The queued request's waiters: at most one generation is ever queued, so they share one promise. */
+  readonly waiter: Waiter | null;
 }
 
 const keyOf = (jobId: string, leaseEpoch: number, providerId: string): string => JSON.stringify([jobId, leaseEpoch, providerId]);
 /** A grant names only its job and provider (responses carry no lease epoch): the request binds it to one. */
 const scopeOf = (jobId: string, providerId: string): string => JSON.stringify([jobId, providerId]);
 
-/** Record one generation's answer, keeping only the most recent `MAX_PROVIDER_KEY_COMPLETIONS` of them. */
-function withCompletion(completions: ReadonlyMap<number, Completion>, generation: number, completion: Completion): ReadonlyMap<number, Completion> {
-  const next = new Map(completions);
-  next.set(generation, completion);
-  if (next.size <= MAX_PROVIDER_KEY_COMPLETIONS) return next;
-  return new Map([...next.keys()].sort((a, b) => b - a).slice(0, MAX_PROVIDER_KEY_COMPLETIONS).map((gen) => [gen, next.get(gen) as Completion] as const));
+function newWaiter(generation: number): Waiter {
+  let settle: (answer: ProviderKeyAnswer) => void = () => undefined;
+  const answered = new Promise<ProviderKeyAnswer>((resolve) => { settle = resolve; });
+  return { generation, answered, settle };
+}
+
+/** Answer the waiters of `generation` (and only them): a later request's answer never reaches an earlier waiter. */
+function settleWaiter(entry: Entry, generation: number, answer: ProviderKeyAnswer): Waiter | null {
+  if (entry.waiter?.generation !== generation) return entry.waiter;
+  entry.waiter.settle(answer);
+  return null;
 }
 
 /**
@@ -88,46 +96,45 @@ export class ProviderKeyCache {
   }
 
   /**
-   * Queue a request for one provider and return the generation to wait at. A no-op while one is already queued (the
-   * same generation comes back). Every earlier answer is kept, not erased: a lookup waiting at its own generation still
-   * reads it, while a newer one waits for its own.
+   * Queue a request for one provider and return the wait for its answer. A no-op while one is already queued (every
+   * lookup waiting on it shares that one promise). A waiter that asks again later gets a new generation, and the
+   * earlier wait keeps the answer to the earlier request — later revalidation cannot erase it.
    */
-  want(jobId: string, leaseEpoch: number, providerId: string): number {
+  want(jobId: string, leaseEpoch: number, providerId: string): ProviderKeyWait {
     const key = keyOf(jobId, leaseEpoch, providerId);
     const current = this.entries.get(key);
-    if (current?.wanted) return current.generation;
+    if (current?.wanted) {
+      const waiter = current.waiter ?? newWaiter(current.generation);
+      if (waiter !== current.waiter) this.entries = new Map([...this.entries, [key, { ...current, waiter }]]);
+      return waiter;
+    }
     const generation = (current?.generation ?? 0) + 1;
+    const waiter = newWaiter(generation);
     const entry: Entry = current
-      ? { ...current, wanted: true, generation }
-      : { jobId, leaseEpoch, providerId, grant: null, answer: null, served: false, wanted: true, generation, inflight: 0, completions: new Map() };
+      ? { ...current, wanted: true, generation, waiter }
+      : { jobId, leaseEpoch, providerId, grant: null, denial: null, served: false, wanted: true, generation, inflight: 0, waiter };
     this.entries = new Map([...this.entries, [key, entry]]);
     for (const listener of this.listeners) listener();
-    return generation;
+    return waiter;
   }
 
   /**
-   * A grant is served for the whole lease; inside the refresh margin the socket asks for a new key instead. With a
-   * `generation` the lookup reads the answer its own request settled with and nothing else — a grant or denial another
-   * request got is not its result (US-008 D-1) — so a missing or expired one means it asks again. Without a generation,
-   * a plain reader sees the latest live grant, else the last denial of a request that is not queued any more.
+   * A plain read, for a lookup deciding whether it has to ask at all: the latest live grant, else the last denial of a
+   * request that is not queued any more, else pending. A queued lookup reads its own answer from its wait instead.
    */
-  state(jobId: string, leaseEpoch: number, providerId: string, nowMs: number, generation?: number): ProviderKeyState {
+  state(jobId: string, leaseEpoch: number, providerId: string, nowMs: number): ProviderKeyState {
     const entry = this.entries.get(keyOf(jobId, leaseEpoch, providerId));
     if (!entry) return { kind: 'pending' };
-    if (generation !== undefined) {
-      const completion = entry.completions.get(generation);
-      if (completion?.kind === 'denied') return { kind: 'denied', reason: completion.reason };
-      // An expired grant is not an answer: its lookup has to ask again for a lease it can still use.
-      if (completion?.kind === 'grant' && completion.grant.expiresAtMs - nowMs > this.timing.refreshMarginMs) {
-        return { kind: 'grant', grant: completion.grant };
-      }
-      return { kind: 'pending' };
-    }
     if (entry.grant && entry.grant.expiresAtMs - nowMs > this.timing.refreshMarginMs) {
       return { kind: 'grant', grant: entry.grant };
     }
-    if (entry.answer && !entry.wanted) return { kind: 'denied', reason: entry.answer.reason };
+    if (entry.denial && !entry.wanted) return { kind: 'denied', reason: entry.denial };
     return { kind: 'pending' };
+  }
+
+  /** A grant must have more than this left before a lookup hands it out (inside it the key is renewed). */
+  get refreshMarginMs(): number {
+    return this.timing.refreshMarginMs;
   }
 
   /** Record a successful broker reply, not sync receipt or a read-only cache lookup. */
@@ -164,9 +171,9 @@ export class ProviderKeyCache {
 
   /**
    * The server's answer to this request's provider requests. A grant belongs to the epoch whose request carried it
-   * (responses do not say); one for something we did not ask, or dropped meanwhile, is ignored. Each answer is recorded
-   * as the settled completion of the generation that carried it, so the lookup that asked then reads it whatever a
-   * later lookup asks afterwards (US-008 D-1); the newest grant and denial are also kept for plain readers.
+   * (responses do not say); one for something we did not ask, or dropped meanwhile, is ignored. The answer settles the
+   * wait of the generation that carried it — and only that one: a later request's answer never becomes an earlier
+   * lookup's result (US-008 D-1). The newest grant and denial are also kept for a plain read.
    */
   apply(requested: readonly ProviderKeyRequest[], grants: readonly ProviderKeyGrant[], errors: readonly ProviderKeyError[]): void {
     const epochOf = new Map<string, number>();
@@ -179,21 +186,19 @@ export class ProviderKeyCache {
       if (!entry) continue;
       const expiresAtMs = Date.parse(grant.expiresAt);
       if (Number.isNaN(expiresAtMs)) continue;   // pending expiry is an error, never an invented grant
-      const settled = this.answeredGeneration(entry);
       const granted = { key: grant.key, expiresAtMs, account: grant.account };
+      const waiter = settleWaiter(entry, this.answeredGeneration(entry), { kind: 'grant', grant: granted });
       next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.providerId), {
-        ...entry, grant: granted, answer: null, wanted: false, inflight: 0,
-        completions: withCompletion(entry.completions, settled, { kind: 'grant', grant: granted }),
+        ...entry, grant: granted, denial: null, wanted: waiter !== null, inflight: 0, waiter,
       });
     }
     for (const error of errors) {
       const entry = this.entryFor(next, epochOf, error.jobId, error.providerId);
       if (!entry) continue;
-      const settled = this.answeredGeneration(entry);
       const reason = entry.served ? 'revoked' : 'none';
+      const waiter = settleWaiter(entry, this.answeredGeneration(entry), { kind: 'denied', reason });
       next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.providerId), {
-        ...entry, answer: { reason, generation: settled }, wanted: false, inflight: 0,
-        completions: withCompletion(entry.completions, settled, { kind: 'denied', reason }),
+        ...entry, denial: reason, wanted: waiter !== null, inflight: 0, waiter,
       });
     }
     this.entries = next;

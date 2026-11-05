@@ -5,7 +5,7 @@ import type { JobRow } from '../journal/types';
 import type { Sleep } from '../time';
 import { CredentialServer, type CredentialReply, type ProviderReply } from './cred-server';
 import { helperValue, writeShims } from './job-files';
-import type { ProviderKeyCache } from './provider-key-cache';
+import type { CachedProviderKey, ProviderKeyCache } from './provider-key-cache';
 import { SocketDirError, ensureSocketDir, socketPathFor } from './socket-dir';
 import type { TokenCache } from './token-cache';
 
@@ -240,8 +240,8 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
    * refresh margin is left; otherwise the request is queued for the sync loop and this waits up to 55 s. A denial is
    * `none` for a provider the job never had and `revoked` for one it did, so nax never switches identity mid-job.
    *
-   * US-009 (US-008 D-1): a queued lookup waits at the generation its own request asked at, so a lookup that starts
-   * later and revalidates the denial cannot erase the answer already waiting here.
+   * US-009 (US-008 D-1): this lookup waits on the answer to its own request and nothing else — no later request of the
+   * same job can replace it, however many follow.
    */
   async providerKeyReply(job: JobRow, providerId: string): Promise<ProviderReply> {
     const cache = this.deps.providerKeys;
@@ -252,25 +252,23 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     const epoch = this.providerEpochs.get(key) ?? {};
     this.providerEpochs.set(key, epoch);
     const deadline = nowMs() + (timing.providerKeyWaitMs ?? PROVIDER_KEY_WAIT_MS);
-    // `undefined` while a live grant is already there (no request of ours to wait for); a new lookup revalidates an
-    // earlier denial, and from then on it reads only the answer its own request settles with.
-    let generation: number | undefined = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs()).kind === 'grant'
-      ? undefined
-      : cache.want(job.jobId, job.leaseEpoch, providerId);
+    const serve = (grant: CachedProviderKey): ProviderReply => {
+      cache.markServed(job.jobId, job.leaseEpoch, providerId);
+      return { ok: true, key: grant.key, expiresAt: grant.expiresAtMs, account: grant.account };
+    };
+    const cached = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs());
+    if (cached.kind === 'grant') return serve(cached.grant);   // no request needed: the lease still has margin
+    // A new lookup revalidates an earlier denial; from here it reads only the answer its own request settles with.
+    let wait = cache.want(job.jobId, job.leaseEpoch, providerId);
     for (;;) {
-      // Check before reading or mutating the cache: a released waiter must never recreate its dropped entry.
+      // Check before waiting again: a released waiter must never read a dropped epoch's answer as its own.
       if (this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline) return { ok: false, reason: 'error' };
-      const now = nowMs();
-      const state = generation === undefined
-        ? cache.state(job.jobId, job.leaseEpoch, providerId, now)
-        : cache.state(job.jobId, job.leaseEpoch, providerId, now, generation);
-      if (state.kind === 'grant') {
-        cache.markServed(job.jobId, job.leaseEpoch, providerId);
-        return { ok: true, key: state.grant.key, expiresAt: state.grant.expiresAtMs, account: state.grant.account };
-      }
-      if (state.kind === 'denied') return { ok: false, reason: state.reason };
-      generation = cache.want(job.jobId, job.leaseEpoch, providerId);   // a no-op while this request is already queued
-      await sleep(timing.pollMs);
+      // The poll tick only re-checks those guards; the answer itself arrives as soon as the sync delivers it.
+      const answer = await Promise.race([wait.answered, sleep(timing.pollMs).then((): null => null)]);
+      if (answer === null) continue;
+      if (answer.kind === 'denied') return { ok: false, reason: answer.reason };
+      if (answer.grant.expiresAtMs - nowMs() > cache.refreshMarginMs) return serve(answer.grant);
+      wait = cache.want(job.jobId, job.leaseEpoch, providerId);   // too short a lease to hand out: ask for a new key
     }
   }
 
