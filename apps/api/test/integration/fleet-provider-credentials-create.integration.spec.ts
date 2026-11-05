@@ -212,6 +212,12 @@ describeIntegration('GLOBAL provider credentials API (PG)', () => {
   });
 });
 
+/**
+ * AC-7 needs a boot whose config has no master key, which is a second application in this file. It
+ * reuses the database the suite already reset and gives its caller the key through a binding, so the
+ * file resets the shared test database once — a second reset only widens the window in which a
+ * concurrent DB-mode run could see an empty schema.
+ */
 describeIntegration('GLOBAL provider credentials API with the vault off (PG)', () => {
   let app: NathApplication;
   let db: ReturnType<typeof fixtureDb>;
@@ -224,13 +230,14 @@ describeIntegration('GLOBAL provider credentials API with the vault off (PG)', (
     previousKey = process.env[ENCRYPTION_KEY_ENV];
     delete process.env[ENCRYPTION_KEY_ENV];
     try {
-      await resetDb();
       app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
       db = fixtureDb(app);
-      // The first registered user is the installation owner, so it holds fleet.credential.create.
+      await db.providerCredential.deleteMany();
       token = data<{ accessToken: string }>(
         await request(server()).post('/api/auth/register').send({ email: 'vault-off@koda.test', name: 'Vault Off', password: 'Admin1234!Aa' }).expect(201),
       ).accessToken;
+      const caller = await db.user.findUniqueOrThrow({ where: { email: 'vault-off@koda.test' } });
+      await grantKeys(db, { type: 'USER', id: caller.id }, ['fleet.credential.create'], null);
     } finally {
       if (previousKey === undefined) delete process.env[ENCRYPTION_KEY_ENV];
       else process.env[ENCRYPTION_KEY_ENV] = previousKey;
