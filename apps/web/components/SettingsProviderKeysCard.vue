@@ -80,6 +80,3 @@ async function remove(row: ProviderCredentialRow) { if (!window.confirm(t('fleet
   </section>
 </template>
 
-<script lang="ts">
-import type { ProviderCredentialRow } from '~/composables/useProviderCredentials'
-</script>
