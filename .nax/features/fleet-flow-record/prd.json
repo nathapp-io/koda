@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T04:28:49.714Z",
+  "updatedAt": "2026-11-06T04:40:12.319Z",
   "userStories": [
     {
       "id": "US-001",
@@ -112,14 +112,17 @@
         "state-machine"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive schema and a specified pure state table use standard patterns; pair unit state tests with real migration/default/constraint checks."
+        "reasoning": "Additive schema and a specified pure state table use standard patterns; pair unit state tests with real migration/default/constraint checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -144,7 +147,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "872802978b559f9eb220a8e51ecc5de010e15ee2"
     },
     {
       "id": "US-003",
