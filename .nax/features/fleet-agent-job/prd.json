@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T13:12:31.227Z",
+  "updatedAt": "2026-11-06T13:27:16.782Z",
   "userStories": [
     {
       "id": "US-001",
@@ -126,14 +126,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure bounded-input normalization and nested DTO validation follow existing patterns; no new authentication or credential path."
+        "reasoning": "Pure bounded-input normalization and nested DTO validation follow existing patterns; no new authentication or credential path.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/dispatch-input.ts",
@@ -156,7 +159,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "569a3ba2d5d7905015a122cbf052ffa78ffc1eec"
     },
     {
       "id": "US-003",
