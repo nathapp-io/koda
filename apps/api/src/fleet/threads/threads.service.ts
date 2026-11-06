@@ -10,7 +10,7 @@ import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
@@ -84,6 +84,30 @@ export class ThreadsService {
     const thread = await this.threads.get({ kind: 'project', projectId }, id);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
+  }
+
+  async lockForFlow(projectId: string, threadId: string): Promise<ChatThreadRecord> {
+    const thread = await this.threads.lockForFlow(projectId, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    repoThreadFields(thread);
+    if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
+    if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
+    if (!thread.specPublished) throw new ConflictAppException({}, 'threads.notPublished');
+    if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
+    return thread;
+  }
+
+  setPreApproval(projectId: string, threadId: string, userId: string, costCapUsd: string): Promise<ChatThreadRecord> {
+    const preApproval: ThreadPreApproval = { userId, at: new Date().toISOString(), costCapUsd };
+    return this.threads.setPreApproval(projectId, threadId, preApproval);
+  }
+
+  clearPreApproval(projectId: string, threadId: string): Promise<boolean> {
+    return this.threads.clearPreApproval(projectId, threadId);
+  }
+
+  consumePreApproval(threadId: string): Promise<void> {
+    return this.threads.consumePreApproval(threadId);
   }
 
   async updateCap(projectId: string, threadId: string, userId: string, value: unknown, canOperate = false): Promise<ChatThreadRecord> {
