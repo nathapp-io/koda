@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T15:34:03.476Z",
+  "updatedAt": "2026-11-06T15:49:16.509Z",
   "userStories": [
     {
       "id": "US-001",
@@ -594,14 +594,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Task confidentiality, credential/provider socket environment propagation and independent resource cleanup are security-sensitive cross-module spawn changes."
+        "reasoning": "Task confidentiality, credential/provider socket environment propagation and independent resource cleanup are security-sensitive cross-module spawn changes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/executor/job-profile.ts",
@@ -636,7 +639,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "be5484a6297280c7532b628a2ce9206306af98af"
     },
     {
       "id": "US-009",
