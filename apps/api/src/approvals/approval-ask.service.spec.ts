@@ -1,5 +1,5 @@
 import type { ITransactionManager } from '@nathapp/nestjs-data';
-import { ApprovalAskService, type OpenAsk } from './approval-ask.service';
+import { ASK_KEYS_BY_COMPONENT, ApprovalAskService, type OpenAsk } from './approval-ask.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC, type ApprovalPolicyRecord, type ApprovalRequestRecord, type ApprovalRequestStatus } from './domain/approval.domain';
 import { ApprovalRequestNotPendingError, UnregisteredApprovalCommandError } from './domain/approval.errors';
@@ -32,6 +32,16 @@ const budgetAsk = (patch: Partial<OpenAsk> = {}): OpenAsk => ({
   input: { policyId: 'b1' },
   deadline: null,
   ...patch,
+});
+
+describe('approval ask component keys', () => {
+  it('US-001 AC-11/13: flow mapping is added without changing runner or budget', () => {
+    expect(ASK_KEYS_BY_COMPONENT).toEqual({
+      runner: 'fleet.job.shell.escalate',
+      budget: 'fleet.budget.override',
+      flow: 'fleet.flow.start',
+    });
+  });
 });
 
 describe('ApprovalAskService', () => {

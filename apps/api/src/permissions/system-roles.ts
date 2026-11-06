@@ -73,6 +73,10 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'label.update',
       'agent.pickup',
       'fleet.job.*',
+      'fleet.flow.create',
+      'fleet.flow.stop',
+      'fleet.flow.start',
+      'fleet.thread.preapprove',
       // Schedule edits stay owner-or-admin (P1d ruling): a developer administers only its own
       // schedules; `project-admin` holds the any-row keys through `*`.
       'fleet.schedule.read',

@@ -20,6 +20,7 @@ export const FLEET_ENTITY_TYPES = [
   'ingest',
   'analytics',
   'provider_credential',
+  'flow',
 ] as const;
 
 export type FleetEntityType = (typeof FLEET_ENTITY_TYPES)[number];

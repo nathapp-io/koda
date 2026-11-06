@@ -6,6 +6,7 @@ import {
   IMPLICIT_KEYS,
   OWNABLE_KEYS,
   PERMISSION_CATALOG,
+  PENDING_SURFACE_KEYS,
   PUBLIC_KEYS,
   READ_ACTION_KEYS,
   ROLE_GRANT_KEYS,
@@ -107,6 +108,12 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'project.credential.create': 'project',
   'project.credential.update': 'project',
   'project.credential.delete': 'project',
+  'fleet.flow.read': 'project',
+  'fleet.flow.create': 'project',
+  'fleet.flow.start': 'project',
+  'fleet.flow.stop': 'project',
+  'fleet.thread.preapprove': 'project',
+  'system.flow.respec': 'any',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 
@@ -182,6 +189,7 @@ function expectedScope(key: string, access: CatalogAccess, ownable: boolean): Ca
 }
 
 function expectedRisk(key: string): CatalogRisk {
+  if (key === 'fleet.flow.start') return 'critical';
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   const last = key.slice(key.lastIndexOf('.') + 1);
   if (last === 'read' || READ_ACTION_KEYS.has(key)) return 'low';
@@ -311,6 +319,24 @@ describe('PERMISSION_CATALOG', () => {
 
   it('AC-12: agent.read is scoped any', () => {
     expect(findCatalogEntry('agent.read')?.scope).toBe('any');
+  });
+
+  it('US-001 AC-10: flow start remains pending until its route is declared', () => {
+    expect(PENDING_SURFACE_KEYS.has('fleet.flow.start')).toBe(true);
+  });
+
+  it('US-001 AC-1/2: flow start is project-scoped, critical and human-approved', () => {
+    expect(findCatalogEntry('fleet.flow.start')).toMatchObject({
+      scope: 'project', risk: 'critical',
+      approval: { approvable: true, floor: 'human', default: 'human' },
+    });
+  });
+
+  it('US-001 AC-3/4: flow keys have the intended scopes and principal access', () => {
+    for (const key of ['fleet.flow.read', 'fleet.flow.create', 'fleet.flow.stop', 'fleet.thread.preapprove']) {
+      expect(findCatalogEntry(key)).toMatchObject({ scope: 'project', principals: ['user', 'agent'] });
+    }
+    expect(findCatalogEntry('system.flow.respec')).toMatchObject({ access: 'system' });
   });
 
   it('US-001 AC-13: the four surviving agent-management keys are scoped globally', () => {
@@ -596,7 +622,7 @@ describe('catalog approval metadata', () => {
       .filter((entry) => !entry.key.startsWith('role.') && !entry.key.startsWith('approval.policy.'))
       .map((entry) => entry.key);
 
-    expect(new Set(elsewhere)).toEqual(ROLE_GRANT_KEYS);
+    expect(new Set(elsewhere)).toEqual(new Set([...ROLE_GRANT_KEYS, 'fleet.flow.start']));
   });
 
   it('AC-10: approval.decide is scoped any, so a global role can hold it', () => {

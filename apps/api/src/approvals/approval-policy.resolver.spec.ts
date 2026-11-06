@@ -79,6 +79,16 @@ describe('ApprovalPolicyResolver', () => {
     findCandidates.mockResolvedValue([policy('r1', { projectId: 'p1', roleId: 'r1', mode: 'self' }), chosen]);
     expect(await resolver.resolve({ ...input, projectId: 'p1' })).toMatchObject({ mode: 'human', policy: chosen });
   });
+  it('US-001 AC-5: flow start policy cannot lower the human floor', async () => {
+    const chosen = policy('agent-flow', {
+      projectId: 'p1', permissionPattern: 'fleet.flow.start', mode: 'agent',
+    });
+    findCandidates.mockResolvedValue([chosen]);
+    expect(await resolver.resolve({ ...input, key: 'fleet.flow.start', projectId: 'p1' })).toEqual({
+      mode: 'human', floor: 'human', policy: chosen, source: 'policy',
+    });
+  });
+
   it('AC-11: clamps policy mode to catalog floor', async () => {
     const chosen = policy('low', { permissionPattern: 'role.manage' });
     findCandidates.mockResolvedValue([chosen]);
