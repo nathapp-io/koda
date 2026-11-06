@@ -4954,6 +4954,39 @@ describeIntegration('API Integration Tests', () => {
       threadMessage(res, 'permissions.40003');
     });
 
+    describe('US-009 thread flow entry route', () => {
+      const flowInput = { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 };
+      const flowUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/flows`;
+
+      it('POST /threads/:id/flows returns 201 and persists the local publish record and pending start approval', async () => {
+        const thread = await newThread('flow-entry-happy', { specPublished: true, publishedSha: 'a'.repeat(40) });
+        const runner = await attachThreadRunner(thread.id);
+        const response = await request(httpServer).post(flowUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send(flowInput).expect(201);
+        const flow = body<{ id: string; approval: { approvalRequestId: string } }>(response);
+        expect(flow).toMatchObject({ entry: 'THREAD', threadId: thread.id, branch: 'feat/flow-entry-happy',
+          specSha: 'a'.repeat(40), pinnedRunnerId: runner.id, state: 'PENDING', url: `/${projectSlug}/flows/${flow.id}` });
+        expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({
+          projectId: world.projectId, threadId: thread.id, createdByType: 'USER', createdById: world.ids.dev,
+          state: 'PENDING', specSha: 'a'.repeat(40), pinnedRunnerId: runner.id, approvalRequestId: flow.approval.approvalRequestId,
+        });
+        expect(await db().approvalRequest.findUniqueOrThrow({ where: { id: flow.approval.approvalRequestId } })).toMatchObject({
+          permissionKey: 'fleet.flow.start', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev, status: 'pending',
+        });
+      });
+
+      it('POST /threads/:id/flows returns threads.notPublished 409 with no persisted flow or request', async () => {
+        const thread = await newThread('flow-entry-unpublished');
+        await attachThreadRunner(thread.id);
+        const before = await db().approvalRequest.count();
+        const response = await request(httpServer).post(flowUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send(flowInput).expect(409);
+        refusal(response, 'threads.notPublished.409');
+        expect(await db().fleetFlow.count({ where: { threadId: thread.id } })).toBe(0);
+        expect(await db().approvalRequest.count()).toBe(before);
+      });
+    });
+
     describe('US-008 thread pre-approval routes', () => {
       const preapprovalUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/preapproval`;
 
