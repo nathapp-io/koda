@@ -53,6 +53,40 @@ describe('US-008 botRulings', () => {
   });
 });
 
+describe('NaxCapabilityProbe agents run (fleet-agent-job US-007)', () => {
+  const TASK_FILE_HELP = { code: 0, stdout: 'Usage: nax agents run --task-file <path> [--model <alias>]', stderr: '', timedOut: false };
+
+  test('AC-1: reports agentsRun when agents run --help exits 0 naming --task-file', async () => {
+    const home = await naxHome([]);
+    const nax = new FakeNaxCli({ agentsRun: TASK_FILE_HELP });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect(capabilities.agentsRun).toBe(true);
+    expect(nax.calls.some((call) => call.args.join(' ') === 'agents run --help')).toBe(true);
+  });
+
+  test.each([
+    ['exit 1', { ...TASK_FILE_HELP, code: 1 }],
+    ['a timed-out help', { ...TASK_FILE_HELP, timedOut: true }],
+    ['help output without --task-file', { code: 0, stdout: 'Usage: nax agents run [--model <alias>]', stderr: '', timedOut: false }],
+    ['a failed spawn', { code: 126, stdout: '', stderr: 'nax: cannot start (EACCES)', timedOut: false, spawnError: 'NAX_SPAWN_FAILED' }],
+  ] as const)('AC-2: omits agentsRun for %s', async (_label, agentsRun) => {
+    const home = await naxHome([]);
+    const nax = new FakeNaxCli({ agentsRun });
+    const { capabilities } = await probeWith(home, nax).run();
+    expect('agentsRun' in capabilities).toBe(false);
+    // The probe asked, and answered no: the key is absent because of nax's answer, not because nothing was checked.
+    expect(nax.calls.filter((call) => call.args.join(' ') === 'agents run --help')).toHaveLength(1);
+  });
+
+  test('the fake nax answers an unknown command by default, so a probe without the fixture reports nothing', async () => {
+    const home = await naxHome([]);
+    const nax = new FakeNaxCli();
+    const help = await nax.run(['agents', 'run', '--help'], { cwd: home });
+    expect(JSON.parse(help.stdout)).toMatchObject({ error: { code: 'UNKNOWN_COMMAND' } });
+    expect('agentsRun' in (await probeWith(home, nax).run()).capabilities).toBe(false);
+  });
+});
+
 describe('listProfileNames (D98, D112)', () => {
   test('json files only, koda job overlays excluded, sorted by code unit', async () => {
     const home = await naxHome(['beta', 'Alpha', 'koda-job-cabc', 'alpha2']);   // distinct letters: macOS file names are case-insensitive

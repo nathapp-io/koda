@@ -21,6 +21,8 @@ export interface NaxAnswers {
   botReview?: NaxResult;
   /** Result for `bot fix --help` (default: unknown command). */
   botFix?: NaxResult;
+  /** fleet-agent-job US-007: result for `agents run --help` (default: unknown command). */
+  agentsRun?: NaxResult;
   /** Keyed by the `--profile` value as passed (a chain keeps its commas; no flag is `default`, which answers DEFAULT_CONFIG unless set). */
   config?: Readonly<Record<string, FakeRequirements | NaxResult>>;
   /** AuthListReport rows; a requested provider without a row is listed unavailable, as nax does. */
@@ -61,6 +63,7 @@ export class FakeNaxCli implements NaxCli {
     }
     if (args[0] === 'bot' && args[1] === 'review' && args[2] === '--help') return a.botReview ?? naxError('UNKNOWN_COMMAND');
     if (args[0] === 'bot' && args[1] === 'fix' && args[2] === '--help') return a.botFix ?? naxError('UNKNOWN_COMMAND');
+    if (args[0] === 'agents' && args[1] === 'run' && args[2] === '--help') return a.agentsRun ?? naxError('UNKNOWN_COMMAND');
     if (command === 'config') {
       const chain = flag(args, '--profile') ?? 'default';
       const entry = a.config?.[chain] ?? (chain === 'default' ? DEFAULT_CONFIG : undefined);

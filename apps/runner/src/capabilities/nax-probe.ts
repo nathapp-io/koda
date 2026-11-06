@@ -172,9 +172,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const empty = await (this.deps.makeEmptyDir ?? makeEmptyDir)();
     try {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
-      const [scan, base, sandbox, protocols, tools, botReview, acp, vault] = await Promise.all([
+      const [scan, base, sandbox, protocols, tools, botReview, agentsRun, acp, vault] = await Promise.all([
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(), this.botReview(empty.dir),
-        this.acpAgents(), this.vault(),
+        this.agentsRun(empty.dir), this.acpAgents(), this.vault(),
       ]);
       const botFix = botReview && await this.botFix(empty.dir);
       const botRulings = botReview && await this.botRulings(empty.dir);
@@ -218,6 +218,8 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         ...(botReview ? { botReview: true as const } : {}),
         ...(botRulings ? { botRulings: true as const } : {}),
         ...(botFix ? { botFix: true as const } : {}),
+        // fleet-agent-job US-007: this machine's nax can run an unattended agent, so the API may place an AGENT job here.
+        ...(agentsRun ? { agentsRun: true as const } : {}),
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
       });
@@ -347,6 +349,15 @@ export class NaxCapabilityProbe implements CapabilityProbe {
   private async botRulings(cwd: string): Promise<boolean> {
     const help = await this.deps.nax.run(['bot', 'review', '--help'], { cwd });
     return help.code === 0 && !help.timedOut && help.spawnError === undefined && help.stdout.includes('--rulings');
+  }
+
+  /**
+   * fleet-agent-job US-007: `nax agents run --help` names `--task-file` only on a nax that runs an unattended agent
+   * from a task file. An exit 0 without it, a timeout and a failed spawn all mean "not this nax", never a claim.
+   */
+  private async agentsRun(cwd: string): Promise<boolean> {
+    const help = await this.deps.nax.run(['agents', 'run', '--help'], { cwd });
+    return help.code === 0 && !help.timedOut && help.spawnError === undefined && help.stdout.includes('--task-file');
   }
 
   private async protocols(): Promise<NaxProtocol[]> {

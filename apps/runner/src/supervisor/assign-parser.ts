@@ -1,7 +1,8 @@
-import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
+import { ACP_EFFORT_RE, ACP_MODEL_ID_RE, THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AgentAssign, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAgent, type ThreadAssign, type ThreadBackend, type ThreadSkillSource, type ReviewDecision, type CallerRuling } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
+import { cleanAgentAssign } from './agent-assign';
 
 export type ParsedAssign = { ok: true; assign: AssignPayload } | { ok: false; detail: string };
 
@@ -204,10 +205,11 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
   const kind = p['command'];
-  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && kind !== 'REVIEW' && kind !== 'FIX' && !isConfigKind(kind))) return bad('command');
+  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && kind !== 'REVIEW' && kind !== 'FIX' && kind !== 'AGENT' && !isConfigKind(kind))) return bad('command');
   const isConfig = isConfigKind(kind);
   const isThread = kind === 'THREAD';
   const isReview = kind === 'REVIEW' || kind === 'FIX';
+  const isAgent = kind === 'AGENT';
   const repo = p['repo'];
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');
@@ -223,7 +225,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (!Array.isArray(profiles) || profiles.length !== 0) return bad('profiles');
   } else if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw')) return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview || isAgent) && p['bashMode'] !== 'raw')) return bad('bashMode');
   const rawReview = p['review'];
   let reviewDecisions: ReviewDecision[] | undefined;
   let reviewRulings: NonNullable<AssignPayload['review']>['rulings'];
@@ -243,6 +245,16 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       reviewDecisions = cleaned;
     }
   } else if (rawReview !== undefined) return bad('review');
+  // fleet-agent-job US-007: an AGENT needs its agent block, and no other kind may carry one (the `review` and
+  // `thread` precedent). An AGENT's planFrom is already refused above; a prNumber or ticketRefs never reaches an
+  // ASSIGN (the API refuses them at dispatch), and any other unlisted key is dropped rather than copied.
+  const rawAgent = p['agent'];
+  let agent: AgentAssign | undefined;
+  if (isAgent) {
+    const cleaned = cleanAgentAssign(rawAgent);
+    if (cleaned === null) return bad('agent');
+    agent = cleaned;
+  } else if (rawAgent !== undefined) return bad('agent');
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
@@ -279,7 +291,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       ...(reviewRulings === undefined ? {} : { rulings: reviewRulings }),
       ...(reviewDecisions === undefined ? {} : { decisions: reviewDecisions }),
     } } : {};
-    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review } };
+    return { ok: true, assign: { ...baseAssign, ...expectBranch, ...review, ...(agent === undefined ? {} : { agent }) } };
   }
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');

@@ -321,6 +321,31 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     expect(gone.ex.watchOptions).toHaveLength(0);
   });
 
+  test('fleet-agent-job US-007 AC-10: AGENT readopt watches an owned live process', async () => {
+    const b = build();
+    b.add({ agent: { name: 'spec-reviewer', task: 'Review' } }, 1, 'AGENT');
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    b.ex.dieAfterTicks(2);
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+    expect(b.ex.watchOptions).toHaveLength(1);
+    expect(b.ex.calls).not.toContain('prepare:j1');
+  });
+
+  test('fleet-agent-job US-007 AC-11: AGENT readopt finishes a gone process without status.json or a run id', async () => {
+    const b = build();
+    b.add({ agent: { name: 'spec-reviewer', task: 'Review' } }, 1, 'AGENT');
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = false;
+    b.ex.status = null;   // an AGENT job writes no status.json and has no nax run id to match
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+    expect(b.ex.watchOptions).toHaveLength(0);
+    expect(b.ex.calls).not.toContain('prepare:j1');
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+
   test('PLAN: a live process that is this job is watched; a dead or foreign one goes to the finish path (no status.json to judge by)', async () => {
     const live = build();
     running(live, { naxRunId: null }, 'PLAN');

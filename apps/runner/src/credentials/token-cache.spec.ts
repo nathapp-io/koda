@@ -1,6 +1,13 @@
 // apps/runner/src/credentials/token-cache.spec.ts
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { GitToken } from '@nathapp/fleet-protocol';
+import { assignFor } from '../../test/helpers/assign';
+import { Journal } from '../journal/journal';
+import { CredentialBroker } from './broker';
+import { CredentialServer } from './cred-server';
 import { MAX_TOKEN_REQUESTS, TokenCache } from './token-cache';
 
 const T0 = Date.parse('2026-10-01T00:00:00.000Z');
@@ -193,6 +200,49 @@ describe('fresh token demand (US-009)', () => {
     expect(cache.state('j1', 1, T0)).toMatchObject({ kind: 'token' });
     cache.requireFresh('j1', 1, 3_000_000);
     expect(cache.error('j1', 1)).toBeNull();
+  });
+});
+
+describe('AGENT default token (fleet-agent-job US-007)', () => {
+  test('AC-12: a granted token with no repoId lands on an AGENT job\'s default request', async () => {
+    // The socket path must stay under the 100-byte sun_path limit, and a nax sandbox's $TMPDIR is already deep:
+    // the shortest possible mkdtemp name keeps this spec runnable in both places.
+    const socketDir = await mkdtemp(join(tmpdir(), 'x'));
+    const listen = spyOn(CredentialServer, 'listen').mockImplementation(async (path) => ({ path, close: async () => undefined }) as CredentialServer);
+    const journal = Journal.open(':memory:');
+    try {
+      // An AGENT job acquires its credentials exactly as REVIEW does: one default, repo-less socket per epoch.
+      const job = journal.insertJob({
+        assign: assignFor('AGENT', { agent: { name: 'spec-reviewer', task: 'Review' } }), leaseEpoch: 3, repoKey: 'acme/app', jobDir: join(socketDir, 'job'),
+      }).row;
+      const cache = new TokenCache(timing);
+      const broker = new CredentialBroker({
+        tokens: cache, socketDir, runnerId: 'run', selfCommand: ['runner'], nowMs: () => T0,
+        sleep: async () => undefined, timing: { waitMs: 10, serveWaitMs: 10, pollMs: 1 },
+      });
+      expect(await broker.acquire(job, { wait: false })).toMatchObject({ ok: true });
+      expect(cache.requests(T0)).toEqual([{ jobId: job.jobId, leaseEpoch: 3 }]);
+      expect(cache.requests(T0)[0]).not.toHaveProperty('repoId');
+      cache.apply(cache.requests(T0), [tok(job.jobId, iso(T0 + 3_600_000))], [], T0);
+      expect(cache.state(job.jobId, 3, T0)).toEqual({
+        kind: 'token', token: { token: 'ghs_1', username: 'x-access-token', expiresAt: iso(T0 + 3_600_000) },
+      });
+      expect(cache.requests(T0)).toEqual([]);
+      expect(broker.currentToken(job)).toBe('ghs_1');
+      await broker.closeAll();
+    } finally {
+      listen.mockRestore();
+      journal.close();
+      await rm(socketDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a grant carrying a repoId does not answer an AGENT job\'s default request', () => {
+    const cache = new TokenCache(timing);
+    cache.want('j1', 3);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 3 }], [{ ...tok('j1', iso(T0 + 3_600_000)), repoId: 'r1' }], [], T0);
+    expect(cache.state('j1', 3, T0)).toEqual({ kind: 'pending' });
+    expect(cache.requests(T0)).toEqual([{ jobId: 'j1', leaseEpoch: 3 }]);
   });
 });
 
