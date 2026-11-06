@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T07:34:26.208Z",
+  "updatedAt": "2026-11-06T08:01:59.696Z",
   "userStories": [
     {
       "id": "US-001",
@@ -709,14 +709,17 @@
         "US-007",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The route composes existing project reach, permission and GitHub APIs with stage-specific error translation before the gate; cross-project non-disclosure and read-only tokens require strict security TDD."
+        "reasoning": "The route composes existing project reach, permission and GitHub APIs with stage-specific error translation before the gate; cross-project non-disclosure and read-only tokens require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/github-app-client.ts",
@@ -750,7 +753,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8cbc0ca7c316e3ffec038b7353c0dadbeb5e2371"
     },
     {
       "id": "US-011",
