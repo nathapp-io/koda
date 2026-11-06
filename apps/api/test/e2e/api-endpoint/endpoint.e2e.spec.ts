@@ -38,6 +38,7 @@ import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/th
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
 import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.service';
+import { ThreadsService } from '../../../src/fleet/threads/threads.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
@@ -4956,14 +4957,21 @@ describeIntegration('API Integration Tests', () => {
     describe('US-008 thread pre-approval routes', () => {
       const preapprovalUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/preapproval`;
 
-      it('AC-1/2: PUT stores the normalized cap and caller identity', async () => {
+      it('AC-1/2: PUT stores the normalized cap and calls the service once with route and caller identity', async () => {
         const thread = await newThread('preapproval-put');
-        const res = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
-          .send({ costCapUsd: 30 }).expect(200);
-        expect(body<{ userId: string; costCapUsd: string }>(res))
-          .toMatchObject({ userId: world.ids.dev, costCapUsd: '30' });
-        expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } }))
-          .toMatchObject({ preApproval: { userId: world.ids.dev, costCapUsd: '30' } });
+        const setPreApproval = vi.spyOn(app.get(ThreadsService), 'setPreApproval');
+        try {
+          const res = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+            .send({ costCapUsd: 30 }).expect(200);
+          expect(body<{ userId: string; costCapUsd: string }>(res))
+            .toMatchObject({ userId: world.ids.dev, costCapUsd: '30' });
+          expect(setPreApproval).toHaveBeenCalledOnce();
+          expect(setPreApproval).toHaveBeenCalledWith(world.projectId, thread.id, world.ids.dev, '30');
+          expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } }))
+            .toMatchObject({ preApproval: { userId: world.ids.dev, costCapUsd: '30' } });
+        } finally {
+          setPreApproval.mockRestore();
+        }
       });
 
       it('AC-3/10: an agent with the key is still refused as human-only', async () => {
