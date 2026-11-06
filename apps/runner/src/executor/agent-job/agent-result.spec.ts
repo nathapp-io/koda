@@ -9,6 +9,18 @@ const sample = {
   deniedAsks: [] as Array<{ kind: 'question'; text: string }>, costUsd: 0.0123,
 };
 
+function isWellFormed(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
+}
+
 describe('AGENT result', () => {
   let dir: string;
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'koda-agent-result-')); });
@@ -76,6 +88,35 @@ describe('AGENT result', () => {
 
   test('AC-9 clips model to 200 characters', () => {
     expect(fitAgentResult({ ...sample, model: 'm'.repeat(300) }).model).toBe('m'.repeat(200));
+  });
+
+  test('F1 clips at character limits without splitting astral characters', async () => {
+    const emoji = '😀';
+    const fitted = fitAgentResult({ ...sample,
+      model: `${'m'.repeat(199)}${emoji}`,
+      deniedAsks: [
+        { kind: 'question', text: `${'q'.repeat(499)}${emoji}` },
+        { kind: 'approval', tool: `${'t'.repeat(127)}${emoji}`, summary: `${'s'.repeat(499)}${emoji}` },
+      ],
+    });
+    const question = fitted.deniedAsks[0];
+    const approval = fitted.deniedAsks[1];
+    const values = [fitted.model ?? '', question?.kind === 'question' ? question.text : '',
+      approval?.kind === 'approval' ? approval.tool : '', approval?.kind === 'approval' ? approval.summary : ''];
+    expect(values).toEqual(['m'.repeat(199), 'q'.repeat(499), 't'.repeat(127), 's'.repeat(499)]);
+    for (const value of values) expect(isWellFormed(value)).toBe(true);
+
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `${'e'.repeat(299)}${emoji}\n`);
+    const failure = await readAgentResult(dir);
+    expect(failure).toEqual({ ok: false, stderrLine: 'e'.repeat(299) });
+    if (!failure.ok && failure.stderrLine) expect(isWellFormed(failure.stderrLine)).toBe(true);
+  });
+
+  test('F2 reads a short stderr diagnostic without loading a large trailing file', async () => {
+    await putStdout('');
+    await writeFile(join(dir, 'nax.stderr'), `error: short diagnostic\n${'x'.repeat(8 * 1024 * 1024)}`);
+    expect(await readAgentResult(dir)).toEqual({ ok: false, stderrLine: 'error: short diagnostic' });
   });
 
   test('AC-10 measures escaped UTF-8 JSON and preserves an output tail', () => {

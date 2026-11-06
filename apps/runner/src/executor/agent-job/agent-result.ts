@@ -1,7 +1,8 @@
-import { open, readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
 import { AGENT_RESULT_LIMITS, type AgentJobResult } from '@nathapp/fleet-protocol';
-import { formatCost } from '../../watcher/status-snapshot';
+import { clip, formatCost } from '../../watcher/status-snapshot';
 import { tailBytes } from '../config-job/result-fit';
 
 export const AGENT_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
@@ -51,12 +52,43 @@ function parseResult(value: unknown): RawAgentResult | undefined {
 }
 
 async function stderrLine(jobDir: string): Promise<string | undefined> {
+  let file;
   try {
-    const text = await readFile(join(jobDir, 'nax.stderr'), 'utf8');
-    const line = text.split(/\r?\n/).find((candidate) => candidate.trim().length > 0);
-    return line === undefined ? undefined : line.slice(0, 300);
+    file = await open(join(jobDir, 'nax.stderr'), 'r');
+    const decoder = new StringDecoder('utf8');
+    const buffer = Buffer.alloc(4096);
+    let line = '';
+    let nonEmpty = false;
+    const inspect = (text: string): string | undefined => {
+      for (const character of text) {
+        if (character === '\n') {
+          if (nonEmpty) return clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300);
+          line = '';
+          nonEmpty = false;
+          continue;
+        }
+        if (line.length < 301) line += character;
+        if (character.trim().length > 0) nonEmpty = true;
+        if (nonEmpty && line.length >= 301) return clip(line, 300);
+      }
+      return undefined;
+    };
+    let eof = false;
+    while (!eof) {
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) eof = true;
+      else {
+        const found = inspect(decoder.write(buffer.subarray(0, bytesRead)));
+        if (found !== undefined) return found;
+      }
+    }
+    const final = inspect(decoder.end());
+    if (final !== undefined) return final;
+    return nonEmpty ? clip(line.endsWith('\r') ? line.slice(0, -1) : line, 300) : undefined;
   } catch {
     return undefined;
+  } finally {
+    await file?.close();
   }
 }
 
@@ -89,13 +121,17 @@ export async function readAgentResult(jobDir: string): Promise<ReadAgentResult> 
   return { ok: false, ...(line !== undefined ? { stderrLine: line } : {}) };
 }
 
+function clipText(value: string, max: number): string {
+  return clip(value, max) ?? value;
+}
+
 function fitAsk(ask: RawAgentResult['deniedAsks'][number]): { ask: RawAgentResult['deniedAsks'][number]; clipped: boolean } {
   if (ask.kind === 'question') {
-    const text = ask.text.slice(0, AGENT_RESULT_LIMITS.maxAskChars);
+    const text = clipText(ask.text, AGENT_RESULT_LIMITS.maxAskChars);
     return { ask: { kind: 'question', text }, clipped: text !== ask.text };
   }
-  const tool = ask.tool.slice(0, AGENT_RESULT_LIMITS.maxToolChars);
-  const summary = ask.summary.slice(0, AGENT_RESULT_LIMITS.maxAskChars);
+  const tool = clipText(ask.tool, AGENT_RESULT_LIMITS.maxToolChars);
+  const summary = clipText(ask.summary, AGENT_RESULT_LIMITS.maxAskChars);
   return { ask: { kind: 'approval', tool, summary }, clipped: tool !== ask.tool || summary !== ask.summary };
 }
 
@@ -106,7 +142,7 @@ export function fitAgentResult(result: RawAgentResult): AgentJobResult {
   let output = tailBytes(result.output, AGENT_RESULT_LIMITS.maxOutputBytes);
   let truncated = output !== result.output;
   let deniedAsksTruncated = result.deniedAsks.length > cappedAsks.length || cappedAsks.some(({ clipped }) => clipped);
-  const model = result.model?.slice(0, AGENT_RESULT_LIMITS.maxModelChars);
+  const model = result.model === undefined ? undefined : clipText(result.model, AGENT_RESULT_LIMITS.maxModelChars);
   const build = (): AgentJobResult => ({
     status: result.status,
     ...(model !== undefined ? { model } : {}),
