@@ -22,13 +22,20 @@ function setup() {
 }
 
 describe('FlowRouteCommands', () => {
+  it('AC-10: validates thread create body before execution can open an approval', async () => {
+    const { command: registeredCommand, flows } = setup();
+    const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
+    expect(() => command.parse({ projectId: 'project-1', threadId: 'thread-1', body: { features: [], roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: 25 } })).toThrow(ValidationAppException);
+    expect(flows.create).not.toHaveBeenCalled();
+  });
+
   it('AC-2: delegates thread create with the pinned project, thread, parsed body, and requesting principal', async () => {
     const { command: registeredCommand, commands, user, flows } = setup();
     const parsed = { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md', dependsOn: [] }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: '25' };
     const create = flows.create;
     const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
     const routeInput = { projectId: 'project-1', threadId: 'thread-1', body: parsed };
-    expect(command.parse(routeInput)).toEqual(routeInput);
+    expect(command.parse(routeInput)).toEqual({ projectId: 'project-1', threadId: 'thread-1', flow: parsed });
     await command.execute(command.parse(routeInput));
     expect(create).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledWith({ entry: 'THREAD', threadId: 'thread-1', ...parsed }, { type: 'USER', id: user.id }, { projectId: 'project-1' });
