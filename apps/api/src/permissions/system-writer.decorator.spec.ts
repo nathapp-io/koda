@@ -1,5 +1,5 @@
 import { Reflector } from '@nestjs/core';
-import { PERMISSION_CATALOG } from './catalog';
+import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from './catalog';
 import { SYSTEM_WRITER_METADATA, SystemWriter } from './system-writer.decorator';
 import { EmailDispatcher } from '../email/email-dispatcher';
 import { ApprovalRequestExpirySweeper } from '../approvals/approval-request-expiry.sweeper';
@@ -112,9 +112,17 @@ describe('@SystemWriter', () => {
     expect(actual).toEqual(expected);
   });
 
-  it('AC-5: declares every system catalog key and no other key', () => {
+  it('US-001: leaves the future flow respec writer pending until its listener is added', () => {
+    expect(PENDING_SURFACE_KEYS.has('system.flow.respec')).toBe(true);
+  });
+
+  it('AC-5: declares every non-pending system catalog key and no other key', () => {
     const declared = new Set([...writers.values()]);
-    const systemKeys = new Set(PERMISSION_CATALOG.filter(({ access }) => access === 'system').map(({ key }) => key));
+    const systemKeys = new Set(
+      PERMISSION_CATALOG
+        .filter(({ access, key }) => access === 'system' && !PENDING_SURFACE_KEYS.has(key))
+        .map(({ key }) => key),
+    );
     expect(declared).toEqual(systemKeys);
   });
 });
