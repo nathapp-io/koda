@@ -161,7 +161,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads, botReview, botFix, botRulings, providerVault } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode, workspaceThreads, botReview, botFix, botRulings, providerVault, agentsRun } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -193,6 +193,9 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   // Fleet PR fix: strict capability flag, absent on runners that cannot safely fix PRs.
   if (botFix !== undefined && botFix !== true) fail('botFix');
   if (botRulings !== undefined && botRulings !== true) fail('botRulings');
+  // US-005: an AGENT job needs `nax agents run`. Strict like botFix: only the literal `true` is meaningful,
+  // and a runner that cannot run agents simply omits the key.
+  if (agentsRun !== undefined && agentsRun !== true) fail('agentsRun');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -220,6 +223,7 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(botReview === true ? { botReview: true as const } : {}),
     ...(botFix === true ? { botFix: true as const } : {}),
     ...(botRulings === true ? { botRulings: true as const } : {}),
+    ...(agentsRun === true ? { agentsRun: true as const } : {}),
     // C10 US-007: absent on a runner without the provider helper; any value other than the literal
     // `true` is dropped (never fatal), exactly like `threadModes` above.
     ...(providerVault === true ? { providerVault: true as const } : {}),

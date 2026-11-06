@@ -29,6 +29,12 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
   const hasReview = job.command === 'REVIEW' || job.command === 'FIX';
   const reviewPrNumber = hasReview ? prNumberOfReviewFeature(job.feature) : null;
   if (hasReview && reviewPrNumber === null) throw new Error('invalid review feature');
+  // US-005: an AGENT job runs the dispatch input's agent, not a PR review, so it carries an `agent` block and
+  // never a `review` one. A row without its input would send an ASSIGN the runner cannot run, so refuse it the
+  // way a malformed REVIEW feature is refused: placement rolls back and the job waits instead.
+  const isAgent = job.command === 'AGENT';
+  if (isAgent && !job.agentInput) throw new Error('invalid agent input');
+  const agentInput = job.agentInput;
   return {
     jobId: job.id,
     command: job.command,
@@ -55,6 +61,7 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
       },
     } : {}),
     ...(thread ? { thread } : {}),
+    ...(isAgent ? { agent: { ...agentInput } } : {}),
     ...(job.command === 'PLAN' && job.threadId ? { expectBranch: job.ref } : {}),
   };
 }

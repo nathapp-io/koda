@@ -143,4 +143,68 @@ describe('GitTokenBroker job purposes', () => {
     expect(second).toEqual(first);
     expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * US-005: an AGENT job's credential. `purpose: 'read'` is GitHub-only, mints the read-only token, carries no
+   * `repoId` (the runner matches it to the job's default token request), and lives under its own cache key so a
+   * read mint can never answer a write request or vice versa.
+   */
+  describe('read purpose (US-005)', () => {
+    const read = { jobId: 'j1', leaseEpoch: 1, repo, purpose: 'read' as const };
+
+    it('AC-6: mints a GitHub read-only token and returns it without a repoId', async () => {
+      const result = await broker.mint(read, NOW);
+      expect(result).toEqual({ ok: true, token: { jobId: 'j1', token: 'readonly', username: 'x-access-token', expiresAt: minted.expiresAt.toISOString() } });
+      expect(github.mintReadOnlyToken).toHaveBeenCalledExactlyOnceWith(repo.githubInstallationId, repo.name);
+      expect(github.mintInstallationToken).not.toHaveBeenCalled();
+      // A read mint is not a FIX mint: no branch-protection probe.
+      expect(github.isBranchProtected).not.toHaveBeenCalled();
+    });
+
+    it('AC-7: returns the cached read token for the same job and lease epoch without minting again', async () => {
+      const first = await broker.mint(read, NOW);
+      const second = await broker.mint(read, new Date(NOW.getTime() + 60_000));
+      expect(second).toEqual(first);
+      expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-7: fresh: true re-mints a read token instead of reusing it', async () => {
+      await broker.mint(read, NOW);
+      await broker.mint({ ...read, fresh: true }, NOW);
+      expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(2);
+    });
+
+    it('AC-8: a read mint and a purpose-less mint for the same job and epoch mint twice and stay distinct', async () => {
+      const readToken = await broker.mint(read, NOW);
+      const writeToken = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo }, NOW);
+      expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(1);
+      expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
+      expect(readToken).toMatchObject({ ok: true, token: { token: 'readonly' } });
+      expect(writeToken).toMatchObject({ ok: true, token: { token: 'minted' } });
+      expect(readToken).not.toEqual(writeToken);
+      // Both entries survive: a second read reuses only the read one.
+      expect(await broker.mint(read, NOW)).toEqual(readToken);
+      expect(github.mintReadOnlyToken).toHaveBeenCalledTimes(1);
+      expect(github.mintInstallationToken).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-9: rejects a GitLab read purpose with provider_error before any token lookup', async () => {
+      await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab, purpose: 'read' }, NOW)).resolves.toEqual({
+        ok: false, error: { jobId: 'j1', reason: 'provider_error' },
+      });
+      expect(gitlabClient.resolve).not.toHaveBeenCalled();
+      expect(github.mintReadOnlyToken).not.toHaveBeenCalled();
+      expect(github.mintInstallationToken).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: never falls back to a stored GitLab credential already cached by a write mint', async () => {
+      gitlabClient.resolve.mockResolvedValue('glpat-stored');
+      const write = await broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab }, NOW);
+      expect(write).toMatchObject({ ok: true, token: { token: 'glpat-stored' } });
+      await expect(broker.mint({ jobId: 'j1', leaseEpoch: 1, repo: gitlab, purpose: 'read' }, NOW)).resolves.toEqual({
+        ok: false, error: { jobId: 'j1', reason: 'provider_error' },
+      });
+      expect(gitlabClient.resolve).toHaveBeenCalledTimes(1);
+    });
+  });
 });

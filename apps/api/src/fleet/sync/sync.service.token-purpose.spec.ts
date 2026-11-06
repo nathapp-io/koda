@@ -91,4 +91,33 @@ describe('SyncService repo-less token purpose', () => {
       mint.mockRestore();
     }
   });
+
+  /**
+   * US-005: the AGENT job's default (repo-less) token request is answered by the broker's read purpose, which is
+   * a GitHub read-only mint carrying no `repoId`. A RUN job keeps the purpose-less write mint.
+   */
+  it('US-005 AC-10: grants the read purpose for an ASSIGNED AGENT job default token request', async () => {
+    const h = harness(FleetJobKind.AGENT);
+    const mint = vi.spyOn(h.broker, 'mint');
+    const response = await h.sync();
+    expect(mint).toHaveBeenCalledTimes(1);
+    expect(mint.mock.calls[0]?.[0]).toEqual({ jobId: 'job-1', leaseEpoch: 7, repo: h.repo, purpose: 'read' });
+    // The real broker ran: read-only, no write token, and no repository attribution on the granted token.
+    expect(h.github.mintReadOnlyToken).toHaveBeenCalledExactlyOnceWith(42n, 'repo');
+    expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
+    expect(response.gitTokens).toEqual([expect.objectContaining({ jobId: 'job-1', token: 'read-token' })]);
+    expect(Object.prototype.hasOwnProperty.call(response.gitTokens[0], 'repoId')).toBe(false);
+  });
+
+  it('US-005 AC-11: keeps the RUN default token request purpose-less', async () => {
+    const h = harness(FleetJobKind.RUN);
+    const mint = vi.spyOn(h.broker, 'mint');
+    await h.sync();
+    expect(mint).toHaveBeenCalledTimes(1);
+    const request = mint.mock.calls[0]?.[0];
+    expect(request).toEqual({ jobId: 'job-1', leaseEpoch: 7, repo: h.repo });
+    expect(Object.prototype.hasOwnProperty.call(request, 'purpose')).toBe(false);
+    expect(h.github.mintInstallationToken).toHaveBeenCalledExactlyOnceWith(42n, 'repo');
+    expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
+  });
 });

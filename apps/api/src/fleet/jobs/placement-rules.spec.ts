@@ -498,3 +498,37 @@ describe('workspace placement AC-2/3/4', () => {
   it('fits a workspace host', () => expect(misfit(workspace, host(true))).toBeNull());
   it('keeps workspace_threads recoverable', () => expect((PERMANENT_MISFITS as ReadonlySet<string>).has('workspace_threads')).toBe(false));
 });
+
+/**
+ * US-005: an AGENT job runs `nax agents run`, so it is placed only on a runner advertising `agentsRun`. The
+ * refusal is recoverable — a runner upgrade fixes it — so the job waits QUEUED instead of being refused.
+ */
+describe('AGENT placement (US-005)', () => {
+  const agentJob = (over: Partial<PlacementJob> = {}) => job({ command: 'AGENT', ...over });
+  const agentRunner = (over: Partial<RunnerCapabilities> = {}, runnerOver: Partial<PlacementRunner> = {}) =>
+    runner({ capabilities: caps({ agentsRun: true, ...over }), ...runnerOver });
+
+  it('AC-2: reports agents_run on a runner whose capabilities lack agentsRun', () => {
+    expect(misfit(agentJob(), runner())).toBe('agents_run');
+  });
+
+  it('AC-2: reports no misfit on an otherwise fitting runner with agentsRun', () => {
+    expect(misfit(agentJob(), agentRunner())).toBeNull();
+  });
+
+  it('AC-3: agents_run is recoverable, so a pinned AGENT dispatch is not refused', () => {
+    expect(PERMANENT_MISFITS.has('agents_run')).toBe(false);
+    // The pinned runner is still judged: the job stays QUEUED with the reason, it is not cancelled.
+    expect(misfit(agentJob({ pinnedRunnerId: 'r1' }), runner())).toBe('agents_run');
+  });
+
+  it('keeps every other placement constraint on an AGENT job', () => {
+    expect(misfit(agentJob(), agentRunner({ tools: { git: true, gh: false, glab: false } }))).toBe('tools');
+    expect(misfit(agentJob(), agentRunner({}, { lastSeenAt: new Date(NOW.getTime() - 91_000) }))).toBe('offline');
+    expect(misfit(agentJob(), agentRunner({}, { labels: [] }))).toBe('labels');
+  });
+
+  it('control: a RUN job does not need agentsRun', () => {
+    expect(misfit(job(), runner())).toBeNull();
+  });
+});

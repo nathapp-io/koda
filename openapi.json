@@ -20557,7 +20557,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }
@@ -22770,7 +22771,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }
@@ -23424,7 +23426,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }
