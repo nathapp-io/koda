@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T13:57:52.271Z",
+  "updatedAt": "2026-11-06T14:12:14.013Z",
   "userStories": [
     {
       "id": "US-001",
@@ -268,14 +268,17 @@
         "US-002",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The route reuses existing dispatch, transaction, provider-error and budget-stop patterns with generated artifacts; permission and provider-policy regression still require the strict security strategy."
+        "reasoning": "The route reuses existing dispatch, transaction, provider-error and budget-stop patterns with generated artifacts; permission and provider-policy regression still require the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -314,7 +317,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f57182bf0c5fdaa8c6a60d05ce3c988328853507"
     },
     {
       "id": "US-005",
