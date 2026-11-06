@@ -157,6 +157,23 @@ export class FleetReposService {
     });
   }
 
+  /**
+   * The nax flow entry's repo lookup: `remoteUrl` is turned into a provider, owner and name by the
+   * caller, and the row is matched case-insensitively (a forge URL and a registered row disagree on
+   * case). Null means no such repo exists for the caller to use.
+   */
+  findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null> {
+    return this.repo.findByIdentity(provider, owner, name);
+  }
+
+  /**
+   * The repo row lock the nax entry's flow creation takes (flow lock order: repo, then flow). Must run
+   * inside the caller's transaction, which is what makes the duplicate check and the insert atomic.
+   */
+  lockById(id: string): Promise<FleetRepoRecord | null> {
+    return this.repo.lockById(id);
+  }
+
   async findReviewRepo(id: string): Promise<Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId'> | null> {
     const row = await this.repo.findById(id);
     if (!row) return null;

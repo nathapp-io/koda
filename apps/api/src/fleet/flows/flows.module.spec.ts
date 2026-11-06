@@ -2,24 +2,45 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Module } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import { AuditLogModule } from '../../audit/audit-log.module';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { FleetReposModule } from '../repos/fleet-repos.module';
+import { FleetReposService } from '../repos/fleet-repos.service';
+import { ThreadsModule } from '../threads/threads.module';
+import { ThreadsService } from '../threads/threads.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from '../../approvals/approval-command.registry';
 import { FleetFlowStartCommand } from './fleet-flow-start.command';
+import { FleetFlowsService } from './fleet-flows.service';
 import { FlowsModule } from './flows.module';
 import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
 
-@Module({ providers: [ApprovalCommandRegistry], exports: [ApprovalCommandRegistry] })
+@Module({
+  providers: [ApprovalCommandRegistry, { provide: ApprovalAskService, useValue: { open: vi.fn(), close: vi.fn() } }],
+  exports: [ApprovalCommandRegistry, ApprovalAskService],
+})
 class StubApprovalEngineModule {}
 @Module({ providers: [{ provide: AuditRecorder, useValue: { record: vi.fn() } }], exports: [AuditRecorder] })
 class StubAuditLogModule {}
 @Module({ providers: [{ provide: FleetActivityService, useValue: { record: vi.fn() } }], exports: [FleetActivityService] })
 class StubFleetActivityModule {}
-@Module({})
+@Module({
+  providers: [{ provide: FleetReposService, useValue: { findByIdentity: vi.fn(), lockById: vi.fn() } }],
+  exports: [FleetReposService],
+})
+class StubFleetReposModule {}
+@Module({
+  providers: [{ provide: ThreadsService, useValue: { lockForFlow: vi.fn(), consumePreApproval: vi.fn() } }],
+  exports: [ThreadsService],
+})
+class StubThreadsModule {}
+const stubTxManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
+@Module({ providers: [{ provide: TRANSACTION_MANAGER, useValue: stubTxManager }], exports: [TRANSACTION_MANAGER] })
 class StubPrismaModule {}
 
 describe('FlowsModule', () => {
@@ -50,6 +71,8 @@ describe('FlowsModule', () => {
       .overrideModule(ApprovalEngineModule).useModule(StubApprovalEngineModule)
       .overrideModule(AuditLogModule).useModule(StubAuditLogModule)
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)
+      .overrideModule(FleetReposModule).useModule(StubFleetReposModule)
+      .overrideModule(ThreadsModule).useModule(StubThreadsModule)
       .overrideModule(PrismaModule).useModule(StubPrismaModule)
       .overrideProvider(PrismaFleetFlowRepository)
       .useValue({ lockById: vi.fn(), findById: vi.fn(), approve: vi.fn(), stop: vi.fn() })
@@ -59,5 +82,8 @@ describe('FlowsModule', () => {
       .toBeInstanceOf(FleetFlowStartCommand);
     expect(testingModule.get(FLEET_FLOW_REPOSITORY, { strict: false }))
       .toBe(testingModule.get(PrismaFleetFlowRepository, { strict: false }));
+    // The create service is wired with the thread and repo services another module exports, not with
+    // their repositories: a flows service that read either repository would break the layering.
+    expect(testingModule.get(FleetFlowsService, { strict: false })).toBeInstanceOf(FleetFlowsService);
   });
 });

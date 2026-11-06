@@ -78,7 +78,13 @@ export interface IFleetFlowRepository {
   findPage(filters: { projectId: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>>;
   findLiveForThread(threadId: string): Promise<FleetFlowRecord | null>;
   findLiveForSpec(repoId: string, branch: string, specSha: string): Promise<FleetFlowRecord | null>;
-  approve(id: string, data: { mode: FleetFlowApprovalMode; approverId: string; approvedAt: Date; approvalRequestId: string }): Promise<FleetFlowRecord>;
+  /**
+   * PENDING -> APPROVED. A request-approval records the request it was decided through; a flow
+   * started by the thread's covering tick has no request, so `approvalRequestId` stays null.
+   */
+  approve(id: string, data: { mode: FleetFlowApprovalMode; approverId: string; approvedAt: Date; approvalRequestId: string | null }): Promise<FleetFlowRecord>;
+  /** Stores the `fleet.flow.start` request opened for a freshly inserted PENDING flow. */
+  setApprovalRequestId(id: string, approvalRequestId: string): Promise<FleetFlowRecord>;
   reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord>;
   updateSha(id: string, specSha: string): Promise<FleetFlowRecord>;
   stop(id: string, reason: string, now: Date): Promise<FleetFlowRecord>;
