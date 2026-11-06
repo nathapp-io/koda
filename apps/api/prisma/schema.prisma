@@ -159,6 +159,7 @@ model Project {
   providerCredentials ProviderCredential[]
   fleetJobs          FleetJob[]
   fleetPrRulings     FleetPrRuling[]
+  fleetFlows         FleetFlow[]
   jobSchedules       JobSchedule[]
   chatThreads        ChatThread[]
   notifications      Notification[]
@@ -823,6 +824,7 @@ model FleetRepo {
   knowledgeFiles KnowledgeRepoFile[]
   prReviews      FleetPrReview[]
   providerCredentials ProviderCredential[]
+  fleetFlows          FleetFlow[]
 
   @@unique([provider, owner, name])
   @@index([projectId])
@@ -1212,6 +1214,58 @@ model FleetConfigEdit {
 /// Fleet S5a §1: a chat thread on a repo's nax feature. At most one ACTIVE thread per (repoId, feature) (partial unique
 /// index in the migration). runnerId is pinned at the first THREAD assignment and never changed; SetNull on runner delete.
 /// Fleet S5b §1a-R4: `kind` is REPO (the four repo fields, checked by RepoThreadFields) or PROJECT (no repo at all).
+model FleetFlow {
+  id                String    @id @default(cuid())
+  projectId         String
+  repoId            String
+  threadId          String?
+  entry             String
+  createdByType     String
+  createdById       String
+  branch            String
+  specSha            String
+  pinnedRunnerId    String?
+  reviewerRole      String
+  supervisorRole    String
+  costCapUsd        Decimal   @db.Decimal(12, 4)
+  spentUsd          Decimal   @default(0) @db.Decimal(12, 4)
+  state             String    @default("PENDING")
+  approvalMode      String?
+  approverId        String?
+  approvedAt        DateTime?
+  approvalRequestId String?
+  stopReason        String?
+  endedAt           DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo     FleetRepo         @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  features FleetFlowFeature[]
+
+  @@index([projectId, createdAt])
+  @@index([threadId, state])
+  @@index([repoId, branch, specSha])
+  @@index([approvalRequestId])
+}
+
+model FleetFlowFeature {
+  id          String    @id @default(cuid())
+  flowId      String
+  position    Int
+  feature     String
+  specPath    String
+  dependsOn   String[]
+  state       String    @default("PENDING")
+  currentStep String?
+  prNumber    Int?
+
+  flow FleetFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@unique([flowId, position])
+  @@unique([flowId, feature])
+}
+
 model ChatThread {
   id              String    @id @default(cuid())
   projectId       String
@@ -1233,6 +1287,7 @@ model ChatThread {
   specPath        String? // .nax/features/<feature>/spec.md
   mode            String    @default("read") // read | ask | full
   pendingApprovals Json?
+  preApproval     Json? // { userId, at (ISO), costCapUsd }
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
   session         Json? // S5a: the thread's session state, folded from the thread stream
   writtenPaths    String[]  @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
