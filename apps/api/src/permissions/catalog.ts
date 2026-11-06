@@ -69,7 +69,6 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'fleet.flow.create',
   'fleet.flow.start',
   'fleet.flow.stop',
-  'fleet.thread.preapprove',
   'system.flow.respec',
   // C10 US-004 declared the two GLOBAL credential update and delete routes, so
   // `fleet.credential.update` and `fleet.credential.delete` left this list; US-005's project routes

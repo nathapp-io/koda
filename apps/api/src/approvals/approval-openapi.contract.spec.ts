@@ -139,6 +139,8 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/threads/{id}/end-session'],
   ['post', '/api/projects/{slug}/threads/{id}/answer'],
   ['post', '/api/projects/{slug}/threads/{id}/approvals/{requestId}'],
+  ['put', '/api/projects/{slug}/threads/{id}/preapproval'],
+  ['delete', '/api/projects/{slug}/threads/{id}/preapproval'],
   ['post', '/api/projects/{slug}/threads/{id}/archive'],
   ['post', '/api/projects/{slug}/threads/{id}/publish'],
   ['post', '/api/projects/{slug}/threads/{id}/discard'],
@@ -189,7 +191,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 140 gated operations', () => {
+describe('OpenAPI contract for 142 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -270,9 +272,9 @@ describe('OpenAPI contract for 140 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 140 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 142 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(140);
+    expect(expected).toHaveLength(142);
     expect(operationsWith202()).toEqual(expected);
   });
 });

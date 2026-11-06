@@ -43,7 +43,7 @@
     "branchNotFound": { "409": "The branch does not exist in this repository" },
     "specShaNotHead": { "409": "The spec commit is not the head of the branch" },
     "specMissing": { "422": "A spec file is missing at this commit: {path}" },
-    "humanOnly": { "403": "Only a human can set or clear a thread pre-approval" },
+    "humanOnly": { "40003": "Only a human can set or clear a thread pre-approval" },
     "notStoppable": { "409": "This flow can no longer be stopped" },
     "notFound": { "404": "Flow not found" }
   },

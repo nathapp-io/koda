@@ -12,9 +12,8 @@ describe('permission contract checker', () => {
     'fleet.flow.create',
     'fleet.flow.start',
     'fleet.flow.stop',
-    'fleet.thread.preapprove',
     'system.flow.respec',
-    // Flow routes and the respec listener are introduced in later stories.
+    // The flow create/read/stop surfaces and respec listener are introduced in later stories.
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,
