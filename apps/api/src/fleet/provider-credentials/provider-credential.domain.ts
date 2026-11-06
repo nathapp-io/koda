@@ -154,13 +154,11 @@ export interface ActiveProviderScopeQuery {
   repoIds: readonly string[];
 }
 
-/**
- * Hard cap on one availability read. It covers at most the job scopes the caller named (a dashboard
- * window is `QUEUED_SCAN_LIMIT` jobs) times the providers they hold, so 2000 is far above any real
- * installation; a truncated answer under-reports what the vault can serve, which keeps a local
- * credential refusal in place (the safe direction) and is logged.
- */
-export const PROVIDER_AVAILABILITY_MAX_ROWS = 2000;
+/** Maximum metadata rows per availability page; not a cap on the complete inventory. */
+export const PROVIDER_AVAILABILITY_PAGE_SIZE = 2000;
+
+/** Bound availability paging; reaching it fails explicitly rather than returning incomplete data. */
+export const PROVIDER_AVAILABILITY_MAX_PAGES = 50;
 
 /**
  * One active GLOBAL key as the credential board's `kodaKeys` column shows it (C10 US-007): metadata

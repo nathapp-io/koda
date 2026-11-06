@@ -9,7 +9,8 @@ import {
 } from './prisma-provider-credential.repository';
 import {
   GLOBAL_SCOPE_KEY,
-  PROVIDER_AVAILABILITY_MAX_ROWS,
+  PROVIDER_AVAILABILITY_MAX_PAGES,
+  PROVIDER_AVAILABILITY_PAGE_SIZE,
   PROVIDER_CREDENTIAL_PAGE_SIZE_MAX,
   PROVIDER_KEY_SUMMARY_MAX_PAGES,
   PROVIDER_KEY_SUMMARY_PAGE_SIZE,
@@ -183,8 +184,8 @@ describe('PrismaProviderCredentialRepository', () => {
     });
 
     /**
-     * C10 (branch review B3): the availability read behind placement. One bounded read answers every named
-     * scope, always including the global rows, and it never selects the sealed key.
+     * The availability read behind placement pages through applicable scopes, always including
+     * global rows, and never selects the sealed key.
      */
     it('B3: reads the active rows of the named scopes plus the global ones, as metadata only', async () => {
       (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -197,11 +198,16 @@ describe('PrismaProviderCredentialRepository', () => {
       expect(prisma.client.providerCredential.findMany).toHaveBeenCalledWith({
         where: {
           disabledAt: null,
-          OR: [{ scopeKey: 'global' }, { projectId: { in: ['p1'] } }, { repoId: { in: ['r1'] } }],
+          OR: [
+            { scopeKey: 'global' },
+            { scope: 'PROJECT', projectId: { in: ['p1'] } },
+            { scope: 'REPO', repoId: { in: ['r1'] } },
+          ],
         },
         select: { scope: true, projectId: true, repoId: true, providerId: true },
         orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
-        take: PROVIDER_AVAILABILITY_MAX_ROWS + 1,
+        skip: 0,
+        take: PROVIDER_AVAILABILITY_PAGE_SIZE,
       });
       expect(rows).toEqual([
         { scope: 'GLOBAL', projectId: null, repoId: null, providerId: 'openrouter' },
@@ -209,17 +215,77 @@ describe('PrismaProviderCredentialRepository', () => {
       ]);
     });
 
-    it('B3: truncates an over-cap answer to the bound, keeping the refusal in place', async () => {
-      const many = Array.from({ length: PROVIDER_AVAILABILITY_MAX_ROWS + 1 }, (_, i) => ({
-        scope: 'GLOBAL', projectId: null, repoId: null, providerId: `p${i}`,
+    it('B4: 2000 unrelated deepseek REPO keys cannot hide an applicable GLOBAL openrouter key', async () => {
+      const inventory = [
+        ...Array.from({ length: 2000 }, (_, i) => row({
+          id: `unrelated-${i}`, scope: 'REPO', scopeKey: `repo:unrelated-${i}`,
+          projectId: 'p1', repoId: `unrelated-${i}`, providerId: 'deepseek',
+        })),
+        row(),
+      ];
+      // Evaluate the query against the fixture rather than returning a pre-filtered mock answer.
+      // Inventory is already in provider order; honor filtering, projection and page boundaries.
+      type Branch = {
+        scope?: string; scopeKey?: string;
+        projectId?: { in: string[] }; repoId?: { in: string[] };
+      };
+      (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockImplementation(async (
+        { where, skip = 0, take }: { where: { disabledAt: null; OR: Branch[] }; skip?: number; take: number },
+      ) => inventory.filter((candidate) => candidate.disabledAt === where.disabledAt && where.OR.some((branch) =>
+        (branch.scope === undefined || branch.scope === candidate.scope) &&
+        (branch.scopeKey === undefined || branch.scopeKey === candidate.scopeKey) &&
+        (branch.projectId === undefined || branch.projectId.in.includes(candidate.projectId ?? '')) &&
+        (branch.repoId === undefined || branch.repoId.in.includes(candidate.repoId ?? '')),
+      )).slice(skip, skip + take).map(({ scope, projectId, repoId, providerId }) => ({ scope, projectId, repoId, providerId })));
+
+      await expect(repository.listActiveScopes({ projectIds: ['p1'], repoIds: ['requested'] })).resolves.toEqual([
+        { scope: 'GLOBAL', projectId: null, repoId: null, providerId: 'openrouter' },
+      ]);
+    });
+
+    it('B4: pages past 2000 applicable rows without dropping the last provider', async () => {
+      const many = Array.from({ length: PROVIDER_AVAILABILITY_PAGE_SIZE + 1 }, (_, i) => ({
+        scope: 'GLOBAL', projectId: null, repoId: null, providerId: `p${String(i).padStart(5, '0')}`,
       }));
-      (prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(many);
-      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const findMany = prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>;
+      findMany.mockImplementation(async ({ skip = 0, take }: { skip?: number; take: number }) => many.slice(skip, skip + take));
 
       const rows = await repository.listActiveScopes({ projectIds: ['p1'], repoIds: [] });
 
-      expect(rows).toHaveLength(PROVIDER_AVAILABILITY_MAX_ROWS);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(String(PROVIDER_AVAILABILITY_MAX_ROWS)));
+      expect(rows).toEqual(many);
+      expect(findMany).toHaveBeenCalledTimes(2);
+      expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        skip: PROVIDER_AVAILABILITY_PAGE_SIZE, take: PROVIDER_AVAILABILITY_PAGE_SIZE,
+      }));
+    });
+
+    it('B4: confirms the end after an exactly full availability page', async () => {
+      const many = Array.from({ length: PROVIDER_AVAILABILITY_PAGE_SIZE }, (_, i) => ({
+        scope: 'PROJECT', projectId: 'p1', repoId: null, providerId: `p${i}`,
+      }));
+      const findMany = prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>;
+      findMany.mockResolvedValueOnce(many).mockResolvedValueOnce([]);
+
+      await expect(repository.listActiveScopes({ projectIds: ['p1'], repoIds: [] })).resolves.toEqual(many);
+      expect(findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('B4: refuses an incomplete inventory at the paging safety bound', async () => {
+      const fullPage = Array.from({ length: PROVIDER_AVAILABILITY_PAGE_SIZE }, (_, i) => ({
+        scope: 'GLOBAL', projectId: null, repoId: null, providerId: `p${i}`,
+      }));
+      const findMany = prisma.client.providerCredential.findMany as ReturnType<typeof vi.fn>;
+      findMany.mockImplementation(async () => fullPage);
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      warn.mockClear();
+      try {
+        await expect(repository.listActiveScopes({ projectIds: ['p1'], repoIds: [] }))
+          .rejects.toThrow(/availability inventory exceeds/);
+        expect(findMany).toHaveBeenCalledTimes(PROVIDER_AVAILABILITY_MAX_PAGES);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused rather than truncated'));
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('B3: reads no row when the caller named no scope', async () => {

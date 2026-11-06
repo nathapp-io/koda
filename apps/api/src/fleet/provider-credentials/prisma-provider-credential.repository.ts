@@ -15,7 +15,8 @@ import {
 import { isRecordNotFound } from '../../common/utils/prisma-errors';
 import {
   GLOBAL_SCOPE_KEY,
-  PROVIDER_AVAILABILITY_MAX_ROWS,
+  PROVIDER_AVAILABILITY_MAX_PAGES,
+  PROVIDER_AVAILABILITY_PAGE_SIZE,
   type ActiveProviderScope,
   type ActiveProviderScopeQuery,
   type IProviderCredentialRepository,
@@ -126,31 +127,36 @@ export class PrismaProviderCredentialRepository
     const projectIds = [...query.projectIds];
     const repoIds = [...query.repoIds];
     if (projectIds.length === 0 && repoIds.length === 0) return [];
-    const rows = await this.prisma.client.providerCredential.findMany({
-      where: {
-        disabledAt: null,
-        OR: [
-          { scopeKey: GLOBAL_SCOPE_KEY },
-          { projectId: { in: projectIds } },
-          { repoId: { in: repoIds } },
-        ],
-      },
-      select: { scope: true, projectId: true, repoId: true, providerId: true },
-      orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
-      // One row per scope and provider, so this is bounded by the caller's scopes times their providers.
-      take: PROVIDER_AVAILABILITY_MAX_ROWS + 1,
-    });
-    if (rows.length > PROVIDER_AVAILABILITY_MAX_ROWS) {
-      // Truncating under-reports what the vault can serve, which only keeps a local credential refusal
-      // in place; a caller that reaches this needs its scopes narrowed, not a bigger read.
-      this.logger.warn(`Provider availability read exceeded ${PROVIDER_AVAILABILITY_MAX_ROWS} rows for ${projectIds.length} projects and ${repoIds.length} repos; the answer is truncated`);
+    const rows: ActiveProviderScope[] = [];
+    // Like the board read below, this is a derived snapshot with a total page order. Concurrent
+    // writes may shift an offset boundary; the next request answers the settled inventory.
+    for (let page = 0; page < PROVIDER_AVAILABILITY_MAX_PAGES; page += 1) {
+      const batch = await this.prisma.client.providerCredential.findMany({
+        where: {
+          disabledAt: null,
+          OR: [
+            { scopeKey: GLOBAL_SCOPE_KEY },
+            // REPO rows also carry projectId, but only the requested repos apply to this read.
+            { scope: 'PROJECT', projectId: { in: projectIds } },
+            { scope: 'REPO', repoId: { in: repoIds } },
+          ],
+        },
+        select: { scope: true, projectId: true, repoId: true, providerId: true },
+        orderBy: PROVIDER_CREDENTIAL_ORDER_BY,
+        skip: page * PROVIDER_AVAILABILITY_PAGE_SIZE,
+        take: PROVIDER_AVAILABILITY_PAGE_SIZE,
+      });
+      for (const row of batch) rows.push({
+        scope: row.scope as ProviderCredentialScope,
+        projectId: row.projectId,
+        repoId: row.repoId,
+        providerId: row.providerId,
+      });
+      if (batch.length < PROVIDER_AVAILABILITY_PAGE_SIZE) return rows;
     }
-    return rows.slice(0, PROVIDER_AVAILABILITY_MAX_ROWS).map((row) => ({
-      scope: row.scope as ProviderCredentialScope,
-      projectId: row.projectId,
-      repoId: row.repoId,
-      providerId: row.providerId,
-    }));
+    const cap = PROVIDER_AVAILABILITY_MAX_PAGES * PROVIDER_AVAILABILITY_PAGE_SIZE;
+    this.logger.warn(`Provider availability read exceeded ${cap} rows for ${projectIds.length} projects and ${repoIds.length} repos; the answer is refused rather than truncated`);
+    throw new Error(`Provider credential availability inventory exceeds ${cap} rows`);
   }
 
   async listGlobal(page: IPageOption): Promise<IPageResult<ProviderCredential>> {
