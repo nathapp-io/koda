@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T06:09:42.834Z",
+  "updatedAt": "2026-11-06T06:48:57.479Z",
   "userStories": [
     {
       "id": "US-001",
@@ -543,14 +543,17 @@
         "US-004",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two thin routes and their registered variants mirror existing project credential gates and delegate to upstream thread methods; human-only ticking and project permissions mandate the security override."
+        "reasoning": "Two thin routes and their registered variants mirror existing project credential gates and delegate to upstream thread methods; human-only ticking and project permissions mandate the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/provider-credentials/project-provider-credentials.controller.ts",
@@ -587,7 +590,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9c4f6b7e8ebd2fd6ec6819e2e7cc5d713c592a01"
     },
     {
       "id": "US-009",
