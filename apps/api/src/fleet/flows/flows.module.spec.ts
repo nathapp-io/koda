@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Module } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import { AuditLogModule } from '../../audit/audit-log.module';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -12,6 +13,11 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { FleetReposModule } from '../repos/fleet-repos.module';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { ThreadsModule } from '../threads/threads.module';
+import { ProjectAccessModule } from '../../projects/project-access.module';
+import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
+import { ProjectAccessService } from '../../projects/project-access.service';
+import { RequiresGuard } from '../../permissions/requires.guard';
+import { PermissionService } from '../../permissions/permission.service';
 import { ThreadsService } from '../threads/threads.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from '../../approvals/approval-command.registry';
 import { FleetFlowStartCommand } from './fleet-flow-start.command';
@@ -21,8 +27,12 @@ import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
 
 @Module({
-  providers: [ApprovalCommandRegistry, { provide: ApprovalAskService, useValue: { open: vi.fn(), close: vi.fn() } }],
-  exports: [ApprovalCommandRegistry, ApprovalAskService],
+  providers: [
+    ApprovalCommandRegistry,
+    { provide: ApprovalAskService, useValue: { open: vi.fn(), close: vi.fn() } },
+    { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
+  ],
+  exports: [ApprovalCommandRegistry, ApprovalAskService, ApprovalRouteGate],
 })
 class StubApprovalEngineModule {}
 @Module({ providers: [{ provide: AuditRecorder, useValue: { record: vi.fn() } }], exports: [AuditRecorder] })
@@ -40,7 +50,22 @@ class StubFleetReposModule {}
 })
 class StubThreadsModule {}
 const stubTxManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
-@Module({ providers: [{ provide: TRANSACTION_MANAGER, useValue: stubTxManager }], exports: [TRANSACTION_MANAGER] })
+@Module({
+  providers: [
+    { provide: ProjectAccessService, useValue: {} },
+    { provide: ProjectMembershipGuard, useValue: {} },
+    { provide: PermissionService, useValue: {} },
+  ],
+  exports: [ProjectAccessService, ProjectMembershipGuard, PermissionService],
+})
+class StubProjectAccessModule {}
+@Module({
+  providers: [
+    { provide: TRANSACTION_MANAGER, useValue: stubTxManager },
+    { provide: PrismaService, useValue: { client: {} } },
+  ],
+  exports: [TRANSACTION_MANAGER, PrismaService],
+})
 class StubPrismaModule {}
 
 describe('FlowsModule', () => {
@@ -73,6 +98,10 @@ describe('FlowsModule', () => {
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)
       .overrideModule(FleetReposModule).useModule(StubFleetReposModule)
       .overrideModule(ThreadsModule).useModule(StubThreadsModule)
+      .overrideModule(ProjectAccessModule).useModule(StubProjectAccessModule)
+      .overrideProvider(ProjectMembershipGuard).useValue({})
+      .overrideProvider(ProjectAccessService).useValue({})
+      .overrideProvider(RequiresGuard).useValue({})
       .overrideModule(PrismaModule).useModule(StubPrismaModule)
       .overrideProvider(PrismaFleetFlowRepository)
       .useValue({ lockById: vi.fn(), findById: vi.fn(), approve: vi.fn(), stop: vi.fn() })
