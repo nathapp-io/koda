@@ -116,7 +116,7 @@ describe('AGENT dispatch input', () => {
     expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, name: 'plugin:spec-reviewer' } }), 'main').agentInput?.name)
       .toBe('plugin:spec-reviewer');
   });
-  it.each(['', '   \n', 't'.repeat(16_385)])('rejects invalid agent task %#', (task) => {
+  it.each(['', '   \n', 't'.repeat(16_385), 'review\u0000this'])('rejects invalid agent task %#', (task) => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main'))
       .toThrow(expect.objectContaining({ args: { reason: 'agent.task' } }));
   });
@@ -124,7 +124,11 @@ describe('AGENT dispatch input', () => {
     const task = 't'.repeat(16_384);
     expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main').agentInput?.task).toBe(task);
   });
-  it.each(['fast model', '', 'm'.repeat(201)])('rejects invalid agent model %#', (model) => {
+  it('accepts a multi-line task unchanged (only U+0000 is refused as text)', () => {
+    const task = 'Review this:\n\t1. the spec\n2. the PRD — é';
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main').agentInput?.task).toBe(task);
+  });
+  it.each(['fast model', '', 'm'.repeat(201), 'model\u0000x'])('rejects invalid agent model %#', (model) => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model } }), 'main'))
       .toThrow(expect.objectContaining({ args: { reason: 'agent.model' } }));
   });
@@ -136,7 +140,7 @@ describe('AGENT dispatch input', () => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: 'acp:bogus/gpt-5.4' } } }), 'main'))
       .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
   });
-  it.each(['not-a-model', 'acp:bogus', 'openai/gpt 5', 'acp:claude [high]'])('rejects model alias target %s', (target) => {
+  it.each(['not-a-model', 'acp:bogus', 'openai/gpt 5', 'acp:claude [high]', 'openai/gpt\u00005.4'])('rejects model alias target %s', (target) => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: target } } }), 'main'))
       .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
   });

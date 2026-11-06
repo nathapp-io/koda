@@ -9,8 +9,16 @@ export const AGENT_MODEL_ALIAS_TARGET_RE = /^(?:(?!acp:)[^\s/\x5B\x5D]+\/[^\s/\x
 export const AGENT_TIMEOUT_MIN_SEC = 60;
 export const AGENT_TIMEOUT_MAX_SEC = 86_400;
 
+/**
+ * Every agent text field is stored in a jsonb column, and PostgreSQL answers SQLSTATE 22P05 ("unsupported Unicode
+ * escape sequence") for U+0000 — a database error at insert, not a validation response. The config-edit
+ * `content must be text` rule is the precedent. Kept as a string test rather than a `[^\u0000]` character class so the
+ * skip is visible here, and so the mirrored grammar above stays exactly nax's.
+ */
+export const hasNul = (value: string): boolean => value.includes('\u0000');
+
 export function isModelAliasTarget(value: unknown): value is string {
-  return typeof value === 'string' && AGENT_MODEL_ALIAS_TARGET_RE.test(value);
+  return typeof value === 'string' && !hasNul(value) && AGENT_MODEL_ALIAS_TARGET_RE.test(value);
 }
 
 export interface AgentJobInput {

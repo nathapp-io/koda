@@ -83,6 +83,12 @@ describeIntegration('fleet jobs (PG)', () => {
     await dispatch('dev', body).expect(400);
   });
 
+  it('answers 400, not a database error, for agent text PostgreSQL cannot store (US-003 F1)', async () => {
+    // jsonb refuses U+0000 (SQLSTATE 22P05), so this dispatch must be refused as input and never reach the insert.
+    await dispatch('dev', { command: 'AGENT', feature: 'agent-nul', agent: { name: 'spec-reviewer', task: 'review\u0000this' } }).expect(400);
+    expect(await prisma.fleetJob.count({ where: { feature: 'agent-nul' } })).toBe(0);
+  });
+
   it('refuses a repo of another project (404) and viewers/outsiders (403)', async () => {
     await dispatch('dev', { feature: 'x', repoId: world.foreignRepoId }).expect(404);
     await dispatch('viewer', { feature: 'x' }).expect(403);

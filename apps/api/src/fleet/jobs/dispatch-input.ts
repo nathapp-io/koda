@@ -3,7 +3,7 @@ import { PROFILE_NAME_RE } from '../common/capabilities';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
 import { REVIEW_FEATURE_PREFIX, reviewFeature } from '../common/review-jobs';
 import type { BashMode } from '../common/protocol';
-import { AGENT_MODEL_ALIAS_KEY_RE, AGENT_MODEL_ALIAS_MAX_ENTRIES, AGENT_MODEL_MAX_LENGTH, AGENT_NAME_RE, AGENT_TASK_MAX_LENGTH, AGENT_TIMEOUT_MAX_SEC, AGENT_TIMEOUT_MIN_SEC, isModelAliasTarget } from '../common/agent-jobs';
+import { AGENT_MODEL_ALIAS_KEY_RE, AGENT_MODEL_ALIAS_MAX_ENTRIES, AGENT_MODEL_MAX_LENGTH, AGENT_NAME_RE, AGENT_TASK_MAX_LENGTH, AGENT_TIMEOUT_MAX_SEC, AGENT_TIMEOUT_MIN_SEC, hasNul, isModelAliasTarget } from '../common/agent-jobs';
 import type { AgentJobInput } from '../common/agent-jobs';
 import type { NewFleetJob } from './domain/fleet-job.domain';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
@@ -35,8 +35,8 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
     if (typeof agent !== 'object' || agent === null || Array.isArray(agent)) fail('agent.name');
     const input = agent as Record<string, unknown>;
     if (typeof input.name !== 'string' || !AGENT_NAME_RE.test(input.name) || input.name.includes('..')) fail('agent.name');
-    if (typeof input.task !== 'string' || input.task.length < 1 || input.task.length > AGENT_TASK_MAX_LENGTH || !/\S/.test(input.task)) fail('agent.task');
-    if (input.model !== undefined && (typeof input.model !== 'string' || input.model.length < 1 || input.model.length > AGENT_MODEL_MAX_LENGTH || /\s/.test(input.model))) fail('agent.model');
+    if (typeof input.task !== 'string' || input.task.length < 1 || input.task.length > AGENT_TASK_MAX_LENGTH || !/\S/.test(input.task) || hasNul(input.task)) fail('agent.task');
+    if (input.model !== undefined && (typeof input.model !== 'string' || input.model.length < 1 || input.model.length > AGENT_MODEL_MAX_LENGTH || /\s/.test(input.model) || hasNul(input.model))) fail('agent.model');
     if (input.modelAliases !== undefined) {
       const aliases = input.modelAliases;
       if (typeof aliases !== 'object' || aliases === null || Array.isArray(aliases)) fail('agent.modelAliases');

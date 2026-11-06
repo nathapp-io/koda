@@ -29,9 +29,11 @@ const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 60_000 });
 
 const INPUT = { name: 'spec-reviewer', task: 'x' };
-const RESULT: AgentJobResult = {
+// `satisfies` rather than an annotation: the fixture is also written straight into a jsonb column, and an interface
+// type (`AgentJobResult`) has no implicit index signature, so Prisma would refuse it as `InputJsonValue`.
+const RESULT = {
   status: 'completed', output: 'done', truncated: false, deniedAsks: [], deniedAsksTruncated: false, costUsd: '0.0123',
-};
+} satisfies AgentJobResult;
 
 describeIntegration('fleet AGENT job persistence (PG, US-003)', () => {
   // The repository writes through a client of its own: the app's client refuses a write with no action context, and

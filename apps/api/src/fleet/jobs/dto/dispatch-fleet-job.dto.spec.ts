@@ -48,6 +48,16 @@ describe('DispatchFleetJobDto', () => {
     const agentError = errors.find((error) => error.property === 'agent');
     expect(agentError?.children?.find((error) => error.property === 'task')).toBeDefined();
   });
+  it.each([
+    ['task', { name: 'spec-reviewer', task: 'review\u0000this' }, 'task'],
+    ['model', { name: 'spec-reviewer', task: 'Review', model: 'model\u0000x' }, 'model'],
+    ['model alias target', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'openai/gpt\u00005.4' } }, 'modelAliases'],
+  ] as const)('rejects a U+0000 in the nested agent %s', async (_case, agent, property) => {
+    // PostgreSQL jsonb refuses U+0000 (SQLSTATE 22P05), so the column must never be asked to store it.
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === property)).toBeDefined();
+  });
   it('accepts FIX as a command', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'FIX', feature: undefined, prNumber: 7 })));
     expect(errors).toEqual([]);

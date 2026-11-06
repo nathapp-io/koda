@@ -32,4 +32,22 @@ describe('dispatch normalization through the agent persistence boundary', () => 
     // US-003: the column exists now, and a command with no agent input stores SQL null rather than JSON null.
     expect(args.data.agentInput).toBe(Prisma.DbNull);
   });
+
+  it.each([
+    ['a task', { name: 'spec-reviewer', task: 'review\u0000this' }],
+    ['a model', { name: 'spec-reviewer', task: 'Review', model: 'model\u0000x' }],
+    ['a model alias target', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'openai/gpt\u00005.4' } }],
+  ] as const)('refuses agent text PostgreSQL cannot store, in %s, before any insert', async (_case, agent) => {
+    // jsonb answers SQLSTATE 22P05 ("unsupported Unicode escape sequence") for U+0000, so a dispatch that reaches
+    // createJob with one is a 500, not a validation response. The two steps a dispatch takes are normalize → insert.
+    const create = vi.fn(async () => row);
+    const repository = new PrismaFleetJobRepository({ client: { fleetJob: { create } } } as never);
+    const dispatch = async (): Promise<void> => {
+      const normalized = normalizeDispatch({ repoId: 'r1', command: 'AGENT', feature: 'feature-a', maxCostUsd: 1, agent } as DispatchFleetJobDto, 'main');
+      await repository.createJob({ ...normalized, projectId: 'p1', requestedById: 'u1' });
+    };
+
+    await expect(dispatch()).rejects.toMatchObject({ prefix: 'fleet.dispatchInput' });
+    expect(create).not.toHaveBeenCalled();
+  });
 });
