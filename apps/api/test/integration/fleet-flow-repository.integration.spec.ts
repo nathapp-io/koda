@@ -90,10 +90,13 @@ describeDb('PrismaFleetFlowRepository', () => {
     expect(page.records.findIndex(({ id }) => id === newer.id)).toBeLessThan(page.records.findIndex(({ id }) => id === older.id));
     expect(page.records.every(({ projectId: id }) => id === projectId)).toBe(true);
   });
-  it('AC-13 cascades repo deletion to flows and features', async () => {
-    const flow = await createFlow({ features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
-    await prisma.fleetRepo.delete({ where: { id: repoId } });
+  it('AC-13 cascades repo deletion to flows and features without breaking shared fixtures', async () => {
+    const ownRepo = await seedFleetBase(prisma);
+    const flow = await createFlow({ repoId: ownRepo.repoId, projectId: ownRepo.projectId, features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
+    await prisma.fleetRepo.delete({ where: { id: ownRepo.repoId } });
     expect(await prisma.fleetFlow.findUnique({ where: { id: flow.id } })).toBeNull();
     expect(await prisma.fleetFlowFeature.count({ where: { flowId: flow.id } })).toBe(0);
+    expect(await prisma.fleetRepo.findUnique({ where: { id: repoId } })).not.toBeNull();
+    expect((await createFlow()).repoId).toBe(repoId);
   });
 });

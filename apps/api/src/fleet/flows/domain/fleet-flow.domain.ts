@@ -61,7 +61,7 @@ export interface CreateFleetFlow {
   supervisorRole: string;
   costCapUsd: string;
   approvalMode?: FleetFlowApprovalMode | null;
-  features: Array<Pick<FleetFlowFeatureRecord, 'position' | 'feature' | 'specPath' | 'dependsOn'>>;
+  features: Array<Pick<FleetFlowFeatureRecord, 'feature' | 'specPath' | 'dependsOn'>>;
 }
 
 export class FlowTransitionError extends Error {
