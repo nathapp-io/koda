@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T15:49:16.509Z",
+  "updatedAt": "2026-11-06T16:03:47.993Z",
   "userStories": [
     {
       "id": "US-001",
@@ -670,14 +670,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A bounded file reader and pure result fitter reuse existing tail/cost helpers; Unicode and serialized escaping are the principal algorithmic risks."
+        "reasoning": "A bounded file reader and pure result fitter reuse existing tail/cost helpers; Unicode and serialized escaping are the principal algorithmic risks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/config-job/result-fit.ts",
@@ -698,7 +701,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bafc284fe66ef63dadfab81bd0678679bd6048b8"
     },
     {
       "id": "US-010",
