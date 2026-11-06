@@ -159,7 +159,7 @@ describe('AGENT assignment (fleet-agent-job US-007)', () => {
   });
   test('AC-4: an AGENT assign without an agent block is refused', () => {
     const { agent: _agent, ...payload } = agentPayload();
-    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'invalid agent' });
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'agent' });
   });
   test.each([
     ['a name with ..', { name: '../x', task: 'Review' }],
@@ -167,13 +167,14 @@ describe('AGENT assignment (fleet-agent-job US-007)', () => {
     ['a modelAliases value holding a space', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'acp:claude high' } }],
     ['timeoutSec 59', { name: 'spec-reviewer', task: 'Review', timeoutSec: 59 }],
   ])('AC-5: refuses an agent block with %s', (_label, value) => {
-    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'invalid agent' });
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
   });
   test('AC-6: an agent block on a RUN is refused', () => {
-    expect(parseAssign(cmd({ ...assignFor('RUN'), agent }))).toEqual({ ok: false, detail: 'invalid agent' });
+    expect(parseAssign(cmd({ ...assignFor('RUN'), agent }))).toEqual({ ok: false, detail: 'agent' });
   });
   test('AC-7: an AGENT assign demands raw bash', () => {
-    expect(parseAssign(cmd(agentPayload({ bashMode: 'gated' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'gated' })))).toEqual({ ok: false, detail: 'bashMode' });
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'escalate' })))).toEqual({ ok: false, detail: 'bashMode' });
   });
   test('AC-13: an otherwise valid RUN assign carries no agent key and keeps its fields', () => {
     const run = assignFor('RUN', { ref: 'feat/x', profiles: ['fast', 'strict'], bashMode: 'raw' });
@@ -207,15 +208,22 @@ describe('AGENT assignment (fleet-agent-job US-007)', () => {
     ['timeoutSec 60.5', { name: 'spec-reviewer', task: 'Review', timeoutSec: 60.5 }],
     ['timeoutSec as a string', { name: 'spec-reviewer', task: 'Review', timeoutSec: '600' }],
   ])('refuses %s', (_label, value) => {
-    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'invalid agent' });
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
   });
   test.each([null, 'spec-reviewer', ['spec-reviewer']])('refuses an agent block of %p', (value) => {
-    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'invalid agent' });
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
   });
   test('refuses an agent block on a PLAN and on a config job', () => {
     for (const command of ['PLAN', 'CONFIG_EDIT'] as const) {
-      expect(parseAssign(cmd({ ...assignFor(command), agent }))).toEqual({ ok: false, detail: 'invalid agent' });
+      expect(parseAssign(cmd({ ...assignFor(command), agent }))).toEqual({ ok: false, detail: 'agent' });
     }
+  });
+  test('the unprefixed agent/bashMode details are AGENT-only: other kinds keep their legacy details', () => {
+    expect(parseAssign(cmd(assignFor('PLAN', { bashMode: 'gated' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('CONFIG_DRIFT'), bashMode: 'gated' }))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('RUN'), bashMode: 'yolo' } as never))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'yolo' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('RUN'), review: { prNumber: 1, botLogin: 'nope' } }))).toEqual({ ok: false, detail: 'invalid review' });
   });
   test('an AGENT assign still refuses a planFrom, a review block and a thread block', () => {
     expect(parseAssign(cmd(agentPayload({ planFrom: 'docs/x.md' })))).toEqual({ ok: false, detail: 'invalid planFrom' });

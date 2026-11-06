@@ -15,6 +15,13 @@ const THREAD_TITLE_MAX_CHARS = 200;
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const bad = (what: string): ParsedAssign => ({ ok: false, detail: `invalid ${what}` });
+/**
+ * fleet-agent-job US-007 AC-4…AC-7 name the exact detail an AGENT refusal carries — `agent` for a bad or misplaced
+ * agent block, `bashMode` for a non-raw mode — so those two answer without `bad`'s `invalid ` prefix. Every other
+ * kind keeps the legacy prefixed details (`invalid bashMode` included).
+ */
+const badAgent = (): ParsedAssign => ({ ok: false, detail: 'agent' });
+const badAgentBashMode = (): ParsedAssign => ({ ok: false, detail: 'bashMode' });
 const text = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
 const hasControl = (v: string): boolean => [...v].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127);
 const plain = (v: unknown, max: number): v is string => text(v, max) && !hasControl(v);
@@ -225,7 +232,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (!Array.isArray(profiles) || profiles.length !== 0) return bad('profiles');
   } else if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread || isReview || isAgent) && p['bashMode'] !== 'raw')) return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode'])) return bad('bashMode');
+  // AC-7: an AGENT refuses a relay mode with the exact `bashMode` detail; the mode must still be a known one.
+  if (isAgent && p['bashMode'] !== 'raw') return badAgentBashMode();
+  if ((isPlan || isConfig || isThread || isReview) && p['bashMode'] !== 'raw') return bad('bashMode');
   const rawReview = p['review'];
   let reviewDecisions: ReviewDecision[] | undefined;
   let reviewRulings: NonNullable<AssignPayload['review']>['rulings'];
@@ -252,9 +262,9 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   let agent: AgentAssign | undefined;
   if (isAgent) {
     const cleaned = cleanAgentAssign(rawAgent);
-    if (cleaned === null) return bad('agent');
+    if (cleaned === null) return badAgent();
     agent = cleaned;
-  } else if (rawAgent !== undefined) return bad('agent');
+  } else if (rawAgent !== undefined) return badAgent();
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
