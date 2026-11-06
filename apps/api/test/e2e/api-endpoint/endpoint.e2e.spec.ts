@@ -6360,6 +6360,65 @@ describeIntegration('VCS manual issue sync lifecycle', () => {
   });
 });
 
+describeIntegration('fleet AGENT dispatch route (US-004)', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let gitlabRepoId: string;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const base = '/api/projects/web/fleet/jobs';
+  const agentInput = { name: 'spec-reviewer', task: 'Review' };
+  const payload = (feature: string, over: Record<string, unknown> = {}) => ({
+    repoId: world.repoId, command: 'AGENT', feature, maxCostUsd: 1, agent: agentInput, ...over,
+  });
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    const gitlab = await db.fleetRepo.create({ data: {
+      projectId: world.projectId, provider: 'gitlab', owner: 'acme', name: 'gitlab-app', defaultBranch: 'main', createdById: world.ids.root,
+    } });
+    gitlabRepoId = gitlab.id;
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+
+  it('US-004 AC-1/5/6: queues AGENT, rejects active duplicate, and returns agent detail', async () => {
+    const response = await request(server()).post(base).set(auth(world.tokens.root)).send(payload('flow-a')).expect(201);
+    const result = data<{ job: { id: string; command: string; state: string; agent: unknown; agentResult: unknown } }>(response);
+    expect(result.job).toMatchObject({ command: 'AGENT', state: 'QUEUED', agent: agentInput, agentResult: null });
+    const duplicate = await request(server()).post(base).set(auth(world.tokens.root)).send(payload('flow-a')).expect(409);
+    expect(duplicate.body.message).toContain(result.job.id);
+    const detail = data<{ agent: unknown }>(await request(server()).get(`${base}/${result.job.id}`).set(auth(world.tokens.root)).expect(200));
+    expect(detail.agent).toEqual(agentInput);
+  });
+
+  it('US-004 AC-2/4/9: applies provider and required-agent dispatch validation', async () => {
+    const gitlabRefusal = await request(server()).post(base).set(auth(world.tokens.root))
+      .send(payload('flow-gitlab', { repoId: gitlabRepoId })).expect(422);
+    expect(gitlabRefusal.body.message).toContain('agent is GitHub-only');
+    const missingAgent = await request(server()).post(base).set(auth(world.tokens.root))
+      .send(payload('flow-no-agent', { agent: undefined })).expect(400);
+    expect(missingAgent.body.message).toContain('agent required for AGENT');
+    for (const [command, reason] of [['REVIEW', 'review is GitHub-only'], ['FIX', 'fix is GitHub-only']] as const) {
+      const response = await request(server()).post(base).set(auth(world.tokens.root)).send({
+        repoId: gitlabRepoId, command, feature: `flow-${command.toLowerCase()}`, maxCostUsd: 1,
+      }).expect(422);
+      expect(response.body.message).toContain(reason);
+    }
+    expect(await db.fleetJob.count({ where: { repoId: gitlabRepoId } })).toBe(0);
+  });
+
+  it('US-004 AC-3: refuses a project member without fleet.job.dispatch', async () => {
+    await request(server()).post(base).set(auth(world.tokens.viewer)).send(payload('flow-no-permission')).expect(403);
+    expect(await db.fleetJob.count({ where: { feature: 'flow-no-permission' } })).toBe(0);
+  });
+});
+
 /** Cancel/unlink keep their public statuses while policy-controlled agent writes wait. */
 describeIntegration('fleet cancel and unlink approval lifecycle', () => {
   let app: NathApplication;

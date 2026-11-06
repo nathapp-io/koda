@@ -38,8 +38,9 @@ import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.servi
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
 class ReviewProviderException extends ValidationAppException {
-  constructor(command: 'REVIEW' | 'FIX') {
-    super({ reason: `${command === FleetJobKind.FIX ? 'fix' : 'review'} is GitHub-only` }, 'fleet.dispatchInput');
+  constructor(command: 'REVIEW' | 'FIX' | 'AGENT') {
+    const label = command === FleetJobKind.FIX ? 'fix' : command === FleetJobKind.AGENT ? 'agent' : 'review';
+    super({ reason: `${label} is GitHub-only` }, 'fleet.dispatchInput');
   }
 
   override get httpStatus(): number {
@@ -95,7 +96,7 @@ export class FleetJobsService {
   async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX) && repo.provider !== 'github') {
+    if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX || dto.command === FleetJobKind.AGENT) && repo.provider !== 'github') {
       throw new ReviewProviderException(dto.command);
     }
     const input = normalizeDispatch(dto, repo.defaultBranch);
