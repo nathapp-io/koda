@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T04:40:12.319Z",
+  "updatedAt": "2026-11-06T04:54:50.479Z",
   "userStories": [
     {
       "id": "US-001",
@@ -178,14 +178,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One aggregate repository reuses AbstractPrismaRepository, parameterized row locks, pagination and the upstream pure state rules; standard TDD with real Postgres verifies atomic writes without a new persistence abstraction."
+        "reasoning": "One aggregate repository reuses AbstractPrismaRepository, parameterized row locks, pagination and the upstream pure state rules; standard TDD with real Postgres verifies atomic writes without a new persistence abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/provider-credentials/prisma-provider-credential.repository.ts",
@@ -202,7 +205,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "18d747855009e886deede97078a0adced1a79e62"
     },
     {
       "id": "US-004",
