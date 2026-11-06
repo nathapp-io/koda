@@ -83,6 +83,8 @@ describeDb('PrismaFleetFlowRepository', () => {
   });
   it('AC-12 pages project flows newest first and filters other projects', async () => {
     const older = await createFlow(); await new Promise((resolve) => setTimeout(resolve, 5)); const newer = await createFlow();
+    const otherProject = await seedFleetBase(prisma);
+    await createFlow({ projectId: otherProject.projectId, repoId: otherProject.repoId });
     const page = await repo.findPage({ projectId }, { current: 1, size: 20 } as never);
     expect(page.records.map(({ id }) => id)).toEqual(expect.arrayContaining([older.id, newer.id]));
     expect(page.records.findIndex(({ id }) => id === newer.id)).toBeLessThan(page.records.findIndex(({ id }) => id === older.id));
