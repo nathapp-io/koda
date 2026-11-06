@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T15:04:50.384Z",
+  "updatedAt": "2026-11-06T15:34:03.476Z",
   "userStories": [
     {
       "id": "US-001",
@@ -513,14 +513,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module runner acceptance/restart behavior includes untrusted command data and credential-cache matching, triggering strict security TDD."
+        "reasoning": "Cross-module runner acceptance/restart behavior includes untrusted command data and credential-cache matching, triggering strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/capabilities/nax-probe.ts",
@@ -556,7 +559,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dfaf1a5d3061fc1e95cd147847aa115554b02fee"
     },
     {
       "id": "US-008",
