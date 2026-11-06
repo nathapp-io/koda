@@ -52,8 +52,9 @@ describeDb('thread flow pre-approval', () => {
     } });
   }
 
-  const auditRows = (threadId: string) => prisma.auditEntry.findMany({
-    where: { key: 'fleet.thread.preapprove', resourceType: 'thread', resourceId: threadId },
+  const threadAuditRows = (threadId: string) => prisma.auditEntry.findMany({
+    where: { resourceType: 'thread', resourceId: threadId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 
   it('AC-1/2: persists, maps and audits the tick', async () => {
@@ -62,7 +63,7 @@ describeDb('thread flow pre-approval', () => {
     const result = await service.get(projectId, row.id);
     expect(result.preApproval).toMatchObject({ userId: 'preapproval-user', costCapUsd: '30' });
     expect(Date.parse(result.preApproval?.at ?? '')).not.toBeNaN();
-    const entries = await auditRows(row.id);
+    const entries = await threadAuditRows(row.id);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ key: 'fleet.thread.preapprove', resourceType: 'thread', resourceId: row.id, projectId });
   });
@@ -82,7 +83,7 @@ describeDb('thread flow pre-approval', () => {
     const row = await thread({ status: 'ARCHIVED', archivedAt: new Date() });
     await expect(withTestActor({ type: 'USER', id: 'preapproval-user' }, () => service.setPreApproval(projectId, row.id, 'preapproval-user', '30')))
       .rejects.toMatchObject({ prefix: 'threads.archived' });
-    expect(await auditRows(row.id)).toHaveLength(0);
+    expect(await threadAuditRows(row.id)).toHaveLength(0);
   });
 
   it('AC-4/5/6: audits clear exactly once; no-op clear and consume add no audit', async () => {
@@ -91,19 +92,21 @@ describeDb('thread flow pre-approval', () => {
       expect(await service.clearPreApproval(projectId, row.id)).toBe(true);
     });
     expect((await service.get(projectId, row.id)).preApproval).toBeNull();
-    const afterClear = await auditRows(row.id);
+    const afterClear = await threadAuditRows(row.id);
     expect(afterClear).toHaveLength(1);
     expect(afterClear[0]).toMatchObject({ key: 'fleet.thread.preapprove', resourceType: 'thread', resourceId: row.id, projectId });
+    const beforeNoopClear = await threadAuditRows(row.id);
     await withTestActor({ type: 'USER', id: 'preapproval-user' }, async () => {
       expect(await service.clearPreApproval(projectId, row.id)).toBe(false);
     });
-    expect(await auditRows(row.id)).toHaveLength(1);
+    expect(await threadAuditRows(row.id)).toEqual(beforeNoopClear);
     await withTestActor({ type: 'USER', id: 'preapproval-user' }, async () => {
       await prisma.chatThread.update({ where: { id: row.id }, data: { preApproval: { userId: 'preapproval-user', at: new Date().toISOString(), costCapUsd: '30' } } });
-      await txManager.run(() => service.consumePreApproval(row.id));
     });
+    const beforeConsume = await threadAuditRows(row.id);
+    await withTestActor({ type: 'USER', id: 'preapproval-user' }, () => txManager.run(() => service.consumePreApproval(row.id)));
     expect((await service.get(projectId, row.id)).preApproval).toBeNull();
-    expect(await auditRows(row.id)).toHaveLength(1);
+    expect(await threadAuditRows(row.id)).toEqual(beforeConsume);
   });
 
   it('AC-7/10/11/15: flow lock returns the tick and applies guard precedence', async () => {
