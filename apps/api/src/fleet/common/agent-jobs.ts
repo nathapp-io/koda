@@ -5,7 +5,7 @@ export const AGENT_MODEL_MAX_LENGTH = 200;
 export const AGENT_MODEL_ALIAS_MAX_ENTRIES = 8;
 export const AGENT_MODEL_ALIAS_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** Mirrors nax's schemas-model-alias target grammar. */
-export const AGENT_MODEL_ALIAS_TARGET_RE = /^(?:[^\s/\x5B\x5D]+\/[^\s/\x5B\x5D]+(?:\[[^\s\x5B\x5D]+\])?|acp:(?:claude|codex|cursor)(?:\/[^\s/\x5B\x5D]+)?(?:\[[^\s\x5B\x5D]+\])?)$/;
+export const AGENT_MODEL_ALIAS_TARGET_RE = /^(?:(?!acp:)[^\s/\x5B\x5D]+\/[^\s/\x5B\x5D]+(?:\[[^\s\x5B\x5D]+\])?|acp:(?:claude|codex|cursor)(?:\/[^\s/\x5B\x5D]+)?(?:\[[^\s\x5B\x5D]+\])?)$/;
 export const AGENT_TIMEOUT_MIN_SEC = 60;
 export const AGENT_TIMEOUT_MAX_SEC = 86_400;
 

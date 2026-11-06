@@ -1,4 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { isModelAliasTarget } from '../common/agent-jobs';
 import { GIT_REF_RE, normalizeDispatch } from './dispatch-input';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 
@@ -129,6 +130,11 @@ describe('AGENT dispatch input', () => {
   });
   it('accepts an ACP model unchanged', () => {
     expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model: 'acp:claude' } }), 'main').agentInput?.model).toBe('acp:claude');
+  });
+  it('does not treat an unknown ACP provider as a generic provider/model target', () => {
+    expect(isModelAliasTarget('acp:bogus/gpt-5.4')).toBe(false);
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: 'acp:bogus/gpt-5.4' } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
   });
   it.each(['not-a-model', 'acp:bogus', 'openai/gpt 5', 'acp:claude [high]'])('rejects model alias target %s', (target) => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: target } } }), 'main'))

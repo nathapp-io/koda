@@ -27,6 +27,20 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review' } })));
     expect(errors).toEqual([]);
   });
+  it.each(['fast model', ' fast', 'fast '])('rejects nested agent model containing whitespace: %p', async (model) => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review', model },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'model')).toBeDefined();
+  });
+  it('rejects unknown ACP providers in nested model aliases', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'acp:bogus/model' } },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'modelAliases')).toBeDefined();
+  });
   it('reports an oversized nested agent task on agent.task', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
       command: 'AGENT', agent: { name: 'spec-reviewer', task: 't'.repeat(16_385) },
