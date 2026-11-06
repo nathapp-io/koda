@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T14:12:14.013Z",
+  "updatedAt": "2026-11-06T14:51:30.086Z",
   "userStories": [
     {
       "id": "US-001",
@@ -350,14 +350,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Read-only credential grants, purpose/cache isolation and runner fencing are security-critical and cross broker, sync, placement and capability validation."
+        "reasoning": "Read-only credential grants, purpose/cache isolation and runner fencing are security-critical and cross broker, sync, placement and capability validation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/placement-rules.ts",
@@ -400,7 +403,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5d111731043cd909b6f479f66dfda6524ac80afd"
     },
     {
       "id": "US-006",
