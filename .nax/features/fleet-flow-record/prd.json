@@ -1,0 +1,868 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-record",
+  "branchName": "feat/fleet-flow-record",
+  "createdAt": "2026-11-06T00:00:00.000Z",
+  "updatedAt": "2026-11-06T04:08:13.206Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Flow permission keys, catalog risk, activity entity",
+      "description": "**Goal** — Register the flow permission vocabulary, human approval floor, developer grants, approval ask component and activity entity.\n\n**Motivation** — Every later piece (steps, verdicts, merge waits, the flow page, nax's send-to-koda tool) needs the record, its states and its approval first.\n\n**Approach** — Verbatim design notes:\n- **Human floor.** `fleet.flow.start` is classified `critical` in `classifyRisk`, so its approval floor and default are `human` and no policy can lower it: an agent can never approve a flow.\n- **Humans only for the tick, in the route.** `fleet.thread.preapprove` keeps `principals: ['user', 'agent']`: a user-only catalog entry would make every role holding it (`developer`, and `project-admin` through `*`) unbindable to agents (`RoleAdminService.assertPrincipalType`). The pre-approval route commands refuse a non-USER actor with 403 `fleet.flows.humanOnly` instead.\n- **Developer role.** `developer` gets `fleet.flow.create`, `fleet.flow.stop`, `fleet.flow.start` and `fleet.thread.preapprove` explicitly; it already holds `fleet.flow.read` through `*.read`.\nPermission catalog target: `NEW_KEY_SCOPES` adds `fleet.flow.read`, `fleet.flow.create`, `fleet.flow.start`, `fleet.flow.stop`, `fleet.thread.preapprove` (all `'project'`) and `system.flow.respec` (`'any'`); `classifyRisk` returns `critical` for `fleet.flow.start`; `PENDING_SURFACE_KEYS` adds all six, and each later story removes the key it declares (`fleet.flow.start` stays: no route declares it, as with `fleet.budget.override`).\nUpdate catalog.spec.ts's separate NEW_KEY_LIST, risk table and derive helper, regenerate the role-matrix snapshot, and append flow after provider_credential in the activity entity closed-world test. Add flow to ASK_KEYS_BY_COMPONENT without altering other component mappings.\n\n**Scope** — In: catalog, seeded developer grants, role-matrix snapshot, approval component mapping and activity entity vocabulary. Out: models/state rules (US-002), command registration (US-005), actual human-only tick enforcement (US-008), declared routes/listener and their pending-key removals (US-008 to US-012).\n\n**Interface** — `ASK_KEYS_BY_COMPONENT` target adds `flow: 'fleet.flow.start'`; `FLEET_ENTITY_TYPES` target ends `provider_credential, flow`. Preserve `findCatalogEntry`, `ApprovalPolicyResolver.resolve` and `RoleAdminService` public APIs.",
+      "acceptanceCriteria": [
+        "[unit] findCatalogEntry('fleet.flow.start') returns scope project, approval.approvable === true and risk critical.",
+        "[unit] findCatalogEntry('fleet.flow.start').approval has floor human and default human.",
+        "[unit] For each key fleet.flow.read, fleet.flow.create, fleet.flow.stop and fleet.thread.preapprove, findCatalogEntry returns scope project and principals ['user', 'agent'].",
+        "[unit] findCatalogEntry('system.flow.respec') returns an entry whose access is system.",
+        "[unit] ApprovalPolicyResolver.resolve for key fleet.flow.start with a project policy of mode agent resolves mode human.",
+        "[unit] The developer system role's project-scope grants include each of fleet.flow.create, fleet.flow.start, fleet.flow.stop and fleet.thread.preapprove.",
+        "[unit] The viewer system role's project-scope grants include fleet.flow.read.",
+        "[unit] The viewer system role's project-scope grants include none of fleet.flow.create, fleet.flow.start, fleet.flow.stop or fleet.thread.preapprove.",
+        "[unit] RoleAdminService binds the developer role to an AGENT principal without throwing permissions.principalType.",
+        "[unit] PENDING_SURFACE_KEYS contains fleet.flow.start.",
+        "[unit] ASK_KEYS_BY_COMPONENT.flow equals fleet.flow.start.",
+        "[unit] FLEET_ENTITY_TYPES ends with provider_credential, flow.",
+        "[unit] ASK_KEYS_BY_COMPONENT.runner remains fleet.job.shell.escalate and ASK_KEYS_BY_COMPONENT.budget remains fleet.budget.override after adding the flow component.",
+        "[unit] FLEET_ENTITY_TYPES preserves the existing ordered prefix runner, enrollment, repo, job, budget, schedule, approval, ingest, analytics, provider_credential before appending flow."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "permissions",
+        "security",
+        "approval"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Additive catalog entries, seed grants and component/entity lists reuse existing derivation and snapshot tests; the human floor and agent role compatibility still require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/system-roles.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/src/fleet/activity/domain/fleet-activity.domain.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "add the five project keys and `system.flow.respec` (scope `'any'`) to `NEW_KEY_SCOPES`, add all six to `PENDING_SURFACE_KEYS`, and return `critical` for `fleet.flow.start` in `classifyRisk`."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "this spec keeps its own copies of `NEW_KEY_SCOPES` (its `NEW_KEY_LIST`), the expected risk table (lines ~184-192) and the `derive` helper (lines ~410-429); add the six keys and `critical` for `fleet.flow.start` so the full-key-list and length assertions (lines ~393-396, 446) hold."
+        },
+        {
+          "path": "apps/api/src/permissions/system-roles.ts",
+          "reason": "add `fleet.flow.create`, `fleet.flow.stop`, `fleet.flow.start` and `fleet.thread.preapprove` to the `developer` role."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated: `fleet.flow.read` is granted in project scope to every role holding `*.read` and to `project-admin`; the other four project keys to `owner`, `admin`, `project-admin` and `developer` only."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-ask.service.ts",
+          "reason": "add `flow: 'fleet.flow.start'` to `ASK_KEYS_BY_COMPONENT`."
+        },
+        {
+          "path": "apps/api/src/fleet/activity/domain/fleet-activity.domain.ts",
+          "reason": "append `flow` to `FLEET_ENTITY_TYPES`."
+        },
+        {
+          "path": "apps/api/src/fleet/activity/fleet-activity.entity-types.spec.ts",
+          "reason": "its closed-world assertion (line 17) becomes `[...PRE_EXISTING, 'provider_credential', 'flow']`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "FleetFlow schema, migration and state rules",
+      "description": "**Goal** — Add durable flow/feature records, nullable advance thread approval, domain contracts and pure lifecycle rules.\n\n**Motivation** — Every later piece (steps, verdicts, merge waits, the flow page, nax's send-to-koda tool) needs the record, its states and its approval first.\n\n**Approach** — Verbatim data model:\n```prisma\nmodel FleetFlow {\n  id                String    @id @default(cuid())\n  projectId         String\n  repoId            String\n  threadId          String?\n  entry             String    // THREAD | NAX\n  createdByType     String    // USER | AGENT\n  createdById       String\n  branch            String\n  specSha           String\n  pinnedRunnerId    String?\n  reviewerRole      String\n  supervisorRole    String\n  costCapUsd        Decimal   @db.Decimal(12, 4)\n  spentUsd          Decimal   @default(0) @db.Decimal(12, 4)\n  state             String    @default(\"PENDING\")\n  approvalMode      String?   // REQUEST | PRE_APPROVED\n  approverId        String?\n  approvedAt        DateTime?\n  approvalRequestId String?\n  stopReason        String?\n  endedAt           DateTime?\n  createdAt         DateTime  @default(now())\n  updatedAt         DateTime  @updatedAt\n  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)\n  repo              FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)\n  features          FleetFlowFeature[]\n  @@index([projectId, createdAt])\n  @@index([threadId, state])\n  @@index([repoId, branch, specSha])\n  @@index([approvalRequestId])\n}\n\nmodel FleetFlowFeature {\n  id           String    @id @default(cuid())\n  flowId       String\n  position     Int\n  feature      String\n  specPath     String\n  dependsOn    String[]\n  state        String    @default(\"PENDING\")\n  currentStep  String?\n  prNumber     Int?\n  flow         FleetFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)\n  @@unique([flowId, position])\n  @@unique([flowId, feature])\n}\n```\n`ChatThread` gains `preApproval Json?`, shape `{ userId: string, at: string (ISO), costCapUsd: string }`, surfaced on `ChatThreadRecord` as `preApproval: ThreadPreApproval | null`. US-004 implements that record mapping. Add Project/FleetRepo back-relations and additive migration 20261125090000_fleet_flows; use local constants/types rather than Prisma enums.\n\nVerbatim flow-state contract:\n`FleetFlowState`: `PENDING`, `APPROVED`, `RUNNING`, `WAITING_MERGE`, `WAITING_ANSWER`, `COMPLETED`, `STOPPED`. Pure `canTransitionFlow(from, to)`:\n| from | allowed to |\n|:---|:---|\n| PENDING | APPROVED, STOPPED, PENDING (re-ask) |\n| APPROVED | RUNNING, PENDING, STOPPED |\n| RUNNING | WAITING_MERGE, WAITING_ANSWER, COMPLETED, STOPPED, PENDING |\n| WAITING_MERGE | RUNNING, STOPPED |\n| WAITING_ANSWER | RUNNING, PENDING, STOPPED |\n| COMPLETED | (none) |\n| STOPPED | (none) |\n`isLiveFlowState(state)` is true for every state except `COMPLETED` and `STOPPED`. F1 itself moves flows only along PENDING -> APPROVED, PENDING -> PENDING (re-ask), PENDING -> STOPPED, APPROVED -> PENDING and APPROVED -> STOPPED. A feature row's `state` is `PENDING` at creation; F3 owns its other values. Stop reasons written by F1: `approval_rejected`, `human_stop`.\n\n**Scope** — In: schema, migration, domain types/repository token and pure rules. Out: repository implementation (US-003), thread mapping/mutations (US-004), approvals (US-005). Dispatching any job (spec review, PLAN, PRD review, RUN, REVIEW, FIX, finish); F1 creates, approves and stops records only. Single-feature steps, the cost cap check between jobs, `spentUsd` accumulation and job-failure stops (fleet flow F3).\n\n**Interface** — `canTransitionFlow(from, to)`; `isLiveFlowState(state)`; domain token `FLEET_FLOW_REPOSITORY`; domain repository contract for create with features, findById, lockById, findPage({ projectId }), findLiveForThread, findLiveForSpec, approve, reask, updateSha and stop, implemented by US-003.",
+      "acceptanceCriteria": [
+        "[unit] For each allowed pair in the flow-state table, canTransitionFlow(from, to) returns true: PENDING -> APPROVED/STOPPED/PENDING; APPROVED -> RUNNING/PENDING/STOPPED; RUNNING -> WAITING_MERGE/WAITING_ANSWER/COMPLETED/STOPPED/PENDING; WAITING_MERGE -> RUNNING/STOPPED; WAITING_ANSWER -> RUNNING/PENDING/STOPPED.",
+        "[unit] canTransitionFlow('PENDING', 'RUNNING') returns false.",
+        "[unit] canTransitionFlow('COMPLETED', 'PENDING') returns false.",
+        "[unit] canTransitionFlow('STOPPED', 'APPROVED') returns false.",
+        "[unit] isLiveFlowState returns true for PENDING, APPROVED, RUNNING, WAITING_MERGE and WAITING_ANSWER.",
+        "[unit] isLiveFlowState returns false for COMPLETED and STOPPED.",
+        "[integration] After migrating, inserting a FleetFlow row with only the required columns stores state PENDING and spentUsd 0.",
+        "[integration] Inserting two FleetFlowFeature rows with the same flowId and feature fails with Prisma error code P2002.",
+        "[integration] Inserting a ChatThread row without preApproval stores it as null.",
+        "[integration] Applying migration 20261125090000_fleet_flows to a database with an existing published ChatThread preserves that row's publishedSha, specPublished, runnerId and maxCostUsd while its new preApproval is null."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "prisma",
+        "state-machine"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive schema and a specified pure state table use standard patterns; pair unit state tests with real migration/default/constraint checks."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/prisma/migrations/20261105000000_provider_credentials/migration.sql",
+        "apps/api/src/fleet/repos/domain/fleet-repo.domain.ts",
+        "apps/api/src/fleet/jobs/job-state.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261125090000_fleet_flows/migration.sql",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/fleet/flows/flow-states.ts",
+        "apps/api/src/fleet/flows/flow-states.spec.ts",
+        "apps/api/test/integration/fleet-flow-schema.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "add `FleetFlow`, `FleetFlowFeature`, `ChatThread.preApproval Json?`, and the back-relations on `Project` and `FleetRepo`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "FleetFlow repository",
+      "description": "**Goal** — Persist and query ordered flow features and enforce flow transitions under row locks.\n\n**Motivation** — Every later piece (steps, verdicts, merge waits, the flow page, nax's send-to-koda tool) needs the record, its states and its approval first.\n\n**Approach** — Verbatim story target: `PrismaFleetFlowRepository` extending `AbstractPrismaRepository`: create with features, `findById`, `lockById`, `findPage({ projectId })`, `findLiveForThread`, `findLiveForSpec(repoId, branch, specSha)`, and transitions `approve`, `reask`, `updateSha`, `stop`, each locking the row and checking `canTransitionFlow`.\nVerbatim design notes:\n- **Live flow.** Every non-terminal state (not `COMPLETED`, not `STOPPED`) is live. One live flow per thread (thread row lock) and per `(repoId, branch, specSha)` on the nax entry (`FleetRepo` row lock).\n- **Lock order.** Thread row (`ChatThread ... FOR UPDATE`) or `FleetRepo` row, then flow row (`FleetFlow ... FOR UPDATE`), then the request through `close`. Every flow transition reads the state under the flow row lock and checks `canTransitionFlow`.\nUse the existing transaction proxy and parameterized SQL lock precedent from the provider credential repository. Atomic nested create must leave no parent after feature uniqueness failure. Assign zero-based positions and always include features sorted by position. findPage filters projectId and returns Nathapp pagination with newest-first ordering. Live queries use isLiveFlowState's nonterminal contract. approve records mode, approverId, approvedAt and request id; reask updates sha/request, clears previous approval mode/user/time; updateSha preserves all approval attribution and changes no lifecycle state; stop records reason/time and rejects terminal transitions with FlowTransitionError. For an unchanged state such as approved updateSha, do not treat a metadata-only write as an invalid APPROVED -> APPROVED transition. Parent serialization is the create service's responsibility, not a new global uniqueness restriction on terminal history.\n\n**Scope** — In: repository implementation and transaction/ordering/transition behavior. Out: parent-lock orchestration, asks and audit/activity (US-007/US-011/US-012), module registration (US-005), HTTP authorization/routes (US-008 to US-011).\n\n**Interface** — `findLiveForSpec(repoId, branch, specSha)`; `approve(flowId, { mode: 'REQUEST', approverId, approvedAt, approvalRequestId })`; `reask(flowId, { specSha, approvalRequestId })`; `updateSha(flowId, specSha)`; `stop(flowId, 'human_stop', now)`; `findPage({ projectId })`. Implement the US-002 domain repository contract and preserve full flow/feature data.",
+      "acceptanceCriteria": [
+        "[integration] PrismaFleetFlowRepository.create with three features persists them with positions 0, 1, 2 and feature state PENDING.",
+        "[integration] findById returns the features in position order with their dependsOn arrays.",
+        "[integration] create with two features of the same name throws and leaves no flow row.",
+        "[integration] findLiveForThread(threadId) returns the thread's flow in APPROVED.",
+        "[integration] findLiveForThread(threadId) returns null when the thread's only flow is STOPPED.",
+        "[integration] findLiveForSpec(repoId, branch, specSha) returns a PENDING flow with those three values.",
+        "[integration] approve(flowId, { mode: 'REQUEST', approverId, approvedAt, approvalRequestId }) sets state APPROVED and the four approval columns.",
+        "[integration] reask(flowId, { specSha, approvalRequestId }) on an APPROVED flow sets state PENDING, stores the new sha and request id, and clears approvalMode, approverId and approvedAt.",
+        "[integration] updateSha(flowId, specSha) on an APPROVED flow changes only specSha.",
+        "[integration] stop(flowId, 'human_stop', now) sets state STOPPED, stopReason human_stop and endedAt now.",
+        "[integration] stop on a STOPPED flow throws FlowTransitionError and leaves the row unchanged.",
+        "[integration] findPage({ projectId }) returns that project's flows newest first and none of another project's flows.",
+        "[integration] Deleting the flow's FleetRepo deletes the flow and its features."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "repository",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One aggregate repository reuses AbstractPrismaRepository, parameterized row locks, pagination and the upstream pure state rules; standard TDD with real Postgres verifies atomic writes without a new persistence abstraction."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/provider-credentials/prisma-provider-credential.repository.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.module.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/fleet/flows/flow-states.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/test/integration/fleet-flow-repository.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Thread pre-approval data and the guarded thread lock",
+      "description": "**Goal** — Expose thread advance approval and add thread-owned locked operations that flow creation can safely call.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, merged #392) turns a settled spec set into ready PRs with one approval.\n\n**Approach** — Verbatim design notes:\n- **Thread data through `ThreadsService`.** The flows module never reads the thread repository. `ThreadsService` gains `lockForFlow(projectId, threadId)`, which takes the thread row lock and applies the thread-entry guards in the Failure Handling order (it owns `threadsEnabled`), plus `setPreApproval`, `clearPreApproval` and `consumePreApproval`.\n- **The tick has no expiry and no spec binding.** It is the user's advance approval (design G4) for whatever the thread publishes next, up to its cap; it is consumed by the first flow it covers.\n- **Thread responses show the tick.** `ThreadDto` gains `preApproval { userId, at, costCapUsd } | null` so the F6 control can render it; the tick is not secret.\n`ChatThread` gains `preApproval Json?`, shape `{ userId: string, at: string (ISO), costCapUsd: string }`, surfaced on `ChatThreadRecord` as `preApproval: ThreadPreApproval | null`.\nVerbatim story target: `ChatThreadRecord.preApproval`, its mapping and `ThreadDto.preApproval`, and the `ThreadsService` methods `lockForFlow`, `setPreApproval`, `clearPreApproval`, `consumePreApproval` with their repository methods. `setPreApproval` and `clearPreApproval` lock the thread row and audit under `fleet.thread.preapprove`; `consumePreApproval` writes no audit (the flow create audits).\nlockForFlow requires the caller's transaction and checks in order: project-scoped missing -> 404 threads.notFound; non-REPO -> 409 threads.notRepoThread; disabled -> 409 threads.disabled; archived -> 409 threads.archived; unpublished -> 409 threads.notPublished; missing runner -> 409 threads.runnerMissing. It does not impose thread.plan ownership. Ticking is advance approval, so set/clear do not require a published spec or runner. A no-op clear returns false and writes no audit. Map null on old rows, update typed record/repository fixtures and publish the nullable Swagger shape in ThreadDto; regenerate openapi.json using bun run api:export-spec.\n\n**Scope** — In: thread domain/repository/service/DTO and additive OpenAPI field. Out: flow consumption eligibility and Decimal comparison (US-007), actor rejection and gated HTTP tick routes (US-008), publish events (US-012). Pre-approval expiry or binding the tick to a published sha: by design the tick approves in advance whatever the thread publishes, up to its cap, and is consumed by one flow.\n\n**Interface** — `lockForFlow(projectId, threadId): Promise<ChatThreadRecord>` (inside the caller's transaction: thread row lock, then the guards, throwing their errors), `setPreApproval(projectId, threadId, userId, costCapUsd)`, `clearPreApproval(projectId, threadId): Promise<boolean>` and `consumePreApproval(threadId)`.",
+      "acceptanceCriteria": [
+        "[integration] ThreadsService.setPreApproval(projectId, threadId, userId, '30') stores preApproval { userId, at, costCapUsd: '30' }, and the next thread read returns it.",
+        "[integration] setPreApproval writes an AuditEntry with key fleet.thread.preapprove, resourceType thread and resourceId the thread id.",
+        "[integration] setPreApproval on an ARCHIVED thread throws ConflictAppException with threads.archived.",
+        "[integration] clearPreApproval on a ticked thread returns true, sets preApproval null and writes an AuditEntry with key fleet.thread.preapprove.",
+        "[integration] clearPreApproval on an unticked thread returns false and writes no AuditEntry.",
+        "[integration] consumePreApproval(threadId) sets preApproval null and writes no AuditEntry.",
+        "[integration] lockForFlow(projectId, threadId) on a published REPO thread with a runner returns its record, including preApproval.",
+        "[integration] lockForFlow throws NotFoundAppException with threads.notFound for a thread of another project.",
+        "[integration] lockForFlow throws ConflictAppException with threads.notRepoThread for a PROJECT thread.",
+        "[integration] lockForFlow throws ConflictAppException with threads.notPublished for a thread whose specPublished is false.",
+        "[integration] lockForFlow throws ConflictAppException with threads.runnerMissing for a thread with no runnerId.",
+        "[integration] While one transaction holds lockForFlow on a thread, a concurrent setPreApproval on it completes only after that transaction ends.",
+        "[integration] GET /api/projects/:slug/threads/:id returns preApproval with costCapUsd '30' for a ticked thread and null otherwise.",
+        "[integration] Setting and clearing preApproval preserves the thread's publishedSha, specPublished, runnerId, mode, pendingApprovals, pendingQuestion and session in the next thread read.",
+        "[integration] lockForFlow, after the not-found and REPO guards pass, throws ConflictAppException with threads.disabled when threads are disabled, and then ConflictAppException with threads.archived for an archived REPO thread."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "threads",
+        "security",
+        "preapproval"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing thread repository/service/DTO gain nullable approval data and established lock/audit operations; advance-authorization storage and project guards require the security override despite standard implementation patterns."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/domain/chat-thread.domain.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/threads/dto/thread.dto.ts",
+        "apps/api/src/fleet/threads/threads.service.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/thread-flow-preapproval.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/domain/chat-thread.domain.ts",
+          "reason": "add `ThreadPreApproval`, `ChatThreadRecord.preApproval`, and the pre-approval and lock methods on `ChatThreadRepository`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+          "reason": "map `preApproval` in `mapThread` and implement the new methods with the thread row lock."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.ts",
+          "reason": "add `lockForFlow`, `setPreApproval`, `clearPreApproval`, `consumePreApproval`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/dto/thread.dto.ts",
+          "reason": "add `preApproval` (`@ApiProperty`, nullable `{ userId, at, costCapUsd }`) to `ThreadDto`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new `ThreadDto` field."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "The fleet.flow.start approval command",
+      "description": "**Goal** — Register a human-floor flow-start command that approves or rejects the current pending spec snapshot atomically.\n\n**Motivation** — Every later piece (steps, verdicts, merge waits, the flow page, nax's send-to-koda tool) needs the record, its states and its approval first.\n\n**Approach** — Verbatim worked skeleton:\n```ts\n// apps/api/src/fleet/flows/fleet-flow-start.command.ts (worked skeleton)\n@Injectable()\nexport class FleetFlowStartCommand implements ApprovalCommand<FlowStartInput, FlowStartResult> {\n  readonly key = 'fleet.flow.start';\n  parse(input: unknown): FlowStartInput { /* { flowId: string, specSha: 40 lowercase hex } or throw */ }\n  async execute(input: FlowStartInput): Promise<FlowStartResult> {\n    const { requestId, approverId } = approvalFromContext();          // file-local, as the budget command's helper\n    const flow = await this.flows.lockById(input.flowId);           // FleetFlow ... FOR UPDATE\n    if (!flow || flow.state !== 'PENDING' || flow.approvalRequestId !== requestId || flow.specSha !== input.specSha) {\n      return { applied: false };\n    }\n    await this.flows.approve(flow.id, { mode: 'REQUEST', approverId, approvedAt: new Date(), approvalRequestId: requestId });\n    await this.audit.record({ key: 'fleet.flow.start', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId, summary: 'flow approved' });\n    await this.activity.record({ action: 'flow.approved', entityType: 'flow', entityId: flow.id, projectId: flow.projectId, /* actor */ payload: { flowId: flow.id, state: 'APPROVED' } });\n    return { applied: true };\n  }\n  async onReject(input: FlowStartInput): Promise<void> {\n    const requestId = currentContext()?.approval.requestId;           // no approverId on reject\n    /* same guard; PENDING -> STOPPED approval_rejected; audit; activity */\n  }\n}\n```\nVerbatim design notes:\n- **Request id on the flow.** The flow row stores `approvalRequestId`; no `FleetApprovalAsk` link row. Asks are closed with status `cancelled` and reason `superseded` or `flow_stopped`; `close` returns null when a decide holds the request, and the `approvalRequestId` guard then makes the late decision a no-op. `execute` reads `requestId` and `approverId` from the action context with a local helper (as `FleetBudgetOverrideCommand` does); `onReject` receives no request and reads only `currentContext().approval.requestId`.\n- **Human floor.** `fleet.flow.start` is classified `critical` in `classifyRisk`, so its approval floor and default are `human` and no policy can lower it: an agent can never approve a flow.\nImplement the skeleton with real actor fields and existing AuditRecorder/FleetActivityService transaction semantics; reject writes STOPPED, approval_rejected and endedAt plus audit/activity, using the same stale guard. A deleted flow is a no-op. details reads without mutation and returns { kind: 'flow', flowId, state, branch, specSha, costCapUsd, features } or null. Register the primary command in FlowsModule.onModuleInit, bind the repository token, import the module in FleetModule, and prove module compilation and registration without a database.\n\n**Scope** — In: start command parse/execute/onReject/details, module/repository wiring and FleetModule import. Out: create/ask orchestration (US-007), route-command variants (US-008 onward), stop route (US-011), respec listener (US-012). Dispatching any job (spec review, PLAN, PRD review, RUN, REVIEW, FIX, finish); F1 creates, approves and stops records only.\n\n**Interface** — `ApprovalCommand<FlowStartInput, FlowStartResult>`; `parse(input: unknown): FlowStartInput`; `async execute(input: FlowStartInput): Promise<FlowStartResult>`; `async onReject(input: FlowStartInput): Promise<void>`; `FleetFlowStartCommand.details(request)`; input `{ flowId: string, specSha: 40 lowercase hex }`; result `{ applied: boolean }`.",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowStartCommand.parse({ flowId: 'f1', specSha: a 40-character lowercase hex sha }) returns an object deeply equal to that input.",
+        "[unit] FleetFlowStartCommand.parse throws for a 39-character or an uppercase specSha.",
+        "[integration] POST /api/approvals/:id/decisions with approve by a USER holding fleet.flow.start and approval.decide, for the request of a PENDING flow, sets the flow APPROVED with approvalMode REQUEST, approverId that user and approvalRequestId the request id.",
+        "[integration] That approval writes an AuditEntry with key fleet.flow.start, resourceType flow, approverType USER and approvalRequestId the request id.",
+        "[integration] That approval records a FleetActivity row with action flow.approved, entityType flow, entityId the flow id and projectId the flow's project.",
+        "[integration] The USER on whose behalf the request was opened may approve it, and the flow becomes APPROVED.",
+        "[integration] POST /api/approvals/:id/decisions with reject sets the flow STOPPED with stopReason approval_rejected and endedAt set.",
+        "[integration] Approving a request whose flow is already STOPPED leaves it STOPPED, and the command result is { applied: false }.",
+        "[integration] Approving a request whose id is not the flow's current approvalRequestId leaves the flow PENDING with { applied: false }.",
+        "[integration] Approving a request whose stored specSha differs from the flow's specSha leaves the flow PENDING with { applied: false }.",
+        "[integration] POST /api/approvals/:id/decisions with approve by an AGENT holding fleet.flow.start and approval.decide is refused, and the flow stays PENDING.",
+        "[unit] After FlowsModule.onModuleInit, ApprovalCommandRegistry.get('fleet.flow.start') returns a FleetFlowStartCommand.",
+        "[unit] FleetFlowStartCommand.details(request) returns { kind: 'flow', flowId, state, branch, specSha, costCapUsd, features } for the request's flow, and null when the flow is gone.",
+        "[integration] Rejecting a superseded start request or one whose flow left PENDING leaves the flow unchanged.",
+        "[unit] FlowsModule.onModuleInit preserves the previously registered command instances returned by ApprovalCommandRegistry.get for fleet.budget.override and fleet.job.shell.escalate."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "approval",
+        "security",
+        "di"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A specified command and module wiring follow the existing budget command and registry patterns; human-only approval, request fencing and approver audit attribution require strict security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+        "apps/api/src/fleet/approvals/approvals.module.ts",
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credentials.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-start.command.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/fleet/flows/fleet-flow-start.command.spec.ts",
+        "apps/api/src/fleet/flows/flows.module.spec.ts",
+        "apps/api/test/integration/fleet-flow-start.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/fleet.module.ts",
+          "reason": "import `FlowsModule` in the `imports` list."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Flow input validation",
+      "description": "**Goal** — Parse both flow entry bodies into one bounded, normalized feature/role/cap contract.\n\n**Motivation** — nax's G5 `nax-flow__send` is built against this feature's create endpoint, so F1 ships the nax entry now instead of last.\n\n**Approach** — Verbatim design bounds:\n- **Bounds.** 1-20 features; feature names follow `FEATURE_RE` (`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`) and are unique; `specPath` 1-300 characters, relative, ends `.md`, no `..` segment; `dependsOn` names only features listed earlier, no duplicates; role values 1-200 characters of `[A-Za-z0-9._:/\\[\\]=,-]`; `costCapUsd` greater than 0, at most 1000, at most 4 decimal places; `branch` matches `GIT_REF_RE`; `specSha` is 40 lowercase hex.\n- **Remote URLs.** `remoteUrl` accepts what `parseGitHubUrl` accepts (`https://github.com/<owner>/<repo>[.git]`); its `skills.unsupportedHost` error is rethrown as a validation error naming `remoteUrl`.\nVerbatim API bodies: Thread-entry body: `{ features: [{ feature, specPath, dependsOn? }], roles: { reviewer, supervisor }, costCapUsd }`. nax-entry body: the same plus `{ remoteUrl, branch, specSha }`. Pre-approval body: `{ costCapUsd }`.\nImplement pure parseFlowInput(body, entry) using the shared FEATURE_RE/GIT_REF_RE rather than reimplementing a different branch/name grammar. Normalize missing dependsOn to [], preserve caller order and validate each dependency against previously accepted feature names. Name the exact failing property (features, features.0.feature, features.0.specPath, features.1.dependsOn, roles.reviewer, roles.supervisor, costCapUsd, branch, specSha or remoteUrl) in ValidationAppException. Do not perform DB or forge work. Return JSON-serializable normalized cap data that can be parsed again when an approved route command executes. The role character class must allow the bracketed role/model syntax exactly as specified.\n\n**Scope** — In: pure flow parser and property-specific failures. Out: HTTP gate/permission checks (US-008 to US-011), forge head/path checks (US-010), tick storage (US-004), duplicate detection (US-007).\n\n**Interface** — `parseFlowInput(body, entry)` in `flow-input.ts`; thread and nax shapes above; failure is `ValidationAppException` naming the property.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowInput accepts one feature { feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md' } with roles { reviewer: 'acp:claude', supervisor: 'native:fast' } and costCapUsd: 25, returning dependsOn: [].",
+        "[unit] parseFlowInput with zero features throws ValidationAppException naming features.",
+        "[unit] parseFlowInput with 21 features throws ValidationAppException naming features.",
+        "[unit] parseFlowInput with a first feature named -flow throws ValidationAppException naming features.0.feature.",
+        "[unit] parseFlowInput with two features named flow-a throws ValidationAppException naming features.1.feature.",
+        "[unit] For each specPath ../x.md, /abs/spec.md and spec.txt, parseFlowInput throws ValidationAppException naming features.0.specPath.",
+        "[unit] parseFlowInput where the second feature's dependsOn names the third feature throws ValidationAppException naming features.1.dependsOn.",
+        "[unit] parseFlowInput where the second feature depends on itself throws ValidationAppException naming features.1.dependsOn.",
+        "[unit] parseFlowInput with no roles.reviewer throws ValidationAppException naming roles.reviewer.",
+        "[unit] parseFlowInput with a roles.supervisor containing a space throws ValidationAppException naming roles.supervisor.",
+        "[unit] For each costCapUsd 0, -1, 1000.01 and 1.00001, parseFlowInput throws ValidationAppException naming costCapUsd.",
+        "[unit] parseFlowInput accepts costCapUsd 1000 and 0.0001.",
+        "[unit] parseFlowInput for the nax entry with a 39-character specSha throws ValidationAppException naming specSha.",
+        "[unit] parseFlowInput for the nax entry with branch feat/..x throws ValidationAppException naming branch.",
+        "[unit] parseFlowInput for the nax entry with remoteUrl git@github.com:org/repo.git throws ValidationAppException naming remoteUrl."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Deterministic pure parsing with existing regex/URL helpers and explicit bounds; table-driven unit TDD suffices because it performs no access control or token work."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/dispatch-input.ts",
+        "apps/api/src/skills/github-url.ts",
+        "apps/api/src/fleet/threads/thread-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/flows/flow-input.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseFlowInput rejects repeated dependency names with ValidationAppException naming the affected features.<index>.dependsOn.",
+        "parseFlowInput rejects a 301-character specPath with ValidationAppException naming the affected features.<index>.specPath.",
+        "parseFlowInput rejects NaN and Infinity for costCapUsd with ValidationAppException naming costCapUsd.",
+        "parseFlowInput accepts role values containing the specified bracket, equals, slash and comma characters without changing them."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "The flow create service",
+      "description": "**Goal** — Create either flow entry through one transaction that prevents live duplicates and either requests human start approval or consumes a covering tick.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, merged #392) turns a settled spec set into ready PRs with one approval.\n\n**Approach** — Verbatim algorithm:\n`FleetFlowsService.create(input, creator, context)` runs in one transaction: take the thread lock (`lockForFlow`) or the `FleetRepo` lock; refuse a live flow on the thread, or a live duplicate on the nax entry; insert the flow and features; consume a covering tick (`APPROVED`, `PRE_APPROVED`) or open the `fleet.flow.start` ask and store its id; audit `fleet.flow.create`; record `flow.created`. Each create route's `routeCommand.run` calls it.\nVerbatim design notes:\n- **Programmatic ask for the start approval.** The approval gate executes a human caller's action at once, so a human-created flow could never be `PENDING` through `routeGate.run` alone. The create service writes the flow and opens the `fleet.flow.start` request through `ApprovalAskService.open` with a new component `flow`, on behalf of the creator, in the same transaction (the `openBudget` precedent). `open` returning `not-needed` cannot happen for a `critical` key; `create` treats it as an internal error. The creating human may decide its own request: an on-behalf human contributes `human`.\n- **Thread data through `ThreadsService`.** The flows module never reads the thread repository. `ThreadsService` gains `lockForFlow(projectId, threadId)`, which takes the thread row lock and applies the thread-entry guards in the Failure Handling order (it owns `threadsEnabled`), plus `setPreApproval`, `clearPreApproval` and `consumePreApproval`.\n- **Thread entry trusts the thread's publish record.** Thread publish commits to a ref in the runner's local clone and never pushes, so koda cannot read thread-entry specs from the forge. The create command reads `branch = feat/<thread.feature>`, `specSha = thread.publishedSha` and `pinnedRunnerId = thread.runnerId` from the record `lockForFlow` returned inside its `run`, so a deferred agent request uses the thread as it is when it executes. It does not check that each `specPath` exists; a missing spec fails the flow's first step (F3).\n- **Who consumes a tick.** A tick covers a flow whose creator is the tick's user or the thread's creator; a flow created by anyone else on that thread is `PENDING`. Covered means the tick's cap is at least the flow's cap, as decimals.\n- **Live flow.** Every non-terminal state (not `COMPLETED`, not `STOPPED`) is live. One live flow per thread (thread row lock) and per `(repoId, branch, specSha)` on the nax entry (`FleetRepo` row lock).\n- **The tick has no expiry and no spec binding.** It is the user's advance approval (design G4) for whatever the thread publishes next, up to its cap; it is consumed by the first flow it covers.\nOpen flow asks with key fleet.flow.start, component flow, origin system, onBehalfOf creator, input { flowId, specSha } and deadline null. Store the pending request id, or set state APPROVED, mode PRE_APPROVED, approverId tick.userId and approvedAt on covered creation. Use typed principal identity for eligibility and Prisma.Decimal, never float comparison; leave uncovered ticks intact. Keep spentUsd zero and every feature state PENDING. Thread live conflict is 409 fleet.flows.threadBusy; nax duplicate is 409 fleet.flows.duplicate carrying the existing flow id.\nAdd FleetRepo repository/service findByIdentity(provider, owner, name) with case-insensitive owner/name and lockById(id), because the NAX path serializes creation on the repo. Extend FlowsModule with FleetFlowsService, ThreadsModule, FleetReposModule and ApprovalEngineModule. Add English/Chinese fleet.flows.* failures required by all lifecycle routes. Create FleetFlowDto with the complete response mapping below.\n\n**Scope** — In: shared create, repo identity/lock exposure, DTO, i18n and module service wiring. Out: HTTP route commands/controllers (US-008 to US-011), nax forge preflight (US-010), stop/respec orchestration (US-011/US-012). Verifying thread-entry spec paths exist: thread publish never pushes, so the first step (F3) is where a missing spec fails. Dispatching any job (spec review, PLAN, PRD review, RUN, REVIEW, FIX, finish); F1 creates, approves and stops records only. Single-feature steps, the cost cap check between jobs, `spentUsd` accumulation and job-failure stops (fleet flow F3). Approval request expiry: flow requests open with `deadline: null`.\n\n**Interface** — `FleetFlowsService.create(input, creator, context)`; repo `findByIdentity(provider, owner, name): Promise<FleetRepoRecord | null>` and `lockById(id)`. Verbatim response contract: `FleetFlowDto`: `id`, `projectId`, `repoId`, `threadId`, `entry`, `createdBy { type, id }`, `branch`, `specSha`, `pinnedRunnerId`, `roles { reviewer, supervisor }`, `costCapUsd` (string), `spentUsd` (string), `state`, `approval { mode, approverId, approvedAt, approvalRequestId } | null`, `stopReason`, `endedAt`, `createdAt`, `features [{ feature, specPath, dependsOn, state, currentStep, prNumber }]` in position order, and `url` (the web path `/<slug>/flows/<id>`, which F6 renders).",
+      "acceptanceCriteria": [
+        "[integration] FleetFlowsService.create for a USER creator with no tick writes a PENDING flow and opens an ApprovalRequest with permissionKey fleet.flow.start, onBehalfOf the creator, required mode human and input { flowId, specSha }.",
+        "[integration] The request id create opened is stored as the flow's approvalRequestId.",
+        "[integration] create for an AGENT creator opens the request with onBehalfOf { type: 'AGENT', id }.",
+        "[integration] create for a thread entry stores branch feat/<thread.feature>, specSha the thread's publishedSha and pinnedRunnerId the thread's runnerId from the record lockForFlow returned.",
+        "[integration] create by the tick's user on a thread ticked with cap '40', for a flow cap of 25, writes the flow APPROVED with approvalMode PRE_APPROVED and approverId the tick's userId, opens no request, and leaves the thread's preApproval null.",
+        "[integration] create by the thread's creator on a thread ticked by another user writes an APPROVED flow with approvalMode PRE_APPROVED.",
+        "[integration] create by a user who is neither the tick's user nor the thread's creator writes the flow PENDING and leaves the tick in place.",
+        "[integration] create on a thread ticked with cap '9.5' for a flow cap of 10 writes the flow PENDING and leaves the tick in place.",
+        "[integration] Two concurrent create calls for one thread produce one flow and one ConflictAppException with fleet.flows.threadBusy.",
+        "[integration] create for a thread whose earlier flow is STOPPED returns a new flow with a different id, leaving the earlier flow STOPPED.",
+        "[integration] create for a nax entry whose (repoId, branch, specSha) already has a live flow throws ConflictAppException with fleet.flows.duplicate carrying the existing flow id.",
+        "[integration] Two concurrent nax-entry create calls for the same repo, branch and sha produce one flow and one fleet.flows.duplicate conflict.",
+        "[integration] create writes an AuditEntry with key fleet.flow.create and resourceType flow.",
+        "[integration] create records a FleetActivity row with action flow.created, projectId the flow's project and payload { flowId, entry, featureCount, state }.",
+        "[integration] When askService.open throws inside create, no FleetFlow row and no FleetFlowFeature row remain."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "transactions",
+        "approval",
+        "security"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Creation coordinates existing thread/repo locks, Decimal tick eligibility, approval asks and audit rollback across modules; concurrency and advance authorization require strict security TDD but no novel architecture."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/activity/fleet-activity.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/dto/fleet-flow.dto.ts",
+        "apps/api/src/fleet/flows/dto/fleet-flow.dto.spec.ts",
+        "apps/api/test/integration/fleet-flow-create.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When askService.open returns not-needed for fleet.flow.start, create throws an internal error and leaves no flow or feature rows.",
+        "When a covering tick cap equals the flow cap at four-decimal precision, create approves the flow and consumes the tick.",
+        "When creation fails after a covering tick was cleared, transaction rollback restores the tick and leaves no flow."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/repos/domain/fleet-repo.domain.ts",
+          "reason": "add `findByIdentity(provider, owner, name)` and `lockById(id)` to `IFleetRepoRepository`."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+          "reason": "implement `findByIdentity` (case-insensitive on owner and name) and `lockById` (`FleetRepo ... FOR UPDATE`)."
+        },
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.ts",
+          "reason": "expose `findByIdentity` and `lockById` to other modules."
+        },
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "add the `fleet.flows.*` messages from the Failure Handling table."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "add the same `fleet.flows.*` keys in Chinese."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Thread pre-approval routes",
+      "description": "**Goal** — Let project humans set or clear one thread's advance flow approval through the existing gated write mechanism.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, merged #392) turns a settled spec set into ready PRs with one approval.\n\n**Approach** — Verbatim design notes:\n- **Every write route is gated.** The write keys are approvable, and the permission contract refuses an ungated write that requires one (`ungated-approvable-write`). Each write route runs through `routeGate.run` with a registered route command; for a human, or an agent with no policy asking, it executes at once; an agent whose policy asks gets 202 with the request, and approving it runs the command.\n- **Humans only for the tick, in the route.** `fleet.thread.preapprove` keeps `principals: ['user', 'agent']`: a user-only catalog entry would make every role holding it (`developer`, and `project-admin` through `*`) unbindable to agents (`RoleAdminService.assertPrincipalType`). The pre-approval route commands refuse a non-USER actor with 403 `fleet.flows.humanOnly` instead.\n- **The tick has no expiry and no spec binding.** It is the user's advance approval (design G4) for whatever the thread publishes next, up to its cap; it is consumed by the first flow it covers.\nImplement ThreadPreApprovalController under projects/:slug/threads/:id/preapproval with project membership and fleet.thread.preapprove enforcement. Both PUT and DELETE carry ApprovalGated and invoke registered variants through routeGate.run for authorized human writes; reject a non-USER principal with the specified immediate 403 before any gate request can open, and enforce USER again inside each route command so deferred execution cannot bypass the restriction. PUT validates costCapUsd > 0, <= 1000, <= four decimal places and normalizes 30 to '30'; DELETE returns 200 after clearing even when already empty. A later human PUT replaces the tick's user/time/cap. Delegate locked audited mutations to ThreadsService from US-004. Agent rejection takes precedence over allowing any approval policy to authorize ticking. Remove fleet.thread.preapprove from PENDING_SURFACE_KEYS only as these surfaces land. Register controller/command provider in FlowsModule, add the two gated operations to approval-openapi.contract.spec.ts, extend endpoint.e2e.spec.ts with exact-status happy/error cases, and regenerate openapi.json.\n\n**Scope** — In: human-only tick HTTP routes, their registered route commands, cap validation and permission/OpenAPI surface updates. Out: thread repository/storage (US-004), flow create routes (US-009/US-010), covering-tick consumption (US-007). Every web page: the Start flow form, the tickbox control, the flow page and the approval card's flow view (fleet flow F6). A project-wide auto-approve setting (deferred by the user 2026-11-04). Pre-approval expiry or binding the tick to a published sha: by design the tick approves in advance whatever the thread publishes, up to its cap, and is consumed by one flow.\n\n**Interface** — `PUT /api/projects/:slug/threads/:id/preapproval` | `fleet.thread.preapprove`, USER actor only | 200 pre-approval. `DELETE /api/projects/:slug/threads/:id/preapproval` | `fleet.thread.preapprove`, USER actor only | 200. Pre-approval body: `{ costCapUsd }`. Commands call `setPreApproval(projectId, threadId, userId, costCapUsd)` and `clearPreApproval(projectId, threadId)`.",
+      "acceptanceCriteria": [
+        "[integration] PUT /api/projects/:slug/threads/:id/preapproval with { costCapUsd: 30 } by a USER holding fleet.thread.preapprove returns 200 and the thread's preApproval.costCapUsd is '30'.",
+        "[integration] The route's test stubs ThreadsService.setPreApproval and asserts it is called once with the route's project id, the thread id, the caller's user id and '30'.",
+        "[integration] The same request by an AGENT whose role holds fleet.thread.preapprove returns 403 fleet.flows.humanOnly and leaves preApproval null.",
+        "[integration] The same request by a USER without fleet.thread.preapprove returns 403.",
+        "[integration] PUT with costCapUsd: 0 returns 400 naming costCapUsd.",
+        "[integration] PUT on an ARCHIVED thread returns 409 threads.archived.",
+        "[integration] PUT on a thread id of another project returns 404 threads.notFound.",
+        "[integration] A second PUT with { costCapUsd: 50 } by another user stores '50' and that user's id.",
+        "[integration] DELETE /api/projects/:slug/threads/:id/preapproval by a USER holding the key returns 200 and sets preApproval null.",
+        "[integration] DELETE by an AGENT returns 403 fleet.flows.humanOnly.",
+        "[integration] The permission contract check over all routes reports no ungated-approvable-write, unused-key or pending-key-declared violation."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "threads",
+        "security",
+        "routes"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-004",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two thin routes and their registered variants mirror existing project credential gates and delegate to upstream thread methods; human-only ticking and project permissions mandate the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/provider-credentials/project-provider-credentials.controller.ts",
+        "apps/api/src/fleet/provider-credentials/provider-credential-route.commands.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/thread-preapproval.controller.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.spec.ts",
+        "apps/api/test/integration/thread-flow-preapproval-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "remove `fleet.thread.preapprove` from `PENDING_SURFACE_KEYS` now that its routes declare it."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "add the two pre-approval operations to `gatedOperations` and raise the expected length by 2."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add the pre-approval routes: happy path and one error each, with exact status codes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new routes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Thread entry route",
+      "description": "**Goal** — Expose project thread flow creation with the settled local publish record resolved only when its gated command executes.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, merged #392) turns a settled spec set into ready PRs with one approval.\n\n**Approach** — Verbatim design notes:\n- **Every write route is gated.** The write keys are approvable, and the permission contract refuses an ungated write that requires one (`ungated-approvable-write`). Each write route runs through `routeGate.run` with a registered route command; for a human, or an agent with no policy asking, it executes at once; an agent whose policy asks gets 202 with the request, and approving it runs the command.\n- **Thread entry trusts the thread's publish record.** Thread publish commits to a ref in the runner's local clone and never pushes, so koda cannot read thread-entry specs from the forge. The create command reads `branch = feat/<thread.feature>`, `specSha = thread.publishedSha` and `pinnedRunnerId = thread.runnerId` from the record `lockForFlow` returned inside its `run`, so a deferred agent request uses the thread as it is when it executes. It does not check that each `specPath` exists; a missing spec fails the flow's first step (F3).\nVerbatim story target: `ThreadFlowsController`: `POST /api/projects/:slug/threads/:id/flows`, gated under `fleet.flow.create`; the route command's `run` calls `FleetFlowsService.create` for the thread entry, which reads branch, sha and runner from the record `lockForFlow` returns. Removes `fleet.flow.create` from `PENDING_SURFACE_KEYS`.\nUse parseFlowInput for THREAD, project membership/RequiresGuard and ApprovalGated. Pin projectId/threadId and validated features/roles/cap in the command; creator comes from the reloaded requesting principal, not the approver. Return 201 FleetFlowDto on execution or 202 ApprovalPending for a create-write request. That write approval is distinct from fleet.flow.start: approving an agent's proposed create still creates PENDING unless a covering tick applies. Register controller and thread-create variant in the existing FlowsModule/flow-route.commands.ts, add one gated OpenAPI operation, extend the endpoint e2e happy/error cases, regenerate openapi.json. Apply ThreadsService guard/error order and live-flow conflicts without duplicating backend rules in the controller.\n\n**Scope** — In: thread flow create route, parsed command delegation, permission/OpenAPI surface. Out: shared creation/covering-tick rules (US-007), nax forge entry (US-010), reads/stops (US-011). Verifying thread-entry spec paths exist: thread publish never pushes, so the first step (F3) is where a missing spec fails. Dispatching any job (spec review, PLAN, PRD review, RUN, REVIEW, FIX, finish); F1 creates, approves and stops records only. Every web page: the Start flow form, the tickbox control, the flow page and the approval card's flow view (fleet flow F6).\n\n**Interface** — `POST /api/projects/:slug/threads/:id/flows` | `fleet.flow.create` | 201 flow, or 202 request. Thread-entry body: `{ features: [{ feature, specPath, dependsOn? }], roles: { reviewer, supervisor }, costCapUsd }`. Delegate to `FleetFlowsService.create(input, creator, context)` with entry THREAD, route projectId/threadId and creator `{ type: 'USER' | 'AGENT', id }`; response `url` is `/<slug>/flows/<id>`.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/threads/:id/flows on a REPO thread with specPublished true, feature flow-x, publishedSha S and runnerId R returns 201 with entry THREAD, branch feat/flow-x, specSha S, pinnedRunnerId R, threadId the thread id and state PENDING.",
+        "[integration] The route's test stubs FleetFlowsService.create and asserts it is called once with entry THREAD, the route's projectId, the thread id, the parsed features, roles and cap, and creator { type: 'USER', id } of the caller.",
+        "[integration] The route on a thread with specPublished false returns 409 threads.notPublished and writes no flow.",
+        "[integration] The route on a PROJECT thread returns 409 threads.notRepoThread.",
+        "[integration] The route on an ARCHIVED thread returns 409 threads.archived.",
+        "[integration] The route with threads disabled in config returns 409 threads.disabled.",
+        "[integration] The route on a thread id of another project returns 404 threads.notFound.",
+        "[integration] The route on a thread with a PENDING flow returns 409 fleet.flows.threadBusy.",
+        "[integration] The route by a caller without fleet.flow.create returns 403.",
+        "[integration] The route with zero features returns 400 naming features.",
+        "[integration] The route by the tick's user on a thread ticked with cap 40, for a flow cap of 25, returns 201 with state APPROVED and approval.mode PRE_APPROVED.",
+        "[integration] With an approval policy of mode agent on fleet.flow.create for the project, the route called by an AGENT returns 202 with the request; approving that request creates the flow in PENDING.",
+        "[integration] The response's url is /<slug>/flows/<flowId>.",
+        "[integration] The route on a nonexistent thread returns 404 threads.notFound.",
+        "[integration] The route on a published REPO thread with no runner returns 409 threads.runnerMissing."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "threads",
+        "security",
+        "routes"
+      ],
+      "dependencies": [
+        "US-007",
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One controller/variant delegates parsing and lifecycle work to upstream implementations using the existing thread route pattern; requester-preserving deferred execution and project authorization require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/thread-flows.controller.ts",
+        "apps/api/test/integration/thread-flow-entry.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a thread publishes a newer sha while an agent's create-write request is pending, approving that request creates a flow with the thread's current publishedSha rather than its old value."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "remove `fleet.flow.create` from `PENDING_SURFACE_KEYS` now that a route declares it."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "add the thread-entry operation to `gatedOperations` and raise the expected length by 1."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add the thread entry route: happy path and one error, with exact status codes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "nax entry route",
+      "description": "**Goal** — Accept nax flow proposals using a reachable registered GitHub repository and verified branch-head spec snapshot.\n\n**Motivation** — nax's G5 `nax-flow__send` is built against this feature's create endpoint, so F1 ships the nax entry now instead of last.\n\n**Approach** — Verbatim design notes:\n- **nax entry verifies on the forge, before the gate.** In the controller, before `routeGate.run`: resolve the repo, check reach and key, mint a read-only installation token, check `specSha` equals the branch head and every `specPath` exists at `specSha` (the `assertRepoInProject` precedent of checks before the gate). Inside `run`, under the `FleetRepo` row lock, the duplicate check and the create.\n- **Remote URLs.** `remoteUrl` accepts what `parseGitHubUrl` accepts (`https://github.com/<owner>/<repo>[.git]`); its `skills.unsupportedHost` error is rethrown as a validation error naming `remoteUrl`.\n- **Every write route is gated.** The write keys are approvable, and the permission contract refuses an ungated write that requires one (`ungated-approvable-write`). Each write route runs through `routeGate.run` with a registered route command; for a human, or an agent with no policy asking, it executes at once; an agent whose policy asks gets 202 with the request, and approving it runs the command.\nVerbatim story target: `FleetFlowsController`: `POST /api/fleet/flows`: before the gate, `remoteUrl` to `FleetRepo` through `findByIdentity`, reach (404) and key (403) checks in the repo's project, and the forge checks; then `routeGate.run` under `fleet.flow.create` with that `projectId`, whose `run` calls `FleetFlowsService.create` with entry `NAX`.\nUse ProjectsService.findAllForPrincipal to avoid exposing another project's registered repo, case-insensitive repo identity, and PermissionService for the resolved project's key. All GitHub HTTP is before the transaction/gate, using mintReadOnlyToken, getBranchHead and getFile at ref specSha; store no token in approval input, flow rows, audit or logs. No installation id or mint app_not_installed/app_permissions_insufficient -> 409 fleet.flows.repoNotConnected. github_app_not_configured/github_app_key_unreadable/provider_unreachable/provider_error -> 503 fleet.flows.forgeUnavailable and no flow. getBranchHead repo_not_found -> 409 fleet.flows.branchNotFound; unequal head -> 409 fleet.flows.specShaNotHead; absent spec -> 422 fleet.flows.specMissing with path. Unknown/inaccessible repo -> 404 fleet.flows.repoNotFound, missing create key on a reachable repo -> 403. Shared service handles the locked live duplicate -> 409 fleet.flows.duplicate with existing id. Register NAX create variant and FleetFlowsController, import GitBrokerModule/ProjectsModule, add one gated OpenAPI operation and endpoint e2e happy/error cases, regenerate openapi.json.\n\n**Scope** — In: nax route, project reach/key enforcement, read-only forge preflight, exception translation and command delegation. Out: repo identity/lock primitive (US-007), shared create (US-007), read route (US-011). GitLab repos and SSH remote URLs on the nax entry. Change detection before each dispatch: F3 re-checks `thread.publishedSha` (thread entry) and the branch head (nax entry) against `flow.specSha`, which also covers a lost `THREAD_SPEC_PUBLISHED` event and a stale replayed `published` line.\n\n**Interface** — `POST /api/fleet/flows` | `fleet.flow.create`, enforced in the resolved repo's project | 201 flow, or 202 request. nax-entry body: `{ features: [{ feature, specPath, dependsOn? }], roles: { reviewer, supervisor }, costCapUsd, remoteUrl, branch, specSha }`. Existing forge APIs: `GitHubAppClient.mintReadOnlyToken(installationId, repoName)`, `getBranchHead(token, owner, name, branch)` and `getFile(token, owner, name, path, ref): Promise<ForgeFile | null>`.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/fleet/flows by an agent rostered on the repo's project, with remoteUrl https://github.com/Org/Repo.git for FleetRepo org/repo, specSha equal to the stubbed getBranchHead result and getFile returning content for every specPath, returns 201 with entry NAX, threadId null and state PENDING.",
+        "[integration] The route's test stubs FleetFlowsService.create and asserts it is called once with entry NAX, the resolved repoId, that repo's projectId, branch, specSha, features, roles, cap, and creator { type: 'AGENT', id }.",
+        "[integration] The route calls getBranchHead with the repo's owner, name and branch, and getFile once per specPath with ref specSha.",
+        "[integration] A remoteUrl matching no FleetRepo returns 404 fleet.flows.repoNotFound.",
+        "[integration] A remoteUrl matching a FleetRepo in a project the agent is not rostered on returns 404 fleet.flows.repoNotFound.",
+        "[integration] An agent rostered on the project whose roles lack fleet.flow.create returns 403.",
+        "[integration] getBranchHead throwing RepoCheckException with reason repo_not_found returns 409 fleet.flows.branchNotFound.",
+        "[integration] A specSha different from the branch head returns 409 fleet.flows.specShaNotHead and writes no flow.",
+        "[integration] getFile returning null for the second specPath returns 422 fleet.flows.specMissing with that path in the error details, and writes no flow.",
+        "[integration] getBranchHead throwing RepoCheckException with reason provider_unreachable or provider_error returns 503 fleet.flows.forgeUnavailable and writes no flow.",
+        "[integration] mintReadOnlyToken throwing RepoCheckException with reason github_app_not_configured or github_app_key_unreadable returns 503 fleet.flows.forgeUnavailable and writes no flow.",
+        "[integration] A FleetRepo with a null githubInstallationId, or mintReadOnlyToken throwing RepoCheckException with reason app_not_installed or app_permissions_insufficient, returns 409 fleet.flows.repoNotConnected.",
+        "[integration] A second identical send while the first flow is PENDING returns 409 fleet.flows.duplicate with the first flow's id, and one approval request exists.",
+        "[integration] With an approval policy of mode agent on fleet.flow.create for the project, the route returns 202 with the request; approving that request creates the flow.",
+        "[integration] FleetReposService.findByIdentity('github', 'ORG', 'REPO') returns the FleetRepo stored as org/repo, and null for other/repo."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "nax",
+        "github",
+        "security",
+        "routes"
+      ],
+      "dependencies": [
+        "US-007",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The route composes existing project reach, permission and GitHub APIs with stage-specific error translation before the gate; cross-project non-disclosure and read-only tokens require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/skills/github-url.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/flows.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/test/integration/nax-flow-entry.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A forge preflight failing before routeGate.run opens no approval request."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "add the nax-entry operation to `gatedOperations` and raise the expected length by 1."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add the nax entry route: happy path and one error, with exact status codes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Flow read and stop routes",
+      "description": "**Goal** — Expose project-scoped list/detail and agent-reachable detail, plus an approval-gated terminal stop operation.\n\n**Motivation** — Every later piece (steps, verdicts, merge waits, the flow page, nax's send-to-koda tool) needs the record, its states and its approval first.\n\n**Approach** — Verbatim story target: `ProjectFlowsController`: `GET /api/projects/:slug/flows`, `GET /api/projects/:slug/flows/:flowId` and gated `POST /api/projects/:slug/flows/:flowId/stop`; `GET /api/fleet/flows/:flowId` on `FleetFlowsController` with the read enforced in the flow's project. Removes `fleet.flow.read` and `fleet.flow.stop` from `PENDING_SURFACE_KEYS`.\nVerbatim design notes:\n- **Every write route is gated.** The write keys are approvable, and the permission contract refuses an ungated write that requires one (`ungated-approvable-write`). Each write route runs through `routeGate.run` with a registered route command; for a human, or an agent with no policy asking, it executes at once; an agent whose policy asks gets 202 with the request, and approving it runs the command.\n- **Request id on the flow.** The flow row stores `approvalRequestId`; no `FleetApprovalAsk` link row. Asks are closed with status `cancelled` and reason `superseded` or `flow_stopped`; `close` returns null when a decide holds the request, and the `approvalRequestId` guard then makes the late decision a no-op. `execute` reads `requestId` and `approverId` from the action context with a local helper (as `FleetBudgetOverrideCommand` does); `onReject` receives no request and reads only `currentContext().approval.requestId`.\n- **Lock order.** Thread row (`ChatThread ... FOR UPDATE`) or `FleetRepo` row, then flow row (`FleetFlow ... FOR UPDATE`), then the request through `close`. Every flow transition reads the state under the flow row lock and checks `canTransitionFlow`.\nLists use the project's id and return the shared page envelope .data.records/.data.total, newest first. Detail returns the complete FleetFlowDto, ordered features, decimal strings and url. Project mismatch or missing id -> 404 fleet.flows.notFound; global-path detail resolves visibility through ProjectsService and enforces fleet.flow.read in that project's scope, returning the same 404 to an unrostered agent. Stop runs through a registered fleet.flow.stop route variant and FleetFlowsService under one transaction; re-read under locks, reject COMPLETED or STOPPED with 409 fleet.flows.notStoppable, move PENDING/APPROVED to STOPPED with human_stop/endedAt, and close the pending start ask cancelled/flow_stopped. A close skipped because a decision holds the request is not fatal: terminal state guards defeat the late decision. Audit fleet.flow.stop/resourceType flow and record flow.stopped with projectId and payload { flowId, stopReason }. Stop authorization is permission-based and may execute for an agent; the persisted reason remains human_stop. A policy-asked agent stop returns 202 and mutates nothing until approved. Register ProjectFlowsController, extend FleetFlowsController, service and route commands, add the stop gated OpenAPI operation, extend exact-status endpoint e2e cases for all four operations and regenerate openapi.json.\n\n**Scope** — In: list/read service orchestration, both read surfaces, gated stop, approval close, audit/activity and surface contracts. Out: create (US-007/US-009/US-010), start command (US-005), respec (US-012), restarting terminal flows in place. Cloning a stopped flow into a new pending flow (deferred to F6). Single-feature steps, the cost cap check between jobs, `spentUsd` accumulation and job-failure stops (fleet flow F3).\n\n**Interface** — `GET /api/projects/:slug/flows` | `fleet.flow.read` | 200 page; `GET /api/projects/:slug/flows/:flowId` | `fleet.flow.read` | 200 flow; `GET /api/fleet/flows/:flowId` | `fleet.flow.read`, enforced in the flow's project | 200 flow; `POST /api/projects/:slug/flows/:flowId/stop` | `fleet.flow.stop` | 200 flow, or 202 request. `ApprovalAskService.close(requestId, { status: 'cancelled' | 'expired', reason })` may return null.",
+      "acceptanceCriteria": [
+        "[integration] GET /api/projects/:slug/flows returns 200 with .data.records holding the project's flows newest first and .data.total.",
+        "[integration] GET /api/projects/:slug/flows/:flowId returns 200 with a FleetFlowDto whose features are in position order and whose costCapUsd is a string.",
+        "[integration] GET /api/projects/:slug/flows/:flowId for a flow of another project returns 404 fleet.flows.notFound.",
+        "[integration] GET /api/fleet/flows/:flowId by an agent rostered on the flow's project returns 200 with the same body as the project route.",
+        "[integration] GET /api/fleet/flows/:flowId by an agent not rostered on the flow's project returns 404 fleet.flows.notFound.",
+        "[integration] GET /api/projects/:slug/flows by a caller without fleet.flow.read returns 403.",
+        "[integration] POST /api/projects/:slug/flows/:flowId/stop on a PENDING flow returns 200 with state STOPPED, stopReason human_stop and endedAt set.",
+        "[integration] Stopping a PENDING flow cancels its open approval request with status cancelled and reason flow_stopped.",
+        "[integration] Stopping an APPROVED flow returns 200 with state STOPPED.",
+        "[integration] Stopping a STOPPED flow returns 409 fleet.flows.notStoppable.",
+        "[integration] A stop writes an AuditEntry with key fleet.flow.stop and resourceType flow, and a FleetActivity row with action flow.stopped and payload { flowId, stopReason }.",
+        "[integration] POST /api/projects/:slug/flows/:flowId/stop by a caller without fleet.flow.stop returns 403 and leaves the flow unchanged.",
+        "[integration] With an approval policy of mode agent on fleet.flow.stop for the project, an AGENT's stop returns 202 and the flow stays PENDING until the request is approved.",
+        "[integration] Stopping a COMPLETED flow returns 409 fleet.flows.notStoppable.",
+        "[integration] A nonexistent flow id returns 404 fleet.flows.notFound from GET /api/projects/:slug/flows/:flowId, from GET /api/fleet/flows/:flowId and from POST /api/projects/:slug/flows/:flowId/stop, and stopping a flow that belongs to another project returns 404 fleet.flows.notFound."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "security",
+        "routes",
+        "lifecycle"
+      ],
+      "dependencies": [
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two authorization surfaces and gated terminal mutation require isolation against project disclosure and late-approval races; strict security TDD covers HTTP, audit and request cancellation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/approvals/approval-ask.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/project-flows.controller.ts",
+        "apps/api/test/integration/fleet-flow-read-stop.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "remove `fleet.flow.read` and `fleet.flow.stop` from `PENDING_SURFACE_KEYS` now that routes declare them."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "add the stop operation to `gatedOperations` and raise the expected length by 1."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add the read and stop routes: happy path and one error each, with exact status codes."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new routes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Re-publish sends a thread flow back to PENDING",
+      "description": "**Goal** — Emit committed thread publication events and re-evaluate an existing flow's approval against the current spec snapshot.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, merged #392) turns a settled spec set into ready PRs with one approval.\n\n**Approach** — Verbatim algorithm and design notes:\n- **Re-publish is event-driven.** After a thread ingest fold that applied a `published` line commits, the ingest emits `THREAD_SPEC_PUBLISHED` `{ threadId, sha, paths }` with `emitAsync`, logging a listener failure. `FleetFlowPublishListener` calls `FleetFlowsService.respec(event)` under the system writer `system.flow.respec`. `respec` finds the thread's live flow unlocked (for its `projectId`), then takes the thread and flow locks and re-reads both. Rules: an event whose `sha` is not the thread's current `publishedSha`, or equals the flow's `specSha`, is ignored; a `PENDING` flow always re-asks (old request closed `superseded`, new one with the new sha); an `APPROVED` flow whose publish touches a spec path returns to `PENDING` with a new request; an `APPROVED` flow whose publish touches none keeps its approval and takes the new sha; a flow in any later state is left to F3. Emission is best-effort, and a stale replayed `published` line can still move `publishedSha`, so F3 re-checks `thread.publishedSha == flow.specSha` before every dispatch.\n- **Lock order.** Thread row (`ChatThread ... FOR UPDATE`) or `FleetRepo` row, then flow row (`FleetFlow ... FOR UPDATE`), then the request through `close`. Every flow transition reads the state under the flow row lock and checks `canTransitionFlow`.\n- **Request id on the flow.** The flow row stores `approvalRequestId`; no `FleetApprovalAsk` link row. Asks are closed with status `cancelled` and reason `superseded` or `flow_stopped`; `close` returns null when a decide holds the request, and the `approvalRequestId` guard then makes the late decision a no-op. `execute` reads `requestId` and `approverId` from the action context with a local helper (as `FleetBudgetOverrideCommand` does); `onReject` receives no request and reads only `currentContext().approval.requestId`.\nIn PrismaThreadIngestRepository.fold inject EventEmitter2, collect every applied published line within its existing transaction, then await emitAsync once per collected line after txManager.run resolves; log a listener error without rethrowing and continue emission. Do not emit for write_doc-only batches or before commit. Keep ingest's existing stale replay/write-fold behavior, published metadata, cursor advancement, FoldResult live-event construction, costChanged derivation and post-commit BudgetEvaluator.signal calls; the new emitter is additive to these paths. Implement the typed event in thread-spec-published.event.ts, and the listener with @OnEvent, @SystemWriter('system.flow.respec') and runAsSystemWriter(this, ...), registered in FlowsModule. respec must access thread data only through ThreadsService. Its transaction re-reads locked rows, closes a previous ask cancelled/superseded when needed, opens a new system-origin flow ask on behalf of the original creator with deadline null and new { flowId, specSha }, and reask clears approvalMode/approverId/approvedAt. Untouched approved flows only updateSha. Every applied change audits system.flow.respec with SYSTEM actor and records project-scoped flow.respec payload { flowId, state }; ignored events produce no writes. Update positional ingest constructor fixtures in prisma-thread-ingest.repository.spec.ts and prisma-thread-cost-review.spec.ts, remove system.flow.respec from PENDING_SURFACE_KEYS, and add [FleetFlowPublishListener, 'system.flow.respec'] to system-writer.decorator.spec.ts's table.\n\n**Scope** — In: after-commit ingest event emission, system writer/listener, respec lifecycle and stale/duplicate event guards. Out: create service core (US-007), approval-decision implementation (US-005), HTTP routes (US-008 to US-011), later-state step coordination (F3). Change detection before each dispatch: F3 re-checks `thread.publishedSha` (thread entry) and the branch head (nax entry) against `flow.specSha`, which also covers a lost `THREAD_SPEC_PUBLISHED` event and a stale replayed `published` line.\n\n**Interface** — `THREAD_SPEC_PUBLISHED` event `{ threadId, sha, paths }`; `FleetFlowsService.respec(event)`; `FleetFlowPublishListener` under `@SystemWriter('system.flow.respec')`; existing `PrismaThreadIngestRepository.fold(batch): Promise<FoldResult>` keeps its return contract.",
+      "acceptanceCriteria": [
+        "[integration] PrismaThreadIngestRepository.fold over a batch holding a published line emits THREAD_SPEC_PUBLISHED once, after its transaction commits, with the line's sha and paths and the thread id resolved from the batch's FleetJob.threadId.",
+        "[integration] fold over a batch with only write_doc lines emits no THREAD_SPEC_PUBLISHED.",
+        "[integration] End to end with the real listener: folding a published line with new sha N whose paths contain spec path P of the thread's APPROVED flow leaves the flow PENDING with specSha N, approval columns cleared, and a new open fleet.flow.start request stored as approvalRequestId.",
+        "[integration] For a PENDING flow, an event with new sha N cancels the old request with reason superseded and opens a new one with input specSha N.",
+        "[integration] For a PENDING flow, an event with new sha N whose paths contain none of the flow's spec paths also re-asks.",
+        "[integration] For an APPROVED flow, an event whose paths contain none of the flow's spec paths updates specSha to N and keeps state APPROVED and the approval columns.",
+        "[integration] An event whose sha is not the thread's current publishedSha changes nothing.",
+        "[integration] Delivering the same event twice changes the flow once and leaves one open request.",
+        "[integration] An event for a thread with no live flow writes nothing and does not throw.",
+        "[integration] Each applied re-publish writes an AuditEntry with key system.flow.respec, resourceType flow and actorType SYSTEM.",
+        "[integration] Each applied re-publish records a FleetActivity row with action flow.respec and payload { flowId, state }.",
+        "[integration] Approving the request that was open before a re-publish re-asked leaves the flow PENDING.",
+        "[integration] A listener that throws is logged and the ingest fold that emitted the event still resolves.",
+        "[integration] After a published line is folded, ChatThread still stores the line's publishedSha, specPublished equal to specPresent, empty writtenPaths and lastWrite containing the original jobId, sha, paths and ignored fields, even when the publish listener fails; and a fold batch for a missing job still returns { costChanged: false, events: [] } without emitting THREAD_SPEC_PUBLISHED.",
+        "[integration] Given an existing matching assistant message and a previously unseen priced usage line with costUsd 0.25, fold still advances the ingest cursor to batch.endOffset, returns costChanged true and signals BudgetEvaluator with the job's spend scopes after commit."
+      ],
+      "tags": [
+        "fleet-flow-record",
+        "api",
+        "events",
+        "threads",
+        "security",
+        "approval"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "An existing ingest fold gains post-commit emission and a system-writer listener coordinates standard locked approval replacement; privilege context and stale-decision races require strict security TDD and real-listener integration tests."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-project-deletion.listener.ts",
+        "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+        "apps/api/src/fleet/threads/ingest/thread-write-fold.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flows.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-publish.listener.ts",
+        "apps/api/src/fleet/threads/ingest/thread-spec-published.event.ts",
+        "apps/api/src/fleet/flows/fleet-flow-publish.listener.spec.ts",
+        "apps/api/test/integration/fleet-flow-respec.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a batch applies two published lines, fold emits both events in batch order after commit even if the first event's listener rejects.",
+        "When the ingest transaction rolls back, fold emits no THREAD_SPEC_PUBLISHED event.",
+        "When a thread flow is RUNNING, WAITING_MERGE or WAITING_ANSWER, respec leaves its state, specSha and approval request unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+          "reason": "inject `EventEmitter2`, collect the batch's `published` lines, and emit `THREAD_SPEC_PUBLISHED` once per line after `fold`'s transaction resolves."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.spec.ts",
+          "reason": "its positional constructions (around line 108) pass the new `EventEmitter2` argument."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-cost-review.spec.ts",
+          "reason": "its positional construction (around line 24) passes the new `EventEmitter2` argument."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "remove `system.flow.respec` from `PENDING_SURFACE_KEYS` now that the listener declares it."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "its writer table (around line 58) gains `[FleetFlowPublishListener, 'system.flow.respec']`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Existing-system enhancement, not greenfield. Discovery used direct reads and targeted searches because codebase-memory MCP is unavailable in this session. The supplied source-root framework detection is inaccurate: apps/api/src/main.ts:12 creates a NestJS Fastify app via AppFactory, and apps/api/package.json:59-67 pins NestJS 12 and the Fastify platform. Follow Nathapp repository/service/module patterns, strict TypeScript, Prisma 7, Vitest and oxlint; do not implement Express handlers. Read the nathapp-nestjs-patterns skill before implementing NestJS code; its content was not exposed in this session. All twelve binding stories keep workdir apps/api, including the expressly required root openapi.json regeneration. No CLI, runner, web or .nax implementation changes are authorized; this PRD is the explicitly requested planning artifact.\n\nArchitecture and dependency order: apps/api/src/fleet/fleet.module.ts:25-29 composes the fleet modules and currently has no FlowsModule. The flows directory does not yet exist. Build catalog registration (US-001), additive schema/domain/state rules (US-002), and pure validation (US-006) independently; then repository (US-003), thread support (US-004), approval command/module (US-005), shared creation service (US-007), gated route slices (US-008 through US-011), and publish integration (US-012) according to the binding dependency graph. Do not create cross-import cycles: the start command depends on the flow repository, not on FleetFlowsService; the service consumes ThreadsService, never ChatThreadRepository. ThreadsModule already exports ThreadsService at apps/api/src/fleet/threads/threads.module.ts:24-29. Use FlowsModule-owned repository/token binding, start-command registration and route-command registration; import ApprovalEngineModule, PrismaModule, FleetActivityModule and needed auth/project access providers using apps/api/src/fleet/provider-credentials/provider-credentials.module.ts:23-34 as the wiring precedent. Unit-level, no-DB module compilation must prove registry and DI wiring.\n\nPermission and approval impact: apps/api/src/permissions/catalog.ts:65-73 contains the pending surfaces, :130-162 declares NEW_KEY_SCOPES, :437-445 classifies risk and :468-487 derives approvability/floor/default. Adding fleet.flow.start as critical yields an immutable human floor without modifying eligibility algorithms. The remaining project keys must still permit both user and agent principals. apps/api/src/permissions/role-admin.service.ts:409-418 refuses binding a role that contains a principal-incompatible key, so making fleet.thread.preapprove user-only in the catalog would break agent developer and project-admin bindings. Enforce human-only ticking inside both route commands instead. apps/api/src/permissions/system-roles.ts:56-100 is the developer grant list; role.read wildcard expansion supplies fleet.flow.read to read roles. Update catalog.spec.ts's independent key/risk derivation and regenerate permissions/__snapshots__/role-matrix.json using the existing role-matrix.spec.ts snapshot mechanism. Existing unlocked system roles are deliberately preserved, not rewritten (system-roles.ts:4-15): changing the seed changes new/reset roles, not every deployed developer role; do not silently broaden customized persisted roles. apps/api/src/permissions/test-helpers/permission-contract.ts:181-215 rejects undeclared, pending-but-declared and ungated approvable writes. Add all six pending keys in US-001 and remove only the key whose route or listener lands in each specified later story; fleet.flow.start stays pending because a registered approval command is not a declared surface.\n\nApprovalAskService.open requires the caller's transaction and pins component/key pairs (apps/api/src/approvals/approval-ask.service.ts:49-52, :76-100); add flow -> fleet.flow.start there. Creation cannot rely on the write-route gate for start approval because a human's write executes immediately. Inside the create transaction use a separate system-origin flow ask on behalf of the actual creator, input { flowId, specSha }, deadline null, and store its request id directly on the flow; not-needed is an internal error. Do not create FleetApprovalAsk link rows. ApprovalCommand supports parse/execute/onReject/details and named variants (approval-command.registry.ts:38-108); use a primary start command plus separate route variants, not a primary command shared by incompatible create inputs. routeCommand reloads the requester from action context on immediate and deferred execution (approvals/route/route-command.ts:49-84); never replace the creator with the deciding user. ApprovalRouteGate.run checks the principal and permission in the supplied project (approvals/route/approval-route-gate.ts:58-99). Project controller precedent: provider-credentials/project-provider-credentials.controller.ts:37-91 declares ProjectMembershipGuard, RequiresGuard, Requires, ApprovalGated and uses ApprovalPending for 202. Flow routes need automatic-execution commands, not redeem-secret behavior copied from credential examples. Human start decisions can self-approve on behalf of themselves because approval-eligibility.ts:52-58 contributes human for an on-behalf USER; agents contribute at most agent or self and cannot satisfy human. The start command's context helper follows fleet-budget-override.command.ts:178-182; reject only has requestId. Guard flow existence, PENDING state, current approvalRequestId and matching specSha before approving/rejecting.\n\nConcurrency and lifecycle: repository transitions must row-lock and check the pure state matrix; never restart STOPPED or COMPLETED rows. Live means all five nonterminal states, not just the two F1 creates. Lock the ChatThread or FleetRepo parent first for create/stop/respec as applicable, then the FleetFlow, then close an ask. Approval decisions already hold the request before the command takes the flow lock; ApprovalAskService.close uses FOR UPDATE SKIP LOCKED and can return null (approval-ask.service.ts:113-146), which avoids a reverse-order deadlock. Request-id, sha and state guards make a late old decision harmless even when close skipped a held request. Parent-row serialization, not a global unique constraint, enforces one live thread flow and one nax-entry live (repoId, branch, specSha); terminal flows must allow new rows. Two concurrent creators and rollback on ask failure require real Postgres tests. No dispatch, runner wake or spend accounting belongs to F1.\n\nPersistence and migration: apps/api/prisma/schema.prisma:795-830 defines FleetRepo, its cascade and identity uniqueness; :1215-1255 defines ChatThread and its existing publishedSha/specPublished fields. Add the exact FleetFlow and FleetFlowFeature models, Project/FleetRepo back-relations, ChatThread.preApproval Json?, and migration 20261125090000_fleet_flows/migration.sql. Follow additive SQL/index/FK style from prisma/migrations/20261105000000_provider_credentials/migration.sql:1-43. Keep state and actor vocabulary local TypeScript constants/types, not Prisma enums. Use Decimal(12,4) for cap/spent, default spent zero/state PENDING, unique feature name and position per flow, ordered reads, and cascade project/repo -> flow -> features. threadId, pinnedRunnerId and approvalRequestId are scalar references in the supplied model, not new FKs; deleting a repo/project may leave an orphaned ask, and a later decision must no-op. No preApproval backfill is needed: old rows read null. PrismaFleetFlowRepository extends AbstractPrismaRepository; mirror provider-credentials/prisma-provider-credential.repository.ts:56-88 for transaction proxy, modelDelegate and parameterized lock queries. Its findPage should follow Nathapp IPageOption/IPageResult pagination (repos/prisma-fleet-repo.repository.ts:71-75) and deterministic newest-first ordering. Regenerate the ignored Prisma client before dependent tests; import from src/generated/prisma/client, never @prisma/client. Match unique violations with the shared helper rather than adapter meta.target.\n\nThread impact: ChatThreadRecord currently has no preApproval (threads/domain/chat-thread.domain.ts:72-101) and ChatThreadRepository has no flow-lock/tick methods (:134-155). mapThread is at threads/prisma-chat-thread.repository.ts:716; it must normalize nullable JSON to ThreadPreApproval | null for every read. That domain addition reaches ThreadsService, WorkspaceThreadsService, controllers and typed test fixtures (threads.service.spec.ts:26 is a concrete record fixture), so update fixtures and mocks without weakening the nonoptional field contract. ThreadsService.plan at threads.service.ts:145-160 owns the reference guard ordering, but lockForFlow must not copy the unrelated thread.plan ownership rule: project flow permission governs this entry. lockForFlow runs inside its caller's transaction and guards not found/project mismatch, REPO kind, threadsEnabled, archived, published, then runner. Tick set/clear lock the same row and audit; consume clears without its own audit. Advance approval must be possible before publication, so tick operations must not reuse published/runner requirements just because lockForFlow has them. ThreadDto at threads/dto/thread.dto.ts:36-66 gains the nullable public tick shape and Swagger metadata. The thread's local published branch is not pushed: resolve branch feat/<thread.feature>, publishedSha and runner under lock at command execution, not from frozen HTTP input; never do forge path checks for this entry. The covering tick requires typed creator identity matching the tick's USER or thread creator, and Decimal cap >= flow cap; consume only a covering tick and preserve uncovered ticks. No expiry or sha binding on a tick.\n\nRepo/forge impact: IFleetRepoRepository (repos/domain/fleet-repo.domain.ts:39-66) currently has findById and lockForDelete but no identity lookup or lockById result. Add findByIdentity and lockById in US-007, exposing through FleetReposService, and keep new methods compatible with repo mocks/consumers. repos/prisma-fleet-repo.repository.ts:49-59 shows current read mapping; identity lookup must be case-insensitive for owner/name although schema identity uniqueness is ordinary text. nax create resolves remoteUrl with skills/github-url.ts:7-25, translating skills.unsupportedHost to a property-specific remoteUrl validation error. ProjectsService.findAllForPrincipal at projects/projects.service.ts:80-96 filters by bindings and excludes deleted projects; use it for reach before permission, preserving indistinguishable 404 for unknown/inaccessible repos or flows. Then enforce fleet.flow.create/read in the resolved project's scope, not global scope or any unrelated project. GitHubAppClient.getBranchHead at git-broker/github-app-client.ts:312-319 distinguishes missing branch, getFile at :338-349 returns null for missing/nonfile, and mintReadOnlyToken is the existing read-only installation-token API. Preflight all forge reads before routeGate.run and before any DB transaction: connection, head equality and each spec path at the pinned sha. Map all RepoCheckException reasons exactly: installation/permissions -> 409 repoNotConnected, config/key/unreachable/provider error -> 503 forgeUnavailable, head 404 -> 409 branchNotFound, mismatch -> 409 specShaNotHead, missing file -> 422 specMissing with path. Never store/log tokens, or pin a token in approval input. Deferred execution locks the repo and reruns duplicate/create logic, not thread data captured before approval; F3 owns branch revalidation before jobs.\n\nAuditing and responses: FleetActivityService.record must run inside the mutation transaction and refuses secret-like payload field names (fleet/activity/fleet-activity.service.ts:15-35). Append flow to the closed-world entity vocabulary (fleet/activity/domain/fleet-activity.domain.ts:12-23; update fleet-activity.entity-types.spec.ts). Every flow activity includes projectId and only safe fields flowId, entry, featureCount, state, stopReason. Record create/start/stop/system-respec audits with the actual action context so approver attribution is preserved. Add English/Chinese fleet.flows.* messages under apps/api/src/i18n/{en,zh}/fleet.json; follow the local exception and envelope conventions, not hardcoded UI prose. Flow DTO maps Decimal to strings, date/null fields, nested creator/roles/approval, position-ordered features and /<slug>/flows/<id> URL; approvalRequestId must remain visible for a pending ask even with no approved mode. List returns .data.records and .data.total using the shared page helper. Regenerate openapi.json after ThreadDto and each route slice with bun run api:export-spec, and update approvals/approval-openapi.contract.spec.ts:15-157's explicit gatedOperations (+2 preapproval, +1 thread create, +1 nax create, +1 stop). Also extend test/e2e/api-endpoint/endpoint.e2e.spec.ts for every new operation's happy path and one exact-status error; no generated CLI edits.\n\nPublish seam: threads/ingest/prisma-thread-ingest.repository.ts:46-53 currently takes four constructor args, and fold at :79-226 transactionally locks job then thread and applies write lines at :154-157 before returning/signalling budgets. Inject EventEmitter2, collect only applied published lines with the resolved thread id inside that transaction, and await emitAsync per line after it resolves; catch/log each listener error without failing ingest or rolling back committed transcript state. thread-write-fold.ts:38-45 sets publishedSha and specPublished even for replayed published lines; preserve this baseline, do not invent stale-publish suppression. Update positional fixtures at ingest/prisma-thread-ingest.repository.spec.ts:108 and prisma-thread-cost-review.spec.ts:24. Define the event in thread-spec-published.event.ts and handle in a FlowsModule provider decorated SystemWriter(system.flow.respec), OnEvent and runAsSystemWriter, mirroring vcs/vcs-project-deletion.listener.ts:28-50. respec discovers the project via an unlocked live flow lookup, then thread-locks and flow-locks and re-reads. Ignore obsolete current-thread sha, already applied sha, no live flow and later execution states; PENDING always re-asks even non-spec changes, APPROVED touched specs re-ask, APPROVED untouched specs retain approval and advance sha. Close old asks superseded, open a fresh flow ask, clear approval attribution for re-ask, and audit/activity exactly once per applied event. Event delivery is best-effort; F3, not this feature, covers lost delivery by dispatch-time sha checks.\n\nCompatibility/open issue: the spec says flow requests open with deadline null and defers request expiry. Baseline ApprovalAskService.newAsk/expiresAt at approval-ask.service.ts:149-185 still computes expiresAt from the policy/default timeout even for deadline null. Implement F1's stated null deadline using the existing engine; do not silently modify shared expiry semantics or claim null disables the sweeper. Any requirement for genuinely non-expiring flow requests needs clarification outside the listed F1 scope. The spec AC phrase 'writes the flow PRE_APPROVED' means state APPROVED and approvalMode PRE_APPROVED, not a nonexistent state. Required ACs remain in their declared story; failure-table cases not repeated in the story list are explicitly added to the matching story, rather than silently lost.\n\nVerification plan for implementers: co-locate pure parsing, state, registry, permission and wiring specs under src/**/*.spec.ts; place actual DB round-trips, constraints, transactions, concurrency and authenticated lifecycle behavior under test/integration/**/*.integration.spec.ts and endpoint checks under test/e2e. Existing precedents include threads/threads.service.spec.ts, threads/prisma-chat-thread.repository.spec.ts, threads/domain/chat-thread.domain.spec.ts, threads/ingest/thread-write-fold.spec.ts, threads/ingest/prisma-thread-ingest.repository.spec.ts, repos/fleet-repos.service.spec.ts, permissions/catalog.spec.ts, permissions/role-matrix.spec.ts, permissions/system-writer.decorator.spec.ts, approvals/approval-openapi.contract.spec.ts and test/integration/project-provider-credentials.integration.spec.ts. Security override uses three-session-tdd for catalog/role changes, human preapproval, approval command/service and all permission-gated routes/system writers; pure state/schema/validation and plain repository stories use complexity-appropriate TDD. Use vi.*, vi.hoisted and lazy await import for TypeScript modules. DB suites use canRunDbTests, KODA_DB_TESTS=1 outside NAX_SANDBOXED=1 and createTestPrismaClient; scoped DB runs must really pass outside the sandbox, not merely skip. Global setup uses prisma db push force-reset, so migration SQL also needs a real migration verification path. Do not run two DB-mode suites on the same database; another checkout uses a private container. Generated acceptance files are read-only, run via vitest.nax.config.ts and story-specific AC filters; do not copy them into src/test. No code tests or commands were executed while drafting this PRD because execution tools are not available.\n\nRefine-pass audit: enumerated all 155 source acceptance criteria in source order: US-001 1-12, US-002 1-9, US-003 1-13, US-004 1-13, US-005 1-13, US-006 1-15, US-007 1-15, US-008 1-11, US-009 1-13, US-010 1-15, US-011 1-13 and US-012 1-13. Each source ordinal remains at the same ordinal in its story's acceptanceCriteria; only additive failure-table/regression assertions follow them. In particular, updateSha changes-only-specSha, STOPPED transition leaves-row-unchanged, uncovered/insufficient ticks remain, duplicate sends leave one request, inaccessible project reads remain 404, and stale/duplicate publications preserve approval/state clauses were retained. PRE_APPROVED is an approvalMode, not an additional FleetFlowState. Every story has a negative assertion, and all 18 feature exclusions are retained verbatim. Restored the spec-recommended permission-contract, provider-module wiring and activity-service context files within each five-file limit; none of this story's own outputs appear as context. All binding dependencies remain exactly unchanged even when they look redundant; US-004 cannot assume US-001 ran, so isolated thread mutation tests may inject AuditRecorder while full-catalog integration validates real audit rows after the catalog story lands. Simplified routing for additive/catalog/command/thin-controller slices while preserving the mandatory security test strategy. Added observable backward-compatibility assertions for legacy component/entity vocabulary, existing schema rows, thread metadata, previously registered commands, repo DTO mapping and ingest write/cost/cursor behavior.\n\nAdditional interface checks: ThreadIngestBatch has jobId but no threadId (threads/ingest/domain/thread-ingest.domain.ts:7-13); publication uses the locked FleetJob.threadId resolved during fold, not a fabricated batch.threadId field. Approval decisions return an ApprovalRequestDto, not the raw command result (approvals/approval-requests.controller.ts:109-122). ApprovalExecutionService stores command.toResult(result) or null (approvals/approval-execution.service.ts:305-310); assert { applied: false } directly at the start-command boundary under a valid approval context, or explicitly expose it through a command-local toResult projection, never assume it is the top-level decisions response. A superseded request already cancelled by close may be refused by the engine as settled; to exercise the command's stale-decision guard use a still-held/late executing request or invoke the command with that engine context. The generic write-gate policy rule is subject to the tick route's stricter immediate non-USER refusal: check that before opening a gate request and again inside its command. The preapproval service API itself continues to own locked persistence, not a second competing controller rule. This audit inspected source and text only; it did not execute JSON parsing or test commands.",
+  "outOfScope": [
+    "Dispatching any job (spec review, PLAN, PRD review, RUN, REVIEW, FIX, finish); F1 creates, approves and stops records only.",
+    "The `AGENT` job kind and `nax agents run` on the runner (fleet flow F2).",
+    "Single-feature steps, the cost cap check between jobs, `spentUsd` accumulation and job-failure stops (fleet flow F3).",
+    "Change detection before each dispatch: F3 re-checks `thread.publishedSha` (thread entry) and the branch head (nax entry) against `flow.specSha`, which also covers a lost `THREAD_SPEC_PUBLISHED` event and a stale replayed `published` line.",
+    "Review verdicts, spec-fix jobs, batched questions and the flow's ticket (fleet flow F4).",
+    "Feature order, merge waits and independent features starting from main (fleet flow F5).",
+    "Every web page: the Start flow form, the tickbox control, the flow page and the approval card's flow view (fleet flow F6).",
+    "Cloning a stopped flow into a new pending flow (deferred to F6).",
+    "A project-wide auto-approve setting (deferred by the user 2026-11-04).",
+    "Pre-approval expiry or binding the tick to a published sha: by design the tick approves in advance whatever the thread publishes, up to its cap, and is consumed by one flow.",
+    "GitLab repos and SSH remote URLs on the nax entry.",
+    "Verifying thread-entry spec paths exist: thread publish never pushes, so the first step (F3) is where a missing spec fails.",
+    "Approval request expiry: flow requests open with `deadline: null`.",
+    "Closing a flow's pending request when its repo or project is deleted: the cascade removes the flow, and a later decision on the orphaned request is a no-op.",
+    "A default approval policy for `fleet.flow.create` or `fleet.flow.stop`: both execute at once unless a project adds a policy.",
+    "Regenerating the CLI client (`bun run generate:cli`) and CLI commands for flows: no CLI story in F1; `openapi.json` is regenerated.",
+    "Notifications for a pending flow beyond what the approval engine already sends for a new request.",
+    "Changes under `.nax/` (rules, config): none are needed; `.nax/` is read-only to the run."
+  ],
+  "routingProfile": "native-codex-ds"
+}
