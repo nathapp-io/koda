@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: The AGENT fleet job kind (fleet flow F2)
 
 ## Summary
@@ -79,7 +78,8 @@ be built.
   UTF-8 bytes of `output` (the flow's verdict JSON sits at the end, F4), then drops denied asks from the end and then
   shortens the output tail further until `JSON.stringify(result)` fits the budget, setting `truncated` and
   `deniedAsksTruncated` when it cut. The whole stdout is in the job log. koda checks the same limits (its own copy,
-  pinned equal to the protocol's) and drops the result whole when any fails (the `configResult` precedent).
+  pinned equal to the protocol's; the API's `AgentJobInput` and `AgentJobResult` types are structural mirrors of the
+  protocol's, as `config-jobs` is) and drops the result whole when any fails (the `configResult` precedent).
 - **Verdict.** Cancel requested: `CANCELLED`. Otherwise status `completed`: `COMPLETED`; status `failed`, `timeout` or
   `cancelled`: `FAILED` with reason `agent <status>`; no parseable result: `FAILED` with reason `agent result
   unreadable` plus `: ` and the first non-empty line of `nax.stderr` (at most 300 characters) when there is one. The
@@ -130,10 +130,13 @@ Changed. The baseline locates the code; implement the target.
 - `normalizeDispatch(dto, defaultBranch)` (`apps/api/src/fleet/jobs/dispatch-input.ts:27`) — Baseline: returns no
   agent field. Target: returns `agentInput: AgentJobInput | null` (non-null only for `AGENT`).
 - `NewFleetJob` / `FleetJobRecord` / `FleetJobPatch` (`apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:149,74,180`):
-  `NewFleetJob` gains optional `agentInput?: AgentJobInput | null`; `FleetJobRecord` gains `agentInput` and
-  `agentResult`; `agentResult` joins the patch keys.
+  `NewFleetJob` gains optional `agentInput?: AgentJobInput | null`; `FleetJobRecord` gains optional `agentInput?:
+  AgentJobInput | null` and `agentResult?: AgentJobResult | null` (the `fixOutcome?` precedent, so the typed record
+  fixtures in existing specs keep compiling); `toJob` always sets both, null when absent; `agentResult` joins the
+  patch keys.
 - `GitTokenBroker.mint(req)` (`apps/api/src/fleet/git-broker/git-token.broker.ts:35`) — Baseline: `purpose?: 'review' |
-  'fix'`. Target: `purpose?: 'review' | 'fix' | 'read'`.
+  'fix'`. Target: `purpose?: 'review' | 'fix' | 'read'`; `fresh` treats `read` as read-only (GitHub `mintReadOnlyToken`,
+  no `repoId` on the token), and the cache-key choice gains a `read` arm, `<jobId>:<leaseEpoch>:read`.
 - `capabilityMisfit` (`apps/api/src/fleet/jobs/placement-rules.ts:124`) and `MisfitReason` (line 13): add `agents_run`.
 - `buildAssignPayload` (`apps/api/src/fleet/jobs/assign-payload.ts:29`): adds `agent` for `AGENT`.
 - `mirror` (`apps/api/src/fleet/sync/event-payloads.ts:93`): adds `agentResult`.
@@ -213,7 +216,7 @@ key socket included). The per-job profile carries `agent.modelAliases` when the 
 
 Workdir: `apps/api`. No dependencies.
 
-Adds `AGENT` to the API enums and the protocol types, the optional nested `agent` dispatch object, and an `AGENT`
+Adds `AGENT` to the API enums and the protocol types, the protocol's runtime `AGENT_RESULT_LIMITS`, the optional nested `agent` dispatch object, and an `AGENT`
 branch in `normalizeDispatch` that returns `agentInput` and refuses the fields `AGENT` does not take.
 
 ### US-002: Agent input bounds
@@ -244,8 +247,8 @@ are regenerated.
 Workdir: `apps/api`. Depends on US-003.
 
 Runners report `agentsRun`; an `AGENT` is placed only on a runner with it (misfit `agents_run`, recoverable); the
-assign payload carries `agent`; the broker's new `read` purpose mints a GitHub read-only token for the job's default
-token request, and the sync grant uses it for `AGENT`.
+assign payload carries `agent`; the broker's new `read` purpose mints a GitHub read-only token with no `repoId`, cached
+under its own `read` key, for the job's default token request, and the sync grant uses it for `AGENT`.
 
 ### US-006: AGENT result mirror
 
@@ -273,7 +276,7 @@ file.
 
 Workdir: `apps/runner`. Depends on US-008.
 
-`AGENT_RESULT_LIMITS` (new runtime constant in `packages/fleet-protocol`); `readAgentResult` parses a bounded
+`readAgentResult` parses a bounded
 `nax.stdout` and reads the first `nax.stderr` line on failure; `fitAgentResult` fits the result to the budget and
 formats the cost.
 
@@ -334,6 +337,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/repo-config/config-result.ts` — the `parseConfigResult` precedent
 - `apps/api/src/fleet/common/agent-jobs.ts` — created by US-001; this story adds `AGENT_RESULT_LIMITS` to it
 - `apps/api/src/fleet/common/protocol.spec.ts` — the mirrored-constant pin precedent
+- `packages/fleet-protocol/src/agent-jobs.ts` — created by US-001; the protocol constant the API copy is pinned to
 
 **US-007**
 
@@ -355,6 +359,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/runner/src/executor/config-job/result-fit.ts` — the budget-fit precedent
 - `apps/runner/src/watcher/status-snapshot.ts` — `formatCost`
 - `packages/fleet-protocol/src/config-jobs.ts` — protocol constants precedent
+- `packages/fleet-protocol/src/agent-jobs.ts` — created by US-001; `AGENT_RESULT_LIMITS` read here
 
 **US-010**
 
@@ -373,6 +378,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 - `apps/api/src/fleet/common/agent-jobs.ts` — `AGENT_NAME_RE`, types `AgentJobInput` and `AgentJobResult`
 - `apps/api/src/fleet/jobs/dto/dispatch-agent.dto.ts` — `DispatchAgentDto`
+- `packages/fleet-protocol/src/agent-jobs.ts` — `AGENT_RESULT_LIMITS`, re-exported from the protocol index
 
 **US-003**
 
@@ -389,7 +395,6 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 **US-009**
 
-- `packages/fleet-protocol/src/agent-jobs.ts` — `AGENT_RESULT_LIMITS`
 - `apps/runner/src/executor/agent-job/agent-result.ts` — `readAgentResult`, `fitAgentResult`, `AGENT_STDOUT_MAX_BYTES`
 
 **US-011**
@@ -407,7 +412,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/jobs/dispatch-input.spec.ts` — whole-object expectations on `normalizeDispatch` gain `agentInput: null` for non-`AGENT` commands.
 - `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` — `NewFleetJob` gains optional `agentInput?: AgentJobInput | null`.
 - `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` — the command enum gains `AGENT`.
-- `packages/fleet-protocol/src/index.ts` — types only: `FleetJobKindName`, `RunnerCapabilities.agentsRun`, `SnapshotEventPayload.agentResult`, `AssignPayload.agent`, `AgentAssign`, `AgentJobResult`.
+- `packages/fleet-protocol/src/index.ts` — types `FleetJobKindName`, `RunnerCapabilities.agentsRun`, `SnapshotEventPayload.agentResult`, `AssignPayload.agent`, `AgentAssign`, `AgentJobResult`, and a re-export of the new protocol agent-jobs module.
 
 **US-002**
 
@@ -416,12 +421,10 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 **US-003**
 
 - `apps/api/prisma/schema.prisma` — `FleetJob` gains `agentInput Json?` and `agentResult Json?`.
-- `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` — `FleetJobRecord` gains `agentInput` and `agentResult`; `agentResult` joins the mutable patch keys.
+- `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` — `FleetJobRecord` gains optional `agentInput` and `agentResult`; `agentResult` joins the mutable patch keys.
 - `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` — insert writes `agentInput` (null when absent); `toJob` maps both columns; the patch writer handles `agentResult` (null as `Prisma.DbNull`).
-- `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` — `FleetJobDto` gains `agent` and `agentResult`; `from` maps them.
+- `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` — `FleetJobDto` gains `agent` and `agentResult`; `from` maps them with `?? null`.
 - `apps/api/src/fleet/jobs/fleet-jobs.service.ts` — requeue's reset patch gains `agentResult: null`.
-- `apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts` — exact expectations on the requeue reset patch gain `agentResult: null`.
-- `apps/api/src/fleet/jobs/dto/fleet-job.dto.spec.ts` — exact `FleetJobDto.from` expectations gain `agent: null` and `agentResult: null`.
 
 **US-004**
 
@@ -461,10 +464,6 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/runner/src/executor/nax-process.ts` — `buildNaxArgv` gains the `AGENT` branch and `opts.agentTaskPath`.
 - `apps/runner/src/executor/host-executor.ts` — `ATTEMPT_FILES` gains the task file name; prepare passes `modelAliases` to `writeJobProfile`; `spawn` writes the task file and passes `agentTaskPath`; `cleanup` deletes the task file.
 
-**US-009**
-
-- `packages/fleet-protocol/src/index.ts` — re-exports `AGENT_RESULT_LIMITS` from the new protocol agent-jobs module.
-
 **US-010**
 
 - `apps/runner/src/supervisor/job-run.ts` — `judge` gains the `AGENT` branch.
@@ -475,6 +474,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` — renders `FleetJobAgentResult` for an `AGENT` job.
 - `apps/web/i18n/locales/en.json` — `fleet.command.AGENT`, the `agents_run` misfit label and the result panel strings.
 - `apps/web/i18n/locales/zh.json` — the same keys in Chinese.
+- `apps/web/tests/i18n/fleet-locale-parity.spec.ts` — the `fleet.misfit` list gains `agents_run` and the `fleet.command` list gains `AGENT`, so its exact-key check matches the API values.
 
 ### Seams
 
@@ -491,6 +491,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 ### US-001: AGENT kind and dispatch shape
 
 - [unit] `FleetJobKind.AGENT` equals the string `'AGENT'`.
+- [unit] `AGENT_RESULT_LIMITS` from `@nathapp/fleet-protocol` equals `{ budgetBytes: 12288, maxOutputBytes: 8192, maxDeniedAsks: 10, maxAskChars: 500, maxToolChars: 128, maxModelChars: 200 }`.
 - [unit] `normalizeDispatch` with command `AGENT`, feature `flow-a`, no `ref`, and `agent` `{ name: 'spec-reviewer', task: 'Review the spec' }` on a repo whose default branch is `main` returns command `AGENT`, ref `main`, and `agentInput` `{ name: 'spec-reviewer', task: 'Review the spec' }` with no other keys.
 - [unit] `normalizeDispatch` with command `AGENT`, `ref` `feat/flow-a` and `agent` `{ name: 'spec-reviewer', task: 'x', model: 'reviewer', modelAliases: { reviewer: 'acp:claude' }, timeoutSec: 600 }` returns ref `feat/flow-a` and an `agentInput` equal to that `agent` object.
 - [unit] `normalizeDispatch` with command `RUN` returns `agentInput` null.
@@ -551,6 +552,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] `buildAssignPayload` for a `RUN` record returns no `agent` key.
 - [unit] `GitTokenBroker.mint` with `purpose: 'read'` on a GitHub repo calls `mintReadOnlyToken` (not `mintInstallationToken`) and returns a token with no `repoId`.
 - [unit] `GitTokenBroker.mint` with `purpose: 'read'` called twice for the same job and lease epoch returns the cached token the second time without minting again.
+- [unit] `GitTokenBroker.mint` with `purpose: 'read'` and then with no `purpose` for the same job and lease epoch mints twice and returns two different tokens (no shared cache entry).
 - [unit] `GitTokenBroker.mint` with `purpose: 'read'` on a GitLab repo returns `{ ok: false }` with reason `provider_error` and never resolves the stored GitLab token.
 - [integration] A runner sync with a default git token request (no `repoId`) for an `ASSIGNED` `AGENT` job calls `GitTokenBroker.mint` once with `purpose: 'read'` for the job's repo.
 - [integration] The same sync for an assigned `RUN` job calls `GitTokenBroker.mint` with no `purpose`.
@@ -599,10 +601,10 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] Preparing an `AGENT` job whose `agent.modelAliases` is `{ reviewer: 'acp:claude' }` writes the `koda-job-<jobId>` profile with that `agent.modelAliases`, and preparing a `REVIEW` job writes it with no `agent` key.
 - [unit] Preparing a new attempt of an `AGENT` job removes an `agent-task.md` left in the job directory by the previous attempt.
 - [unit] `HostExecutor.cleanup` of an `AGENT` job deletes `agent-task.md` from the job directory.
+- [unit] `HostExecutor.spawn` of an `AGENT` job rejects when writing the task file fails, and `spawnNax` is not called.
 
 ### US-009: AGENT result reader
 
-- [unit] `AGENT_RESULT_LIMITS` from `@nathapp/fleet-protocol` equals `{ budgetBytes: 12288, maxOutputBytes: 8192, maxDeniedAsks: 10, maxAskChars: 500, maxToolChars: 128, maxModelChars: 200 }`.
 - [unit] `readAgentResult(jobDir)` with `nax.stdout` holding `{"agent":"spec-reviewer","model":"acp:claude","status":"completed","output":"ok","deniedAsks":[],"costUsd":0.0123}` returns `{ ok: true }` with that parsed result.
 - [unit] `readAgentResult` with an empty `nax.stdout` and `nax.stderr` `\nerror: unknown agent x\nmore` returns `{ ok: false, stderrLine: 'error: unknown agent x' }`.
 - [unit] For each `nax.stdout` in the table `not json`, `{"status":"weird"}` and a valid result padded past `AGENT_STDOUT_MAX_BYTES` (16 MiB), `readAgentResult` returns `{ ok: false }`.
@@ -636,4 +638,4 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] `FleetJobAgentResult` with no `costUsd` shows the `fleet.agentResult.costUnknown` notice.
 - [unit] `FleetJobAgentResult` with a null `agentResult` shows the `fleet.agentResult.pending` notice.
 - [unit] The English label for command `AGENT` is `Agent task` and the English `agents_run` misfit label is `nax on this runner cannot run agent tasks`.
-- [unit] The Chinese locale defines `fleet.command.AGENT` and the `agents_run` misfit label.
+- [unit] The Chinese locale defines `fleet.command.AGENT` and the `agents_run` misfit label, and the fleet locale parity spec, whose `fleet.command` list includes `AGENT` and `fleet.misfit` list includes `agents_run`, passes.
