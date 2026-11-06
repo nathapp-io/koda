@@ -1,11 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Module } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuditLogModule } from '../../audit/audit-log.module';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from '../../approvals/approval-command.registry';
 import { FleetFlowStartCommand } from './fleet-flow-start.command';
 import { FlowsModule } from './flows.module';
+import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
+import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
+
+@Module({ providers: [ApprovalCommandRegistry], exports: [ApprovalCommandRegistry] })
+class StubApprovalEngineModule {}
+@Module({ providers: [{ provide: AuditRecorder, useValue: { record: vi.fn() } }], exports: [AuditRecorder] })
+class StubAuditLogModule {}
+@Module({ providers: [{ provide: FleetActivityService, useValue: { record: vi.fn() } }], exports: [FleetActivityService] })
+class StubFleetActivityModule {}
+@Module({})
+class StubPrismaModule {}
 
 describe('FlowsModule', () => {
   let testingModule: TestingModule | undefined;
@@ -30,19 +45,19 @@ describe('FlowsModule', () => {
     expect(registry.get('fleet.job.shell.escalate')).toBe(shell);
   });
 
-  it('compiles its command providers without a database and registers the command at module init', async () => {
-    testingModule = await Test.createTestingModule({
-      providers: [
-        ApprovalCommandRegistry,
-        FleetFlowStartCommand,
-        FlowsModule,
-        { provide: FLEET_FLOW_REPOSITORY, useValue: { lockById: vi.fn(), findById: vi.fn(), approve: vi.fn(), stop: vi.fn() } },
-        { provide: AuditRecorder, useValue: { record: vi.fn() } },
-        { provide: FleetActivityService, useValue: { record: vi.fn() } },
-      ],
-    }).compile();
-    const module = testingModule.get(FlowsModule);
-    module.onModuleInit();
-    expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.start')).toBeInstanceOf(FleetFlowStartCommand);
+  it('compiles the real module without a database and registers the command through its repository token', async () => {
+    testingModule = await Test.createTestingModule({ imports: [FlowsModule] })
+      .overrideModule(ApprovalEngineModule).useModule(StubApprovalEngineModule)
+      .overrideModule(AuditLogModule).useModule(StubAuditLogModule)
+      .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)
+      .overrideModule(PrismaModule).useModule(StubPrismaModule)
+      .overrideProvider(PrismaFleetFlowRepository)
+      .useValue({ lockById: vi.fn(), findById: vi.fn(), approve: vi.fn(), stop: vi.fn() })
+      .compile();
+    await testingModule.init();
+    expect(testingModule.get(ApprovalCommandRegistry, { strict: false }).get('fleet.flow.start'))
+      .toBeInstanceOf(FleetFlowStartCommand);
+    expect(testingModule.get(FLEET_FLOW_REPOSITORY, { strict: false }))
+      .toBe(testingModule.get(PrismaFleetFlowRepository, { strict: false }));
   });
 });

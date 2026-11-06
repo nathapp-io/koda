@@ -55,6 +55,10 @@ export class FleetFlowStartCommand implements ApprovalCommand<FlowStartInput, Fl
     return { applied: true };
   }
 
+  toResult(result: FlowStartResult): FlowStartResult {
+    return result;
+  }
+
   async onReject(input: FlowStartInput): Promise<void> {
     const requestId = currentContext()?.approval.requestId;
     if (!requestId) return;
