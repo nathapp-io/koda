@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
-import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
+import type { SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../../src/approvals/approval-relay';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { FORGE_TOKEN_MIN_REMAINING_MS, HostExecutor } from '../../src/executor/host-executor';
@@ -19,7 +19,10 @@ import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
+import { JobRun } from '../../src/supervisor/job-run';
+import { RepoMutex } from '../../src/supervisor/repo-mutex';
 import { runVerdict } from '../../src/verdict/run-verdict';
+import { FakeLogShipping } from '../helpers/fake-log-shipping';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
 import { NO_APPROVALS } from '../helpers/no-approvals';
 import { NO_CREDENTIALS } from '../helpers/no-credentials';
@@ -35,7 +38,7 @@ afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAK
 /** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
 const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
 
-async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
+async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -51,6 +54,138 @@ async function world(command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' = 'RUN', over: P
   const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
+
+describe('HostExecutor AGENT spawn (fleet-agent-job US-008)', () => {
+  const BOT = 'koda-fleet[bot]';
+  const TASK = 'Review the spec';
+  const HANDLE: SpawnHandle = { pid: 6060, pgid: 6060 };
+  const SOCKET_ENV = 'KODA_PROVIDER_CRED_SOCKET';
+  type SpawnCall = { readonly argv: readonly string[]; readonly options: SpawnNaxOptions };
+  const socketFor = (job: JobRow): string => join(job.jobDir, `provider-keys-${job.leaseEpoch}.sock`);
+
+  /**
+   * The file's own `world()` fixture with the two US-008 injections: a provider that serves the job's provider-key
+   * socket (as a RUN gets), and a nax start that records argv and env and starts no process.
+   */
+  async function agentWorld(command: 'AGENT' | 'REVIEW' | 'RUN', assignOver: Partial<AssignPayload> = {}) {
+    const base: Partial<AssignPayload> = command === 'AGENT'
+      ? { agent: { name: 'spec-reviewer', task: TASK } }
+      : command === 'REVIEW' ? { review: { prNumber: 42, botLogin: BOT } } : {};
+    const w = await world(command, { jobId: 'ajob1', ...base, ...assignOver });
+    const calls: SpawnCall[] = [];
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      currentToken: () => 'tok-agent',
+      freshToken: async () => ({ ok: true, token: 'tok-agent' }),
+      serveProviderKeys: async (job) => socketFor(job),
+      releaseProviderKeys: async () => undefined,
+    };
+    const deps = {
+      config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: w.log,
+      nowMs: () => Date.now(), credentials, approvals: NO_APPROVALS,
+      spawnNax: (argv: readonly string[], options: SpawnNaxOptions): SpawnHandle => { calls.push({ argv, options }); return HANDLE; },
+    };
+    const ex = new HostExecutor(deps);
+    await mkdir(w.row.jobDir, { recursive: true });
+    return { ...w, ex, deps, calls };
+  }
+
+  test('AC-8: writes the task file and starts agents run with it, in the clone dir, with the RUN provider-key socket', async () => {
+    const w = await agentWorld('AGENT');
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });
+    expect(await w.ex.spawn(w.row)).toEqual(HANDLE);
+    const taskPath = join(w.row.jobDir, 'agent-task.md');
+    expect(await readFile(taskPath, 'utf8')).toBe(TASK);
+    expect((await stat(taskPath)).mode & 0o777).toBe(0o600);
+    expect(w.calls).toHaveLength(1);
+    expect([...(w.calls[0]?.argv ?? [])]).toEqual(
+      ['bun', FAKE, 'agents', 'run', 'spec-reviewer', '--task-file', taskPath, '--json', '--profile', 'koda-job-ajob1', '--timeout', '3600'],
+    );
+    expect((w.calls[0]?.argv ?? []).join(' ')).not.toContain(TASK);          // the task never meets argv
+    expect(w.calls[0]?.options.cwd).toBe(join(w.workspaceRoot, 'acme', 'app'));
+    expect(w.calls[0]?.options.stdoutPath).toBe(join(w.row.jobDir, 'nax.stdout'));
+    expect(w.calls[0]?.options.env[SOCKET_ENV]).toBe(socketFor(w.row));
+    // The same variable a RUN gets, from the same derivation: an AGENT is not a special environment.
+    const run = await agentWorld('RUN');
+    expect(await run.ex.prepare(run.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    await run.ex.spawn(run.row);
+    expect(run.calls[0]?.options.env[SOCKET_ENV]).toBe(socketFor(run.row));
+    expect(Object.keys(w.calls[0]?.options.env ?? {}).filter((key) => key === SOCKET_ENV)).toEqual([SOCKET_ENV]);
+  });
+
+  test('AC-8: an AGENT assign with a model and timeout reaches argv, and no forge-token file is written', async () => {
+    const w = await agentWorld('AGENT', { agent: { name: 'spec-reviewer', task: TASK, model: 'reviewer', timeoutSec: 600 } });
+    await w.ex.prepare(w.row);
+    await w.ex.spawn(w.row);
+    expect((w.calls[0]?.argv ?? []).slice(-4)).toEqual(['--model', 'reviewer', '--timeout', '600']);
+    expect(w.calls[0]?.options.env['NAX_FORGE_TOKEN_FILE']).toBeUndefined();
+    await expect(stat(join(w.row.jobDir, 'forge-token'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('AC-9: prepare writes agent.modelAliases for an AGENT job and no agent key for a REVIEW job', async () => {
+    const agent = await agentWorld('AGENT', { agent: { name: 'spec-reviewer', task: TASK, model: 'reviewer', modelAliases: { reviewer: 'acp:claude' } } });
+    expect((await agent.ex.prepare(agent.row)).ok).toBe(true);
+    expect(JSON.parse(await readFile(jobProfilePath(agent.naxHome, 'ajob1'), 'utf8')).agent).toEqual({ modelAliases: { reviewer: 'acp:claude' } });
+    const review = await agentWorld('REVIEW');
+    expect((await review.ex.prepare(review.row)).ok).toBe(true);
+    expect('agent' in JSON.parse(await readFile(jobProfilePath(review.naxHome, 'ajob1'), 'utf8'))).toBe(false);
+  });
+
+  test('AC-10: preparing a new attempt removes the agent-task.md the previous attempt left', async () => {
+    const w = await agentWorld('AGENT');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await w.ex.spawn(w.row);
+    const taskPath = join(w.row.jobDir, 'agent-task.md');
+    await stat(taskPath);
+    const requeued = w.journal.insertJob({ assign: w.assign, leaseEpoch: 2, repoKey: 'acme/app', jobDir: w.row.jobDir }).row;
+    expect((await w.ex.prepare(requeued)).ok).toBe(true);
+    await expect(stat(taskPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('AC-11: cleanup deletes agent-task.md and the profile', async () => {
+    const w = await agentWorld('AGENT');
+    await w.ex.prepare(w.row);
+    await w.ex.spawn(w.row);
+    const taskPath = join(w.row.jobDir, 'agent-task.md');
+    await stat(taskPath);
+    await w.ex.cleanup(w.row);
+    await expect(stat(taskPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(jobProfilePath(w.naxHome, 'ajob1'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('AC-12: a task-file write failure rejects the spawn and starts no nax', async () => {
+    const w = await agentWorld('AGENT');
+    await w.ex.prepare(w.row);
+    await mkdir(join(w.row.jobDir, 'agent-task.md'), { recursive: true });   // a directory where the file must go
+    await expect(w.ex.spawn(w.row)).rejects.toMatchObject({ code: 'EISDIR' });
+    expect(w.calls).toEqual([]);
+  });
+
+  test('AC-13: a task-file write failure during an AGENT start is FAILED with the spawn reason', async () => {
+    const w = await agentWorld('AGENT');
+    // The obstruction appears between prepare and spawn: prepare's own attempt wipe removes one that exists earlier.
+    class Obstructed extends HostExecutor {
+      override async spawn(job: JobRow): Promise<SpawnHandle> {
+        await mkdir(join(job.jobDir, 'agent-task.md'), { recursive: true });
+        return super.spawn(job);
+      }
+    }
+    const run = new JobRun({
+      journal: w.journal, executor: new Obstructed(w.deps), mutex: new RepoMutex(),
+      uploader: { upload: async () => ({ kind: 'ok' }) }, log: w.log, now: () => new Date(), sleep: async () => undefined,
+      tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 },
+      logs: new FakeLogShipping(),
+    }, 'ajob1', 1);
+    await run.start('prepare');
+    const states = w.journal.pendingEvents('ajob1', 1, 1_000).filter((event) => event.type === 'state').map((event) => event.payload as StateEventPayload);
+    expect(states).toHaveLength(1);
+    expect(states[0]?.to).toBe('FAILED');
+    expect(states[0]?.reason).toStartWith('spawn failed: EISDIR');
+    expect(w.calls).toEqual([]);                                            // nax never started
+    expect(w.journal.getJob('ajob1', 1)?.doneAt).not.toBeNull();
+  });
+});
 
 describe('HostExecutor process identity (US-003)', () => {
   test('AC-10: identifies the job profile in argv as ours', async () => {

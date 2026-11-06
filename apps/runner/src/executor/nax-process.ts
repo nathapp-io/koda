@@ -6,6 +6,8 @@ import { jobProfileName } from './job-profile';
 export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const COST_RE = /^\d+(\.\d{1,4})?$/;
 export const RESERVED_PREFIX = 'koda-job-';
+/** fleet-agent-job US-008: `nax agents run` has no cost cap, so every AGENT run is bounded by a timeout instead. */
+export const AGENT_DEFAULT_TIMEOUT_SEC = 3_600;
 
 function reviewPrNumber(assign: AssignPayload): number {
   if (!assign.review || !Number.isSafeInteger(assign.review.prNumber) || assign.review.prNumber <= 0 || !/^[A-Za-z0-9][A-Za-z0-9-]*\[bot\]$/.test(assign.review.botLogin)) throw new PathError('invalid review');
@@ -13,7 +15,7 @@ function reviewPrNumber(assign: AssignPayload): number {
 }
 
 /** S1 spec §5.2 step 4. Every dynamic piece is checked again here (D30): the chain is joined with commas. */
-export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload, opts: { decisionsPath?: string; rulingsPath?: string } = {}): string[] {
+export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayload, opts: { decisionsPath?: string; rulingsPath?: string; agentTaskPath?: string } = {}): string[] {
   const feature = assertFeature(assign.feature);
   for (const profile of assign.profiles) {
     if (!PROFILE_NAME.test(profile) || profile.startsWith(RESERVED_PREFIX)) throw new PathError('invalid profile');
@@ -29,6 +31,19 @@ export function buildNaxArgv(naxCommand: readonly string[], assign: AssignPayloa
       ...(assign.command === 'FIX' ? ['--full'] : []), '--profile', chain,
       ...(opts.decisionsPath === undefined ? [] : ['--decisions', opts.decisionsPath]),
       ...(assign.command === 'FIX' && opts.rulingsPath !== undefined ? ['--rulings', opts.rulingsPath] : []),
+    ];
+  }
+  // fleet-agent-job US-008: the AGENT branch precedes the RUN fallback and has no --max-cost (nax `agents run` has no
+  // cost cap; a flow checks its cap between jobs). The task travels on the file the runner wrote, never in argv, and
+  // every run is bounded by --timeout: the assign's timeoutSec, else nax's own default turn limit.
+  if (assign.command === 'AGENT') {
+    const agent = assign.agent;
+    if (agent === undefined) throw new Error('agent required for AGENT');
+    if (opts.agentTaskPath === undefined) throw new Error('agent task file required for AGENT');
+    return [
+      ...naxCommand, 'agents', 'run', agent.name, '--task-file', opts.agentTaskPath, '--json', '--profile', chain,
+      ...(agent.model === undefined ? [] : ['--model', agent.model]),
+      '--timeout', String(agent.timeoutSec ?? AGENT_DEFAULT_TIMEOUT_SEC),
     ];
   }
   if (!COST_RE.test(assign.maxCostUsd)) throw new PathError('invalid maxCostUsd');

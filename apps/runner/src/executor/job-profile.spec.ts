@@ -73,6 +73,48 @@ describe('relay overlay (spec §4.1, plan D275)', () => {
   });
 });
 
+describe('agent model aliases overlay (fleet-agent-job US-008)', () => {
+  let naxHome!: string;
+  beforeEach(async () => { naxHome = await tmp.make('profile-agent'); });
+  const relay = { bashMode: 'escalate' as const, approvalTimeoutSec: 600, endpoint: { url: 'http://127.0.0.1:1/ask', secret: 's'.repeat(64) } };
+
+  test('AC-1: modelAliases { reviewer: "acp:claude" } becomes agent.modelAliases on the profile', () => {
+    const profile = jobProfileContent('/out', 'p', undefined, undefined, { reviewer: 'acp:claude' });
+    expect(profile.agent).toEqual({ modelAliases: { reviewer: 'acp:claude' } });
+    expect((profile.agent as { modelAliases: Record<string, string> }).modelAliases).toEqual({ reviewer: 'acp:claude' });
+    expect(profile).toMatchObject({ outputDir: '/out', name: 'p' });
+  });
+
+  test('AC-2: absent and empty aliases both leave no agent key at all', () => {
+    for (const aliases of [undefined, {}]) {
+      const profile = jobProfileContent('/out', 'p', undefined, undefined, aliases);
+      expect('agent' in profile).toBe(false);
+      expect(profile).toEqual({ outputDir: '/out', name: 'p' });
+    }
+  });
+
+  test('AC-14: the bot cost limit keeps its exact shape when the aliases argument is omitted', () => {
+    expect(jobProfileContent('/out', 'repo', undefined, 5)).toEqual({ outputDir: '/out', name: 'repo', bot: { costLimit: 5 } });
+    expect('agent' in jobProfileContent('/out', 'repo', undefined, 5)).toBe(false);
+  });
+
+  test('aliases coexist with the relay overlay and the bot cost limit', () => {
+    expect(jobProfileContent('/out', 'p', relay, 2.5, { reviewer: 'acp:claude' })).toMatchObject({
+      bot: { costLimit: 2.5 },
+      execution: { bashApproval: 'escalate', approvalTimeout: 600_000 },
+      interaction: { plugin: 'webhook' },
+      agent: { modelAliases: { reviewer: 'acp:claude' } },
+    });
+  });
+
+  test('writeJobProfile writes the aliases, and an empty map writes no agent key', async () => {
+    const path = await writeJobProfile(naxHome, 'j1', '/out', 'p', undefined, undefined, { reviewer: 'acp:claude' });
+    expect(JSON.parse(await readFile(path, 'utf8')).agent).toEqual({ modelAliases: { reviewer: 'acp:claude' } });
+    await writeJobProfile(naxHome, 'j1', '/out', 'p', undefined, undefined, {});
+    expect('agent' in JSON.parse(await readFile(path, 'utf8'))).toBe(false);
+  });
+});
+
 describe('job profile file', () => {
   test('names and paths', () => {
     expect(jobProfileName('cabc123')).toBe('koda-job-cabc123');

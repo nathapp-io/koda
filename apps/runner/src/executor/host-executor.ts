@@ -24,6 +24,7 @@ import { readFixResult, readFixState, type FixOutcome } from '../verdict/fix-res
 import { prepareConfigCheckout } from './config-job/checkout';
 import { configBranchName } from './config-job/commit-push';
 import { runConfigJob } from './config-job/config-job';
+import { AGENT_TASK_FILE, removeAgentTask, writeAgentTask } from './agent-job/agent-task-file';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
@@ -62,7 +63,8 @@ export interface HostExecutorDeps {
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 // US-008: `forge-token` is a REVIEW/FIX token file; a retry must not start with the previous attempt's.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE, REVIEW_RULINGS_FILE];
+// fleet-agent-job US-008: `agent-task.md` is an AGENT job's task; a retry writes its own.
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'fix.stdout', 'fix.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow', 'forge-token', REVIEW_DECISIONS_FILE, REVIEW_RULINGS_FILE, AGENT_TASK_FILE];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -127,7 +129,9 @@ export class HostExecutor implements JobExecutor {
       const relay = assign.bashMode === 'raw' ? undefined
         : { bashMode: assign.bashMode, approvalTimeoutSec: assign.approvalTimeoutSec, endpoint: await this.deps.approvals.open(job) };
       const botCostLimitUsd = assign.command === 'REVIEW' || assign.command === 'FIX' ? Number(assign.maxCostUsd) : undefined;
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd);
+      // fleet-agent-job US-008: the flow's `model: 'reviewer'` resolves through this profile's agent.modelAliases.
+      const modelAliases = assign.command === 'AGENT' ? assign.agent?.modelAliases : undefined;
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay, botCostLimitUsd, modelAliases);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
@@ -166,6 +170,10 @@ export class HostExecutor implements JobExecutor {
 
   async spawn(job: JobRow): Promise<SpawnHandle> {
     const { repoDir, jobDir } = this.dirs(job);
+    // fleet-agent-job US-008: an AGENT job's task goes on a 0600 file, never in argv (it is up to 16 KiB and would be
+    // visible in the process list). A write that fails rejects the spawn before anything is started or written.
+    const agent = job.command === 'AGENT' ? job.assign.agent : undefined;
+    const agentTaskPath = agent === undefined ? undefined : await writeAgentTask(jobDir, agent.task);
     const reviewJob = job.command === 'REVIEW' || job.command === 'FIX';
     const decisions = reviewJob ? job.assign.review?.decisions : undefined;
     const decisionsPath = decisions !== undefined && decisions.length > 0 ? await writeReviewDecisions(jobDir, decisions) : undefined;
@@ -174,6 +182,7 @@ export class HostExecutor implements JobExecutor {
     const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign, {
       ...(decisionsPath === undefined ? {} : { decisionsPath }),
       ...(rulingsPath === undefined ? {} : { rulingsPath }),
+      ...(agentTaskPath === undefined ? {} : { agentTaskPath }),
     });
     const acquired = await this.deps.credentials.acquire(job, { wait: false });
     const binDir = acquired.ok ? acquired.credentials.binDir : null;
@@ -482,6 +491,7 @@ export class HostExecutor implements JobExecutor {
   }
 
   async cleanup(job: JobRow): Promise<void> {
+    const { jobDir } = this.dirs(job);
     try {
       await deleteJobProfile(this.deps.config.naxHome, job.jobId);
     } finally {
@@ -491,7 +501,12 @@ export class HostExecutor implements JobExecutor {
         try {
           await this.releaseJobCredentials(job);
         } finally {
-          await this.dropReviewToken(job, this.dirs(job).jobDir);   // US-006: a token file nax never got to delete itself
+          // US-006: a token file nax never got to delete itself. US-008: an AGENT job's task file, which nax read at start.
+          try {
+            await this.dropReviewToken(job, jobDir);
+          } finally {
+            await removeAgentTask(jobDir);
+          }
         }
       }
     }
