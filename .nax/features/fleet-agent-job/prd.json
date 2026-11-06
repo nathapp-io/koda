@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T13:27:16.782Z",
+  "updatedAt": "2026-11-06T13:57:52.271Z",
   "userStories": [
     {
       "id": "US-001",
@@ -187,14 +187,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Nullable JSON migration, guarded repository conversion, patch semantics and requeue state span persistence/domain/DTO modules and need real database verification."
+        "reasoning": "Nullable JSON migration, guarded repository conversion, patch semantics and requeue state span persistence/domain/DTO modules and need real database verification.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
@@ -235,7 +238,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d5887dd82c41ab4df7f8c198029cf8f66e2408ab"
     },
     {
       "id": "US-004",
