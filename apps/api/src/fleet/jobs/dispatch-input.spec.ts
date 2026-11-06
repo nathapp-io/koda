@@ -107,7 +107,73 @@ describe('AGENT dispatch input', () => {
     expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent, ...over }), 'main'))
       .toThrow(expect.objectContaining({ args: { reason } }));
   });
+  it.each(['-x', 'a b', 'a..b', 'n'.repeat(129)])('rejects invalid agent name %s', (name) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, name } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.name' } }));
+  });
+  it('accepts plugin-qualified agent names unchanged', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, name: 'plugin:spec-reviewer' } }), 'main').agentInput?.name)
+      .toBe('plugin:spec-reviewer');
+  });
+  it.each(['', '   \n', 't'.repeat(16_385)])('rejects invalid agent task %#', (task) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.task' } }));
+  });
+  it('accepts a maximum-length task unchanged', () => {
+    const task = 't'.repeat(16_384);
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main').agentInput?.task).toBe(task);
+  });
+  it.each(['fast model', '', 'm'.repeat(201)])('rejects invalid agent model %#', (model) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.model' } }));
+  });
+  it('accepts an ACP model unchanged', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model: 'acp:claude' } }), 'main').agentInput?.model).toBe('acp:claude');
+  });
+  it.each(['not-a-model', 'acp:bogus', 'openai/gpt 5', 'acp:claude [high]'])('rejects model alias target %s', (target) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: target } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+  });
+  it.each(['acp:claude', 'acp:codex/gpt-5.4', 'openai/gpt-5.4[high]', 'opencode-go/deepseek-v4.1-flash'])('accepts alias target %s', (target) => {
+    const modelAliases = { reviewer: target };
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases } }), 'main').agentInput?.modelAliases).toEqual(modelAliases);
+  });
+  it('rejects invalid alias keys and more than eight aliases', () => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { '-bad': 'acp:claude' } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+    const nine = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`a${i}`, 'acp:claude']));
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: nine } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+  });
+  it('accepts eight aliases', () => {
+    const aliases = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`a${i}`, 'acp:claude']));
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: aliases } }), 'main').agentInput?.modelAliases).toEqual(aliases);
+  });
+  it.each([59, 86_401, 60.5])('rejects invalid timeout %s', (timeoutSec) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, timeoutSec } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.timeoutSec' } }));
+  });
+  it.each([60, 86_400])('accepts timeout boundary %s', (timeoutSec) => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, timeoutSec } }), 'main').agentInput?.timeoutSec).toBe(timeoutSec);
+  });
+  it('rejects malformed agent objects and optional field types with field-specific reasons', () => {
+    for (const [agentInput, reason] of [
+      [{ name: 7, task: 'x' }, 'agent.name'],
+      [{ name: 'valid', task: 7 }, 'agent.task'],
+      [{ name: 'valid', task: 'x', model: 3 }, 'agent.model'],
+      [{ name: 'valid', task: 'x', modelAliases: ['acp:claude'] }, 'agent.modelAliases'],
+      [{ name: 'valid', task: 'x', timeoutSec: '60' }, 'agent.timeoutSec'],
+      [[], 'agent.name'],
+    ] as const) {
+      expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: agentInput as never }), 'main'))
+        .toThrow(expect.objectContaining({ args: { reason } }));
+    }
+  });
   it('returns null agent input for RUN', () => expect(normalizeDispatch(dto(), 'main').agentInput).toBeNull());
+  it('keeps RUN bash mode and cost unaffected by AGENT-only bounds', () => {
+    const out = normalizeDispatch(dto({ bashMode: 'gated', feature: 'legacy', maxCostUsd: 1 }), 'main');
+    expect(out).toMatchObject({ bashMode: 'gated', maxCostUsd: '1', agentInput: null });
+  });
   it('keeps the existing PLAN dispatch shape with additive null agentInput', () => {
     expect(normalizeDispatch(dto({ command: 'PLAN', feature: 'legacy', planFrom: 'specs/legacy.md' }), 'main')).toEqual(expect.objectContaining({
       command: 'PLAN', feature: 'legacy', ref: 'main', planFrom: 'specs/legacy.md', bashMode: 'raw', agentInput: null,

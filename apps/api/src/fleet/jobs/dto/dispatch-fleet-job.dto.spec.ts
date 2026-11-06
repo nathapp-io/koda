@@ -27,6 +27,13 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review' } })));
     expect(errors).toEqual([]);
   });
+  it('reports an oversized nested agent task on agent.task', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 't'.repeat(16_385) },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'task')).toBeDefined();
+  });
   it('accepts FIX as a command', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'FIX', feature: undefined, prNumber: 7 })));
     expect(errors).toEqual([]);
