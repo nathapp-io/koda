@@ -155,8 +155,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
               threadChanged = true;
             }
             else if (isWriteLine(line)) {
-              await this.foldWriteLine(batch, threadId, line);
-              if (line.type === 'published') publications.push({ threadId, sha: line.sha, paths: line.paths });
+              const publication = await this.foldWriteLine(batch, threadId, line);
+              if (publication) publications.push(publication);
               threadChanged = true;
             }
             else if (line.type === 'usage') {
@@ -575,10 +575,11 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds one write-path line (fleet S5a §4) into the thread's write columns. The caller holds the thread row lock, so
    * the row read here is the one the single update writes back over.
    */
-  private async foldWriteLine(batch: ThreadIngestBatch, threadId: string, line: WriteLine): Promise<void> {
+  private async foldWriteLine(batch: ThreadIngestBatch, threadId: string, line: WriteLine): Promise<ThreadSpecPublishedEvent | null> {
     const db = this.prisma.client;
-    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { writtenPaths: true, session: true } });
+    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { writtenPaths: true, session: true, publishedSha: true } });
     if (!thread) throw new Error(`write-path line for missing thread ${threadId}`);
+    const previousSha = thread.publishedSha;
     const patch: WriteFoldPatch = writeLinePatch(
       {
         writtenPaths: thread.writtenPaths,
@@ -591,6 +592,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     // update with empty data. The caller still marks the thread changed, so the live event is emitted.
     const data = this.writePatchData(patch);
     if (Object.keys(data).length > 0) await db.chatThread.update({ where: { id: threadId }, data });
+    return line.type === 'published' ? { threadId, sha: line.sha, paths: line.paths, previousSha } : null;
   }
 
   /** Maps a fold patch onto `ChatThread` columns. Keys the patch leaves out are not touched. */

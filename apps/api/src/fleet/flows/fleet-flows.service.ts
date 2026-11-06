@@ -136,7 +136,11 @@ export class FleetFlowsService {
       if (event.sha !== thread.publishedSha || event.sha === flow.specSha) return;
       if (flow.state !== 'PENDING' && flow.state !== 'APPROVED') return;
 
-      const reask = flow.state === 'PENDING' || flow.features.some(({ specPath }) => event.paths.includes(specPath));
+      // Paths describe only this publication, not any intervening ones. A stale/skipped event
+      // (including an earlier line of this same committed batch) may have changed a spec, so
+      // carrying approval forward is safe only from the flow's immediately preceding snapshot.
+      const reask = flow.state === 'PENDING' || event.previousSha !== flow.specSha ||
+        flow.features.some(({ specPath }) => event.paths.includes(specPath));
       let changed: FleetFlowRecord;
       if (reask) {
         if (!canTransitionFlow(flow.state, 'PENDING')) return;

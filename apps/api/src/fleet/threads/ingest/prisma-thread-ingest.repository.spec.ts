@@ -135,7 +135,7 @@ describe('thread publish events (US-012)', () => {
     const received: unknown[] = [];
     emitter.on('thread.spec.published', (event) => { expect(committed).toBe(true); received.push(event); });
     await repoWith(client, undefined, emitter, () => { committed = true; }).fold(batch([published]));
-    expect(received).toEqual([{ threadId: 'T', sha: 'b'.repeat(40), paths: ['docs/spec.md'] }]);
+    expect(received).toEqual([{ threadId: 'T', sha: 'b'.repeat(40), paths: ['docs/spec.md'], previousSha: null }]);
   });
 
   it('AC-2: write_doc alone emits no publication', async () => {

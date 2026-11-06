@@ -56,9 +56,9 @@ integration('thread publication -> flow respec', () => {
     if (approved) await db.chatThread.update({ where: { id: threadId }, data: { preApproval: { userId: creatorId, at: new Date().toISOString(), costCapUsd: '30' } } });
     return (await withTestActor({ type: 'USER', id: creatorId }, () => service.create({ entry: 'THREAD', threadId, features: [{ feature: 'flow', specPath: PATH, dependsOn: [] }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: '25' }, { type: 'USER', id: creatorId }, { projectId }))).flow;
   };
-  const publishEvent = async (paths = [PATH], sha = NEW) => {
+  const publishEvent = async (paths = [PATH], sha = NEW, continuity = true) => {
     await db.chatThread.update({ where: { id: threadId }, data: { publishedSha: NEW } });
-    await emitter.emitAsync(EVENT, { threadId, sha, paths });
+    await emitter.emitAsync(EVENT, { threadId, sha, paths, ...(continuity ? { previousSha: OLD } : {}) });
   };
   const requests = () => db.approvalRequest.findMany({ where: { permissionKey: 'fleet.flow.start', status: 'pending' } });
 
@@ -102,7 +102,7 @@ integration('thread publication -> flow respec', () => {
       received.push({ event, inTransaction: tx.isInTransaction(), sha: (await db.chatThread.findUniqueOrThrow({ where: { id: threadId } })).publishedSha });
     });
     await fold([published()]);
-    expect(received).toEqual([{ event: { threadId, sha: NEW, paths: [PATH] }, inTransaction: false, sha: NEW }]);
+    expect(received).toEqual([{ event: { threadId, sha: NEW, paths: [PATH], previousSha: OLD }, inTransaction: false, sha: NEW }]);
   });
   it('AC-2: write_doc only emits nothing', async () => {
     const received = vi.fn(); listen(received);
@@ -115,6 +115,48 @@ integration('thread publication -> flow respec', () => {
     const row = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
     expect(row).toMatchObject({ state: 'PENDING', specSha: NEW, approvalMode: null, approverId: null, approvedAt: null });
     expect(await requests()).toMatchObject([{ id: row.approvalRequestId, input: { flowId: flow.id, specSha: NEW }, onBehalfOfType: 'USER', onBehalfOfId: creatorId, origin: 'system' }]);
+  });
+  it('F1: a spec publication followed by an unrelated publication in one fold must re-ask at the final sha', async () => {
+    const flow = await create(true);
+    const finalSha = 'c'.repeat(40);
+    const events: unknown[] = [];
+    listen((event) => { events.push(event); });
+    await fold([published(), { type: 'published', sha: finalSha, paths: ['docs/other.md'], ignored: [], specPresent: true }]);
+    expect(events).toEqual([
+      { threadId, sha: NEW, paths: [PATH], previousSha: OLD },
+      { threadId, sha: finalSha, paths: ['docs/other.md'], previousSha: NEW },
+    ]);
+    const current = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
+    expect(current).toMatchObject({
+      state: 'PENDING', specSha: finalSha, approvalMode: null, approverId: null, approvedAt: null,
+    });
+    expect(await requests()).toMatchObject([{ id: current.approvalRequestId, input: { flowId: flow.id, specSha: finalSha } }]);
+    expect((await db.chatThread.findUniqueOrThrow({ where: { id: threadId } })).publishedSha).toBe(finalSha);
+  });
+  it('F1: a lost spec publication cannot be hidden by an unrelated publication in a later fold', async () => {
+    const flow = await create(true);
+    const open = spy(vi.spyOn(app.get(ApprovalAskService), 'open')).mockRejectedValueOnce(new Error('lost respec'));
+    await fold([published()]);
+    expect(open).toHaveBeenCalledOnce();
+    expect((await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).specSha).toBe(OLD);
+    const finalSha = 'c'.repeat(40);
+    await fold([{ type: 'published', sha: finalSha, paths: ['docs/other.md'], ignored: [], specPresent: true }], jobId, 200);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'PENDING', specSha: finalSha });
+    expect(await requests()).toMatchObject([{ input: { flowId: flow.id, specSha: finalSha } }]);
+  });
+  it('F1: a single unrelated publication still preserves approval when ingest establishes continuity', async () => {
+    const flow = await create(true);
+    await fold([published(['docs/other.md'])]);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({
+      state: 'APPROVED', specSha: NEW, approvalMode: flow.approvalMode, approverId: flow.approverId, approvedAt: flow.approvedAt,
+    });
+    expect(await requests()).toHaveLength(0);
+  });
+  it('F1: an unrelated legacy event without continuity evidence conservatively re-asks', async () => {
+    const flow = await create(true);
+    await publishEvent(['docs/other.md'], NEW, false);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'PENDING', specSha: NEW });
+    expect(await requests()).toMatchObject([{ input: { flowId: flow.id, specSha: NEW } }]);
   });
   it.each([['AC-4', [PATH]], ['AC-5', ['docs/unrelated.md']]] as const)('%s: PENDING re-asks regardless of touched paths', async (_ac, paths) => {
     const flow = await create();

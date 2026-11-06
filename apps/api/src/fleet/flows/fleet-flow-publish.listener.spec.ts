@@ -48,9 +48,9 @@ function setup(state: FleetFlowRecord['state'] = 'PENDING') {
 
 describe('FleetFlowPublishListener / respec', () => {
   // Deliberately import at call time so the pre-implementation failure names the missing listener.
-  const deliver = async (s: ReturnType<typeof setup>, paths = [PATH], sha = NEW) => {
+  const deliver = async (s: ReturnType<typeof setup>, paths = [PATH], sha = NEW, previousSha: string | null = OLD) => {
     const { FleetFlowPublishListener } = await import('./fleet-flow-publish.listener');
-    return new FleetFlowPublishListener(s.service).onThreadSpecPublished({ threadId: 'T', sha, paths });
+    return new FleetFlowPublishListener(s.service).onThreadSpecPublished({ threadId: 'T', sha, paths, previousSha });
   };
 
   it('AC-3/10/11: touched APPROVED flow re-asks under the system writer with audit and activity', async () => {
@@ -80,6 +80,14 @@ describe('FleetFlowPublishListener / respec', () => {
     expect(s.asks.close).not.toHaveBeenCalled();
     expect(s.audit.record).toHaveBeenCalledOnce();
     expect(s.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: { flowId: 'F', state: 'APPROVED' } }));
+  });
+
+  it.each([null, 'c'.repeat(40)])('F1: an unproven or skipped predecessor %s re-asks even without a touched spec', async (previousSha) => {
+    const s = setup('APPROVED');
+    await deliver(s, ['docs/other.md'], NEW, previousSha);
+    expect(s.row()).toMatchObject({ state: 'PENDING', specSha: NEW, approvalMode: null, approverId: null, approvedAt: null });
+    expect(s.asks.open).toHaveBeenCalledOnce();
+    expect(s.flows.updateSha).not.toHaveBeenCalled();
   });
 
   it('AC-7: stale publication changes nothing', async () => {
