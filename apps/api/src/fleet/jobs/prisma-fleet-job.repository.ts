@@ -15,7 +15,7 @@ import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assi
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
-  ActiveJobRef, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
+  ActiveJobRef, agentInputOf, agentResultOf, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
   FleetJobPrRulings, FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
   QueuedCursor, QueuedScanFilter,
 } from './domain/fleet-job.domain';
@@ -38,6 +38,9 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   // US-004: a `String?` column, mapped to the two outcomes the runner may report.
   fixOutcome: fixOutcomeOf(r.fixOutcome),
   fixReady: r.fixReady as unknown as FixReady | null,
+  // US-003: both agent columns are unconstrained JSON, so they are mapped through their shape guards.
+  agentInput: agentInputOf(r.agentInput),
+  agentResult: agentResultOf(r.agentResult),
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });
@@ -74,14 +77,14 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
-    const { reviewDecisions, prRulings, ...rest } = data;
-    // The AGENT input column is introduced by US-003; keep the additive dispatch shape out of Prisma until then.
-    delete rest.agentInput;
+    const { reviewDecisions, prRulings, agentInput, ...rest } = data;
     try {
       // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
       return toJob(await this.db.fleetJob.create({
         data: {
           ...rest, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd),
+          // US-003: an absent agent input is SQL null, so a non-AGENT job keeps the column empty (as it does for its result).
+          agentInput: agentInput == null ? Prisma.DbNull : (agentInput as unknown as Prisma.InputJsonValue),
           ...(prRulings !== undefined ? { prRulings: prRulings === null ? Prisma.DbNull : (prRulings as unknown as Prisma.InputJsonValue) } : {}),
           ...(reviewDecisions !== undefined ? { reviewDecisions: reviewDecisions === null ? Prisma.DbNull : (reviewDecisions as unknown as Prisma.InputJsonValue) } : {}),
         },
@@ -152,7 +155,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord> {
-    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, fixReady, prRulings, ...rest } = patch;
+    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, workflow, configResult, fixReady, prRulings, agentResult, ...rest } = patch;
     const data: Prisma.FleetJobUpdateInput = {
       ...rest,
       ...(costSpentUsd !== undefined ? { costSpentUsd: new Prisma.Decimal(costSpentUsd) } : {}),
@@ -164,6 +167,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       ...(configResult !== undefined ? { configResult: configResult === null ? Prisma.DbNull : (configResult as unknown as Prisma.InputJsonValue) } : {}),
       ...(prRulings !== undefined ? { prRulings: prRulings === null ? Prisma.DbNull : (prRulings as unknown as Prisma.InputJsonValue) } : {}),
       ...(fixReady !== undefined ? { fixReady: fixReady === null ? Prisma.DbNull : (fixReady as unknown as Prisma.InputJsonValue) } : {}),
+      // US-003: the mirror's result; `null` clears the column (SQL null) on requeue rather than storing JSON null.
+      ...(agentResult !== undefined ? { agentResult: agentResult === null ? Prisma.DbNull : (agentResult as unknown as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };
     try {

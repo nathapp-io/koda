@@ -4,6 +4,7 @@ import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
 import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome, FixReady } from '../domain/fleet-job.domain';
+import type { AgentJobInput, AgentJobResult } from '../../common/agent-jobs';
 import type { MisfitReason } from '../placement-rules';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -94,6 +95,10 @@ export class FleetJobDto {
   declare fixOutcome: FixOutcome | null;
   @ApiPropertyOptional({ type: Object, nullable: true, description: 'A FIX job’s ready result; null until reported.' })
   declare fixReady: FixReady | null;
+  @ApiPropertyOptional({ type: Object, nullable: true, description: "An AGENT job's immutable dispatch input (name, task, model?, modelAliases?, timeoutSec?). Null for every other command." })
+  declare agent: AgentJobInput | null;
+  @ApiPropertyOptional({ type: Object, nullable: true, description: "An AGENT job's latest attempt result (status, output, truncated, deniedAsks, deniedAsksTruncated, costUsd?). Null until the runner reports one, and after a requeue." })
+  declare agentResult: AgentJobResult | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
@@ -123,6 +128,8 @@ export class FleetJobDto {
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
       fixOutcome: r.fixOutcome ?? null, fixReady: r.fixReady ?? null,
+      // US-003: the AGENT input and result, as the shape guards mapped them (absent becomes null).
+      agent: r.agentInput ?? null, agentResult: r.agentResult ?? null,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });

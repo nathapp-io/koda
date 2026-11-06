@@ -1,3 +1,4 @@
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { normalizeDispatch } from './dispatch-input';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
@@ -12,10 +13,11 @@ const row = {
   cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null,
   finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
   wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null, configResult: null,
-  fixOutcome: null, fixReady: null, threadId: null, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: new Date(0),
+  fixOutcome: null, fixReady: null, agentInput: null, agentResult: null, threadId: null, eventSeq: 0, ackedRunnerSeq: 0,
+  attributedAt: null, updatedAt: new Date(0),
 };
 
-describe('dispatch normalization through the pre-agent persistence boundary', () => {
+describe('dispatch normalization through the agent persistence boundary', () => {
   it.each([
     [{ command: 'RUN', feature: 'feature-a', maxCostUsd: 1 }, 'RUN'],
     [{ command: 'PLAN', feature: 'feature-a', planFrom: 'specs/a.md', maxCostUsd: 1 }, 'PLAN'],
@@ -27,6 +29,7 @@ describe('dispatch normalization through the pre-agent persistence boundary', ()
     await repository.createJob({ ...normalized, projectId: 'p1', requestedById: 'u1' });
 
     const [args] = create.mock.calls[0] as unknown as [{ data: Record<string, unknown> }];
-    expect(args.data).not.toHaveProperty('agentInput');
+    // US-003: the column exists now, and a command with no agent input stores SQL null rather than JSON null.
+    expect(args.data.agentInput).toBe(Prisma.DbNull);
   });
 });

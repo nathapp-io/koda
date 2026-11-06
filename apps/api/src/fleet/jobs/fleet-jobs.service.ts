@@ -359,6 +359,8 @@ export class FleetJobsService {
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, workflow: null,
             // D475, US-004: every attempt reports its own result — the config edit's, and the FIX outcome's.
             configResult: null, fixOutcome: null, fixReady: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            // US-003: the new attempt reports its own agent result; the AGENT input is dispatch-time and stays.
+            agentResult: null,
           },
         });
         await this.audit.record({ key: 'fleet.job.requeue', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `requeued from ${current.state}` });
