@@ -83,6 +83,9 @@ describeIntegration('AGENT read-only token on sync (PG)', () => {
     // Each case dispatches its own job: a job left ASSIGNED by the previous case would hold this runner's repo.
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
+    // The fake forge outlives the cases, so its request history is cleared too: a case that asserts on the mints it
+    // caused must not see a previous case's mint (vitest may run them in any order).
+    forge.requests.length = 0;
     mint = vi.spyOn(app.get(GitTokenBroker), 'mint');
   });
   afterEach(() => {
@@ -96,6 +99,7 @@ describeIntegration('AGENT read-only token on sync (PG)', () => {
   it('AC-10: an ASSIGNED AGENT job default token request mints once with purpose read and grants a repo-less token', async () => {
     const job = await dispatch({ command: 'AGENT', feature: 'flow-a', agent: { name: 'spec-reviewer', task: 'x' } });
     expect(job.state).toBe('ASSIGNED');
+    const before = mints().length;
 
     const res = await sync({ tokenRequests: [{ jobId: job.id, leaseEpoch: job.leaseEpoch }] });
 
@@ -105,7 +109,8 @@ describeIntegration('AGENT read-only token on sync (PG)', () => {
     });
     // The grant names no repository (a PROJECT read-only grant would) and is the read-only credential.
     expect(res.gitTokens).toEqual([{ jobId: job.id, token: 'ghs_brokered', username: 'x-access-token', expiresAt: expect.any(String) }]);
-    expect(mints()).toEqual([{ repositories: [expect.any(String)], permissions: READ_ONLY_PERMISSIONS }]);
+    // Only the mint this case caused: a shared forge history must not decide the assertion.
+    expect(mints().slice(before)).toEqual([{ repositories: [expect.any(String)], permissions: READ_ONLY_PERMISSIONS }]);
     // The credential lives only in the sync response (spec §7.1): no row holds it.
     const tables = await Promise.all([
       prisma.fleetCommand.findMany(), prisma.fleetActivity.findMany(), prisma.fleetJobEvent.findMany(), prisma.fleetJob.findMany(),
