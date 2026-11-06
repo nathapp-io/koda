@@ -64,15 +64,22 @@ export interface CreateFleetFlow {
   features: Array<Pick<FleetFlowFeatureRecord, 'position' | 'feature' | 'specPath' | 'dependsOn'>>;
 }
 
-export interface FleetFlowRepository {
+export class FlowTransitionError extends Error {
+  constructor(readonly flowId: string, readonly from: string, readonly to: string) {
+    super(`Cannot transition flow ${flowId} from ${from} to ${to}`);
+    this.name = 'FlowTransitionError';
+  }
+}
+
+export interface IFleetFlowRepository {
   create(data: CreateFleetFlow): Promise<FleetFlowRecord>;
   findById(id: string): Promise<FleetFlowRecord | null>;
   lockById(id: string): Promise<FleetFlowRecord | null>;
   findPage(filters: { projectId: string }, page: IPageOption): Promise<IPageResult<FleetFlowRecord>>;
   findLiveForThread(threadId: string): Promise<FleetFlowRecord | null>;
   findLiveForSpec(repoId: string, branch: string, specSha: string): Promise<FleetFlowRecord | null>;
-  approve(id: string, approverId: string, mode: FleetFlowApprovalMode, approvalRequestId?: string | null): Promise<FleetFlowRecord>;
-  reask(id: string): Promise<FleetFlowRecord>;
+  approve(id: string, data: { mode: FleetFlowApprovalMode; approverId: string; approvedAt: Date; approvalRequestId: string }): Promise<FleetFlowRecord>;
+  reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord>;
   updateSha(id: string, specSha: string): Promise<FleetFlowRecord>;
-  stop(id: string, reason: string): Promise<FleetFlowRecord>;
+  stop(id: string, reason: string, now: Date): Promise<FleetFlowRecord>;
 }
