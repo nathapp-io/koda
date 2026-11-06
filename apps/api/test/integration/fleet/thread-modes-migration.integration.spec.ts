@@ -21,6 +21,10 @@ describeDb('thread modes migration over the preceding schema', () => {
     const job = await db.fleetJob.create({ data: { projectId: world.projectId, repoId: world.repoId, command: 'THREAD', ref: 'main', feature: 'old-thread', profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.adminId, threadId: 'old-thread' } });
     await db.$executeRaw`INSERT INTO "FleetThreadTurn" ("jobId", "threadId", "action", "instructions", "backend", "skills", "resume") VALUES (${job.id}, 'old-thread', 'SESSION', '', '{"kind":"native"}'::jsonb, '[]'::jsonb, false)`;
     await applyMigration(db, MIGRATION);
+    // The generated client selects every ChatThread scalar, including `preApproval`, which only the
+    // later fleet_flows migration adds. Apply it so the reads below can use the client; the assertions
+    // still cover only what the thread_modes migration writes.
+    await applyMigration(db, '20261125090000_fleet_flows');
     expect(await db.chatThread.findUniqueOrThrow({ where: { id: 'old-thread' } })).toMatchObject({ mode: 'read', pendingApprovals: null });
     expect(await db.fleetThreadTurn.findUniqueOrThrow({ where: { jobId: job.id } })).toMatchObject({ mode: 'read' });
     const backfill = migrationStatements(MIGRATION).find((s) => s.startsWith('UPDATE "Role"'));
