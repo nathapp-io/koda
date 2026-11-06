@@ -284,6 +284,16 @@ describe('RoleAdminService', () => {
       expect(error.args).toEqual({ entry: 'admin' });
     });
 
+    it('US-001 AC-9: developer can be granted to an AGENT principal', async () => {
+      const granted = await service.assertMayGrant(owner, {
+        roleKey: 'developer',
+        projectId,
+        principalType: 'AGENT',
+        principalId: 'agent-flow-1',
+      });
+      expect(granted.key).toBe('developer');
+    });
+
     it('a role an AGENT principal can never hold is 400 permissions.principalType', async () => {
       const error = await thrown(() =>
         service.assertMayGrant(owner, {

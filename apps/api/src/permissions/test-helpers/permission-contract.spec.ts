@@ -8,7 +8,8 @@ describe('permission contract checker', () => {
     'member.remove',
     'fleet.job.shell.escalate',
     'fleet.budget.override',
-    // C10 US-004/US-005: every credential route declares its key, so none of them is pending.
+    'fleet.flow.start',
+    // Flow routes declare create/read/stop; the publish listener now declares respec.
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

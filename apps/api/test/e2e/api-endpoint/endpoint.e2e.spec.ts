@@ -15,7 +15,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/e2e/api-endpoint/endpoint.e2e.spec.ts
  * File: test/integration/api-e2e/api-e2e.integration.spec.ts
  */
-import { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
@@ -38,6 +38,7 @@ import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/th
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
 import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.service';
+import { ThreadsService } from '../../../src/fleet/threads/threads.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
@@ -102,7 +103,7 @@ function refusal(res: request.Response, key: string, args: Record<string, unknow
 
 describeIntegration('API Integration Tests', () => {
   let app: NathApplication;
-  let httpServer: ReturnType<INestApplication['getHttpServer']>;
+  let httpServer: Server;
 
   // Shared state across ordered test sections
   let userAccessToken: string;
@@ -185,13 +186,27 @@ describeIntegration('API Integration Tests', () => {
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
-    // NOW init — compiles route handlers with the guards registered above
+    // NOW init — compiles route handlers with the guards registered above.
     await app.init();
+    // Own one IPv4 loopback listener for the lifecycle instead of letting Supertest bind/close an
+    // unspecified-address ephemeral server on every request. This avoids repeated port churn through
+    // host proxy interception, whose 407 responses otherwise fail arbitrary endpoint assertions.
+    await app.listen(0, '127.0.0.1');
     httpServer = app.getHttpServer();
   }, 30_000);
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('F1: keeps one explicit loopback listener alive between Supertest requests', async () => {
+    const address = httpServer.address();
+    expect(address).toMatchObject({ address: '127.0.0.1', family: 'IPv4', port: expect.any(Number) });
+    for (let index = 0; index < 2; index++) {
+      await request(httpServer).get('/api/auth/me').expect(401);
+      expect(httpServer.listening).toBe(true);
+      expect(httpServer.address()).toEqual(address);
+    }
   });
 
   // ─────────────────────────────────────────────────────────────────
@@ -4951,6 +4966,218 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/archive`)
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
       threadMessage(res, 'permissions.40003');
+    });
+
+    describe('US-011 flow read and stop routes', () => {
+      let sequence = 0;
+      const flowsUrl = () => `/api/projects/${projectSlug}/flows`;
+      const flowAuth = () => ({ Authorization: `Bearer ${world.tokens.dev}` });
+      async function seedFlow() {
+        return db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
+          branch: `feat/read-stop-e2e-${++sequence}`, specSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
+        } });
+      }
+      it('GET /projects/:slug/flows returns 200 with records and total', async () => {
+        const flow = await seedFlow();
+        const page = body<{ records: { id: string }[]; total: number }>(await request(httpServer).get(flowsUrl()).set(flowAuth()).expect(200));
+        expect(page.records.map(({ id }) => id)).toContain(flow.id);
+        expect(page.total).toBeGreaterThan(0);
+      });
+      it('GET /projects/:slug/flows returns 404 for an unknown project', async () => {
+        await request(httpServer).get('/api/projects/missing-flow-project/flows').set(flowAuth()).expect(404);
+      });
+      it('GET /projects/:slug/flows/:flowId returns 200 with a complete flow DTO', async () => {
+        const flow = await seedFlow();
+        expect(body(await request(httpServer).get(`${flowsUrl()}/${flow.id}`).set(flowAuth()).expect(200)))
+          .toMatchObject({ id: flow.id, costCapUsd: '25.0000', features: [{ feature: 'read-stop' }], url: `/${projectSlug}/flows/${flow.id}` });
+      });
+      it('GET /projects/:slug/flows/:flowId returns fleet.flows.notFound 404 for a missing flow', async () => {
+        refusal(await request(httpServer).get(`${flowsUrl()}/missing`).set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('GET /fleet/flows/:flowId returns 200 with the same DTO', async () => {
+        const flow = await seedFlow();
+        const project = await request(httpServer).get(`${flowsUrl()}/${flow.id}`).set(flowAuth()).expect(200);
+        const global = await request(httpServer).get(`/api/fleet/flows/${flow.id}`).set(flowAuth()).expect(200);
+        expect(global.body).toEqual(project.body);
+      });
+      it('GET /fleet/flows/:flowId returns fleet.flows.notFound 404 for a missing flow', async () => {
+        refusal(await request(httpServer).get('/api/fleet/flows/missing').set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('POST /projects/:slug/flows/:flowId/stop returns 200 and persists STOPPED', async () => {
+        const flow = await seedFlow();
+        expect(body(await request(httpServer).post(`${flowsUrl()}/${flow.id}/stop`).set(flowAuth()).expect(200)))
+          .toMatchObject({ id: flow.id, state: 'STOPPED', stopReason: 'human_stop', endedAt: expect.any(String) });
+        expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED' });
+      });
+      it('POST /projects/:slug/flows/:flowId/stop returns fleet.flows.notStoppable 409 for COMPLETED', async () => {
+        const flow = await seedFlow();
+        await db().fleetFlow.update({ where: { id: flow.id }, data: { state: 'COMPLETED' } });
+        refusal(await request(httpServer).post(`${flowsUrl()}/${flow.id}/stop`).set(flowAuth()).expect(409), 'fleet.flows.notStoppable.409');
+      });
+    });
+
+    describe('US-010 nax flow entry route', () => {
+      const sha = 'c'.repeat(40);
+      const flowInput = { remoteUrl: 'https://github.com/acme/threads-app.git', branch: 'feat/nax-entry-e2e', specSha: sha,
+        features: [{ feature: 'nax-entry-e2e', specPath: 'docs/nax-entry.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 };
+
+      it('POST /fleet/flows returns 201 with NAX and a persisted PENDING flow', async () => {
+        const github = app.get(GitHubAppClient);
+        const mint = vi.spyOn(github, 'mintReadOnlyToken').mockResolvedValue({ token: 'nax-read-token', expiresAt: new Date() });
+        // These two methods are already spied by the parent thread lifecycle. Preserve its defaults.
+        const head = vi.mocked(github.getBranchHead);
+        const file = vi.mocked(github.getFile);
+        const previousHead = head.getMockImplementation();
+        const previousFile = file.getMockImplementation();
+        head.mockResolvedValue(sha);
+        file.mockResolvedValue({ sha, size: 4, content: Buffer.from('spec') });
+        try {
+          const response = await request(httpServer).post('/api/fleet/flows').set('Authorization', `Bearer ${world.tokens.dev}`).send(flowInput).expect(201);
+          const flow = body<{ id: string; approval: { approvalRequestId: string } }>(response);
+          expect(flow).toMatchObject({ entry: 'NAX', threadId: null, state: 'PENDING', repoId: world.repoId, branch: flowInput.branch, specSha: sha });
+          expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ entry: 'NAX', state: 'PENDING', createdById: world.ids.dev });
+          expect(await db().approvalRequest.findUniqueOrThrow({ where: { id: flow.approval.approvalRequestId } })).toMatchObject({ permissionKey: 'fleet.flow.start', status: 'pending' });
+        } finally {
+          mint.mockRestore();
+          head.mockReset();
+          file.mockReset();
+          if (previousHead) head.mockImplementation(previousHead);
+          if (previousFile) file.mockImplementation(previousFile);
+        }
+      });
+
+      it('POST /fleet/flows hides an unknown repo with 404 and writes nothing', async () => {
+        const before = { flows: await db().fleetFlow.count(), requests: await db().approvalRequest.count() };
+        const response = await request(httpServer).post('/api/fleet/flows').set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ ...flowInput, remoteUrl: 'https://github.com/unknown/repo' }).expect(404);
+        refusal(response, 'fleet.flows.repoNotFound.404');
+        expect(await db().fleetFlow.count()).toBe(before.flows);
+        expect(await db().approvalRequest.count()).toBe(before.requests);
+      });
+    });
+
+    describe('US-009 thread flow entry route', () => {
+      const flowInput = { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 };
+      const flowUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/flows`;
+
+      it('POST /threads/:id/flows returns 201 and persists the local publish record and pending start approval', async () => {
+        const thread = await newThread('flow-entry-happy', { specPublished: true, publishedSha: 'a'.repeat(40) });
+        const runner = await attachThreadRunner(thread.id);
+        const response = await request(httpServer).post(flowUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send(flowInput).expect(201);
+        const flow = body<{ id: string; approval: { approvalRequestId: string } }>(response);
+        expect(flow).toMatchObject({ entry: 'THREAD', threadId: thread.id, branch: 'feat/flow-entry-happy',
+          specSha: 'a'.repeat(40), pinnedRunnerId: runner.id, state: 'PENDING', url: `/${projectSlug}/flows/${flow.id}` });
+        expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({
+          projectId: world.projectId, threadId: thread.id, createdByType: 'USER', createdById: world.ids.dev,
+          state: 'PENDING', specSha: 'a'.repeat(40), pinnedRunnerId: runner.id, approvalRequestId: flow.approval.approvalRequestId,
+        });
+        expect(await db().approvalRequest.findUniqueOrThrow({ where: { id: flow.approval.approvalRequestId } })).toMatchObject({
+          permissionKey: 'fleet.flow.start', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev, status: 'pending',
+        });
+      });
+
+      it('POST /threads/:id/flows returns threads.notPublished 409 with no persisted flow or request', async () => {
+        const thread = await newThread('flow-entry-unpublished');
+        await attachThreadRunner(thread.id);
+        const before = await db().approvalRequest.count();
+        const response = await request(httpServer).post(flowUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send(flowInput).expect(409);
+        refusal(response, 'threads.notPublished.409');
+        expect(await db().fleetFlow.count({ where: { threadId: thread.id } })).toBe(0);
+        expect(await db().approvalRequest.count()).toBe(before);
+      });
+    });
+
+    describe('US-008 thread pre-approval routes', () => {
+      const preapprovalUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/preapproval`;
+
+      it('AC-1/2: PUT stores the normalized cap and calls the service once with route and caller identity', async () => {
+        const thread = await newThread('preapproval-put');
+        const setPreApproval = vi.spyOn(app.get(ThreadsService), 'setPreApproval');
+        try {
+          const res = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+            .send({ costCapUsd: 30 }).expect(200);
+          expect(body<{ userId: string; costCapUsd: string }>(res))
+            .toMatchObject({ userId: world.ids.dev, costCapUsd: '30' });
+          expect(setPreApproval).toHaveBeenCalledOnce();
+          expect(setPreApproval).toHaveBeenCalledWith(world.projectId, thread.id, world.ids.dev, '30');
+          expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } }))
+            .toMatchObject({ preApproval: { userId: world.ids.dev, costCapUsd: '30' } });
+        } finally {
+          setPreApproval.mockRestore();
+        }
+      });
+
+      it('AC-3/10: an agent with the key is still refused as human-only', async () => {
+        const thread = await newThread('preapproval-agent');
+        const grant = await grantKeys(db(), { type: 'AGENT', id: agentId }, ['project.read', 'fleet.thread.preapprove'], world.projectId);
+        const policy = await seedWaitPolicy(db(), 'fleet.thread.preapprove', world.projectId);
+        await app.get(MembershipService).invalidatePermissions();
+        try {
+          const requestsBefore = await db().approvalRequest.count({ where: { permissionKey: 'fleet.thread.preapprove', projectId: world.projectId } });
+          const res = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${agentApiKey}`)
+            .send({ costCapUsd: 30 }).expect(403);
+          refusal(res, 'fleet.flows.humanOnly.40003');
+          expect((await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).preApproval).toBeNull();
+          expect(await db().approvalRequest.count({ where: { permissionKey: 'fleet.thread.preapprove', projectId: world.projectId } })).toBe(requestsBefore);
+          await request(httpServer).delete(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${agentApiKey}`).expect(403);
+        } finally {
+          await db().approvalPolicy.delete({ where: { id: policy.id } });
+          const binding = await db().roleBinding.findUniqueOrThrow({ where: { id: grant.id }, select: { roleId: true } });
+          await db().roleBinding.delete({ where: { id: grant.id } });
+          await db().role.delete({ where: { id: binding.roleId } });
+          await app.get(MembershipService).invalidatePermissions();
+        }
+      });
+
+      it('AC-4: a USER without the key is refused', async () => {
+        const thread = await newThread('preapproval-no-key');
+        await setProjectRole(world.ids.dev, world.projectId, 'viewer');
+        try {
+          await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+            .send({ costCapUsd: 30 }).expect(403);
+        } finally { await setProjectRole(world.ids.dev, world.projectId, 'developer'); }
+      });
+
+      it('AC-5: rejects a zero cap and identifies costCapUsd', async () => {
+        const thread = await newThread('preapproval-zero');
+        const res = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ costCapUsd: 0 }).expect(400);
+        expect(res.body.message).toContain('costCapUsd');
+      });
+
+      it('AC-6/7: archived threads conflict and foreign-project threads are hidden', async () => {
+        const archived = await newThread('preapproval-archived', { status: 'ARCHIVED', archivedAt: new Date() });
+        const archivedRes = await request(httpServer).put(preapprovalUrl(archived.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ costCapUsd: 30 }).expect(409);
+        refusal(archivedRes, 'threads.archived.409');
+        const foreign = await db().chatThread.create({ data: {
+          projectId: world.opsProjectId, repoId: world.foreignRepoId, baseRef: 'main', feature: 'foreign-preapproval', title: 'foreign',
+          createdById: world.ids.dev, backend: { kind: 'native' }, skills: [], specPath: '.nax/spec.md',
+        } });
+        await request(httpServer).put(preapprovalUrl(foreign.id)).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ costCapUsd: 30 }).expect(404);
+      });
+
+      it('AC-8: a later human PUT replaces the cap and user', async () => {
+        const thread = await newThread('preapproval-replace');
+        await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`).send({ costCapUsd: 30 }).expect(200);
+        const replaced = await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.root}`)
+          .send({ costCapUsd: 50 }).expect(200);
+        expect(body<{ userId: string; costCapUsd: string }>(replaced))
+          .toMatchObject({ userId: world.ids.root, costCapUsd: '50' });
+      });
+
+      it('AC-9: DELETE clears the tick idempotently', async () => {
+        const thread = await newThread('preapproval-delete');
+        await request(httpServer).put(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`).send({ costCapUsd: 30 }).expect(200);
+        await request(httpServer).delete(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+        expect((await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).preApproval).toBeNull();
+        await request(httpServer).delete(preapprovalUrl(thread.id)).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      });
     });
 
     it('US-001 AC1: thread detail answers a sendRefusal fact (null with nothing blocking)', async () => {

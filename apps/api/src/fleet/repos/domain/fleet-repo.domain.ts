@@ -41,6 +41,16 @@ export interface IFleetRepoRepository {
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
   create(data: Omit<FleetRepoRecord, 'id' | 'createdAt' | 'autoReview' | 'autoReviewProfiles' | 'autoReviewMaxCostUsd' | 'autoReviewEnabledById' | 'autoReviewEnabledByType' | 'autoReviewEnabledAt' | 'fixTrustDetectedChecks' | 'fixAllowUnprotected'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
+  /**
+   * The nax flow entry resolves a remote URL to its repo: the owner and name compare
+   * case-insensitively, because a forge's URLs and a registered row do not agree on case.
+   */
+  findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null>;
+  /**
+   * SELECT ... FOR UPDATE on the repo row, returning the locked record. The nax flow entry
+   * serialises creation on it, so two concurrent calls cannot both pass the duplicate check.
+   */
+  lockById(id: string): Promise<FleetRepoRecord | null>;
   updateAutoReview(id: string, patch: AutoReviewPatch): Promise<FleetRepoRecord>;
   /** The fix-checks setting (fleet FIX US-001): one boolean column, answered as the updated record. */
   updateFixChecks(id: string, value: boolean): Promise<FleetRepoRecord>;

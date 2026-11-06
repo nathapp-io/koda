@@ -13,8 +13,8 @@ describe('fleet activity entity types', () => {
     'runner', 'enrollment', 'repo', 'job', 'budget', 'schedule', 'approval', 'ingest', 'analytics',
   ];
 
-  it('AC-15: keeps every pre-existing entity type, in order, and appends provider_credential', () => {
-    expect(FLEET_ENTITY_TYPES).toEqual([...PRE_EXISTING, 'provider_credential']);
+  it('US-001 AC-12/14: keeps every existing entity type in order, then appends provider_credential and flow', () => {
+    expect(FLEET_ENTITY_TYPES).toEqual([...PRE_EXISTING, 'provider_credential', 'flow']);
   });
 
   it('AC-15: record stores each pre-existing entity type exactly as named', async () => {
@@ -27,6 +27,19 @@ describe('fleet activity entity types', () => {
 
     expect(repo.create.mock.calls.map(([row]) => row.entityType)).toEqual([...PRE_EXISTING]);
     expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ payload: {} }));
+  });
+
+  it('US-001 AC-12: record stores a flow entity type', async () => {
+    const repo = { create: vi.fn(), findPage: vi.fn() };
+    const service = new FleetActivityService(repo as never);
+
+    await service.record({
+      actorType: 'SYSTEM', actorId: 'flow', action: 'flow.started', entityType: 'flow', entityId: 'flow-1',
+    });
+
+    expect(repo.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      entityType: 'flow', entityId: 'flow-1',
+    }));
   });
 
   it('AC-15: record stores a provider_credential entry with its secret-free payload', async () => {

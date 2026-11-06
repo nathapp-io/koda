@@ -7,6 +7,9 @@ import { ConflictAppException } from '../../../common/exceptions/conflict-app.ex
 
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 
+/** One user's advance approval for the next flow created from this thread. */
+export interface ThreadPreApproval { userId: string; at: string; costCapUsd: string }
+
 /** The repo fields of a REPO thread, all present. */
 export interface RepoThreadFields { repoId: string; baseRef: string; feature: string; specPath: string }
 
@@ -93,6 +96,7 @@ export interface ChatThreadRecord {
   writtenPaths: string[];
   publishedSha: string | null;
   specPublished: boolean;
+  preApproval: ThreadPreApproval | null;
   lastWrite: ThreadWriteResult | null;
   /** Fleet S5b 1d: set only by a workspace-scope read (US-002); a project-scope record never carries it. */
   homeProject?: { slug: string; name: string };
@@ -132,6 +136,10 @@ export interface ChatMessageRecord {
 export type ThreadScope = { kind: 'project'; projectId: string } | { kind: 'workspace'; userId: string };
 
 export interface ChatThreadRepository {
+  lockForFlow(projectId: string, threadId: string): Promise<ChatThreadRecord | null>;
+  setPreApproval(projectId: string, threadId: string, preApproval: ThreadPreApproval): Promise<ChatThreadRecord>;
+  clearPreApproval(projectId: string, threadId: string): Promise<boolean>;
+  consumePreApproval(threadId: string): Promise<void>;
   create(input: { mode?: ThreadMode; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;

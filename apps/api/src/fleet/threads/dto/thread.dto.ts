@@ -61,6 +61,7 @@ export class ThreadDto {
   @ApiProperty({ type: [String] }) writtenPaths: string[];
   @ApiProperty({ nullable: true, type: String }) publishedSha: string | null;
   @ApiProperty() specPublished: boolean;
+  @ApiProperty({ nullable: true, type: 'object', properties: { userId: { type: 'string' }, at: { type: 'string', format: 'date-time' }, costCapUsd: { type: 'string' } } }) preApproval: { userId: string; at: string; costCapUsd: string } | null;
   @ApiProperty({ nullable: true, type: 'object', additionalProperties: true }) lastWrite: ThreadWriteResult | null;
 }
 

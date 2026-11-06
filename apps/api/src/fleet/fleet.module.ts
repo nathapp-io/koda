@@ -21,9 +21,10 @@ import { ThreadIngestModule } from './threads/ingest/thread-ingest.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { ProviderCredentialsModule } from './provider-credentials/provider-credentials.module';
+import { FlowsModule } from './flows/flows.module';
 
 /** Fleet S1 (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md). */
 @Module({
-  imports: [FleetRulingsModule, FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetReviewsModule, FleetJobsModule, RepoConfigModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule, ThreadsModule, ThreadIngestModule, AssistantModule, KnowledgeModule, ProviderCredentialsModule],
+  imports: [FleetRulingsModule, FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetReviewsModule, FleetJobsModule, RepoConfigModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule, ThreadsModule, ThreadIngestModule, AssistantModule, KnowledgeModule, ProviderCredentialsModule, FlowsModule],
 })
 export class FleetModule {}

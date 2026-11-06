@@ -25,6 +25,9 @@ describeDb('AssistantActionRequest committed migration (PG)', () => {
     // Same reason for ChatThread: the client selects `mode` and `pendingApprovals`, which only the
     // thread_modes migration adds to this chain.
     await applyMigration(scratch.db, '20261124090000_thread_modes');
+    // Same reason again: the client selects every ChatThread scalar, so this chain also needs
+    // `preApproval`, which the fleet_flows migration adds.
+    await applyMigration(scratch.db, '20261125090000_fleet_flows');
   }, 120_000);
   afterAll(async () => { await scratch?.drop(); });
 

@@ -7751,6 +7751,557 @@
         ]
       }
     },
+    "/api/fleet/provider-credentials": {
+      "get": {
+        "operationId": "FleetProviderCredentialsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of ProviderCredentialDto; never carries a key"
+          },
+          "403": {
+            "description": "fleet.credential.read is missing globally"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the GLOBAL provider keys as metadata only (fleet.credential.read, global)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "FleetProviderCredentialsController_create",
+        "parameters": [
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderCredentialDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid providerId, name or key"
+          },
+          "403": {
+            "description": "fleet.credential.create is missing globally"
+          },
+          "409": {
+            "description": "A key for this provider already exists (fleet.providerCredentials.duplicate)"
+          },
+          "503": {
+            "description": "The credential vault is off (fleet.providerCredentials.vaultOff)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a GLOBAL provider key; the key is never returned (fleet.credential.create, global)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/provider-credentials/{id}": {
+      "patch": {
+        "operationId": "FleetProviderCredentialsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderCredentialDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "GLOBAL credential not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate or update a GLOBAL provider key (metadata only)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "FleetProviderCredentialsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential deleted"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "GLOBAL credential not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a GLOBAL provider key",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/provider-credentials": {
+      "get": {
+        "operationId": "ProjectProviderCredentialsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of ProviderCredentialDto; never carries a key"
+          },
+          "403": {
+            "description": "project.credential.read is missing in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the project's provider keys as metadata only (project.credential.read)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectProviderCredentialsController_create",
+        "parameters": [
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectProviderCredentialDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid providerId, name or key"
+          },
+          "403": {
+            "description": "project.credential.create is missing in this project"
+          },
+          "404": {
+            "description": "The repo is not one of this project (fleet.repos)"
+          },
+          "409": {
+            "description": "A key for this provider already exists at this scope (fleet.providerCredentials.duplicate)"
+          },
+          "503": {
+            "description": "The credential vault is off (fleet.providerCredentials.vaultOff)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a PROJECT key, or a REPO key when repoId names one of its repos",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/provider-credentials/{id}": {
+      "patch": {
+        "operationId": "ProjectProviderCredentialsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderCredentialDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "project.credential.update is missing in this project"
+          },
+          "404": {
+            "description": "No credential of this project has that id"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate or update one of the project provider keys (metadata only)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectProviderCredentialsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Koda-Approval-Request",
+            "in": "header",
+            "description": "Approval request id to redeem an approved request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential deleted"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "project.credential.delete is missing in this project"
+          },
+          "404": {
+            "description": "No credential of this project has that id"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete one of the project provider keys",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/projects/{slug}/fleet/schedules": {
       "get": {
         "operationId": "ProjectFleetSchedulesController_list",
@@ -9153,557 +9704,6 @@
         "summary": "Runner sync: events, command acks, token requests; long-polls when idle",
         "tags": [
           "fleet-runner"
-        ]
-      }
-    },
-    "/api/fleet/provider-credentials": {
-      "get": {
-        "operationId": "FleetProviderCredentialsController_list",
-        "parameters": [
-          {
-            "name": "current",
-            "required": false,
-            "in": "query",
-            "description": "Page number (1-based)",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "size",
-            "required": false,
-            "in": "query",
-            "description": "Page size",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Page of ProviderCredentialDto; never carries a key"
-          },
-          "403": {
-            "description": "fleet.credential.read is missing globally"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List the GLOBAL provider keys as metadata only (fleet.credential.read, global)",
-        "tags": [
-          "fleet"
-        ]
-      },
-      "post": {
-        "operationId": "FleetProviderCredentialsController_create",
-        "parameters": [
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProviderCredentialDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCredentialDto"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid providerId, name or key"
-          },
-          "403": {
-            "description": "fleet.credential.create is missing globally"
-          },
-          "409": {
-            "description": "A key for this provider already exists (fleet.providerCredentials.duplicate)"
-          },
-          "503": {
-            "description": "The credential vault is off (fleet.providerCredentials.vaultOff)"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a GLOBAL provider key; the key is never returned (fleet.credential.create, global)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/provider-credentials/{id}": {
-      "patch": {
-        "operationId": "FleetProviderCredentialsController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProviderCredentialDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCredentialDto"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "GLOBAL credential not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Rotate or update a GLOBAL provider key (metadata only)",
-        "tags": [
-          "fleet"
-        ]
-      },
-      "delete": {
-        "operationId": "FleetProviderCredentialsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Credential deleted"
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "GLOBAL credential not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete a GLOBAL provider key",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/provider-credentials": {
-      "get": {
-        "operationId": "ProjectProviderCredentialsController_list",
-        "parameters": [
-          {
-            "name": "current",
-            "required": false,
-            "in": "query",
-            "description": "Page number (1-based)",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "size",
-            "required": false,
-            "in": "query",
-            "description": "Page size",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "type": "number"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Page of ProviderCredentialDto; never carries a key"
-          },
-          "403": {
-            "description": "project.credential.read is missing in this project"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List the project's provider keys as metadata only (project.credential.read)",
-        "tags": [
-          "fleet"
-        ]
-      },
-      "post": {
-        "operationId": "ProjectProviderCredentialsController_create",
-        "parameters": [
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProjectProviderCredentialDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCredentialDto"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid providerId, name or key"
-          },
-          "403": {
-            "description": "project.credential.create is missing in this project"
-          },
-          "404": {
-            "description": "The repo is not one of this project (fleet.repos)"
-          },
-          "409": {
-            "description": "A key for this provider already exists at this scope (fleet.providerCredentials.duplicate)"
-          },
-          "503": {
-            "description": "The credential vault is off (fleet.providerCredentials.vaultOff)"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a PROJECT key, or a REPO key when repoId names one of its repos",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/provider-credentials/{id}": {
-      "patch": {
-        "operationId": "ProjectProviderCredentialsController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProviderCredentialDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCredentialDto"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "project.credential.update is missing in this project"
-          },
-          "404": {
-            "description": "No credential of this project has that id"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Rotate or update one of the project provider keys (metadata only)",
-        "tags": [
-          "fleet"
-        ]
-      },
-      "delete": {
-        "operationId": "ProjectProviderCredentialsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Koda-Approval-Request",
-            "in": "header",
-            "description": "Approval request id to redeem an approved request.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Credential deleted"
-          },
-          "202": {
-            "description": "The write waits for approval",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ret": {
-                      "type": "number"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "project.credential.delete is missing in this project"
-          },
-          "404": {
-            "description": "No credential of this project has that id"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete one of the project provider keys",
-        "tags": [
-          "fleet"
         ]
       }
     },
@@ -13964,6 +13964,819 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/preapproval": {
+      "put": {
+        "operationId": "ThreadPreApprovalController_set",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "costCapUsd"
+                ],
+                "properties": {
+                  "costCapUsd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
+                    "maximum": 1000,
+                    "multipleOf": 0.0001
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The thread pre-approval"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "costCapUsd must be greater than 0, at most 1000, and have at most four decimal places"
+          },
+          "403": {
+            "description": "Only a USER may set a pre-approval or the permission is missing"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the human advance approval and cost cap for a thread flow",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "ThreadPreApprovalController_clear",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pre-approval cleared, including when it was already empty"
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a USER may clear a pre-approval or the permission is missing"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Clear the human advance approval for a thread flow",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/flows": {
+      "post": {
+        "operationId": "ThreadFlowsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "features",
+                  "roles",
+                  "costCapUsd"
+                ],
+                "properties": {
+                  "features": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature",
+                        "specPath"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "specPath": {
+                          "type": "string"
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "roles": {
+                    "type": "object",
+                    "required": [
+                      "reviewer",
+                      "supervisor"
+                    ],
+                    "properties": {
+                      "reviewer": {
+                        "type": "string"
+                      },
+                      "supervisor": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "costCapUsd": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.create\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid flow input"
+          },
+          "403": {
+            "description": "fleet.flow.create is missing"
+          },
+          "404": {
+            "description": "threads.notFound"
+          },
+          "409": {
+            "description": "Thread is not eligible for a flow"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a fleet flow from a published repository thread (fleet.flow.create)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/flows/{flowId}": {
+      "get": {
+        "operationId": "FleetFlowsController_get",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing in the flow project"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a fleet flow in its reachable project (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/flows": {
+      "post": {
+        "operationId": "FleetFlowsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "features",
+                  "roles",
+                  "costCapUsd",
+                  "remoteUrl",
+                  "branch",
+                  "specSha"
+                ],
+                "properties": {
+                  "features": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature",
+                        "specPath"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "specPath": {
+                          "type": "string"
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "roles": {
+                    "type": "object",
+                    "required": [
+                      "reviewer",
+                      "supervisor"
+                    ],
+                    "properties": {
+                      "reviewer": {
+                        "type": "string"
+                      },
+                      "supervisor": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "costCapUsd": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "remoteUrl": {
+                    "type": "string",
+                    "description": "HTTPS github.com repository URL"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "specSha": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.create\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid flow input, naming the property"
+          },
+          "403": {
+            "description": "fleet.flow.create is missing in the repository project"
+          },
+          "404": {
+            "description": "fleet.flows.repoNotFound"
+          },
+          "409": {
+            "description": "Repository not connected, branch missing, SHA not head, or duplicate live flow"
+          },
+          "422": {
+            "description": "fleet.flows.specMissing, naming the path"
+          },
+          "503": {
+            "description": "fleet.flows.forgeUnavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a nax fleet flow from verified branch-head specs (fleet.flow.create)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows": {
+      "get": {
+        "operationId": "ProjectFlowsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowPageDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project flows newest first (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows/{flowId}": {
+      "get": {
+        "operationId": "ProjectFlowsController_get",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a project flow (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows/{flowId}/stop": {
+      "post": {
+        "operationId": "ProjectFlowsController_stop",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.stop\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.stop is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          },
+          "409": {
+            "description": "fleet.flows.notStoppable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop a fleet flow (fleet.flow.stop)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/audit": {
+      "get": {
+        "operationId": "AuditController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "actorType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "AGENT",
+                "RUNNER",
+                "SYSTEM"
+              ]
+            }
+          },
+          {
+            "name": "key",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "approverId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resourceType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resourceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "correlationId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of AuditEntryDto"
+          },
+          "400": {
+            "description": "Invalid filter or date window"
+          },
+          "403": {
+            "description": "Caller does not hold audit.read"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Audit entries, newest first; needs the global key audit.read",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/keys": {
+      "get": {
+        "operationId": "AuditController_keys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Distinct audit keys, unprefixed: { keys: string[] }"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Caller does not hold audit.read"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every audit key that occurs, sorted ascending; needs the global key audit.read",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -14823,168 +15636,6 @@
         "summary": "Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
         "tags": [
           "role-bindings"
-        ]
-      }
-    },
-    "/api/audit": {
-      "get": {
-        "operationId": "AuditController_list",
-        "parameters": [
-          {
-            "name": "current",
-            "required": false,
-            "in": "query",
-            "description": "Page number (1-based)",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "size",
-            "required": false,
-            "in": "query",
-            "description": "Page size",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "type": "number"
-            }
-          },
-          {
-            "name": "actorType",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "USER",
-                "AGENT",
-                "RUNNER",
-                "SYSTEM"
-              ]
-            }
-          },
-          {
-            "name": "key",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "actorId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "approverId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "projectId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "resourceType",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "resourceId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "correlationId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Page of AuditEntryDto"
-          },
-          "400": {
-            "description": "Invalid filter or date window"
-          },
-          "403": {
-            "description": "Caller does not hold audit.read"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Audit entries, newest first; needs the global key audit.read",
-        "tags": [
-          "audit"
-        ]
-      }
-    },
-    "/api/audit/keys": {
-      "get": {
-        "operationId": "AuditController_keys",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Distinct audit keys, unprefixed: { keys: string[] }"
-          },
-          "401": {
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "description": "Caller does not hold audit.read"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Every audit key that occurs, sorted ascending; needs the global key audit.read",
-        "tags": [
-          "audit"
         ]
       }
     },
@@ -19899,6 +20550,143 @@
           "placement"
         ]
       },
+      "CreateProviderCredentialDto": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "description": "Provider id, lowercase (for example `openrouter`)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name, 1-64 characters"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 8192,
+            "description": "The provider API key; stored encrypted and never returned"
+          }
+        },
+        "required": [
+          "providerId",
+          "name",
+          "key"
+        ]
+      },
+      "ProviderCredentialDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "PROJECT",
+              "REPO"
+            ],
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "last4": {
+            "type": "string",
+            "description": "Last four characters of the key, for display only"
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "12 hex characters: a stable, non-reversible identifier of the key"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO 8601"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "providerId",
+          "name",
+          "last4",
+          "fingerprint",
+          "disabled",
+          "createdBy",
+          "updatedAt"
+        ]
+      },
+      "UpdateProviderCredentialDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name, 1-64 characters"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 8192,
+            "description": "Replacement provider key; stored encrypted and never returned"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "Whether the credential is disabled"
+          }
+        }
+      },
+      "CreateProjectProviderCredentialDto": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "description": "Provider id, lowercase (for example `openrouter`)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name, 1-64 characters"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 8192,
+            "description": "The provider API key; stored encrypted and never returned"
+          },
+          "repoId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A fleet repo of this project; present makes the key a REPO key"
+          }
+        },
+        "required": [
+          "providerId",
+          "name",
+          "key"
+        ]
+      },
       "ScheduleDto": {
         "type": "object",
         "properties": {
@@ -20607,143 +21395,6 @@
           "mode",
           "edits",
           "baseSha"
-        ]
-      },
-      "CreateProviderCredentialDto": {
-        "type": "object",
-        "properties": {
-          "providerId": {
-            "type": "string",
-            "description": "Provider id, lowercase (for example `openrouter`)"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "description": "Display name, 1-64 characters"
-          },
-          "key": {
-            "type": "string",
-            "minLength": 16,
-            "maxLength": 8192,
-            "description": "The provider API key; stored encrypted and never returned"
-          }
-        },
-        "required": [
-          "providerId",
-          "name",
-          "key"
-        ]
-      },
-      "ProviderCredentialDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "GLOBAL",
-              "PROJECT",
-              "REPO"
-            ],
-            "type": "string"
-          },
-          "projectId": {
-            "type": "string",
-            "nullable": true
-          },
-          "repoId": {
-            "type": "string",
-            "nullable": true
-          },
-          "providerId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "last4": {
-            "type": "string",
-            "description": "Last four characters of the key, for display only"
-          },
-          "fingerprint": {
-            "type": "string",
-            "description": "12 hex characters: a stable, non-reversible identifier of the key"
-          },
-          "disabled": {
-            "type": "boolean"
-          },
-          "createdBy": {
-            "type": "string"
-          },
-          "updatedAt": {
-            "type": "string",
-            "description": "ISO 8601"
-          }
-        },
-        "required": [
-          "id",
-          "scope",
-          "providerId",
-          "name",
-          "last4",
-          "fingerprint",
-          "disabled",
-          "createdBy",
-          "updatedAt"
-        ]
-      },
-      "UpdateProviderCredentialDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "description": "Display name, 1-64 characters"
-          },
-          "key": {
-            "type": "string",
-            "minLength": 16,
-            "maxLength": 8192,
-            "description": "Replacement provider key; stored encrypted and never returned"
-          },
-          "disabled": {
-            "type": "boolean",
-            "description": "Whether the credential is disabled"
-          }
-        }
-      },
-      "CreateProjectProviderCredentialDto": {
-        "type": "object",
-        "properties": {
-          "providerId": {
-            "type": "string",
-            "description": "Provider id, lowercase (for example `openrouter`)"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "description": "Display name, 1-64 characters"
-          },
-          "key": {
-            "type": "string",
-            "minLength": 16,
-            "maxLength": 8192,
-            "description": "The provider API key; stored encrypted and never returned"
-          },
-          "repoId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "A fleet repo of this project; present makes the key a REPO key"
-          }
-        },
-        "required": [
-          "providerId",
-          "name",
-          "key"
         ]
       },
       "CreateEnrollmentDto": {
@@ -23172,6 +23823,22 @@
           "specPublished": {
             "type": "boolean"
           },
+          "preApproval": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "userId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "costCapUsd": {
+                "type": "string"
+              }
+            }
+          },
           "lastWrite": {
             "type": "object",
             "nullable": true,
@@ -23221,6 +23888,7 @@
           "writtenPaths",
           "publishedSha",
           "specPublished",
+          "preApproval",
           "lastWrite"
         ]
       },
@@ -23451,6 +24119,22 @@
           "specPublished": {
             "type": "boolean"
           },
+          "preApproval": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "userId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "costCapUsd": {
+                "type": "string"
+              }
+            }
+          },
           "lastWrite": {
             "type": "object",
             "nullable": true,
@@ -23536,6 +24220,7 @@
           "writtenPaths",
           "publishedSha",
           "specPublished",
+          "preApproval",
           "lastWrite",
           "sendRefusal",
           "handoff",
@@ -23921,6 +24606,22 @@
           "specPublished": {
             "type": "boolean"
           },
+          "preApproval": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "userId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "costCapUsd": {
+                "type": "string"
+              }
+            }
+          },
           "lastWrite": {
             "type": "object",
             "nullable": true,
@@ -23955,6 +24656,7 @@
           "writtenPaths",
           "publishedSha",
           "specPublished",
+          "preApproval",
           "lastWrite"
         ]
       },
@@ -24140,6 +24842,22 @@
           "specPublished": {
             "type": "boolean"
           },
+          "preApproval": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "userId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "costCapUsd": {
+                "type": "string"
+              }
+            }
+          },
           "lastWrite": {
             "type": "object",
             "nullable": true,
@@ -24210,6 +24928,7 @@
           "writtenPaths",
           "publishedSha",
           "specPublished",
+          "preApproval",
           "lastWrite",
           "sendRefusal",
           "handoff",
@@ -24786,6 +25505,242 @@
           "lexicalOnly",
           "empty",
           "hits"
+        ]
+      },
+      "FleetFlowCreatorDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "FleetFlowRolesDto": {
+        "type": "object",
+        "properties": {
+          "reviewer": {
+            "type": "string"
+          },
+          "supervisor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer",
+          "supervisor"
+        ]
+      },
+      "FleetFlowApprovalDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "REQUEST",
+              "PRE_APPROVED"
+            ],
+            "type": "string"
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvalRequestId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "FleetFlowFeatureDto": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string"
+          },
+          "specPath": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string"
+          },
+          "currentStep": {
+            "type": "string",
+            "nullable": true
+          },
+          "prNumber": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "feature",
+          "specPath",
+          "dependsOn",
+          "state"
+        ]
+      },
+      "FleetFlowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string",
+            "nullable": true
+          },
+          "entry": {
+            "enum": [
+              "THREAD",
+              "NAX"
+            ],
+            "type": "string"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/FleetFlowCreatorDto"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "specSha": {
+            "type": "string"
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "roles": {
+            "$ref": "#/components/schemas/FleetFlowRolesDto"
+          },
+          "costCapUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "spentUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "RUNNING",
+              "WAITING_MERGE",
+              "WAITING_ANSWER",
+              "COMPLETED",
+              "STOPPED"
+            ]
+          },
+          "approval": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetFlowApprovalDto"
+              }
+            ]
+          },
+          "stopReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowFeatureDto"
+            }
+          },
+          "url": {
+            "type": "string",
+            "description": "Web path of the flow page"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "entry",
+          "createdBy",
+          "branch",
+          "specSha",
+          "roles",
+          "costCapUsd",
+          "spentUsd",
+          "state",
+          "createdAt",
+          "features",
+          "url"
+        ]
+      },
+      "FleetFlowPageDto": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "current": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number"
+          },
+          "hasNext": {
+            "type": "boolean"
+          },
+          "hasPrev": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "records",
+          "total",
+          "current",
+          "size",
+          "hasNext",
+          "hasPrev"
         ]
       },
       "HomeActivityDto": {

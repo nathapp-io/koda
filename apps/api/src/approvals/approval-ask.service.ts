@@ -49,6 +49,7 @@ export type AskOutcome<TInput = unknown> =
 export const ASK_KEYS_BY_COMPONENT: Readonly<Record<string, string>> = {
   runner: 'fleet.job.shell.escalate',
   budget: 'fleet.budget.override',
+  flow: 'fleet.flow.start',
 };
 
 /**

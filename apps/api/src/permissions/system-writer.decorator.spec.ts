@@ -1,5 +1,5 @@
 import { Reflector } from '@nestjs/core';
-import { PERMISSION_CATALOG } from './catalog';
+import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from './catalog';
 import { SYSTEM_WRITER_METADATA, SystemWriter } from './system-writer.decorator';
 import { EmailDispatcher } from '../email/email-dispatcher';
 import { ApprovalRequestExpirySweeper } from '../approvals/approval-request-expiry.sweeper';
@@ -40,6 +40,7 @@ import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outc
 import { AssistantActionOutcomeSubscriber } from '../fleet/assistant/requests/assistant-action-outcome.subscriber';
 import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { FleetFlowPublishListener } from '../fleet/flows/fleet-flow-publish.listener';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
@@ -84,6 +85,7 @@ const writers = new Map<Function, string>([
   [ThreadIngestHook, 'system.thread.ingest'],
   [AssistantActionOutcomeSubscriber, 'system.thread.ingest'],
   [FanOutPublisher, 'system.outbox.dispatch'],
+  [FleetFlowPublishListener, 'system.flow.respec'],
 ]);
 
 const reflector = new Reflector();
@@ -108,13 +110,22 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(39);
+    expect(writers).toHaveLength(40);
     expect(actual).toEqual(expected);
   });
 
-  it('AC-5: declares every system catalog key and no other key', () => {
+  it('US-012: the respec listener declares the now-live system writer', () => {
+    expect(PENDING_SURFACE_KEYS.has('system.flow.respec')).toBe(false);
+    expect(writers.get(FleetFlowPublishListener)).toBe('system.flow.respec');
+  });
+
+  it('AC-5: declares every non-pending system catalog key and no other key', () => {
     const declared = new Set([...writers.values()]);
-    const systemKeys = new Set(PERMISSION_CATALOG.filter(({ access }) => access === 'system').map(({ key }) => key));
+    const systemKeys = new Set(
+      PERMISSION_CATALOG
+        .filter(({ access, key }) => access === 'system' && !PENDING_SURFACE_KEYS.has(key))
+        .map(({ key }) => key),
+    );
     expect(declared).toEqual(systemKeys);
   });
 });

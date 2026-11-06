@@ -1,4 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { THREAD_SPEC_PUBLISHED, type ThreadSpecPublishedEvent } from './thread-spec-published.event';
 import { randomUUID } from 'node:crypto';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { runAsSystem } from '../../../action-context/action-context';
@@ -44,11 +46,14 @@ const isWriteLine = (line: ThreadLine): line is WriteLine =>
 
 @Injectable()
 export class PrismaThreadIngestRepository implements ThreadIngestRepository {
+  private readonly logger = new Logger(PrismaThreadIngestRepository.name);
+
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly budgets: BudgetEvaluator,
     private readonly audit: AuditRecorder,
+    private readonly emitter: EventEmitter2,
   ) {}
 
   /** Startup catch-up candidates (US-007): a THREAD attempt whose stream holds bytes past its cursor, at most 200. */
@@ -78,6 +83,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
 
   async fold(batch: ThreadIngestBatch): Promise<FoldResult> {
     let spendKeys: string[] = [];
+    const publications: ThreadSpecPublishedEvent[] = [];
     // Permissions P2 US-007: the transcript, its cost mirror rows and the session fields *are* the domain rows a
     // runner's stream produces, so the whole transaction body is bookkeeping. The `turn_end` entry still counts —
     // bookkeeping drops writes only, never entries recorded through AuditRecorder.
@@ -149,7 +155,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
               threadChanged = true;
             }
             else if (isWriteLine(line)) {
-              await this.foldWriteLine(batch, threadId, line);
+              const publication = await this.foldWriteLine(batch, threadId, line);
+              if (publication) publications.push(publication);
               threadChanged = true;
             }
             else if (line.type === 'usage') {
@@ -209,6 +216,15 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         return { costChanged, events: liveEvents };
     }));
     if (result.costChanged) this.budgets.signal(spendKeys);
+    // Best-effort, after commit and outside transcript bookkeeping. One failing listener must not
+    // reject a committed fold or prevent emission of the batch's remaining publications.
+    for (const event of publications) {
+      try {
+        await this.emitter.emitAsync(THREAD_SPEC_PUBLISHED, event);
+      } catch (error) {
+        this.logger.error(`thread ${event.threadId} spec publish listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return result;
   }
 
@@ -559,10 +575,11 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds one write-path line (fleet S5a §4) into the thread's write columns. The caller holds the thread row lock, so
    * the row read here is the one the single update writes back over.
    */
-  private async foldWriteLine(batch: ThreadIngestBatch, threadId: string, line: WriteLine): Promise<void> {
+  private async foldWriteLine(batch: ThreadIngestBatch, threadId: string, line: WriteLine): Promise<ThreadSpecPublishedEvent | null> {
     const db = this.prisma.client;
-    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { writtenPaths: true, session: true } });
+    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { writtenPaths: true, session: true, publishedSha: true } });
     if (!thread) throw new Error(`write-path line for missing thread ${threadId}`);
+    const previousSha = thread.publishedSha;
     const patch: WriteFoldPatch = writeLinePatch(
       {
         writtenPaths: thread.writtenPaths,
@@ -575,6 +592,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     // update with empty data. The caller still marks the thread changed, so the live event is emitted.
     const data = this.writePatchData(patch);
     if (Object.keys(data).length > 0) await db.chatThread.update({ where: { id: threadId }, data });
+    return line.type === 'published' ? { threadId, sha: line.sha, paths: line.paths, previousSha } : null;
   }
 
   /** Maps a fold patch onto `ChatThread` columns. Keys the patch leaves out are not touched. */

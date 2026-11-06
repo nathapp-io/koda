@@ -221,7 +221,7 @@ describe('the seeded-role allow/deny matrix', () => {
 
     for (const row of rows) {
       expect(Object.keys(row.cells)).toEqual(PERMISSION_CATALOG.map((entry) => entry.key));
-      expect(Object.keys(row.cells)).toHaveLength(236);
+      expect(Object.keys(row.cells)).toHaveLength(242);
     }
   });
 
@@ -241,6 +241,14 @@ describe('the seeded-role allow/deny matrix', () => {
     expect(PINNED_CELLS.map((cell) => cell.reason)).toEqual([...PINNED_REASONS]);
     expect(readPinned(matrix)).toEqual([...PINNED_REASONS]);
     expect(readPinned(readCommittedMatrix())).toEqual([...PINNED_REASONS]);
+  });
+
+  it('US-001 AC-6/7/8: flow project grants follow the developer and viewer role boundaries', () => {
+    for (const key of ['fleet.flow.create', 'fleet.flow.start', 'fleet.flow.stop', 'fleet.thread.preapprove']) {
+      expect(matrix.developer[key][1]).toBe('granted');
+      expect(matrix.viewer[key][1]).toBe('not-granted');
+    }
+    expect(matrix.viewer['fleet.flow.read'][1]).toBe('granted');
   });
 
   it('US-005: Project Admin holds every project credential key, and the other project roles read only', () => {

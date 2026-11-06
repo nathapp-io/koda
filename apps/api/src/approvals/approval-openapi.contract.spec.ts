@@ -40,6 +40,8 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/fleet/jobs/{id}/requeue'],
   ['delete', '/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}'],
   ['post', '/api/fleet/repos'],
+  ['post', '/api/fleet/flows'],
+  ['post', '/api/projects/{slug}/flows/{flowId}/stop'],
   ['post', '/api/fleet/provider-credentials'],
   ['patch', '/api/fleet/provider-credentials/{id}'],
   ['delete', '/api/fleet/provider-credentials/{id}'],
@@ -136,9 +138,12 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/threads/{id}/plan'],
   ['post', '/api/projects/{slug}/threads/{id}/run'],
   ['post', '/api/projects/{slug}/threads/{id}/stop'],
+  ['post', '/api/projects/{slug}/threads/{id}/flows'],
   ['post', '/api/projects/{slug}/threads/{id}/end-session'],
   ['post', '/api/projects/{slug}/threads/{id}/answer'],
   ['post', '/api/projects/{slug}/threads/{id}/approvals/{requestId}'],
+  ['put', '/api/projects/{slug}/threads/{id}/preapproval'],
+  ['delete', '/api/projects/{slug}/threads/{id}/preapproval'],
   ['post', '/api/projects/{slug}/threads/{id}/archive'],
   ['post', '/api/projects/{slug}/threads/{id}/publish'],
   ['post', '/api/projects/{slug}/threads/{id}/discard'],
@@ -189,7 +194,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 140 gated operations', () => {
+describe('OpenAPI contract for 145 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -257,6 +262,15 @@ describe('OpenAPI contract for 140 gated operations', () => {
     }
   });
 
+  it('US-010: nax flow create documents 201, 202 and forge refusal statuses', () => {
+    const responses = openapi.paths['/api/fleet/flows']?.post?.responses;
+    for (const status of ['201', '202', '400', '403', '404', '409', '422', '503']) expect(responses).toHaveProperty(status);
+  });
+
+  it('US-009: thread flow create has an approval response', () => {
+    expect(openapi.paths['/api/projects/{slug}/threads/{id}/flows']?.post?.responses).toHaveProperty('202');
+  });
+
   it('AC-7: POST knowledge-base search has no 202 response', () => {
     expect(openapi.paths['/api/projects/{slug}/kb/search']?.post?.responses).not.toHaveProperty('202');
   });
@@ -270,9 +284,9 @@ describe('OpenAPI contract for 140 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 140 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 145 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(140);
+    expect(expected).toHaveLength(145);
     expect(operationsWith202()).toEqual(expected);
   });
 });

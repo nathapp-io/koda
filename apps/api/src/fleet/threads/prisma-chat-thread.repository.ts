@@ -27,7 +27,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadPreApproval, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import { readPendingApprovals } from './domain/pending-approvals';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
@@ -181,6 +181,42 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   async archivedThreadIds(runnerId: string): Promise<string[]> {
     const rows = await this.prisma.client.chatThread.findMany({ where: { runnerId, status: 'ARCHIVED' }, orderBy: [{ archivedAt: 'desc' }, { id: 'desc' }], take: THREAD_LIMITS.maxArchivedThreadIds, select: { id: true } });
     return rows.map((row) => row.id);
+  }
+
+  async lockForFlow(projectId: string, threadId: string): Promise<ChatThreadRecord | null> {
+    await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+    const row = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
+    return row ? this.mapThread(row, null) : null;
+  }
+
+  async setPreApproval(projectId: string, threadId: string, preApproval: ThreadPreApproval): Promise<ChatThreadRecord> {
+    return this.txManager.run(async () => {
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      if (before.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
+      const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { preApproval: preApproval as unknown as Prisma.InputJsonValue } });
+      await this.audit.record({ key: 'fleet.thread.preapprove', resourceType: 'thread', resourceId: row.id, projectId, summary: 'pre-approval set' });
+      return this.mapThread(row, null);
+    });
+  }
+
+  async clearPreApproval(projectId: string, threadId: string): Promise<boolean> {
+    return this.txManager.run(async () => {
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      if (before.preApproval === null) return false;
+      const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { preApproval: Prisma.DbNull } });
+      await this.audit.record({ key: 'fleet.thread.preapprove', resourceType: 'thread', resourceId: row.id, projectId, summary: 'pre-approval cleared' });
+      return true;
+    });
+  }
+
+  async consumePreApproval(threadId: string): Promise<void> {
+    await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+    const row = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { preApproval: true } });
+    if (row && row.preApproval !== null) await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { preApproval: Prisma.DbNull } });
   }
 
   async updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string, canOperate = false): Promise<ChatThreadRecord> {
@@ -727,6 +763,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       pendingApprovals: readPendingApprovals(row.pendingApprovals),
       lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
       writtenPaths: row.writtenPaths, publishedSha: row.publishedSha, specPublished: row.specPublished,
+      preApproval: (row.preApproval as unknown as ThreadPreApproval | null) ?? null,
       lastWrite: (row.lastWrite as unknown as ThreadWriteResult | null) ?? null,
     };
   }

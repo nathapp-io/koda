@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '../../../generated/prisma/client';
 import { currentBookkeepingReason, openAuditScope, noteAuditEntry } from '../../../action-context/audit-coverage';
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
@@ -102,10 +104,10 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
   return { client, messages, thread };
 }
 
-function repoWith(client: unknown, audit = { record: vi.fn().mockResolvedValue(undefined) }): PrismaThreadIngestRepository {
+function repoWith(client: unknown, audit = { record: vi.fn().mockResolvedValue(undefined) }, emitter = new EventEmitter2(), committed = () => {}): PrismaThreadIngestRepository {
   const prisma = { client } as never;
-  const txManager = { run: (fn: () => Promise<unknown>) => fn() } as never;
-  return new PrismaThreadIngestRepository(prisma, txManager, { signal: vi.fn() } as never, audit as never);
+  const txManager = { run: async (fn: () => Promise<unknown>) => { const result = await fn(); committed(); return result; } } as never;
+  return new PrismaThreadIngestRepository(prisma, txManager, { signal: vi.fn() } as never, audit as never, emitter);
 }
 
 function batch(lines: ThreadLine[], overrides: Partial<ThreadIngestBatch> = {}): ThreadIngestBatch {
@@ -121,6 +123,61 @@ const delta = (text: string, round = 1, turnId = 't1'): ThreadLine => ({ type: '
 const reset = (round: number, turnId = 't1'): ThreadLine => ({ type: 'stream_reset', turnId, round });
 const end = (over: Partial<Extract<ThreadLine, { type: 'turn_end' }>> = {}): ThreadLine => ({
   type: 'turn_end', turnId: 't1', status: 'completed', output: 'Final', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0, ...over,
+});
+
+describe('thread publish events (US-012)', () => {
+  const published: ThreadLine = { type: 'published', sha: 'b'.repeat(40), paths: ['docs/spec.md'], ignored: ['other'], specPresent: true };
+
+  it('AC-1: emits each applied publication after commit using the job thread id', async () => {
+    const { client } = fakeClient();
+    const emitter = new EventEmitter2();
+    let committed = false;
+    const received: unknown[] = [];
+    emitter.on('thread.spec.published', (event) => { expect(committed).toBe(true); received.push(event); });
+    await repoWith(client, undefined, emitter, () => { committed = true; }).fold(batch([published]));
+    expect(received).toEqual([{ threadId: 'T', sha: 'b'.repeat(40), paths: ['docs/spec.md'], previousSha: null }]);
+  });
+
+  it('AC-2: write_doc alone emits no publication', async () => {
+    const { client } = fakeClient();
+    const emitter = new EventEmitter2();
+    const emit = vi.spyOn(emitter, 'emitAsync');
+    await repoWith(client, undefined, emitter).fold(batch([{ type: 'write_doc', path: 'docs/spec.md', bytes: 10 }]));
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('AC-13/14: listener failure is logged, metadata and live events survive, and later publications still emit', async () => {
+    const { client, thread } = fakeClient({ writtenPaths: ['docs/spec.md'], jobState: 'COMPLETED' });
+    const emitter = new EventEmitter2();
+    const listen = vi.fn().mockRejectedValueOnce(new Error('listener failed')).mockResolvedValue(undefined);
+    emitter.on('thread.spec.published', listen);
+    const log = vi.spyOn(Logger.prototype, 'error');
+    log.mockClear();
+    const result = await repoWith(client, undefined, emitter).fold(batch([published, published]));
+    expect(listen).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('listener failed'));
+    expect(thread).toMatchObject({ publishedSha: 'b'.repeat(40), specPublished: true, writtenPaths: [],
+      lastWrite: { kind: 'published', jobId: 'J', sha: 'b'.repeat(40), paths: ['docs/spec.md'], ignored: ['other'] } });
+    expect(result).toMatchObject({ costChanged: false, events: [expect.objectContaining({ type: 'thread', threadId: 'T' })] });
+  });
+
+  it('AC-14: missing job returns the empty result and emits nothing', async () => {
+    const { client } = fakeClient();
+    client.fleetJob.findUnique.mockResolvedValueOnce(null as never);
+    const emitter = new EventEmitter2();
+    const emit = vi.spyOn(emitter, 'emitAsync');
+    expect(await repoWith(client, undefined, emitter).fold(batch([published]))).toEqual({ costChanged: false, events: [] });
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('does not emit when the transaction rolls back', async () => {
+    const { client } = fakeClient();
+    client.threadIngestCursor.upsert.mockRejectedValueOnce(new Error('rollback'));
+    const emitter = new EventEmitter2();
+    const emit = vi.spyOn(emitter, 'emitAsync');
+    await expect(repoWith(client, undefined, emitter).fold(batch([published]))).rejects.toThrow('rollback');
+    expect(emit).not.toHaveBeenCalled();
+  });
 });
 
 describe('PrismaThreadIngestRepository.fold (US-003)', () => {

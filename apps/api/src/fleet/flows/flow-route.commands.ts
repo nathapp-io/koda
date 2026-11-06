@@ -1,0 +1,108 @@
+import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
+import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
+import { parseRouteInput } from '../../approvals/route/parse-route-input';
+import { routeCommand } from '../../approvals/route/route-command';
+import type { ThreadPreApproval } from '../threads/domain/chat-thread.domain';
+import { FleetFlowsService, type FlowCreator } from './fleet-flows.service';
+import { parseFlowInput, type NormalizedFlowInput, type NormalizedNaxFlowInput } from './flow-input';
+import { ThreadsService } from '../threads/threads.service';
+
+export const THREAD_FLOW_CREATE_VARIANT = 'rest:fleet-thread-flow.create';
+export const NAX_FLOW_CREATE_VARIANT = 'rest:fleet-nax-flow.create';
+export const FLOW_STOP_VARIANT = 'rest:fleet-flow.stop';
+
+export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
+  set: 'rest:fleet-thread-preapproval.set',
+  clear: 'rest:fleet-thread-preapproval.clear',
+} as const;
+
+interface ThreadFlowCreateInput { projectId: string; threadId: string; body: NormalizedFlowInput }
+interface NaxFlowCreateInput { projectId: string; repoId: string; body: NormalizedNaxFlowInput }
+interface SetPreApprovalInput { projectId: string; threadId: string; costCapUsd: string }
+interface ClearPreApprovalInput { projectId: string; threadId: string }
+
+@Injectable()
+export class FlowRouteCommands implements OnModuleInit {
+  constructor(
+    private readonly registry: ApprovalCommandRegistry,
+    private readonly threads: ThreadsService,
+    private readonly loader: ActorPrincipalLoader,
+    private readonly flows: FleetFlowsService,
+  ) {}
+
+  onModuleInit(): void {
+    this.registry.register(routeCommand<{ projectId: string; flowId: string }, Awaited<ReturnType<FleetFlowsService['stop']>>>({
+      key: 'fleet.flow.stop', variant: FLOW_STOP_VARIANT,
+      parse: (input) => parseRouteInput(input, ['projectId', 'flowId']),
+      run: (principal, input) => this.flows.stop(input.projectId, input.flowId, {
+        type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id,
+      }),
+    }, this.loader));
+    this.registry.register(routeCommand<NaxFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
+      key: 'fleet.flow.create', variant: NAX_FLOW_CREATE_VARIANT,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['projectId', 'repoId']);
+        const body = (input as Record<string, unknown>).body;
+        return { projectId: route.projectId, repoId: route.repoId, body: parseFlowInput(body, 'NAX') };
+      },
+      run: async (principal, input) => {
+        const creator: FlowCreator = principal.actorType === 'user'
+          ? { type: 'USER', id: principal.id }
+          : { type: 'AGENT', id: principal.id };
+        const { features, roles, costCapUsd, branch, specSha } = input.body;
+        return this.flows.create({ entry: 'NAX', repoId: input.repoId, branch, specSha, features, roles, costCapUsd }, creator, { projectId: input.projectId });
+      },
+    }, this.loader));
+    this.registry.register(routeCommand<ThreadFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
+      key: 'fleet.flow.create', variant: THREAD_FLOW_CREATE_VARIANT,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['projectId', 'threadId']);
+        if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ValidationAppException({}, 'approvals.invalidInput');
+        const body = (input as Record<string, unknown>).body;
+        return { projectId: route.projectId, threadId: route.threadId, body: parseFlowInput(body, 'THREAD') };
+      },
+      run: async (principal, input) => {
+        const creator: FlowCreator = principal.actorType === 'user'
+          ? { type: 'USER', id: principal.id }
+          : { type: 'AGENT', id: principal.id };
+        return this.flows.create({ entry: 'THREAD', threadId: input.threadId, ...input.body }, creator, { projectId: input.projectId });
+      },
+    }, this.loader));
+    this.registry.register(routeCommand<SetPreApprovalInput, ThreadPreApproval>({
+      key: 'fleet.thread.preapprove', variant: THREAD_PREAPPROVAL_ROUTE_VARIANTS.set,
+      parse: parseSetInput,
+      run: async (principal, input) => {
+        assertHuman(principal);
+        const thread = await this.threads.setPreApproval(input.projectId, input.threadId, principal.id, input.costCapUsd);
+        if (!thread.preApproval) throw new Error('thread pre-approval write did not return its persisted value');
+        return thread.preApproval;
+      },
+      toResult: (result) => result,
+    }, this.loader));
+    this.registry.register(routeCommand<ClearPreApprovalInput, null>({
+      key: 'fleet.thread.preapprove', variant: THREAD_PREAPPROVAL_ROUTE_VARIANTS.clear,
+      parse: (input) => parseRouteInput(input, ['projectId', 'threadId']),
+      run: async (principal, input) => {
+        assertHuman(principal);
+        await this.threads.clearPreApproval(input.projectId, input.threadId);
+        return null;
+      },
+    }, this.loader));
+  }
+}
+
+function parseSetInput(value: unknown): SetPreApprovalInput {
+  const { projectId, threadId } = parseRouteInput(value, ['projectId', 'threadId']);
+  const cost = (value as Record<string, unknown>).costCapUsd;
+  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost <= 0 || cost > 1000 || Number(cost.toFixed(4)) !== cost) {
+    throw new ValidationAppException({ reason: 'costCapUsd' }, 'threads.input');
+  }
+  return { projectId, threadId, costCapUsd: String(cost) };
+}
+
+function assertHuman(principal: KodaPrincipal): void {
+  if (principal.actorType !== 'user') throw new ForbiddenAppException({}, 'fleet.flows.humanOnly');
+}

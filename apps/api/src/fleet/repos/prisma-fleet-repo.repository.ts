@@ -54,6 +54,22 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     return row ? this.toDomain(row) : null;
   }
 
+  /** The nax flow entry's remote URL: owner and name compare case-insensitively. */
+  async findByIdentity(provider: string, owner: string, name: string): Promise<FleetRepoRecord | null> {
+    const row = await this.db.fleetRepo.findFirst({
+      where: { provider, owner: { equals: owner, mode: 'insensitive' }, name: { equals: name, mode: 'insensitive' } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return row ? this.toDomain(row) : null;
+  }
+
+  /** SELECT ... FOR UPDATE on the repo row (the nax flow entry's creation lock). */
+  async lockById(id: string): Promise<FleetRepoRecord | null> {
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "FleetRepo" WHERE "id" = ${id} FOR UPDATE`;
+    if (rows.length === 0) return null;
+    return this.findById(id);
+  }
+
   /** The project's anchor repo (S5b-R13): oldest `createdAt`, ties by smallest `id`. */
   async findAnchor(projectId: string): Promise<FleetRepoRecord | null> {
     const row = await this.db.fleetRepo.findFirst({ where: { projectId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });

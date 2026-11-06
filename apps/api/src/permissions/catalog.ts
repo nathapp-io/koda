@@ -65,6 +65,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
+  'fleet.flow.start',
   // C10 US-004 declared the two GLOBAL credential update and delete routes, so
   // `fleet.credential.update` and `fleet.credential.delete` left this list; US-005's project routes
   // declare `project.credential.*` from the start, so no credential key waits for a surface.
@@ -146,6 +147,12 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'project.credential.create': 'project',
   'project.credential.update': 'project',
   'project.credential.delete': 'project',
+  'fleet.flow.read': 'project',
+  'fleet.flow.create': 'project',
+  'fleet.flow.start': 'project',
+  'fleet.flow.stop': 'project',
+  'fleet.thread.preapprove': 'project',
+  'system.flow.respec': 'any',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);
@@ -435,6 +442,7 @@ export const ROLE_GRANT_KEYS: ReadonlySet<string> = new Set(['member.add', 'invi
 
 /** Risk, first match wins: role and policy keys, then reads, then deletes/removes and high-risk writes. */
 function classifyRisk(key: string): PermissionRisk {
+  if (key === 'fleet.flow.start') return 'critical';
   if (ROLE_GRANT_KEYS.has(key) || key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
   if (isReadKey(key)) return 'low';
   if (CREDENTIAL_KEYS.has(key)) return 'high';
