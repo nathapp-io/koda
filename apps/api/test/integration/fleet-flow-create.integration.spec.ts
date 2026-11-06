@@ -4,6 +4,7 @@ import type { PrismaClient } from '../../src/generated/prisma/client';
 import { ConflictAppException } from '../../src/common/exceptions/conflict-app.exception';
 import { ApprovalAskService } from '../../src/approvals/approval-ask.service';
 import { FleetFlowsService, type CreateFlowInput, type FlowCreator } from '../../src/fleet/flows/fleet-flows.service';
+import { FleetFlowDto } from '../../src/fleet/flows/dto/fleet-flow.dto';
 import { FleetReposService } from '../../src/fleet/repos/fleet-repos.service';
 import { ThreadsService } from '../../src/fleet/threads/threads.service';
 import type { ChatThreadRecord } from '../../src/fleet/threads/domain/chat-thread.domain';
@@ -113,6 +114,12 @@ describeDb('FleetFlowsService.create', () => {
     expect(approvalRequestId).toBe(request.id);
     expect(flow.approvalRequestId).toBe(request.id);
     expect((await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).approvalRequestId).toBe(request.id);
+    // The response of a create the tick did not cover must show the request it waits on, although the
+    // stored flow has no approval mode yet.
+    expect(FleetFlowDto.from(flow, 'web')).toMatchObject({
+      state: 'PENDING',
+      approval: { mode: 'REQUEST', approverId: null, approvedAt: null, approvalRequestId: request.id },
+    });
   });
 
   it('AC-3: an AGENT creator opens the request on behalf of the agent', async () => {

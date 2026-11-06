@@ -82,15 +82,30 @@ describe('FleetFlowDto', () => {
     expect(dto).toMatchObject({ stopReason: 'manual', endedAt: APPROVED_AT.toISOString() });
   });
 
-  it('keeps the nax entry free of a thread and carries the request of a pending flow', () => {
+  /**
+   * The row `FleetFlowsService.create` leaves behind when no tick covers the flow: PENDING, no approval
+   * mode (nothing has been decided yet), and the `fleet.flow.start` request it waits on. The request is
+   * part of the record the client shows, so the approval block must be answered for it — as REQUEST,
+   * the mode a decision on that request will persist.
+   */
+  it('answers the approval block of the request a freshly created PENDING flow waits on', () => {
+    const dto = FleetFlowDto.from(record({ state: 'PENDING', approvalMode: null, approvalRequestId: 'request-1' }), 'web');
+
+    expect(dto.approval).toEqual({
+      mode: 'REQUEST', approverId: null, approvedAt: null, approvalRequestId: 'request-1',
+    });
+  });
+
+  it('keeps the nax entry free of a thread and carries the request of a flow approved through it', () => {
     const dto = FleetFlowDto.from(record({
       entry: 'NAX', threadId: null, pinnedRunnerId: null, createdByType: 'AGENT', createdById: 'agent-1',
-      approvalMode: 'REQUEST', approvalRequestId: 'request-1',
+      state: 'APPROVED', approvalMode: 'REQUEST', approverId: 'user-2', approvedAt: APPROVED_AT,
+      approvalRequestId: 'request-1',
     }), 'web');
 
     expect(dto).toMatchObject({
       entry: 'NAX', threadId: null, pinnedRunnerId: null, createdBy: { type: 'AGENT', id: 'agent-1' },
-      approval: { mode: 'REQUEST', approverId: null, approvedAt: null, approvalRequestId: 'request-1' },
+      approval: { mode: 'REQUEST', approverId: 'user-2', approvedAt: APPROVED_AT.toISOString(), approvalRequestId: 'request-1' },
     });
   });
 });

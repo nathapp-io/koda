@@ -8,6 +8,24 @@ import type {
 
 const iso = (date: Date | null): string | null => (date === null ? null : date.toISOString());
 
+/**
+ * The approval block of a flow. A decided flow carries its mode, approver and time; a PENDING flow has
+ * no mode yet but the `fleet.flow.start` request it waits on is part of the record — `create` stores the
+ * request id and nothing else — so that request answers as `REQUEST`, the mode a decision on it
+ * persists. Only a flow with neither a mode nor a request (started by the thread's tick, which has no
+ * request) answers `null`.
+ */
+function approvalOf(record: FleetFlowRecord): FleetFlowApprovalDto | null {
+  const mode = record.approvalMode ?? (record.approvalRequestId === null ? null : 'REQUEST');
+  if (mode === null) return null;
+  return {
+    mode,
+    approverId: record.approverId,
+    approvedAt: iso(record.approvedAt),
+    approvalRequestId: record.approvalRequestId,
+  };
+}
+
 export class FleetFlowCreatorDto {
   @ApiProperty({ enum: ['USER', 'AGENT'] }) declare type: 'USER' | 'AGENT';
   @ApiProperty() declare id: string;
@@ -83,12 +101,7 @@ export class FleetFlowDto {
       costCapUsd: record.costCapUsd,
       spentUsd: record.spentUsd,
       state: record.state,
-      approval: record.approvalMode === null ? null : {
-        mode: record.approvalMode,
-        approverId: record.approverId,
-        approvedAt: iso(record.approvedAt),
-        approvalRequestId: record.approvalRequestId,
-      },
+      approval: approvalOf(record),
       stopReason: record.stopReason,
       endedAt: iso(record.endedAt),
       createdAt: record.createdAt.toISOString(),
