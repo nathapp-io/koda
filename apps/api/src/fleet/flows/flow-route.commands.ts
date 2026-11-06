@@ -7,10 +7,11 @@ import { parseRouteInput } from '../../approvals/route/parse-route-input';
 import { routeCommand } from '../../approvals/route/route-command';
 import type { ThreadPreApproval } from '../threads/domain/chat-thread.domain';
 import { FleetFlowsService, type FlowCreator } from './fleet-flows.service';
-import { parseFlowInput, type NormalizedFlowInput } from './flow-input';
+import { parseFlowInput, type NormalizedFlowInput, type NormalizedNaxFlowInput } from './flow-input';
 import { ThreadsService } from '../threads/threads.service';
 
 export const THREAD_FLOW_CREATE_VARIANT = 'rest:fleet-thread-flow.create';
+export const NAX_FLOW_CREATE_VARIANT = 'rest:fleet-nax-flow.create';
 
 export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
   set: 'rest:fleet-thread-preapproval.set',
@@ -18,6 +19,7 @@ export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
 } as const;
 
 interface ThreadFlowCreateInput { projectId: string; threadId: string; body: NormalizedFlowInput }
+interface NaxFlowCreateInput { projectId: string; repoId: string; body: NormalizedNaxFlowInput }
 interface SetPreApprovalInput { projectId: string; threadId: string; costCapUsd: string }
 interface ClearPreApprovalInput { projectId: string; threadId: string }
 
@@ -31,6 +33,21 @@ export class FlowRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    this.registry.register(routeCommand<NaxFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
+      key: 'fleet.flow.create', variant: NAX_FLOW_CREATE_VARIANT,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['projectId', 'repoId']);
+        const body = (input as Record<string, unknown>).body;
+        return { projectId: route.projectId, repoId: route.repoId, body: parseFlowInput(body, 'NAX') };
+      },
+      run: async (principal, input) => {
+        const creator: FlowCreator = principal.actorType === 'user'
+          ? { type: 'USER', id: principal.id }
+          : { type: 'AGENT', id: principal.id };
+        const { features, roles, costCapUsd, branch, specSha } = input.body;
+        return this.flows.create({ entry: 'NAX', repoId: input.repoId, branch, specSha, features, roles, costCapUsd }, creator, { projectId: input.projectId });
+      },
+    }, this.loader));
     this.registry.register(routeCommand<ThreadFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
       key: 'fleet.flow.create', variant: THREAD_FLOW_CREATE_VARIANT,
       parse: (input) => {

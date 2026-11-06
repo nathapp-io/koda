@@ -40,6 +40,7 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/fleet/jobs/{id}/requeue'],
   ['delete', '/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}'],
   ['post', '/api/fleet/repos'],
+  ['post', '/api/fleet/flows'],
   ['post', '/api/fleet/provider-credentials'],
   ['patch', '/api/fleet/provider-credentials/{id}'],
   ['delete', '/api/fleet/provider-credentials/{id}'],
@@ -192,7 +193,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 143 gated operations', () => {
+describe('OpenAPI contract for 144 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -260,6 +261,11 @@ describe('OpenAPI contract for 143 gated operations', () => {
     }
   });
 
+  it('US-010: nax flow create documents 201, 202 and forge refusal statuses', () => {
+    const responses = openapi.paths['/api/fleet/flows']?.post?.responses;
+    for (const status of ['201', '202', '400', '403', '404', '409', '422', '503']) expect(responses).toHaveProperty(status);
+  });
+
   it('US-009: thread flow create has an approval response', () => {
     expect(openapi.paths['/api/projects/{slug}/threads/{id}/flows']?.post?.responses).toHaveProperty('202');
   });
@@ -277,9 +283,9 @@ describe('OpenAPI contract for 143 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 143 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 144 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(143);
+    expect(expected).toHaveLength(144);
     expect(operationsWith202()).toEqual(expected);
   });
 });

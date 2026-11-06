@@ -4954,6 +4954,46 @@ describeIntegration('API Integration Tests', () => {
       threadMessage(res, 'permissions.40003');
     });
 
+    describe('US-010 nax flow entry route', () => {
+      const sha = 'c'.repeat(40);
+      const flowInput = { remoteUrl: 'https://github.com/acme/threads-app.git', branch: 'feat/nax-entry-e2e', specSha: sha,
+        features: [{ feature: 'nax-entry-e2e', specPath: 'docs/nax-entry.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 };
+
+      it('POST /fleet/flows returns 201 with NAX and a persisted PENDING flow', async () => {
+        const github = app.get(GitHubAppClient);
+        const mint = vi.spyOn(github, 'mintReadOnlyToken').mockResolvedValue({ token: 'nax-read-token', expiresAt: new Date() });
+        // These two methods are already spied by the parent thread lifecycle. Preserve its defaults.
+        const head = vi.mocked(github.getBranchHead);
+        const file = vi.mocked(github.getFile);
+        const previousHead = head.getMockImplementation();
+        const previousFile = file.getMockImplementation();
+        head.mockResolvedValue(sha);
+        file.mockResolvedValue({ sha, size: 4, content: Buffer.from('spec') });
+        try {
+          const response = await request(httpServer).post('/api/fleet/flows').set('Authorization', `Bearer ${world.tokens.dev}`).send(flowInput).expect(201);
+          const flow = body<{ id: string; approval: { approvalRequestId: string } }>(response);
+          expect(flow).toMatchObject({ entry: 'NAX', threadId: null, state: 'PENDING', repoId: world.repoId, branch: flowInput.branch, specSha: sha });
+          expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ entry: 'NAX', state: 'PENDING', createdById: world.ids.dev });
+          expect(await db().approvalRequest.findUniqueOrThrow({ where: { id: flow.approval.approvalRequestId } })).toMatchObject({ permissionKey: 'fleet.flow.start', status: 'pending' });
+        } finally {
+          mint.mockRestore();
+          head.mockReset();
+          file.mockReset();
+          if (previousHead) head.mockImplementation(previousHead);
+          if (previousFile) file.mockImplementation(previousFile);
+        }
+      });
+
+      it('POST /fleet/flows hides an unknown repo with 404 and writes nothing', async () => {
+        const before = { flows: await db().fleetFlow.count(), requests: await db().approvalRequest.count() };
+        const response = await request(httpServer).post('/api/fleet/flows').set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ ...flowInput, remoteUrl: 'https://github.com/unknown/repo' }).expect(404);
+        refusal(response, 'fleet.flows.repoNotFound.404');
+        expect(await db().fleetFlow.count()).toBe(before.flows);
+        expect(await db().approvalRequest.count()).toBe(before.requests);
+      });
+    });
+
     describe('US-009 thread flow entry route', () => {
       const flowInput = { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25 };
       const flowUrl = (id: string) => `/api/projects/${projectSlug}/threads/${id}/flows`;

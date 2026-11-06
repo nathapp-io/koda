@@ -36,7 +36,7 @@
   "flowInput": { "-2": "流程输入无效：{reason}" },
   "flows": {
     "threadBusy": { "409": "此线程已有进行中的流程" },
-    "duplicate": { "409": "已有进行中的流程覆盖此分支与规格提交" },
+    "duplicate": { "409": "已有进行中的流程覆盖此分支与规格提交：{flowId}" },
     "repoNotFound": { "404": "在你可访问的项目中找不到与此远程 URL 匹配的仓库" },
     "repoNotConnected": { "409": "Koda 尚无法读取此仓库：请为该仓库连接 GitHub App" },
     "forgeUnavailable": { "503": "代码托管服务当前不可用；流程未创建" },

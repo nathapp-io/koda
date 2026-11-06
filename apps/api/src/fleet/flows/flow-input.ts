@@ -13,6 +13,12 @@ export interface NormalizedFlowInput {
   specSha?: string;
 }
 
+export interface NormalizedNaxFlowInput extends NormalizedFlowInput {
+  remoteUrl: string;
+  branch: string;
+  specSha: string;
+}
+
 const ROLE_RE = /^[A-Za-z0-9._:/\x5b\x5d=,-]{1,200}$/;
 const SPEC_SHA_RE = /^[a-f0-9]{40}$/;
 const COST_RE = /^\d+(?:\.\d{1,4})?$/;
@@ -25,6 +31,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Parse the untrusted create body into the stable JSON shape used by flow commands. */
+export function parseFlowInput(body: unknown, entry: 'NAX'): NormalizedNaxFlowInput;
+export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowInput;
 export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowInput {
   if (entry !== 'THREAD' && entry !== 'NAX') fail('features');
   if (!isRecord(body)) fail('features');

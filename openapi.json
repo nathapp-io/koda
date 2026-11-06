@@ -14245,6 +14245,151 @@
         ]
       }
     },
+    "/api/fleet/flows": {
+      "post": {
+        "operationId": "FleetFlowsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "features",
+                  "roles",
+                  "costCapUsd",
+                  "remoteUrl",
+                  "branch",
+                  "specSha"
+                ],
+                "properties": {
+                  "features": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature",
+                        "specPath"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "specPath": {
+                          "type": "string"
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "roles": {
+                    "type": "object",
+                    "required": [
+                      "reviewer",
+                      "supervisor"
+                    ],
+                    "properties": {
+                      "reviewer": {
+                        "type": "string"
+                      },
+                      "supervisor": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "costCapUsd": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "remoteUrl": {
+                    "type": "string",
+                    "description": "HTTPS github.com repository URL"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "specSha": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.create\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid flow input, naming the property"
+          },
+          "403": {
+            "description": "fleet.flow.create is missing in the repository project"
+          },
+          "404": {
+            "description": "fleet.flows.repoNotFound"
+          },
+          "409": {
+            "description": "Repository not connected, branch missing, SHA not head, or duplicate live flow"
+          },
+          "422": {
+            "description": "fleet.flows.specMissing, naming the path"
+          },
+          "503": {
+            "description": "fleet.flows.forgeUnavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a nax fleet flow from verified branch-head specs (fleet.flow.create)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/audit": {
       "get": {
         "operationId": "AuditController_list",

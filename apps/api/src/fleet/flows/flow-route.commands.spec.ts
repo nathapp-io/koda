@@ -22,6 +22,22 @@ function setup() {
 }
 
 describe('FlowRouteCommands', () => {
+  it('NAX AC-2/14: persisted NAX input reparses and delegates once as the requesting agent, without extra fields', async () => {
+    const { command: getCommand, loader, flows } = setup();
+    loader.forContext.mockResolvedValue({ actorType: 'agent', id: 'agent-1' });
+    const command = getCommand('rest:fleet-nax-flow.create');
+    const body = { remoteUrl: 'https://github.com/Org/Repo.git', branch: 'feat/flow-x', specSha: 'a'.repeat(40),
+      features: [{ feature: 'flow-x', specPath: 'docs/spec.md' }], roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: 25 };
+    const parsed = command.parse({ projectId: 'project-1', repoId: 'repo-1', body, token: 'must-not-persist' });
+    const persisted: unknown = JSON.parse(JSON.stringify(parsed));
+    expect(command.parse(persisted)).toEqual(parsed);
+    expect(JSON.stringify(parsed)).not.toContain('must-not-persist');
+    await command.execute(command.parse(persisted));
+    expect(flows.create).toHaveBeenCalledOnce();
+    expect(flows.create).toHaveBeenCalledWith({ entry: 'NAX', repoId: 'repo-1', branch: body.branch, specSha: body.specSha,
+      features: [{ ...body.features[0], dependsOn: [] }], roles: body.roles, costCapUsd: '25' },
+    { type: 'AGENT', id: 'agent-1' }, { projectId: 'project-1' });
+  });
   it('F4: JSON-persisted parser output reparses and deferred execution creates the flow', async () => {
     const { command: registeredCommand, flows } = setup();
     const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);

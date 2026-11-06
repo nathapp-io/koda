@@ -25,6 +25,12 @@ import { FleetFlowsService } from './fleet-flows.service';
 import { FlowsModule } from './flows.module';
 import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
+import { GitBrokerModule } from '../git-broker/git-broker.module';
+import { GitHubAppClient } from '../git-broker/github-app-client';
+import { ProjectsModule } from '../../projects/projects.module';
+import { ProjectsService } from '../../projects/projects.service';
+import { FleetFlowsController } from './fleet-flows.controller';
+import { NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
 
 @Module({
   providers: [
@@ -49,6 +55,10 @@ class StubFleetReposModule {}
   exports: [ThreadsService],
 })
 class StubThreadsModule {}
+@Module({ providers: [{ provide: GitHubAppClient, useValue: {} }], exports: [GitHubAppClient] })
+class StubGitBrokerModule {}
+@Module({ providers: [{ provide: ProjectsService, useValue: {} }], exports: [ProjectsService] })
+class StubProjectsModule {}
 const stubTxManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
 @Module({
   providers: [
@@ -98,6 +108,8 @@ describe('FlowsModule', () => {
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)
       .overrideModule(FleetReposModule).useModule(StubFleetReposModule)
       .overrideModule(ThreadsModule).useModule(StubThreadsModule)
+      .overrideModule(GitBrokerModule).useModule(StubGitBrokerModule)
+      .overrideModule(ProjectsModule).useModule(StubProjectsModule)
       .overrideModule(ProjectAccessModule).useModule(StubProjectAccessModule)
       .overrideProvider(ProjectMembershipGuard).useValue({})
       .overrideProvider(ProjectAccessService).useValue({})
@@ -114,5 +126,7 @@ describe('FlowsModule', () => {
     // The create service is wired with the thread and repo services another module exports, not with
     // their repositories: a flows service that read either repository would break the layering.
     expect(testingModule.get(FleetFlowsService, { strict: false })).toBeInstanceOf(FleetFlowsService);
+    expect(testingModule.get(FleetFlowsController, { strict: false })).toBeInstanceOf(FleetFlowsController);
+    expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.create', NAX_FLOW_CREATE_VARIANT)).toBeDefined();
   });
 });
