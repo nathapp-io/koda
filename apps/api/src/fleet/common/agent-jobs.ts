@@ -9,6 +9,16 @@ export const AGENT_MODEL_ALIAS_TARGET_RE = /^(?:(?!acp:)[^\s/\x5B\x5D]+\/[^\s/\x
 export const AGENT_TIMEOUT_MIN_SEC = 60;
 export const AGENT_TIMEOUT_MAX_SEC = 86_400;
 
+/** Serialized result bounds; pinned to packages/fleet-protocol by protocol.spec.ts. */
+export const AGENT_RESULT_LIMITS = {
+  budgetBytes: 12_288,
+  maxOutputBytes: 8_192,
+  maxDeniedAsks: 10,
+  maxAskChars: 500,
+  maxToolChars: 128,
+  maxModelChars: 200,
+} as const;
+
 /**
  * Every agent text field is stored in a jsonb column, and PostgreSQL answers SQLSTATE 22P05 ("unsupported Unicode
  * escape sequence") for U+0000 — a database error at insert, not a validation response. The config-edit

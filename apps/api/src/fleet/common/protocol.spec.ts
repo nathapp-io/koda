@@ -4,6 +4,7 @@ import { AGENT_RESULT_LIMITS, APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_M
 import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
 import { APPROVAL_TEXT_MAX_BYTES, DEFAULT_APPROVAL_TIMEOUT_SEC, SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
+import { AGENT_RESULT_LIMITS as API_AGENT_RESULT_LIMITS } from './agent-jobs';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -16,8 +17,10 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe('fleet protocol', () => {
-  it('exports the agent result limits', () => {
-    expect(AGENT_RESULT_LIMITS).toEqual({ budgetBytes: 12_288, maxOutputBytes: 8_192, maxDeniedAsks: 10, maxAskChars: 500, maxToolChars: 128, maxModelChars: 200 });
+  it('pins the API agent result limits to the protocol package', () => {
+    const expected = { budgetBytes: 12_288, maxOutputBytes: 8_192, maxDeniedAsks: 10, maxAskChars: 500, maxToolChars: 128, maxModelChars: 200 };
+    expect(AGENT_RESULT_LIMITS).toEqual(expected);
+    expect(API_AGENT_RESULT_LIMITS).toEqual(AGENT_RESULT_LIMITS);
   });
 
   it('supports the package protocol version', () => {

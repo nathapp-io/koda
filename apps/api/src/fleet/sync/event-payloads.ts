@@ -3,6 +3,7 @@ import type { BashAsk } from '../approvals/approval-closer';
 import type { FleetJobPatch, FleetJobPostRun, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import { parseApprovalRequest } from './approval-request-payload';
 import { parseConfigResult } from '../repo-config/config-result';
+import { parseAgentResult } from './agent-result';
 
 export type EventEffect =
   | { kind: 'transition'; to: FleetJobState; reason: string | null; exitCode: number | null }
@@ -119,6 +120,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['fixReady', fixReady(p.fixReady)],
     // D495: dormant for nax jobs (configEditFor gates on isConfigKind) — mirror() never sees the command to guard with.
     ['configResult', configResult],
+    ['agentResult', p.agentResult === undefined ? undefined : parseAgentResult(p.agentResult) ?? undefined],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
 }
