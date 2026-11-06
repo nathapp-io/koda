@@ -18,7 +18,7 @@ import type { EventRow } from '../journal/types';
 import { JobRun, type BundleUploader, type JobRunDeps, type JobRunTuning } from './job-run';
 import { RepoMutex } from './repo-mutex';
 
-function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<JobRunTuning> = {}, assign: Partial<AssignPayload> = {}) {
+function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<JobRunTuning> = {}, assign: Partial<AssignPayload> = {}, jobDir = `/w/.jobs/${jobId}`) {
   const time = fakeTime();
   const journal = Journal.open(':memory:', time.now);
   const ex = new FakeExecutor();
@@ -38,7 +38,7 @@ function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<
     tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000, ...tuning },   // 0: unit tests do not wait for acks unless they say so
     logs,
   };
-  journal.insertJob({ assign: assignFor(command, { ...assign, jobId }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
+  journal.insertJob({ assign: assignFor(command, { ...assign, jobId }), leaseEpoch: 1, repoKey: 'acme/app', jobDir });
   return { time, journal, ex, outcomes, uploads, mutex, deps, log, logs, acked: [] as EventRow[], run: new JobRun(deps, jobId, 1) };
 }
 type Built = ReturnType<typeof build>;
@@ -1546,5 +1546,80 @@ describe('RUN workflow finish (US-002)', () => {
     await b.run.start('finish');
     expect(states(b).at(-1)?.to).toBe('CANCELLED');
     expect(b.ex.calls.filter((c) => c === 'pushProgress:j1')).toHaveLength(1);
+  });
+});
+
+describe('AGENT verdict (US-010)', () => {
+  async function agentJob(status: 'completed' | 'failed' | 'timeout' | 'cancelled' = 'completed', costUsd?: number, cancel = false) {
+    const jobDir = await tmpLogs.make('agent-verdict');
+    const b = build('AGENT', 'j1', {}, {}, jobDir);
+    b.journal.updateJob('j1', 1, {
+      state: 'RUNNING', pid: 1, pgid: 1,
+      ...(cancel ? { cancelRequestedAt: '2026-10-01T00:00:00.000Z' } : {}),
+    });
+    await writeFile(join(jobDir, 'nax.stdout'), JSON.stringify({ agent: 'spec-reviewer', status, output: 'ok', deniedAsks: [], ...(costUsd === undefined ? {} : { costUsd }) }));
+    return b;
+  }
+
+  test('AC-1: completed includes fitted result and four-place cost', async () => {
+    const b = await agentJob('completed', 0.0123);
+    await b.run.start('finish');
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toMatchObject({ agentResult: { status: 'completed', output: 'ok', costUsd: '0.0123' }, costSpentUsd: '0.0123' });
+  });
+  test('AC-2: timeout fails but reports its result', async () => {
+    const b = await agentJob('timeout');
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toMatchObject({ to: 'FAILED', reason: 'agent timeout' });
+    expect(lastSnapshot(b)?.agentResult).toMatchObject({ status: 'timeout' });
+  });
+  test('AC-3: failed result maps to failed verdict', async () => {
+    const b = await agentJob('failed');
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toMatchObject({ to: 'FAILED', reason: 'agent failed' });
+  });
+  test('AC-4: cancelled result without a cancel request maps to failed', async () => {
+    const b = await agentJob('cancelled');
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toMatchObject({ to: 'FAILED', reason: 'agent cancelled' });
+  });
+  test('AC-5: unknown result cost omits costSpentUsd', async () => {
+    const b = await agentJob('completed');
+    await b.run.start('finish');
+    expect(lastSnapshot(b)).toMatchObject({ agentResult: { status: 'completed' } });
+    expect(lastSnapshot(b)).not.toHaveProperty('costSpentUsd');
+  });
+  test('AC-6: unreadable result includes the first stderr line', async () => {
+    const b = await agentJob();
+    const row = b.journal.getJob('j1', 1);
+    if (!row) throw new Error('agent test job missing');
+    await writeFile(join(row.jobDir, 'nax.stdout'), 'not json');
+    await writeFile(join(row.jobDir, 'nax.stderr'), '\nerror: unknown agent spec-reviewer\nmore');
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toMatchObject({ to: 'FAILED', reason: 'agent result unreadable: error: unknown agent spec-reviewer' });
+    expect(lastSnapshot(b)).not.toHaveProperty('agentResult');
+  });
+  test('AC-7: unreadable result without stderr is reported plainly', async () => {
+    const b = await agentJob();
+    const row = b.journal.getJob('j1', 1);
+    if (!row) throw new Error('agent test job missing');
+    await writeFile(join(row.jobDir, 'nax.stdout'), 'not json');
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toMatchObject({ to: 'FAILED', reason: 'agent result unreadable' });
+  });
+  test('AC-8: cancellation wins over an agent result', async () => {
+    const b = await agentJob('failed', undefined, true);
+    await b.run.start('finish');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(lastSnapshot(b)?.agentResult).toMatchObject({ status: 'failed' });
+  });
+  test('AC-9: REVIEW retains its review verdict and cost without agentResult', async () => {
+    const b = build('REVIEW');
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 1, pgid: 1 });
+    b.ex.reviewPosted = true;
+    b.ex.planCost = '0.0123';
+    await b.run.start('finish');
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toEqual({ costSpentUsd: '0.0123' });
   });
 });
