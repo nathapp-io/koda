@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T05:35:43.923Z",
+  "updatedAt": "2026-11-06T05:46:03.022Z",
   "userStories": [
     {
       "id": "US-001",
@@ -388,14 +388,17 @@
         "validation"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Deterministic pure parsing with existing regex/URL helpers and explicit bounds; table-driven unit TDD suffices because it performs no access control or token work."
+        "reasoning": "Deterministic pure parsing with existing regex/URL helpers and explicit bounds; table-driven unit TDD suffices because it performs no access control or token work.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/dispatch-input.ts",
@@ -416,7 +419,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "eec75a4434128a5448cf564ae7b02dde15328e92"
     },
     {
       "id": "US-007",
