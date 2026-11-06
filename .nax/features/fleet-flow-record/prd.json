@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T06:48:57.479Z",
+  "updatedAt": "2026-11-06T07:34:26.208Z",
   "userStories": [
     {
       "id": "US-001",
@@ -625,14 +625,17 @@
         "US-007",
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One controller/variant delegates parsing and lifecycle work to upstream implementations using the existing thread route pattern; requester-preserving deferred execution and project authorization require the security override."
+        "reasoning": "One controller/variant delegates parsing and lifecycle work to upstream implementations using the existing thread route pattern; requester-preserving deferred execution and project authorization require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.service.ts",
@@ -670,7 +673,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1211512c498f51830868c9eecc2cde49f30fd49a"
     },
     {
       "id": "US-010",
