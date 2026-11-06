@@ -1,6 +1,6 @@
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { describe, expect, it, vi } from 'vitest';
-import { FlowRouteCommands, THREAD_PREAPPROVAL_ROUTE_VARIANTS } from './flow-route.commands';
+import { FlowRouteCommands, THREAD_FLOW_CREATE_VARIANT, THREAD_PREAPPROVAL_ROUTE_VARIANTS } from './flow-route.commands';
 
 function setup() {
   const commands = new Map<string, { parse(input: unknown): unknown; execute(input: unknown): Promise<unknown> }>();
@@ -11,16 +11,29 @@ function setup() {
   };
   const user = { actorType: 'user', id: 'user-1' };
   const loader = { forContext: vi.fn().mockResolvedValue(user) };
-  new FlowRouteCommands(registry as never, threads as never, loader as never).onModuleInit();
+  const flows = { create: vi.fn().mockResolvedValue({ flow: { id: 'flow-1' }, approvalRequestId: null }) };
+  new FlowRouteCommands(registry as never, threads as never, loader as never, flows as never).onModuleInit();
   const command = (variant: string) => {
     const registered = commands.get(variant);
     if (!registered) throw new Error(`missing route command ${variant}`);
     return registered;
   };
-  return { command, commands, registry, threads, user, loader };
+  return { command, commands, registry, threads, user, loader, flows };
 }
 
 describe('FlowRouteCommands', () => {
+  it('AC-2: delegates thread create with the pinned project, thread, parsed body, and requesting principal', async () => {
+    const { command: registeredCommand, commands, user, flows } = setup();
+    const parsed = { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md', dependsOn: [] }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: '25' };
+    const create = flows.create;
+    const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
+    const routeInput = { projectId: 'project-1', threadId: 'thread-1', body: parsed };
+    expect(command.parse(routeInput)).toEqual(routeInput);
+    await command.execute(command.parse(routeInput));
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith({ entry: 'THREAD', threadId: 'thread-1', ...parsed }, { type: 'USER', id: user.id }, { projectId: 'project-1' });
+    expect(commands.has(THREAD_FLOW_CREATE_VARIANT)).toBe(true);
+  });
   it('AC-2: pins route project/thread and caller id in setPreApproval', async () => {
     const { command: registeredCommand, threads } = setup();
     const command = registeredCommand(THREAD_PREAPPROVAL_ROUTE_VARIANTS.set);

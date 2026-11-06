@@ -14103,6 +14103,148 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/flows": {
+      "post": {
+        "operationId": "ThreadFlowsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "features",
+                  "roles",
+                  "costCapUsd"
+                ],
+                "properties": {
+                  "features": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature",
+                        "specPath"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "specPath": {
+                          "type": "string"
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "roles": {
+                    "type": "object",
+                    "required": [
+                      "reviewer",
+                      "supervisor"
+                    ],
+                    "properties": {
+                      "reviewer": {
+                        "type": "string"
+                      },
+                      "supervisor": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "costCapUsd": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.create\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid flow input"
+          },
+          "403": {
+            "description": "fleet.flow.create is missing"
+          },
+          "404": {
+            "description": "threads.notFound"
+          },
+          "409": {
+            "description": "Thread is not eligible for a flow"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a fleet flow from a published repository thread (fleet.flow.create)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/audit": {
       "get": {
         "operationId": "AuditController_list",
@@ -24993,6 +25135,208 @@
           "lexicalOnly",
           "empty",
           "hits"
+        ]
+      },
+      "FleetFlowCreatorDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "FleetFlowRolesDto": {
+        "type": "object",
+        "properties": {
+          "reviewer": {
+            "type": "string"
+          },
+          "supervisor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer",
+          "supervisor"
+        ]
+      },
+      "FleetFlowApprovalDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "REQUEST",
+              "PRE_APPROVED"
+            ],
+            "type": "string"
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvalRequestId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "FleetFlowFeatureDto": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string"
+          },
+          "specPath": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string"
+          },
+          "currentStep": {
+            "type": "string",
+            "nullable": true
+          },
+          "prNumber": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "feature",
+          "specPath",
+          "dependsOn",
+          "state"
+        ]
+      },
+      "FleetFlowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string",
+            "nullable": true
+          },
+          "entry": {
+            "enum": [
+              "THREAD",
+              "NAX"
+            ],
+            "type": "string"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/FleetFlowCreatorDto"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "specSha": {
+            "type": "string"
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "roles": {
+            "$ref": "#/components/schemas/FleetFlowRolesDto"
+          },
+          "costCapUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "spentUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "RUNNING",
+              "WAITING_MERGE",
+              "WAITING_ANSWER",
+              "COMPLETED",
+              "STOPPED"
+            ]
+          },
+          "approval": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetFlowApprovalDto"
+              }
+            ]
+          },
+          "stopReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowFeatureDto"
+            }
+          },
+          "url": {
+            "type": "string",
+            "description": "Web path of the flow page"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "entry",
+          "createdBy",
+          "branch",
+          "specSha",
+          "roles",
+          "costCapUsd",
+          "spentUsd",
+          "state",
+          "createdAt",
+          "features",
+          "url"
         ]
       },
       "HomeActivityDto": {

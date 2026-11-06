@@ -66,7 +66,6 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'fleet.job.shell.escalate',
   'fleet.budget.override',
   'fleet.flow.read',
-  'fleet.flow.create',
   'fleet.flow.start',
   'fleet.flow.stop',
   'system.flow.respec',

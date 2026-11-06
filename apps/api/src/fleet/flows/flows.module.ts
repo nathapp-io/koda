@@ -13,10 +13,11 @@ import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { FleetFlowStartCommand } from './fleet-flow-start.command';
 import { FleetFlowsService } from './fleet-flows.service';
 import { ThreadPreApprovalController } from './thread-preapproval.controller';
+import { ThreadFlowsController } from './thread-flows.controller';
 import { FlowRouteCommands } from './flow-route.commands';
 
 @Module({
-  controllers: [ThreadPreApprovalController],
+  controllers: [ThreadPreApprovalController, ThreadFlowsController],
   // ThreadsModule owns the thread-entry guards (`lockForFlow`); FleetReposModule owns the repo row lock
   // the nax entry serialises on; ApprovalEngineModule owns the ask both entries open.
   imports: [ApprovalEngineModule, AuthRepositoryModule, AuditLogModule, FleetActivityModule, FleetReposModule, ProjectAccessModule, ThreadsModule, PrismaModule],
