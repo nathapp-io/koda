@@ -135,3 +135,25 @@ test('project code AC-9: preserves optional repoId in token requests', () => {
   expect(sent).toEqual(tokenRequests);
   expect(sent?.[1]).not.toHaveProperty('repoId');
 });
+
+describe('provider requests (US-008)', () => {
+  test('are carried as given, capped at the sync limit of 64, and reduced to the three wire fields', () => {
+    const providerRequests = Array.from({ length: 70 }, (_, i) => ({ jobId: `j${i}`, leaseEpoch: 1, providerId: 'openrouter' }));
+    const request = build({ providerRequests });
+    expect(request.providerRequests).toHaveLength(SYNC_LIMITS.providerRequests);
+    expect(request.providerRequests?.[0]).toEqual({ jobId: 'j0', leaseEpoch: 1, providerId: 'openrouter' });
+  });
+
+  test('are empty when none are given', () => {
+    expect(build().providerRequests).toEqual([]);
+  });
+
+  test('a huge event backlog never starves them: the head is priced before the events', () => {
+    add('a');
+    for (let i = 0; i < 60; i += 1) j.appendEvent('a', 1, 'log', { stream: 'run', text: 'y'.repeat(16_000) });
+    const providerRequests = Array.from({ length: 64 }, (_, i) => ({ jobId: `job-${i}`, leaseEpoch: 1, providerId: 'openrouter' }));
+    const request = build({ providerRequests });
+    expect(request.providerRequests).toHaveLength(64);
+    expect(byteLength(request)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+  });
+});

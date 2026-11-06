@@ -37,11 +37,11 @@ describe('PR ruling tools', () => {
     expect(s.write).toMatchObject({ key: 'fleet.job.rule', kind: 'write' });
     const preview = await s.preview(s.ctx, s.write.parse(input));
     for (const text of ['j1', 'D-1', 'confirmed']) expect(preview).toContain(text);
-    expect(s.service.ruleTarget).toHaveBeenCalledWith('p1', 'j1', { itemId: 'D-1', text: input.text });
+    expect(s.service.preflight).toHaveBeenCalledWith('p1', 'j1', { itemId: 'D-1', text: input.text });
     expect(s.service.create).not.toHaveBeenCalled();
   });
   it('AC-5: unknown preview/execution uses distinct tool error paths and does not create', async () => {
-    const s = setup(); s.service.ruleTarget.mockRejectedValue(new NotFoundAppException({}, 'fleet.rulings.unknownItem'));
+    const s = setup(); s.service.preflight.mockRejectedValue(new NotFoundAppException({}, 'fleet.rulings.unknownItem'));
     await expect(s.preview(s.ctx, s.write.parse(input))).rejects.toEqual(new ToolInputError('unknown item'));
     await expect(s.write.execute(s.ctx, s.write.parse(input))).rejects.toEqual(new ToolActionError('unknown item'));
     expect(s.service.create).not.toHaveBeenCalled();
@@ -49,7 +49,7 @@ describe('PR ruling tools', () => {
   it('executes shared create as the same actor, rechecking target', async () => {
     const s = setup(); s.service.create.mockResolvedValue({ id: 'r1', state: 'pending' } as Awaited<ReturnType<FleetPrRulingsService['create']>>);
     expect(await s.write.execute(s.ctx, s.write.parse(input))).toContain('pending');
-    expect(s.service.ruleTarget).toHaveBeenCalled();
+    expect(s.service.preflight).toHaveBeenCalled();
     expect(s.service.create).toHaveBeenCalledWith(s.ctx.actor, 'web', 'j1', { itemId: 'D-1', text: input.text });
   });
   it.each([
@@ -61,7 +61,7 @@ describe('PR ruling tools', () => {
   });
   it('does not translate missing-job or unexpected errors into unknown item', async () => {
     const s = setup(); const error = new NotFoundAppException({}, 'fleet.jobs');
-    s.service.ruleTarget.mockRejectedValue(error);
+    s.service.preflight.mockRejectedValue(error);
     await expect(s.preview(s.ctx, input)).rejects.toBe(error);
     await expect(s.write.execute(s.ctx, input)).rejects.toBe(error);
   });
@@ -69,15 +69,17 @@ describe('PR ruling tools', () => {
     [new ConflictAppException({}, 'fleet.rulings.notDraft'), 'job is not a draft RUN'],
     [new ConflictAppException({}, 'fleet.rulings.notLatest'), 'job is not the latest RUN'],
     [new ConflictAppException({}, 'fleet.rulings.settled'), 'item ruling is already applied'],
+    [new ConflictAppException({}, 'fleet.rulings.notRulable'), 'CI items cannot be ruled'],
+    [new ConflictAppException({}, 'fleet.rulings.noItemIndex'), 'pull request has no nax item index'],
     [new ValidationAppException({}, 'fleet.rulings.invalidText'), 'text'],
   ])('translates structured ruling refusal %s', async (error, reason) => {
-    const s = setup(); s.service.ruleTarget.mockRejectedValue(error);
+    const s = setup(); s.service.preflight.mockRejectedValue(error);
     await expect(s.preview(s.ctx, input)).rejects.toEqual(new ToolInputError(reason));
     await expect(s.write.execute(s.ctx, input)).rejects.toEqual(new ToolActionError(reason));
   });
   it('propagates unexpected failures and refuses malformed read input', async () => {
     const s = setup(); const error = new Error('database unavailable');
-    s.service.ruleTarget.mockRejectedValue(error);
+    s.service.preflight.mockRejectedValue(error);
     await expect(s.write.execute(s.ctx, input)).rejects.toBe(error);
     expect(() => s.read.parse(null)).toThrow('jobId');
   });

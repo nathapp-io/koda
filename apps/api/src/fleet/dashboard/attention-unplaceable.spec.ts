@@ -108,4 +108,27 @@ describe('job_unplaceable (S2b (c) §2.3)', () => {
     expect(result.items[0]?.item).toMatchObject({ verdict: 'no_fit', severity: 'warning', reasons: [{ runnerName: 'wk-mac', reason: 'interaction' }] });
     expect([...result.fixableBlockedRunnerIds]).toEqual(['r1']);
   });
+
+  /**
+   * C10 (branch review B3): the dry-run must judge provider needs exactly as placement does — a vault runner
+   * is only a candidate for a provider koda can serve for that job's scope. Without the resolver, or with no
+   * applicable key, the job is unplaceable here too, so the dashboard cannot drift from dispatch.
+   */
+  describe('C10 B3: a provider-vault runner is judged on the keys koda can serve', () => {
+    const vaultCaps = dashCaps({ providerVault: true, credentials: [], profiles: { fast: { protocol: 'native', providers: ['openrouter'], sandbox: false } } });
+    const vaultOnly = () => [dashRunner({ capabilities: vaultCaps })];
+    const serves = (providers: string[]) => () => new Set(providers);
+
+    it('reports the job unplaceable (and the runner fixable-blocked) when koda holds no applicable key', () => {
+      const result = run({ runners: vaultOnly() });
+      expect(result.items[0]?.item).toMatchObject({ verdict: 'never', severity: 'error', reasons: [{ runnerName: 'wk-mac', reason: 'provider_missing' }] });
+      expect([...result.fixableBlockedRunnerIds]).toEqual(['r1']);
+      expect(run({ runners: vaultOnly(), vaultProviders: serves([]) }).items).toHaveLength(1);
+      expect(run({ runners: vaultOnly(), vaultProviders: serves(['deepseek']) }).items).toHaveLength(1);
+    });
+
+    it('does not report unplaceable when the vault can serve the job provider', () => {
+      expect(run({ runners: vaultOnly(), vaultProviders: serves(['openrouter']) }).items).toEqual([]);
+    });
+  });
 });

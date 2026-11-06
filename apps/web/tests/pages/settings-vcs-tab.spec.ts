@@ -1,4 +1,9 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
+import { defineComponent, h, ref } from 'vue'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import type { Mounted } from '../helpers/mount-sfc'
+import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
+import * as apiModule from '../../composables/useApi'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -283,6 +288,35 @@ describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys
 // ──────────────────────────────────────────────────────────────────────────────
 // Quality checks
 // ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-013 settings integration', () => {
+  test('AC-10: a changed event from SettingsVcsCard refreshes the VCS connection data', async () => {
+    const refreshConnection = jest.fn(async () => undefined)
+    const VcsCardStub = defineComponent({ emits: ['changed'], setup(_props, { emit }) { return () => h('button', { 'data-testid': 'vcs-changed', onClick: () => emit('changed') }) } })
+    let asyncIndex = 0
+    const project = { id: 'p1', name: 'Project', slug: 'web', key: 'WEB' }
+    const app: Mounted = mountSfc(webFile('pages', '[project]', 'settings.vue'), {
+      components: { ...uiStubs, SettingsVcsCard: VcsCardStub },
+      alias: { '~/composables/useApi': apiModule },
+      globals: {
+        useApi: () => ({ $api: { get: async () => null } }),
+        useI18n: () => i18nStub(), useAppToast: () => toastRecorder(),
+        useRoute: () => ({ params: { project: 'web' } }),
+        useAsyncData: () => {
+          asyncIndex += 1
+          return asyncIndex === 1
+            ? { data: ref(null), pending: ref(false), error: ref(null), refresh: refreshConnection }
+            : { data: ref(project), pending: ref(false), error: ref(null), refresh: jest.fn(async () => undefined) }
+        },
+      },
+    })
+    const button = app.find('[data-testid="vcs-changed"]')[0]
+    expect(button).toBeDefined()
+    await (button?.props.onClick as () => void)()
+    expect(refreshConnection).toHaveBeenCalledTimes(1)
+    app.unmount()
+  })
+})
 
 describe('VCS-P1-005-C: Code quality checks', () => {
   test('source does not contain console.log statements', () => {

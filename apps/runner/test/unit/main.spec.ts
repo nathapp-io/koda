@@ -1,6 +1,6 @@
 import { isNaxSandboxed } from '../helpers/test-environment';
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { makeTempDirs } from '../helpers/tmp';
 
@@ -23,7 +23,7 @@ describe('koda-runner CLI', () => {
   });
   test('--help lists enroll, run and status', async () => {
     const { stdout } = await cli(['--help']);
-    for (const word of ['enroll', 'run', 'status', 'install-service', 'uninstall-service', '--home']) expect(stdout).toContain(word);
+    for (const word of ['enroll', 'run', 'status', 'vault', 'install-service', 'uninstall-service', '--home']) expect(stdout).toContain(word);
   });
   test('status on an empty home says not enrolled and exits 0; --json is machine readable', async () => {
     const home = join(await tmp.make('cli'), 'home');
@@ -38,6 +38,28 @@ describe('koda-runner CLI', () => {
     const { stderr, code } = await cli(['--home', home, 'run']);
     expect(code).toBe(1);
     expect(stderr).toMatch(/enroll/);
+  });
+  test('vault enable points nax at this runner and exits 0; disable removes it; a config.json that is not JSON exits 1 and stays untouched', async () => {
+    const dir = await tmp.make('cli');
+    const home = join(dir, 'home');
+    const naxHome = join(dir, 'naxhome');
+    const configPath = join(naxHome, 'config.json');
+    await mkdir(home, { recursive: true });
+    await mkdir(naxHome, { recursive: true });
+    await writeFile(join(home, 'runner.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:9', workspaceRoot: join(dir, 'ws'), naxHome }));
+    const enable = await cli(['--home', home, 'vault', 'enable']);
+    expect(enable.code).toBe(0);
+    const written = JSON.parse(await readFile(configPath, 'utf8')) as { auth: { source: string; exec: { command: string[]; timeoutMs: number }; onChange: string } };
+    expect(written.auth).toMatchObject({ source: 'exec', exec: { timeoutMs: 60_000 }, onChange: 'warn' });
+    expect(written.auth.exec.command).toEqual([process.execPath, MAIN, 'provider-cred']);   // D84: how this runner runs again
+    const disable = await cli(['--home', home, 'vault', 'disable']);
+    expect(disable.code).toBe(0);
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual({});
+    await writeFile(configPath, '{ "agent": ');
+    const invalid = await cli(['--home', home, 'vault', 'enable']);
+    expect(invalid.code).toBe(1);
+    expect(invalid.stderr).toMatch(/not valid JSON/);
+    expect(await readFile(configPath, 'utf8')).toBe('{ "agent": ');
   });
   test('enroll without a token exits 1 and names the option and the environment variable', async () => {
     const home = join(await tmp.make('cli'), 'home');

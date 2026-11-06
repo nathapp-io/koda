@@ -1,7 +1,7 @@
-import { FLEET_PROTOCOL_VERSION, type CommandAck, type JobReport, type RunnerCapabilities, type SyncRequest, type TokenRequest } from '@nathapp/fleet-protocol';
+import { FLEET_PROTOCOL_VERSION, type CommandAck, type JobReport, type ProviderKeyRequest, type RunnerCapabilities, type SyncRequest, type TokenRequest } from '@nathapp/fleet-protocol';
 import type { Journal } from '../journal/journal';
 
-export const SYNC_LIMITS = Object.freeze({ jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, payloadBytes: 16_384 } as const);
+export const SYNC_LIMITS = Object.freeze({ jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, providerRequests: 64, payloadBytes: 16_384 } as const);
 /** Under the server's 1 MiB body cap (D26). */
 export const MAX_BODY_BYTES = 900_000;
 /** `{"seq":2147483647,"type":"lifecycle","payload":},` is 49 bytes around the payload; rounded up. */
@@ -38,6 +38,8 @@ export interface BuildInput {
   readonly scale: BatchScale;
   /** Design §3.1: from the TokenCache; the server allows 64. */
   readonly tokenRequests?: readonly TokenRequest[];
+  /** US-008: from the ProviderKeyCache; also under the head, so it is counted before the event budget (64 at most). */
+  readonly providerRequests?: readonly ProviderKeyRequest[];
 }
 
 /** The server allows 500 characters and no NUL; a runner-built detail is shorter and never poisons a request (D59). */
@@ -72,6 +74,7 @@ export function buildSyncRequest(input: BuildInput): SyncRequest {
     freeSlots,
     commandAcks,
     tokenRequests: (input.tokenRequests ?? []).slice(0, SYNC_LIMITS.tokenRequests).map((r) => ({ jobId: r.jobId, leaseEpoch: r.leaseEpoch, ...(r.repoId === undefined ? {} : { repoId: r.repoId }), ...(r.fresh === true ? { fresh: true as const } : {}) })),
+    providerRequests: (input.providerRequests ?? []).slice(0, SYNC_LIMITS.providerRequests).map((r) => ({ jobId: r.jobId, leaseEpoch: r.leaseEpoch, providerId: r.providerId })),
   };
   let budget = MAX_BODY_BYTES - byteLength({ ...head, jobs: [] });
   const jobs: JobReport[] = [];

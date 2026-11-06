@@ -123,7 +123,7 @@ async function finish(): Promise<void> {
               <span v-else>{{ t('fleet.rulings.none') }}</span>
             </TableCell>
             <TableCell v-if="canRule">
-              <FleetJobRulingForm v-if="!loading && !failed && latest.get(item.id)?.state !== 'applied'" :item-id="item.id" :submit="(text) => rule(item.id, text)" />
+              <FleetJobRulingForm v-if="item.kind !== 'ci' && !loading && !failed && latest.get(item.id)?.state !== 'applied'" :item-id="item.id" :submit="(text) => rule(item.id, text)" />
             </TableCell>
           </TableRow>
         </TableBody>

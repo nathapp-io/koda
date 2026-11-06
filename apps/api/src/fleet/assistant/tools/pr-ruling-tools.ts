@@ -1,5 +1,6 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { AppException } from '@nathapp/nestjs-common';
+import type { AgentPrincipal, UserPrincipal } from '../../../auth/principal/koda-principal.types';
 import { FleetPrRulingsService } from '../../rulings/fleet-pr-rulings.service';
 import type { CreateRulingInput } from '../../rulings/fleet-pr-ruling.domain';
 import { parseRulingText } from '../../rulings/ruling-keyword';
@@ -39,7 +40,7 @@ export class PrRulingTools implements OnModuleInit {
       },
       preview: async (ctx, { jobId, ...dto }) => {
         try {
-          await this.rulings.ruleTarget(ctx.projectId, jobId, dto);
+          await this.rulings.preflight(ctx.projectId, jobId, dto);
         } catch (error) {
           const reason = rulingRefusal(error);
           if (reason === null) throw error;
@@ -50,18 +51,42 @@ export class PrRulingTools implements OnModuleInit {
         return maskSecrets(`Rule job ${jobId}, item ${dto.itemId}: ${parsed.disposition}\n${dto.text}`);
       },
       execute: async (ctx, { jobId, ...dto }) => {
-        try {
-          await this.rulings.ruleTarget(ctx.projectId, jobId, dto);
-          const ruling = await this.rulings.create(ctx.actor, ctx.projectSlug, jobId, dto);
-          return `ruling ${ruling.id}: ${ruling.state}`;
-        } catch (error) {
-          const reason = rulingRefusal(error);
-          if (reason === null) throw error;
-          throw new ToolActionError(reason);
-        }
+        await this.preflightInTool(ctx.projectId, jobId, dto);
+        return this.createRuling(ctx.actor, ctx.projectSlug, jobId, dto);
+      },
+      /**
+       * US-014 F1: a deferred (approval-held) ruling runs this before the engine opens its transaction, so the
+       * item-index forge read never holds the approval lock. `create` still rechecks eligibility under it.
+       */
+      prepare: async (ctx, { jobId, ...dto }) => {
+        await this.preflightInTool(ctx.projectId, jobId, dto);
+        return () => this.createRuling(ctx.actor, ctx.projectSlug, jobId, dto);
       },
     };
     this.registry.register(read, write);
+  }
+
+  /** The tool's own preflight, refused the way an execution refusal reads. */
+  private async preflightInTool(projectId: string, jobId: string, dto: CreateRulingInput): Promise<void> {
+    try {
+      await this.rulings.preflight(projectId, jobId, dto);
+    } catch (error) {
+      const reason = rulingRefusal(error);
+      if (reason === null) throw error;
+      throw new ToolActionError(reason);
+    }
+  }
+
+  /** The ruling write; a refusal discovered inside `create` reads the same way. */
+  private async createRuling(actor: UserPrincipal | AgentPrincipal, projectSlug: string, jobId: string, dto: CreateRulingInput): Promise<string> {
+    try {
+      const ruling = await this.rulings.create(actor, projectSlug, jobId, dto);
+      return `ruling ${ruling.id}: ${ruling.state}`;
+    } catch (error) {
+      const reason = rulingRefusal(error);
+      if (reason === null) throw error;
+      throw new ToolActionError(reason);
+    }
   }
 }
 
@@ -77,6 +102,8 @@ function rulingRefusal(error: unknown): string | null {
     case 'fleet.rulings.notDraft': return 'job is not a draft RUN';
     case 'fleet.rulings.notLatest': return 'job is not the latest RUN';
     case 'fleet.rulings.settled': return 'item ruling is already applied';
+    case 'fleet.rulings.notRulable': return 'CI items cannot be ruled';
+    case 'fleet.rulings.noItemIndex': return 'pull request has no nax item index';
     case 'fleet.rulings.invalidText': return 'text';
     default: return null;
   }

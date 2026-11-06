@@ -1,5 +1,6 @@
 import { constants } from 'node:os';
 import { requestCredential, runGitCred } from './credentials/git-credential';
+import { PROVIDER_CRED_SOCKET_ENV, requestProviderKey, runProviderCred } from './credentials/provider-cred';
 import { runShim, type ShimChild } from './credentials/shim';
 
 function spawnInherited(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): ShimChild {
@@ -31,6 +32,17 @@ export async function dispatchInternal(argv: readonly string[]): Promise<number 
       spawn: spawnInherited,
       warn: (line) => { process.stderr.write(`${line}\n`); },
       onSignal: (signal, handler) => { process.on(signal, handler); },
+    });
+  }
+  // US-009: nax's exec helper (`auth.exec.command` in nax's config, D84-style argv of its own). The socket path comes
+  // from this job's env, so it is read here rather than passed as argv.
+  if (command === 'provider-cred') {
+    return runProviderCred(rest, {
+      readStdin: () => Bun.stdin.text(),
+      write: (text) => { process.stdout.write(text); },
+      warn: (line) => { process.stderr.write(`${line}\n`); },
+      env: { [PROVIDER_CRED_SOCKET_ENV]: process.env[PROVIDER_CRED_SOCKET_ENV] },
+      request: (path, providerId) => requestProviderKey(path, providerId),
     });
   }
   return null;

@@ -7,9 +7,11 @@ import type { AcpAgentProbe } from '../capabilities/acp-agent-probe';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
+import { vaultHelperEnabled } from '../commands/vault';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
+import { ProviderKeyCache } from '../credentials/provider-key-cache';
 import { TokenCache } from '../credentials/token-cache';
 import { defaultSocketDir, ensureSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
@@ -138,7 +140,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   (options.configureCredentials ?? defaultConfigureCredentials)(naxCredentialsConfig(config.naxHome));
   const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
   const naxMode = config.capabilities === null;   // D95: this runner asks nax; runner.json carries no capabilities block
-  const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax, options.acpProbe), journal, log);
+  // D84, C10 US-010: the argv the broker hands a shim, the git helper and nax's exec helper, and the same argv the
+  // probe compares `<naxHome>/config.json` against. Nothing here edits that file.
+  const self = options.selfCommand ?? selfCommand();
+  const reporter = new CapabilityReporter(
+    createCapabilityProbe(config, now, nax, options.acpProbe, () => vaultHelperEnabled(config.naxHome, self)), journal, log,
+  );
   try {
     await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
     if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
@@ -187,14 +194,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const capacity = new CapacityTracker(client, log);
   await capacity.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
+  // US-008: the provider keys handed out over sync, in memory only, like the tokens.
+  const providerKeys = new ProviderKeyCache({ refreshMarginMs: tuning.providerKeyRefreshMarginMs });
   const broker = new CredentialBroker({
-    tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
+    tokens, providerKeys, socketDir, runnerId: identity.runnerId, selfCommand: self,
     nowMs: () => Date.now(), sleep,
-    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
+    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs, providerKeyWaitMs: tuning.providerKeyServeWaitMs },
     uid,
   });
 
-  const jobCheck = naxMode ? new NaxJobCheck({ nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs }) : undefined;   // D104
+  // C10 US-009: `providerKey` resolves a provider through the job's own provider-key socket, so the post-checkout check
+  // does not refuse a vault-only job for a key koda holds (branch review B1).
+  const jobCheck = naxMode
+    ? new NaxJobCheck({
+      nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs,
+      providerKey: (job, providerId) => broker.providerKeyGranted(job, providerId),
+    })
+    : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({
     config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, ...(jobCheck ? { jobCheck } : {}),
   });
@@ -217,6 +233,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sessions: options.threadSessions ?? new ThreadSessionFactory({
         homeDir: home.dir, naxHome: config.naxHome,
         nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
+        // US-011: the same argv the broker's helpers and the probe use, so a thread's `provider-cred` helper is this
+        // runner again — and the one the vault-enabled `config.json` names.
+        selfCommand: self,
       }),
       credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
@@ -249,6 +268,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     handleCommands: (commands) => handler.handle(commands),
     abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
     tokenRequests: () => tokens.requests(Date.now()),
+    // US-008: the provider keys a job's model calls are waiting for, and the server's answer, applied at once.
+    providerRequests: () => providerKeys.requests(),
+    onProviderKeys: (requested, granted, errors) => {
+      providerKeys.apply(requested, granted, errors);
+      for (const error of errors) log.warn('provider key refused', { jobId: error.jobId, providerId: error.providerId, reason: error.reason });
+    },
     onArchivedThreads: (ids) => { archivedThreadIds = [...ids]; },
     onTokens: (requested, granted, errors) => {
       tokens.apply(requested, granted, errors, Date.now());
@@ -261,6 +286,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
   const stopNeedListener = tokens.onNeed(() => loop.wake());
+  const stopProviderKeyNeedListener = providerKeys.onNeed(() => loop.wake());   // US-008: a new request wakes the poll
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
 
   const reprobe = async (): Promise<void> => {
@@ -288,6 +314,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       for (const timer of timers) clearInterval(timer);
       loop.stop();
       stopNeedListener();
+      stopProviderKeyNeedListener();
       await running;
       supervisor.shutdown();
       await shipper.close();
@@ -311,6 +338,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     for (const timer of timers) clearInterval(timer);
     loop.stop();
     stopNeedListener();
+    stopProviderKeyNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
     void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot

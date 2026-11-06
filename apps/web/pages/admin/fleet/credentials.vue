@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useFleetCredentialBoard } from '~/composables/useFleetCredentialBoard'
+import { hasBoardContent } from '~/lib/fleet-credential-board'
 
 definePageMeta({ layout: 'default' })
 
-/** Fleet S3 §6: provider credentials and profiles on every runner (global admin; others see the 403 note). */
+/**
+ * Fleet S3 §6: provider credentials and profiles on every runner (global admin; others see the 403 note).
+ * C10 US-012 added the koda column: the GLOBAL keys koda holds are worth a row even with no runner
+ * enrolled, so the grid — not the empty state — is what an unenrolled fleet with stored keys shows.
+ */
 const { t } = useI18n()
 const { data, pending, forbidden, failed, load } = useFleetCredentialBoard()
+
+const hasContent = computed(() => (data.value ? hasBoardContent(data.value) : false))
 
 onMounted(() => { void load() })
 </script>
@@ -15,6 +22,9 @@ onMounted(() => { void load() })
   <div class="space-y-6">
     <PageHeader :title="t('fleet.credentials.title')" :subtitle="t('fleet.credentials.subtitle', { days: data?.warnDays ?? 7 })">
       <template #actions>
+        <NuxtLink to="/admin/fleet/provider-keys" class="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm hover:bg-muted" data-testid="fleet-credentials-provider-keys-link">
+          {{ t('fleet.credentials.manageKeys') }}
+        </NuxtLink>
         <Button variant="outline" :disabled="pending || forbidden" data-testid="fleet-credentials-refresh" @click="load()">
           {{ t('fleet.credentials.refresh') }}
         </Button>
@@ -25,7 +35,7 @@ onMounted(() => { void load() })
     <template v-else>
       <ErrorState v-if="failed && !data" @retry="load()" />
       <LoadingState v-else-if="!data" />
-      <EmptyState v-else-if="data.runners.length === 0" :message="t('fleet.credentials.empty')" />
+      <EmptyState v-else-if="!hasContent" :message="t('fleet.credentials.empty')" />
       <Tabs v-else default-value="grid">
         <TabsList>
           <TabsTrigger value="grid" data-testid="fleet-credentials-tab-grid">{{ t('fleet.credentials.tabs.grid') }}</TabsTrigger>

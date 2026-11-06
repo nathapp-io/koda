@@ -3,6 +3,8 @@ import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { DASH_NOW, dashCaps, dashJob, secAgo } from '../../common/test-helpers/fleet-dashboard';
 import { PauseSnapshot } from '../budgets/budget-rules';
 import type { BudgetGate } from '../budgets/budget-gate';
+import { providerScopeLookupKey, type ProviderLookupScope } from '../provider-credentials/provider-credential.domain';
+import type { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
 import { FleetDashboardService } from './dashboard.service';
 import type { IDashboardRepository, RawRunnerRow } from './domain/dashboard.domain';
 
@@ -26,10 +28,13 @@ function fakeRepo(over: Partial<IDashboardRepository> = {}): Mocked<IDashboardRe
 
 const budgets = { snapshot: vi.fn().mockResolvedValue(PauseSnapshot.of([], DASH_NOW)) } as unknown as BudgetGate;
 
+/** C10 (branch review B3): the vault answers no provider unless a test says otherwise. */
+const credentials = { availableProviders: vi.fn(async (scopes: readonly ProviderLookupScope[]) => new Map(scopes.map((s) => [providerScopeLookupKey(s), new Set<string>()] as const))) } as unknown as ProviderCredentialsService;
+
 describe('FleetDashboardService (S2b (c) §1)', () => {
   it('reads with the caps and windows of the spec and tolerates a corrupt runner', async () => {
     const repo = fakeRepo();
-    const service = new FleetDashboardService(repo, budgets, testFleetConfig());
+    const service = new FleetDashboardService(repo, budgets, testFleetConfig(), credentials);
     const v = await service.snapshot({ kind: 'project', projectId: 'p1' }, DASH_NOW);
     expect(repo.findActiveJobs).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 201);
     expect(repo.findQueuedWindow).toHaveBeenCalledWith(50);
@@ -37,7 +42,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     expect(repo.pendingSummaryByJob).toHaveBeenCalledWith(['j1']);
     expect(v.attention.map((a) => [a.kind, a.severity])).toEqual([['job_silent', 'error']]);
     // Global scope shows versions, so a wrong readCapabilities would show here (project scope nulls them anyway).
-    const g = await new FleetDashboardService(fakeRepo(), budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    const g = await new FleetDashboardService(fakeRepo(), budgets, testFleetConfig(), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(g.runners.find((r) => r.id === 'r2')).toEqual(expect.objectContaining({ naxVersion: null, credentials: [], online: true }));
     expect(g.runners.find((r) => r.id === 'r1')?.naxVersion).toBe('0.83.3');
   });
@@ -49,7 +54,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
       findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'THREAD', projectId: 'p1', bashMode: 'raw' }]),
       findActiveJobs: vi.fn().mockResolvedValue([]),
     });
-    const view = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    const view = await new FleetDashboardService(repo, budgets, testFleetConfig(), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(view.attention).toEqual([expect.objectContaining({
       kind: 'runner_unhealthy', severity: 'error', conditions: [{ type: 'offline', jobsHeld: 1 }],
     })]);
@@ -64,7 +69,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
       ]),
       findActiveJobs: vi.fn().mockResolvedValue([]),
     });
-    const view = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    const view = await new FleetDashboardService(repo, budgets, testFleetConfig(), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(view.runners.find((runner) => runner.id === 'r1')?.activeJobs).toBe(1);
   });
 
@@ -72,16 +77,70 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     const soon = new Date(DASH_NOW.getTime() + 10 * 86_400_000).toISOString();
     const caps = dashCaps({ credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false }] });
     const repo = fakeRepo({ findRunners: vi.fn().mockResolvedValue([rawRunner({ capabilities: caps })]), findActiveJobs: vi.fn().mockResolvedValue([]) });
-    const v7 = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    const v7 = await new FleetDashboardService(repo, budgets, testFleetConfig(), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(v7.attention).toEqual([]);
-    const v14 = await new FleetDashboardService(repo, budgets, testFleetConfig({ credentialExpiryWarnDays: 14 })).snapshot({ kind: 'global' }, DASH_NOW);
+    const v14 = await new FleetDashboardService(repo, budgets, testFleetConfig({ credentialExpiryWarnDays: 14 }), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(v14.attention.map((a) => a.conditions)).toEqual([[{ type: 'credential', providerId: 'deepseek', why: 'expiring' }]]);
   });
 
   it('asks pending approvals only for the listed (capped) jobs', async () => {
     const many = Array.from({ length: 201 }, (_, i) => dashJob({ id: `j${i}` }));
     const repo = fakeRepo({ findActiveJobs: vi.fn().mockResolvedValue(many) });
-    await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    await new FleetDashboardService(repo, budgets, testFleetConfig(), credentials).snapshot({ kind: 'global' }, DASH_NOW);
     expect(repo.pendingSummaryByJob.mock.calls[0][0]).toHaveLength(200);
+  });
+
+  /**
+   * C10 (branch review B3): the dry-run resolves the vault answer for the queued window's own scopes, and only
+   * when a runner reports the helper, so the attention signal matches what dispatch would decide.
+   */
+  it('B3: reads the vault for the queued window scopes when a runner reports providerVault', async () => {
+    const vaultRunnerCaps = dashCaps({
+      providerVault: true, credentials: [], profiles: { fast: { protocol: 'native', providers: ['openrouter'], sandbox: false } },
+    });
+    const queued = dashJob({ state: 'QUEUED', runnerId: null, lastHeartbeatAt: null, profiles: ['fast'], queuedAt: secAgo(120) });
+    const repo = fakeRepo({
+      findRunners: vi.fn().mockResolvedValue([rawRunner({ capabilities: vaultRunnerCaps })]),
+      findHeldRefs: vi.fn().mockResolvedValue([]),
+      findQueuedWindow: vi.fn().mockResolvedValue([queued]),
+      findActiveJobs: vi.fn().mockResolvedValue([]),
+    });
+    const answer = (providers: string[]) => ({
+      availableProviders: vi.fn(async (scopes: readonly ProviderLookupScope[]) => new Map(scopes.map((s) => [providerScopeLookupKey(s), new Set(providers)] as const))),
+    } as unknown as ProviderCredentialsService);
+    const unplaceable = async (service: ProviderCredentialsService) =>
+      (await new FleetDashboardService(repo, budgets, testFleetConfig(), service).snapshot({ kind: 'global' }, DASH_NOW))
+        .attention.filter((item) => item.kind === 'job_unplaceable');
+
+    expect(await unplaceable(answer(['openrouter']))).toEqual([]);
+    // The same job with nothing the vault can serve is unplaceable, which is what placement answers too.
+    expect(await unplaceable(answer([]))).toHaveLength(1);
+  });
+
+  it('B3: asks the vault about each queued job own scope', async () => {
+    const vault = {
+      availableProviders: vi.fn(async (scopes: readonly ProviderLookupScope[]) => new Map(scopes.map((s) => [providerScopeLookupKey(s), new Set(['openrouter'])] as const))),
+    } as unknown as ProviderCredentialsService;
+    const repo = fakeRepo({
+      findRunners: vi.fn().mockResolvedValue([rawRunner({ capabilities: dashCaps({ providerVault: true }) })]),
+      findQueuedWindow: vi.fn().mockResolvedValue([dashJob({ state: 'QUEUED', runnerId: null, queuedAt: secAgo(120) })]),
+      findActiveJobs: vi.fn().mockResolvedValue([]),
+    });
+
+    await new FleetDashboardService(repo, budgets, testFleetConfig(), vault).snapshot({ kind: 'global' }, DASH_NOW);
+
+    expect(vault.availableProviders).toHaveBeenCalledWith([{ projectId: 'p1', repoId: 'repo1' }]);
+  });
+
+  it('B3: pays no vault read when no runner reports the helper', async () => {
+    const vault = { availableProviders: vi.fn() } as unknown as ProviderCredentialsService;
+    const repo = fakeRepo({
+      findQueuedWindow: vi.fn().mockResolvedValue([dashJob({ state: 'QUEUED', runnerId: null, lastHeartbeatAt: null, profiles: ['fast'], queuedAt: secAgo(120) })]),
+      findActiveJobs: vi.fn().mockResolvedValue([]),
+    });
+
+    await new FleetDashboardService(repo, budgets, testFleetConfig(), vault).snapshot({ kind: 'global' }, DASH_NOW);
+
+    expect(vault.availableProviders).not.toHaveBeenCalled();
   });
 });

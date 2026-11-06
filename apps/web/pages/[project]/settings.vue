@@ -113,6 +113,8 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
 
         <ProjectInvitesPanel :slug="slug" @member-added="refreshProject()" />
 
+        <SettingsProviderKeysCard :slug="slug" />
+
         <div class="rounded-md border border-border p-6 space-y-6">
           <SettingsMemoryCard :slug="slug" />
         </div>

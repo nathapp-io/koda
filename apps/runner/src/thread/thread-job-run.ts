@@ -18,7 +18,7 @@ import { ThreadLivePublish, publishInputMutex } from './thread-live-publish';
 import { runThreadAction, type ThreadDiscardInput, type ThreadDiscardResult } from './thread-action-run';
 import { isTerminalState } from '../supervisor/transitions';
 import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from './skill-fetch';
-import type { OpenThreadSessionOptions } from './session-factory';
+import type { OpenThreadSessionOptions, ThreadProviderKeys } from './session-factory';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
 import { threadScratchDir } from './thread-paths';
@@ -215,6 +215,11 @@ export class ThreadJobRun {
   private sessionClose: Promise<void> | null = null;
   /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
   private closing = false;
+  /**
+   * US-011: the row whose provider keys this run serves. Kept here because `abandon` deletes the journal row before the
+   * run ends, and the final release still needs the job it releases.
+   */
+  private providerKeyRow: JobRow | null = null;
   /** Cost is the sum of `usage.costUsd` over the whole job (a `turn_end.costUsd` repeats its turn's usage). */
   private spent = 0;
   private maxCostUsd = Number.POSITIVE_INFINITY;
@@ -250,6 +255,11 @@ export class ThreadJobRun {
     } finally {
       // Every exit gives up the job's log streams, including a halt, an abandon and a failure whose own recording failed.
       this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
+      // US-011: and its provider-key socket. It outlives the git socket by design (a model call needs it to the last
+      // turn), so it is released here rather than with the checkout — after a still-pending `open` has settled, which
+      // is what closes a lookup that raced an abandon. `abandon` releases it too; a second release on a socket that is
+      // already gone is a no-op, and the retained row keeps this cleanup working after `abandon` deleted the journal row.
+      await this.releaseProviderKeys(this.row());
     }
   }
 
@@ -325,6 +335,7 @@ export class ThreadJobRun {
 
     // Step 6: the session, on the prepared worktree. A cancel or halt that lands while it opens ends the run
     // as above, and the session `open` then resolved is closed rather than dropped.
+    const providerKeys = await this.providerKeysFor(row);
     const opened = await this.deps.host.sessions.open({
       jobId: this.jobId,
       thread,
@@ -343,6 +354,7 @@ export class ThreadJobRun {
         ...this.kodaToolProxies(thread),
       ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
+      ...(providerKeys === undefined ? {} : { providerKeys }),
     });
     if (this.halted) {
       // There is no close of the run's own to await: the session `open` resolved is closed then, unawaited, so a
@@ -397,6 +409,9 @@ export class ThreadJobRun {
     if (this.stopped()) return;
     const scratch = threadScratchDir(this.deps.host.homeDir, thread.threadId);
     await mkdir(scratch, { recursive: true, mode: 0o700 });
+    // US-011: a PROJECT or WORKSPACE session gets the same provider keys a REPO one does — the key is the model's, and
+    // neither kind has a checkout to serve it from.
+    const providerKeys = await this.providerKeysFor(row);
     const opened = await this.deps.host.sessions.open({
       jobId: this.jobId,
       thread,
@@ -414,6 +429,7 @@ export class ThreadJobRun {
         ...this.kodaToolProxies(thread),
       ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
+      ...(providerKeys === undefined ? {} : { providerKeys }),
     });
     if (this.halted) {
       if (opened.ok) this.startSessionClose(opened.session);
@@ -543,6 +559,53 @@ export class ThreadJobRun {
       await this.deps.host.credentials.release(row);
     } catch (error) {
       this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
+    }
+  }
+
+  /**
+   * US-011: what a session `open` needs to read this job epoch's provider keys — the socket a per-session exec helper
+   * asks, and the credential provider's own lookup deciding whether koda holds a key for a provider (the same lookup
+   * the socket answers, so the decision and the hand-out cannot disagree). A credential provider that serves no
+   * provider keys (a broker with no vault wired, or a spec's acquire/release fake) answers undefined, so the session
+   * opens exactly as it did before the vault existed and nax's process-wide store — the machine's own credentials —
+   * serves it. A socket that could not be opened is a warning for the same reason: a thread that runs without koda
+   * keys behaves as it always did, and failing the thread over it would deny a run the machine could serve.
+   *
+   * The row is retained for the run's own cleanup, and a halted run serves nothing and grants nothing: an abandon that
+   * lands while `open` is still preparing must not leave a provider request behind for a job that is already gone
+   * (round 1, F1). The `granted` closure repeats the halt check because the session factory may call it after the
+   * abandonment released the socket.
+   */
+  private async providerKeysFor(row: JobRow): Promise<ThreadProviderKeys | undefined> {
+    this.providerKeyRow = row;
+    if (this.halted) return undefined;
+    const credentials = this.deps.host.credentials;
+    const serve = credentials.serveProviderKeys;
+    const granted = credentials.providerKeyGranted;
+    if (serve === undefined || granted === undefined) return undefined;
+    try {
+      const socket = await serve.call(credentials, row);
+      return { socket, granted: (providerId) => (this.halted ? Promise.resolve(false) : granted.call(credentials, row, providerId)) };
+    } catch (error) {
+      this.deps.log.warn('provider-key socket unavailable', { jobId: this.jobId, error: errorMessage(error) });
+      return undefined;
+    }
+  }
+
+  /**
+   * US-011: this epoch's provider-key socket and its grants go when the run ends, whatever ended it. Independent of the
+   * git release, and a failure only warns: it must never replace the error that ended the run or skip the cleanup
+   * after it. The row is the one this run served (retained above) or, before any serve, the journal's own; after an
+   * abandon deleted the journal row, the retained one is what still lets the final cleanup run.
+   */
+  private async releaseProviderKeys(row: JobRow | null): Promise<void> {
+    const release = this.deps.host.credentials.releaseProviderKeys;
+    const target = this.providerKeyRow ?? row;
+    if (release === undefined || target === null) return;
+    try {
+      await release.call(this.deps.host.credentials, target);
+    } catch (error) {
+      this.deps.log.warn('provider-key socket could not be released', { jobId: this.jobId, error: errorMessage(error) });
     }
   }
 
@@ -1025,6 +1088,9 @@ export class ThreadJobRun {
         this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
       }
     }
+    // US-011: the row is read before `abandon` drops it, and the run's retained one covers a row it read even earlier;
+    // this is the release `start()`'s own finally then repeats once a still-pending `open` has settled.
+    await this.releaseProviderKeys(row);
     await this.awaitSessionClose();
   }
 

@@ -6,9 +6,11 @@ import { EnrollError, enrollRunner } from './commands/enroll';
 import { runCommand } from './commands/run';
 import { installService, uninstallService } from './commands/service';
 import { collectStatus, formatStatus } from './commands/status';
+import { runVaultCommand } from './commands/vault';
 import { resolveHome } from './config/runner-config';
 import { dispatchInternal } from './internal-commands';
 import { createConsoleLogger } from './logger';
+import { selfCommand } from './self-command';
 import { ServiceError } from './service/units';
 import { systemServiceDeps } from './service/system-deps';
 import { ServerClient } from './sync/http';
@@ -75,6 +77,23 @@ program
     const report = await collectStatus(home(), { env: process.env, makeClient: (serverUrl, apiKey) => new ServerClient({ serverUrl, apiKey }) });
     process.stdout.write(opts.json ? `${JSON.stringify(report)}\n` : formatStatus(report));
   });
+
+const vaultAction = (action: 'enable' | 'disable') => async (): Promise<void> => {
+  process.exitCode = await runVaultCommand(action, home(), { env: process.env, self: selfCommand(), say, warn: fail });
+};
+
+// C10 US-010: the one place koda edits nax's global config. No daemon path writes it — this command does, atomically.
+const vault = program
+  .command('vault')
+  .description("Point nax's provider credentials at this runner's helper, or stop doing that");
+vault
+  .command('enable')
+  .description('Write nax auth: { source: "exec" } naming this runner\'s provider-cred helper, keeping every other key')
+  .action(vaultAction('enable'));
+vault
+  .command('disable')
+  .description('Remove nax auth (the whole property, nothing else), keeping every other key')
+  .action(vaultAction('disable'));
 
 const serviceAction = async (work: () => Promise<void>): Promise<void> => {
   try {

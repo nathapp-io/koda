@@ -1,5 +1,5 @@
 import {
-  evaluateRunners, jobScopePause, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob,
+  evaluateRunners, jobScopePause, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob, withVaultProviders,
 } from '../jobs/placement-rules';
 import { jobItem } from './attention-jobs';
 import { isThreadKind } from '../common/thread-jobs';
@@ -21,6 +21,12 @@ export interface DryRunInput {
   /** Runner-held loads across all projects. */
   loads: ReadonlyMap<string, RunnerLoad>;
   pauses: DryRunPauses;
+  /**
+   * C10 (branch review B3): the providers the vault could hand one queued job, from that job's own scope.
+   * Absent means the vault serves none, and a `providerVault` runner is then judged like any other — the
+   * same rule placement applies, so the dry-run cannot call a job unplaceable that dispatch would place.
+   */
+  vaultProviders?: (job: DashboardJobRow) => ReadonlySet<string>;
 }
 
 export interface ScopedItem {
@@ -67,7 +73,9 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
     if (jobScopePause(job, (keys) => input.pauses.match(keys) ?? null)) return emit('budget_paused', 'warning', [], 0);
     const pool = job.pinnedRunnerId ? candidates.filter((r) => r.id === job.pinnedRunnerId) : candidates;
     if (pool.length === 0) return emit('no_runners', 'error', [], 0);
-    const verdicts = evaluateRunners(toPlacementJob(job, job), pool, input.loads, (id) => input.pauses.runnerPaused(id), now, t.runnerOfflineSec);
+    const judged = toPlacementJob(job, job);
+    const placement = input.vaultProviders ? withVaultProviders(judged, input.vaultProviders(job)) : judged;
+    const verdicts = evaluateRunners(placement, pool, input.loads, (id) => input.pauses.runnerPaused(id), now, t.runnerOfflineSec);
     const misfits = verdicts
       .flatMap((v) => (v.reason === null ? [] : [{ runnerId: v.runner.id, runnerName: v.runner.name, reason: v.reason }]))
       .sort((a, b) => a.runnerName.localeCompare(b.runnerName) || a.runnerId.localeCompare(b.runnerId));

@@ -1,7 +1,10 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import type { CommandAck, JobReport, RunnerEvent, SyncRequest, TokenRequest } from '../common/protocol';
+import type { CommandAck, JobReport, ProviderKeyRequest, RunnerEvent, SyncRequest, TokenRequest } from '../common/protocol';
+import { PROVIDER_ID_PATTERN } from '../provider-credentials/provider-credential.domain';
 
-export const SYNC_LIMITS = Object.freeze({ jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, payloadBytes: 16_384 });
+export const SYNC_LIMITS = Object.freeze({
+  jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, providerRequests: 64, payloadBytes: 16_384,
+});
 const EVENT_TYPES: readonly string[] = ['state', 'snapshot', 'lifecycle', 'log', 'approval_request'];
 const MAX_INT = 2_147_483_647;
 
@@ -67,6 +70,13 @@ function parseTokenRequest(v: unknown): TokenRequest {
   };
 }
 
+/** US-006: a provider key request is the token request's shape plus a validated nax provider id. */
+function parseProviderRequest(v: unknown): ProviderKeyRequest {
+  if (!isObj(v) || !isStr(v.jobId, 64) || !isInt(v.leaseEpoch, 0)) fail('providerRequest');
+  if (!isStr(v.providerId, 48) || !PROVIDER_ID_PATTERN.test(v.providerId)) fail('providerRequest');
+  return { jobId: v.jobId as string, leaseEpoch: v.leaseEpoch as number, providerId: v.providerId as string };
+}
+
 /** Envelope validation of an untrusted runner sync (spec §3.2). Payload semantics: interpretEvent. */
 export function parseSyncRequest(raw: unknown): ParsedSync {
   if (!isObj(raw)) fail('body');
@@ -85,5 +95,6 @@ export function parseSyncRequest(raw: unknown): ParsedSync {
     jobs,
     commandAcks: list(raw.commandAcks, SYNC_LIMITS.acks, 'commandAcks').map(parseAck),
     tokenRequests: list(raw.tokenRequests, SYNC_LIMITS.tokenRequests, 'tokenRequests').map(parseTokenRequest),
+    providerRequests: list(raw.providerRequests, SYNC_LIMITS.providerRequests, 'providerRequests').map(parseProviderRequest),
   };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { RunnerCapabilities } from '@nathapp/fleet-protocol';
+import type { AssignPayload, RunnerCapabilities } from '@nathapp/fleet-protocol';
+import type { JobRow } from '../journal/types';
 import type { NaxCli } from '../nax/nax-cli';
 import { FakeNaxCli, json, naxError, type NaxAnswers } from '../../test/helpers/fake-nax-cli';
 import { NaxJobCheck, firstMismatch } from './job-check';
@@ -12,9 +13,17 @@ const CAPS: RunnerCapabilities = {
 const DEEPSEEK = { providerId: 'deepseek', stored: { kind: 'api-key', expired: false }, ambient: false, available: true };
 const NONE = { transport: 'native' as const, providers: [], sandbox: false };
 
+/** The row the check is asked about: C10 reads `jobId`/`leaseEpoch` to resolve a provider through the job's socket. */
+const row = (profiles: readonly string[] = []): JobRow => ({
+  jobId: 'job-1', leaseEpoch: 2, command: 'RUN', state: 'ASSIGNED', repoKey: 'acme/app', branch: null, pid: null, pgid: null,
+  naxRunId: null, logPath: null, jobDir: '/w/.jobs/job-1', cancelRequestedAt: null, resultBranch: null, resultSha: null,
+  createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', doneAt: null,
+  assign: { profiles: [...profiles] } as unknown as AssignPayload,
+});
+
 function checker(answers: NaxAnswers) {
   const nax = new FakeNaxCli(answers);
-  return { nax, check: (profiles: string[] = []) => new NaxJobCheck({ nax, capabilities: () => CAPS }).check({ profiles }, REPO) };
+  return { nax, check: (profiles: string[] = []) => new NaxJobCheck({ nax, capabilities: () => CAPS }).check(row(profiles), REPO) };
 }
 
 describe('NaxJobCheck (D104)', () => {
@@ -77,7 +86,7 @@ describe('NaxJobCheck (D104)', () => {
         return inner.run(args, options);
       },
     };
-    const check = new NaxJobCheck({ nax, capabilities: () => CAPS }).check({ profiles: [] }, REPO);
+    const check = new NaxJobCheck({ nax, capabilities: () => CAPS }).check(row(), REPO);
     const settled = await Promise.race([
       check,
       new Promise<never>((_resolve, reject) => { setTimeout(() => reject(new Error('the chain resolve never started while the trust check was pending')), 500); }),
@@ -106,8 +115,74 @@ describe('NaxJobCheck (D104)', () => {
   });
   test('every call carries the job check timeout, not the probe 30s one', async () => {
     const nax = new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['deepseek'], sandbox: false } }, auth: [DEEPSEEK] });
-    await new NaxJobCheck({ nax, capabilities: () => CAPS, timeoutMs: 1_234 }).check({ profiles: ['fast'] }, REPO);
+    await new NaxJobCheck({ nax, capabilities: () => CAPS, timeoutMs: 1_234 }).check(row(['fast']), REPO);
     expect(nax.calls.map((call) => call.timeoutMs)).toEqual([1_234, 1_234, 1_234]);
+  });
+  test('the concurrent chain resolve still overlaps when the job is a full row (D111 path unchanged)', async () => {
+    const inner = new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['deepseek'], sandbox: false } }, auth: [DEEPSEEK] });
+    expect(await new NaxJobCheck({ nax: inner, capabilities: () => ({ ...CAPS, providerVault: true }) }).check(row(['fast']), REPO)).toBeNull();
+  });
+
+  /**
+   * C10 (branch review B1): on a vault runner `nax auth list` cannot see a koda key, so a provider the machine holds no
+   * local credential for is resolved through the job's own provider-key socket before it is refused.
+   */
+  describe('C10: vault-backed providers', () => {
+    const needs = (providers: string[]) => ({ config: { fast: { transport: 'native' as const, providers, sandbox: false } }, auth: json({ source: 'file', providers: [] }) });
+    const vault = (caps: Partial<RunnerCapabilities>, granted: readonly string[]) =>
+      new NaxJobCheck({
+        nax: new FakeNaxCli(needs(['openrouter'])),
+        capabilities: () => ({ ...CAPS, ...caps }),
+        providerKey: async (_job, providerId) => granted.includes(providerId),
+      });
+
+    test('a grant satisfies the profile instead of `provider openrouter unavailable`', async () => {
+      expect(await vault({ providerVault: true }, ['openrouter']).check(row(['fast']), REPO)).toBeNull();
+    });
+    test('no grant keeps the refusal, naming the provider', async () => {
+      expect(await vault({ providerVault: true }, []).check(row(['fast']), REPO)).toBe('capability mismatch: provider openrouter unavailable');
+    });
+    test('without the capability the socket is never asked', async () => {
+      const asked: string[] = [];
+      const check = new NaxJobCheck({
+        nax: new FakeNaxCli(needs(['openrouter'])), capabilities: () => CAPS,
+        providerKey: async (_job, providerId) => { asked.push(providerId); return true; },
+      });
+      expect(await check.check(row(['fast']), REPO)).toBe('capability mismatch: provider openrouter unavailable');
+      expect(asked).toEqual([]);
+    });
+    test('a locally available provider is not asked of the socket at all', async () => {
+      const asked: string[] = [];
+      const check = new NaxJobCheck({
+        nax: new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['deepseek'], sandbox: false } }, auth: [DEEPSEEK] }),
+        capabilities: () => ({ ...CAPS, providerVault: true }),
+        providerKey: async (_job, providerId) => { asked.push(providerId); return false; },
+      });
+      expect(await check.check(row(['fast']), REPO)).toBeNull();
+      expect(asked).toEqual([]);
+    });
+    test('each lookup is one provider, in requirement order', async () => {
+      const asked: Array<[string, string]> = [];
+      const check = new NaxJobCheck({
+        nax: new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['openrouter', 'deepseek'], sandbox: false } }, auth: [DEEPSEEK] }),
+        capabilities: () => ({ ...CAPS, providerVault: true }),
+        providerKey: async (job, providerId) => { asked.push([job.jobId, providerId]); return true; },
+      });
+      expect(await check.check(row(['fast']), REPO)).toBeNull();
+      expect(asked).toEqual([['job-1', 'openrouter']]);
+    });
+    test('a lookup that throws is no grant, bounded by the job check timeout', async () => {
+      const throwing = new NaxJobCheck({
+        nax: new FakeNaxCli(needs(['openrouter'])), capabilities: () => ({ ...CAPS, providerVault: true }),
+        providerKey: async () => { throw new Error('socket gone'); },
+      });
+      expect(await throwing.check(row(['fast']), REPO)).toBe('capability mismatch: provider openrouter unavailable');
+      const hanging = new NaxJobCheck({
+        nax: new FakeNaxCli(needs(['openrouter'])), capabilities: () => ({ ...CAPS, providerVault: true }), timeoutMs: 20,
+        providerKey: async () => new Promise<boolean>(() => undefined),
+      });
+      expect(await hanging.check(row(['fast']), REPO)).toBe('capability mismatch: provider openrouter unavailable');
+    });
   });
 });
 

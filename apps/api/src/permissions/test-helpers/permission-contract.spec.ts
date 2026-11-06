@@ -8,6 +8,7 @@ describe('permission contract checker', () => {
     'member.remove',
     'fleet.job.shell.escalate',
     'fleet.budget.override',
+    // C10 US-004/US-005: every credential route declares its key, so none of them is pending.
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

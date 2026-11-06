@@ -19,8 +19,18 @@ export class FleetRulingRouteCommands implements OnModuleInit {
       key: 'fleet.job.rule', variant: FLEET_RULING_ROUTE_VARIANTS.create,
       parse: (input) => ({ ...parseRouteInput(input, ['slug', 'projectId', 'jobId']), ruling: parseBody(CreateRulingDto, (input as Record<string, unknown>).ruling ?? {}) }),
       run: async (principal, input) => {
-        await this.rulings.ruleTarget(input.projectId, input.jobId, input.ruling);
+        // US-014: the replay re-runs the same preflight (eligibility + item-index read) before create.
+        await this.rulings.preflight(input.projectId, input.jobId, input.ruling);
         return FleetPrRulingDto.from(await this.rulings.create(principal, input.slug, input.jobId, input.ruling));
+      },
+      /**
+       * US-014 F1: deferred execution calls this *before* it opens its transaction. The item-index forge read
+       * belongs here, so a slow provider can never hold the approval row lock or exhaust the transaction
+       * deadline; the returned callback is the locked write only, and `create` still rechecks eligibility.
+       */
+      prepare: async (principal, input) => {
+        await this.rulings.preflight(input.projectId, input.jobId, input.ruling);
+        return async () => FleetPrRulingDto.from(await this.rulings.create(principal, input.slug, input.jobId, input.ruling));
       },
       toResult: (result) => result,
     }, this.loader));

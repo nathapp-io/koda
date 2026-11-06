@@ -31,6 +31,7 @@ import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } fro
 import { buildFixArgv, buildNaxArgv, isProcessAlive, signalGroup, spawnNax, type SpawnNaxOptions } from './nax-process';
 import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
+import { releaseProviderSocket, serveProviderSocket } from './provider-socket';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { removeReviewToken, writeReviewToken } from './review-token';
@@ -118,7 +119,7 @@ export class HostExecutor implements JobExecutor {
       const { assign } = job;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
-      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(assign, repoDir);   // D104
+      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(job, repoDir);   // D104
       if (mismatch !== null) return { ok: false, reason: mismatch };
       if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;
@@ -147,8 +148,8 @@ export class HostExecutor implements JobExecutor {
 
   runConfigJob(job: JobRow, ctx: ConfigJobContext): Promise<ConfigJobRun> {
     const { repoDir, jobDir } = this.dirs(job);
-    const { git, credentials, nowMs, sleep } = this.deps;
-    return runConfigJob({ git, naxCommand: this.deps.config.naxCommand, naxHome: this.deps.config.naxHome, credentials, nowMs, ...(sleep ? { sleep } : {}) }, job, { repoDir, jobDir }, ctx);
+    const { git, credentials, nowMs, sleep, log } = this.deps;
+    return runConfigJob({ git, naxCommand: this.deps.config.naxCommand, naxHome: this.deps.config.naxHome, credentials, nowMs, log, ...(sleep ? { sleep } : {}) }, job, { repoDir, jobDir }, ctx);
   }
 
   /**
@@ -180,6 +181,8 @@ export class HostExecutor implements JobExecutor {
     // D88: the shims come first on nax's PATH; no token variable is ever set here.
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     const env: Record<string, string | undefined> = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path };
+    // US-009: the provider-key socket this job epoch serves, never a key: nax's exec helper reads the key over it.
+    Object.assign(env, await serveProviderSocket(this.deps.credentials, job, this.deps.log));
     // US-006: a REVIEW overlays the stripped environment AFTER stripping, so a copy the daemon inherited cannot leak in.
     // #395: a GitHub RUN gets the same overlay, best-effort (see runIdentityEnv).
     const identity = reviewJob ? await this.reviewEnv(job, jobDir) : await this.runIdentityEnv(job, jobDir);
@@ -218,6 +221,7 @@ export class HostExecutor implements JobExecutor {
       ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome,
       PATH: binDir ? `${binDir}${delimiter}${inherited}` : inherited,
       NAX_FORGE_TOKEN_FILE: tokenPath, NAX_FORGE_LOGIN: login,
+      ...(await serveProviderSocket(this.deps.credentials, job, this.deps.log)),   // US-009: the same socket as the review step
     };
     try {
       return this.startNax(argv, { cwd: repoDir, stdoutPath: join(jobDir, 'fix.stdout'), stderrPath: join(jobDir, 'fix.stderr'), env });
@@ -485,7 +489,7 @@ export class HostExecutor implements JobExecutor {
         await this.deps.approvals.close(job.jobId, job.leaseEpoch);
       } finally {
         try {
-          await this.deps.credentials.release(job);
+          await this.releaseJobCredentials(job);
         } finally {
           await this.dropReviewToken(job, this.dirs(job).jobDir);   // US-006: a token file nax never got to delete itself
         }
@@ -493,12 +497,26 @@ export class HostExecutor implements JobExecutor {
     }
   }
 
+  /**
+   * US-009: the git release and the provider-key release are independent — a git failure must not leave the provider
+   * socket serving, and the git failure is still the error that surfaces (the provider release only warns).
+   */
+  private async releaseJobCredentials(job: JobRow): Promise<void> {
+    try {
+      await this.deps.credentials.release(job);
+    } finally {
+      await releaseProviderSocket(this.deps.credentials, job, this.deps.log);
+    }
+  }
+
+  /** D90: a readopted job keeps its deterministic provider-key socket path, so the running nax helper finds it again. */
   async resumeCredentials(job: JobRow): Promise<void> {
     await this.deps.credentials.acquire(job, { wait: false });
+    await serveProviderSocket(this.deps.credentials, job, this.deps.log);
   }
 
   async releaseCredentials(job: JobRow): Promise<void> {
-    await this.deps.credentials.release(job);
+    await this.releaseJobCredentials(job);
   }
 
   async resumeApprovals(job: JobRow): Promise<void> {

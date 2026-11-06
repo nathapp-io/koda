@@ -4,15 +4,17 @@ import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import { currentActor, currentContext, runWithActor } from '../../action-context/action-context';
 
+const targetRepo = { provider: 'github', owner: 'acme', name: 'app', githubInstallationId: 77n };
+
 describe('FleetPrRulingsService', () => {
   const agent: AgentPrincipal = { actorType: 'agent', id: 'agent', slug: 'ruler', status: 'ACTIVE', capabilities: [] };
   const setup = () => {
     const order: string[] = [];
     const repo: IFleetPrRulingRepository = {
-      findTarget: vi.fn(async () => { order.push('validate'); return { projectId: 'project', repoId: 'repo', command: 'RUN', outcome: 'draft', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
+      findTarget: vi.fn(async () => { order.push('validate'); return { projectId: 'project', repoId: 'repo', command: 'RUN', outcome: 'draft', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }], repo: targetRepo }; }),
       pendingForFix: vi.fn(async () => []), replaceOlderRuns: vi.fn(async () => undefined),
       latestRunForPr: vi.fn(async () => 'run'), latestRuling: vi.fn(async () => null), list: vi.fn(),
-      lockTarget: vi.fn(async () => { order.push('lock'); return { projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }] }; }),
+      lockTarget: vi.fn(async () => { order.push('lock'); return { projectId: 'project', repoId: 'repo', prNumber: 42, openItems: [{ id: 'D-1', kind: 'review' }], repo: targetRepo }; }),
       replacePending: vi.fn(async () => { order.push('replace'); }),
       insert: vi.fn(async (data: NewFleetPrRuling) => { order.push('insert'); return { ...data, id: 'ruling', createdAt: new Date(), updatedAt: new Date() }; }),
     };
@@ -63,7 +65,7 @@ describe('FleetPrRulingsService', () => {
   });
   it('refuses a RUN without a PR without replacing anything', async () => {
     const { service, repo } = setup();
-    vi.mocked(repo.lockTarget).mockResolvedValue({ projectId: 'project', repoId: 'repo', prNumber: null, openItems: [{ id: 'D-1', kind: 'review' }] });
+    vi.mocked(repo.lockTarget).mockResolvedValue({ projectId: 'project', repoId: 'repo', prNumber: null, openItems: [{ id: 'D-1', kind: 'review' }], repo: targetRepo });
     await expect(service.create(agent, 'slug', 'run', { itemId: 'D-1', text: 'verified' })).rejects.toThrow();
     expect(repo.replacePending).not.toHaveBeenCalled();
   });

@@ -42,4 +42,17 @@ describe('createCapabilityProbe (D95)', () => {
     expect(probed).toBe(0);
     expect(capabilities.threadBackends).toBeUndefined();
   });
+  test('US-010: a vaultHelper reaches the nax probe, and the operator\'s capabilities block still wins over it', async () => {
+    let asked = 0;
+    const vaultHelper = async (): Promise<boolean> => {
+      asked += 1;
+      return true;
+    };
+    const probed = await createCapabilityProbe({ capabilities: null, naxCommand: ['nax'], naxHome: '/nonexistent-nax-home' }, now, new FakeNaxCli(), undefined, vaultHelper).probe();
+    expect(probed.capabilities.providerVault).toBe(true);
+    expect(asked).toBe(1);
+    const staticProbe = await createCapabilityProbe({ capabilities: STATIC, naxCommand: ['nax'], naxHome: '/nh' }, now, new FakeNaxCli(), undefined, vaultHelper).probe();
+    expect('providerVault' in staticProbe.capabilities).toBe(false);
+    expect(asked).toBe(1);   // the static probe never checks, so it never claims a vault
+  });
 });

@@ -32,6 +32,10 @@ if (args[0] === '--version') {
   console.log(process.env['FAKE_NAX_VERSION'] ?? '0.83.1-fake');
   process.exit(0);
 }
+// Every invocation dumps its environment, including the read-only commands of D108 and the config tools of S3: a spec
+// that inspects the environment a job's nax was started with (the runner's env rules) sees the call it cares about.
+const envDump = process.env['FAKE_NAX_ENV_DUMP'];
+if (envDump) writeFileSync(envDump, JSON.stringify(process.env));
 const probed = answerProbe(args, process.env, process.cwd());   // D108: config, auth list, sandbox probe, trust check
 if (probed) {
   process.stdout.write(`${probed.stdout}\n`);
@@ -58,8 +62,6 @@ if (!profile.outputDir || !isAbsolute(profile.outputDir)) {
   process.exit(2);
 }
 const outDir = profile.outputDir;
-const envDump = process.env['FAKE_NAX_ENV_DUMP'];
-if (envDump) writeFileSync(envDump, JSON.stringify(process.env));
 const scenario = process.env['FAKE_NAX_SCENARIO'] ?? (command === 'plan' ? 'plan-valid' : 'completed');
 const stepMs = Number(process.env['FAKE_NAX_STEP_MS'] ?? 30);
 const steps = Number(process.env['FAKE_NAX_STEPS'] ?? 3);

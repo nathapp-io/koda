@@ -98,6 +98,15 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.repo.fix.unprotected': 'global',
   'thread.mode.ask': 'project',
   'thread.mode.full': 'project',
+  // C10 US-003: the GLOBAL provider key writes (the create route ships with US-003).
+  'fleet.credential.create': 'global',
+  'fleet.credential.update': 'global',
+  'fleet.credential.delete': 'global',
+  // C10 US-005: the project-scoped provider key management routes (PROJECT and REPO rows).
+  'project.credential.read': 'project',
+  'project.credential.create': 'project',
+  'project.credential.update': 'project',
+  'project.credential.delete': 'project',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 
@@ -111,6 +120,8 @@ const HIGH_RISK_PREFIXES = [
   'fleet.budget.',
   'fleet.enrollment.',
   'fleet.credential.',
+  // C10 US-005: project credential writes are high risk for the same reason as the global ones.
+  'project.credential.',
   'fleet.job.shell.',
   'thread.mode.',
 ];
@@ -220,6 +231,32 @@ describe('PERMISSION_CATALOG', () => {
     expect(admin.has('ci.webhook.ingest')).toBe(false);
     expect(admin.has('vcs.webhook.ingest')).toBe(false);
   });
+  it('US-005 AC-13: project.credential.create is a high-risk project key', () => {
+    expect(findCatalogEntry('project.credential.create')).toMatchObject({
+      key: 'project.credential.create',
+      access: 'role',
+      scope: 'project',
+      risk: 'high',
+      approval: { approvable: true, default: 'agent' },
+    });
+  });
+
+  it('US-005 AC-14: project.credential.read is a low-risk project key', () => {
+    expect(findCatalogEntry('project.credential.read')).toMatchObject({
+      key: 'project.credential.read',
+      access: 'role',
+      scope: 'project',
+      risk: 'low',
+      approval: { approvable: false, floor: 'none', default: 'none' },
+    });
+  });
+
+  it('US-005 AC-13: the other two project credential writes are high-risk project keys', () => {
+    for (const key of ['project.credential.update', 'project.credential.delete']) {
+      expect(findCatalogEntry(key)).toMatchObject({ scope: 'project', risk: 'high', approval: { approvable: true } });
+    }
+  });
+
   it('AC-1: every proposed_key in the action inventory resolves to an entry with that key', () => {
     expect(INVENTORY_KEYS.length).toBeGreaterThan(200);
 

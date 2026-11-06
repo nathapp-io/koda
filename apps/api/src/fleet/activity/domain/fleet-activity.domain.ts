@@ -4,7 +4,25 @@ import type { FleetActorType } from '../../../common/enums';
 
 export const FLEET_ACTIVITY_REPOSITORY = Symbol('FLEET_ACTIVITY_REPOSITORY');
 
-export type FleetEntityType = 'runner' | 'enrollment' | 'repo' | 'job' | 'budget' | 'schedule' | 'approval' | 'ingest' | 'analytics';
+/**
+ * The activity feed's entity types. `FleetEntityType` derives from this list so the members are also
+ * readable at runtime (a feed filter or a test can name them); the order is the order they arrived in,
+ * and C10 US-003 appends `provider_credential` without touching the nine before it.
+ */
+export const FLEET_ENTITY_TYPES = [
+  'runner',
+  'enrollment',
+  'repo',
+  'job',
+  'budget',
+  'schedule',
+  'approval',
+  'ingest',
+  'analytics',
+  'provider_credential',
+] as const;
+
+export type FleetEntityType = (typeof FLEET_ENTITY_TYPES)[number];
 
 export interface FleetActivityEntry {
   actorType: FleetActorType;

@@ -300,9 +300,21 @@ describe('fleet OpenAPI contract', () => {
   it('exposes the credential board (S3 §4.4)', () => {
     expect(spec.paths['/api/fleet/credential-board']?.['get']).toBeDefined();
     expect(Object.keys(spec.components.schemas['CredentialBoardDto']?.properties ?? {}).sort())
-      .toEqual(['generatedAt', 'profiles', 'providers', 'runners', 'warnDays']);
+      .toEqual(['generatedAt', 'kodaKeys', 'profiles', 'providers', 'runners', 'warnDays']);
     expect(JSON.stringify(spec.components.schemas['CredentialCellDto'])).toContain('expiring');
     expect(JSON.stringify(spec.components.schemas['RunnerConditionDto'])).toContain('expiring');
+  });
+
+  /** C10 US-007: the board answers the koda column and each runner's vault state to the web and CLI. */
+  it('exposes the credential board koda keys and runner vault state (C10 US-007)', () => {
+    const kodaKeyProps = Object.keys(spec.components.schemas['KodaKeyDto']?.properties ?? {});
+    expect(kodaKeyProps.sort()).toEqual(['last4', 'name', 'providerId', 'updatedAt']);
+    expect(kodaKeyProps).not.toContain('key');
+    expect(kodaKeyProps).not.toContain('encryptedKey');
+    expect(JSON.stringify(spec.components.schemas['CredentialBoardDto']?.properties?.['kodaKeys']))
+      .toContain('#/components/schemas/KodaKeyDto');
+    expect(Object.keys(spec.components.schemas['CredentialBoardRunnerDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['providerVault']));
   });
 });
 

@@ -12,7 +12,19 @@ import { assignFor } from '../helpers/assign';
 import { FakeExecutor } from '../helpers/fake-executor';
 import { NO_LOG_SHIPPING } from '../helpers/fake-log-shipping';
 import { manualClock } from '../helpers/manual-clock';
+import { within } from '../helpers/deadline';
 import { waitFor } from '../helpers/wait';
+
+/** RUNNING precedes asynchronous stream creation. Probe readiness without consuming a command or starting a turn. */
+async function ready(b: ReturnType<typeof setup>): Promise<void> {
+  await waitFor(async () => {
+    if (b.journal.getJob('j1', 1)?.state !== 'RUNNING') return false;
+    const probe = await b.supervisor.threadCommand(cmd('THREAD_INPUT', 'readiness-probe'));
+    return probe.detail === 'invalid payload';
+  }, { timeoutMs: 1_500, intervalMs: 5, message: 'thread fixture never became command-ready (RUNNING with an open stream)' });
+}
+
+const idle = (supervisor: Supervisor): Promise<void> => within(supervisor.idle(), 'thread supervisor never became idle');
 
 const roots: string[] = [];
 const supervisors: Supervisor[] = [];
@@ -62,7 +74,11 @@ function setup(options: { withThreads?: boolean; liveSession?: AgentSession; ses
   };
   const supervisor = new Supervisor(deps);
   supervisors.push(supervisor);
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot, log: deps.log, now, approvals: { answer: async () => ({ result: 'ok' }) } });
+  const commandHandler = new CommandHandler({ journal, supervisor, workspaceRoot, log: deps.log, now, approvals: { answer: async () => ({ result: 'ok' }) } });
+  const handler = {
+    handle: (commands: readonly FleetCommandOut[]) => within(commandHandler.handle(commands),
+      `thread commands did not finish: ${commands.map((command) => `${command.type}(${command.commandId})`).join(', ')}`),
+  };
   const addThread = (jobId = 'j1', epoch = 1) => journal.insertJob({
     assign: assignFor('THREAD', { jobId, feature: `thread-${jobId}`, thread: { ...thread, initialMessage: options.initialMessage ?? thread.initialMessage } }),
     leaseEpoch: epoch, repoKey: 'acme/app', jobDir: join(workspaceRoot, '.jobs', jobId),
@@ -77,18 +93,31 @@ const cmd = (type: FleetCommandOut['type'], commandId: string, jobId = 'j1', pay
 const states = (b: ReturnType<typeof setup>, jobId = 'j1') => b.journal.pendingEvents(jobId, 1, 100).filter((event) => event.type === 'state').map((event) => (event.payload as { to: string; reason?: string }));
 
 afterEach(async () => {
-  for (const supervisor of supervisors.splice(0)) { supervisor.shutdown(); await supervisor.idle(); }
+  for (const supervisor of supervisors.splice(0)) { supervisor.shutdown(); await idle(supervisor); }
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
+  test('the running fixture waits for command readiness, not just the RUNNING row', async () => {
+    const b = setup();
+    await b.handler.handle([assignCommand()]);
+    // Only drain microtasks: reach the RUNNING transition before openStream's filesystem awaits finish.
+    for (let i = 0; i < 1_000 && b.journal.getJob('j1', 1)?.state !== 'RUNNING'; i += 1) await Promise.resolve();
+    expect(b.journal.getJob('j1', 1)?.state, 'the fixture must reach the pre-stream RUNNING window').toBe('RUNNING');
+    const early = await b.supervisor.threadCommand(cmd('THREAD_INPUT', 'probe-early'));
+    expect(early, 'RUNNING alone must not be mistaken for command readiness').toMatchObject({ detail: 'session_not_ready' });
+    await ready(b);
+    const probe = await b.supervisor.threadCommand(cmd('THREAD_INPUT', 'probe-ready'));
+    expect(probe, 'the ready fixture must have a writer; an empty input must reach payload validation').toMatchObject({ detail: 'invalid payload' });
+  });
+
   test('US-006 AC-1: THREAD ASSIGN starts the assigned row', async () => {
     const b = setup();
     await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await ready(b);
     expect(b.journal.getJob('j1', 1)?.state).toBe('RUNNING');
     expect(b.ex.calls).toEqual([]);
-    await b.supervisor.abandon('j1', 1); await b.supervisor.idle();
+    await within(b.supervisor.abandon('j1', 1), 'abandon j1 epoch 1'); await idle(b.supervisor);
   });
 
   test('US-006 AC-2: THREAD ASSIGN without a thread host fails backend_unavailable', async () => {
@@ -99,20 +128,20 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
 
   test('US-006 AC-3: input to a running thread is acknowledged ok', async () => {
     const b = setup(); await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await ready(b);
     expect(await b.handler.handle([cmd('THREAD_INPUT', 'input-1', 'j1', { messageId: 'm2', text: 'next' })])).toMatchObject([{ result: 'ok' }]);
-    await b.supervisor.abandon('j1', 1); await b.supervisor.idle();
+    await within(b.supervisor.abandon('j1', 1), 'abandon j1 epoch 1'); await idle(b.supervisor);
   });
 
   test('US-006 AC-4: replayed input command sends its text only once', async () => {
     let sends = 0;
     const s = session({ async *send() { sends += 1; await new Promise<void>(() => undefined); yield undefined as never; } });
     const b = setup({ liveSession: s }); await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await ready(b);
     const input = cmd('THREAD_INPUT', 'same-input', 'j1', { messageId: 'm2', text: 'once' });
     await b.handler.handle([input]); await b.handler.handle([input]);
     expect(sends).toBe(1);
-    await b.supervisor.abandon('j1', 1); await b.supervisor.idle();
+    await within(b.supervisor.abandon('j1', 1), 'abandon j1 epoch 1'); await idle(b.supervisor);
   });
 
   test('US-006 AC-5: input for an unassigned job is rejected', async () => {
@@ -124,9 +153,9 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
 
   test('US-006 AC-6: input after THREAD_CLOSE and idle is rejected', async () => {
     const b = setup(); await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await ready(b);
     await b.handler.handle([cmd('THREAD_CLOSE', 'close-1')]);
-    await b.supervisor.idle();
+    await idle(b.supervisor);
     const inputAck = await b.handler.handle([cmd('THREAD_INPUT', 'after-close', 'j1', { messageId: 'm2', text: 'late' })]);
     expect(inputAck).toEqual([
       { commandId: 'after-close', leaseEpoch: 1, result: 'rejected', detail: 'does not hold job' },
@@ -135,8 +164,8 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
 
   test('US-006 AC-7: CANCEL closes a running thread through UPLOADING to CANCELLED', async () => {
     const b = setup(); await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
-    await b.handler.handle([cmd('CANCEL', 'cancel-1')]); await b.supervisor.idle();
+    await ready(b);
+    await b.handler.handle([cmd('CANCEL', 'cancel-1')]); await idle(b.supervisor);
     expect(states(b).map((event) => event.to)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
     expect(b.ex.calls).toEqual([]);
   });
@@ -148,25 +177,26 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
     const outcome = await Promise.race([b.handler.handle([cmd('ABANDON', 'abandon-1')]).then(() => 'resolved'), Bun.sleep(100).then(() => 'blocked')]);
     held();
     expect(outcome).toBe('resolved');
-    await b.supervisor.idle();
+    await idle(b.supervisor);
   });
 
   test('US-006 AC-9: abandoning a live thread removes its journal row', async () => {
     const b = setup(); await b.handler.handle([assignCommand()]);
-    await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await ready(b);
     await b.handler.handle([cmd('ABANDON', 'abandon-2')]);
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.ex.calls).toEqual([]);
-    await b.supervisor.idle();
+    await idle(b.supervisor);
   });
 
   test('US-006 AC-10: abandon bounds a never-resolving session close by the configured timeout', async () => {
     const close = mock(async () => new Promise<void>(() => undefined));
     const b = setup({ liveSession: session({ close }) });
-    await b.handler.handle([assignCommand()]); await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    await b.handler.handle([assignCommand()]); await ready(b);
     const abandoning = b.handler.handle([cmd('ABANDON', 'abandon-timeout')]);
-    await waitFor(() => close.mock.calls.length === 1);
-    await Bun.sleep(0);   // let the abandon park on the close it will not await past the timeout
+    await waitFor(() => close.mock.calls.length === 1 && b.time.sleepingFor(tuning.threadCloseTimeoutMs), {
+      timeoutMs: 1_500, intervalMs: 5, message: 'abandon never armed its session-close deadline',
+    });
     b.time.advance(tuning.threadCloseTimeoutMs);
     await abandoning;
     expect(close).toHaveBeenCalledTimes(1);
@@ -174,7 +204,7 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
   });
 
   test('US-006 AC-11: abandoning a thread releases credentials for its row', async () => {
-    const b = setup(); await b.handler.handle([assignCommand()]); await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    const b = setup(); await b.handler.handle([assignCommand()]); await ready(b);
     const row = b.journal.getJob('j1', 1);
     await b.handler.handle([cmd('ABANDON', 'abandon-release')]);
     expect(b.credentials.release).toHaveBeenCalledWith(row);
@@ -182,13 +212,23 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
 
   test('US-006 AC-12: an abandoned held turn cannot append later journal events', async () => {
     let releaseTurn: (() => void) | undefined;
-    const held = session({ async *send() { await new Promise<void>((resolve) => { releaseTurn = resolve; }); yield { type: 'turn_end', status: 'completed' } as never; } });
-    const b = setup({ liveSession: held }); await b.handler.handle([assignCommand()]); await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
+    let turnEnded = false;
+    const held = session({ async *send() {
+      try {
+        await new Promise<void>((resolve) => { releaseTurn = resolve; });
+        yield { type: 'turn_end', status: 'completed' } as never;
+      } finally { turnEnded = true; }
+    } });
+    const b = setup({ liveSession: held }); await b.handler.handle([assignCommand()]); await ready(b);
     const inputAck = await b.handler.handle([cmd('THREAD_INPUT', 'held-input', 'j1', { messageId: 'm2', text: 'held' })]);
-    expect(inputAck).toMatchObject([{ result: 'ok' }]);
-    expect(releaseTurn).toBeDefined();
-    await b.handler.handle([cmd('ABANDON', 'abandon-held')]); releaseTurn?.(); await b.supervisor.idle();
-    expect(b.journal.pendingEvents('j1', 1, 100)).toEqual([]);
+    expect(inputAck, `the held input must be accepted before abandon: ${JSON.stringify(inputAck)}`).toMatchObject([{ result: 'ok' }]);
+    await waitFor(() => releaseTurn !== undefined, {
+      timeoutMs: 1_500, intervalMs: 5, message: 'the accepted input never entered the held session turn',
+    });
+    expect(releaseTurn, 'the held turn must be started before abandoning it').toBeDefined();
+    await b.handler.handle([cmd('ABANDON', 'abandon-held')]); releaseTurn?.(); await idle(b.supervisor);
+    await waitFor(() => turnEnded, { timeoutMs: 1_500, intervalMs: 5, message: 'the abandoned turn never finished after being released' });
+    expect(b.journal.pendingEvents('j1', 1, 100), 'a resumed abandoned turn must not recreate journal events').toEqual([]);
   });
 
   test('US-006 AC-13: abandoning a thread row without an in-memory run does not wait for the repository mutex', async () => {

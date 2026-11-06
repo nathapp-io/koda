@@ -3,7 +3,11 @@ import { AbstractPrismaRepository, PrismaService, type PrismaModelDelegate } fro
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { FleetPrRuling as RulingRow, PrismaClient } from '../../generated/prisma/client';
 import { prNumberFor } from '../sync/pr-attribution.service';
-import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget, RulingResultPatch } from './fleet-pr-ruling.domain';
+import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling, PendingFixRuling, RulingJobTarget, RulingResultPatch, RulingTargetRepo } from './fleet-pr-ruling.domain';
+
+/** US-014: the job's repo, reduced to what a ruling target needs (the preflight forge read included). */
+const targetRepo = (repo: { provider: string; owner: string; name: string; githubInstallationId: bigint | null }): RulingTargetRepo =>
+  ({ provider: repo.provider, owner: repo.owner, name: repo.name, githubInstallationId: repo.githubInstallationId });
 
 @Injectable()
 export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<FleetPrRuling, RulingRow, string> implements IFleetPrRulingRepository {
@@ -43,7 +47,7 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
       if (item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.kind === 'string') openItems.push({ id: item.id, kind: item.kind });
     }
     const prNumber = job.repo.provider === 'github' && job.resultPrUrl ? prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl) : null;
-    return { projectId: job.projectId, repoId: job.repoId, prNumber, openItems };
+    return { projectId: job.projectId, repoId: job.repoId, prNumber, openItems, repo: targetRepo(job.repo) };
   }
   async findTarget(projectId: string, jobId: string) {
     const job = await this.prisma.client.fleetJob.findFirst({ where: { id: jobId, projectId, project: { deletedAt: null } }, include: { repo: true } });
@@ -54,7 +58,8 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
       if (item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.kind === 'string') openItems.push({ id: item.id, kind: item.kind });
     }
     return { projectId, repoId: job.repoId, command: job.command, outcome: typeof workflow.outcome === 'string' ? workflow.outcome : null,
-      prNumber: job.repo.provider === 'github' && job.resultPrUrl ? prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl) : null, openItems };
+      prNumber: job.repo.provider === 'github' && job.resultPrUrl ? prNumberFor({ ...job.repo, provider: 'github' }, job.resultPrUrl) : null, openItems,
+      repo: targetRepo(job.repo) };
   }
 
   async latestRunForPr(repoId: string, prNumber: number): Promise<string | null> {

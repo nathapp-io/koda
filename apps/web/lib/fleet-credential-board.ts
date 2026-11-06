@@ -6,16 +6,40 @@ export type CellState = (typeof CELL_STATES)[number]
 export interface BoardCell { state: CellState; kind: CredentialKind; expires?: string }
 export interface BoardProfileNeeds { protocol: string; providers: string[]; sandbox: boolean }
 export interface BoardProfileCell { present: boolean; needs?: BoardProfileNeeds; misfit?: string }
-export interface BoardRunner { id: string; name: string; enabled: boolean; online: boolean; readable: boolean }
+/**
+ * `providerVault` is the runner's `providerVault` capability (C10 US-007): false means the machine
+ * does not serve koda-held keys through nax's exec helper, which the board marks "vault off".
+ */
+export interface BoardRunner { id: string; name: string; enabled: boolean; online: boolean; readable: boolean; providerVault: boolean }
+/** One active GLOBAL key koda holds (C10 US-007): metadata only, never the key. */
+export interface KodaKey { providerId: string; name: string; last4: string; updatedAt: string }
 export interface CredentialBoard {
   generatedAt: string
   warnDays: number
+  /** The GLOBAL keys koda holds; empty when the vault is off. */
+  kodaKeys: KodaKey[]
   runners: BoardRunner[]
   providers: Array<{ providerId: string; cells: Record<string, BoardCell> }>
   profiles: Array<{ name: string; runners: Record<string, BoardProfileCell> }>
 }
 
 export const BOARD_PATH = '/fleet/credential-board'
+
+/**
+ * The koda key of one provider row, if any. `@@unique([scopeKey, providerId])` keeps it to at most one
+ * GLOBAL key per provider, so a row holds exactly one or none.
+ */
+export function kodaKeyFor(board: Pick<CredentialBoard, 'kodaKeys'>, providerId: string): KodaKey | undefined {
+  return board.kodaKeys.find((key) => key.providerId === providerId)
+}
+
+/**
+ * Whether the board has anything to show. A stored GLOBAL key is worth a row on its own: hiding the
+ * grid when no runner is enrolled would hide keys koda holds and can still serve.
+ */
+export function hasBoardContent(board: Pick<CredentialBoard, 'runners' | 'kodaKeys'>): boolean {
+  return board.runners.length > 0 || board.kodaKeys.length > 0
+}
 
 const TONES: Record<CellState, ChipTone> = { ok: 'ok', expiring: 'warn', expired: 'warn', unavailable: 'bad', missing: 'bad' }
 

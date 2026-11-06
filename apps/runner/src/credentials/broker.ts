@@ -3,8 +3,9 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { JobRow } from '../journal/types';
 import type { Sleep } from '../time';
-import { CredentialServer, type CredentialReply } from './cred-server';
+import { CredentialServer, type CredentialReply, type ProviderReply } from './cred-server';
 import { helperValue, writeShims } from './job-files';
+import type { CachedProviderKey, ProviderKeyCache } from './provider-key-cache';
 import { SocketDirError, ensureSocketDir, socketPathFor } from './socket-dir';
 import type { TokenCache } from './token-cache';
 
@@ -33,6 +34,14 @@ export interface CredentialProvider {
    */
   currentToken?(job: JobRow): string | null;
   freshToken?(job: JobRow, minRemainingMs: number, isCancelled?: () => boolean): Promise<{ ok: true; token: string } | { ok: false; reason: string }>;
+  /**
+   * US-008: the path of this job epoch's provider-key socket, opened on the first call. Provider keys are needed for
+   * every model call, so the socket outlives the git credential socket (released after checkout).
+   */
+  serveProviderKeys?(job: JobRow): Promise<string>;
+  /** US-008: true when the job holds a provider key for `providerId` (the same lookup the socket answers with). */
+  providerKeyGranted?(job: JobRow, providerId: string): Promise<boolean>;
+  releaseProviderKeys?(job: JobRow): Promise<void>;
 }
 
 /** Read-only project repository credentials; no job-local command shims. */
@@ -45,7 +54,15 @@ export interface BrokerTiming {
   readonly waitMs: number;
   readonly serveWaitMs: number;
   readonly pollMs: number;
+  /** US-008: how long a provider-key request waits for its grant; defaults to `PROVIDER_KEY_WAIT_MS` (55 s). */
+  readonly providerKeyWaitMs?: number;
 }
+
+/** US-008: the spec's 55 s — a model call waits this long for a key before it hears `error`. */
+export const PROVIDER_KEY_WAIT_MS = 55_000;
+
+/** The socket-name segment that keeps the provider-key socket apart from the git and repository ones (D78). */
+export const PROVIDER_KEY_SOCKET_SCOPE = 'provider-keys';
 
 export interface BrokerDeps {
   readonly tokens: TokenCache;
@@ -58,6 +75,8 @@ export interface BrokerDeps {
   readonly timing: BrokerTiming;
   /** D109: the owner the socket directory must have; defaults to this process's uid. */
   readonly uid?: number;
+  /** US-008: the provider keys handed out over sync; absent in a broker that serves only git credentials. */
+  readonly providerKeys?: ProviderKeyCache;
 }
 
 const NONE: JobCredentials = { helper: null, binDir: null };
@@ -79,6 +98,10 @@ async function closeQuietly(pending: Promise<CredentialServer>): Promise<void> {
 /** Design §3.1: one socket per (job, epoch), answered from the TokenCache, and the job's shims. */
 export class CredentialBroker implements CredentialProvider, RepoCredentialProvider {
   private servers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
+  /** US-008: provider-key sockets live apart from `servers`, so `release`'s shims check never sees them. */
+  private providerServers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
+  /** Identity tokens invalidate sleeping provider replies when their job epoch is released. */
+  private readonly providerEpochs = new Map<string, object>();
   private closing = false;
   private readonly repositories = new Map<string, Set<string>>();
 
@@ -182,12 +205,101 @@ export class CredentialBroker implements CredentialProvider, RepoCredentialProvi
     if (!sibling) await rm(join(job.jobDir, 'bin'), { recursive: true, force: true });
   }
 
+  /**
+   * US-008: the job epoch's provider-key socket, opened once per (job, epoch) whatever the clone URL — an ssh
+   * `git@…` job needs no git token but still needs its model keys. Returns the path; the map holds the pending
+   * listen so two concurrent calls share one socket.
+   */
+  async serveProviderKeys(job: JobRow): Promise<string> {
+    const { socketDir, runnerId } = this.deps;
+    const sock = socketPathFor(socketDir, runnerId, job.jobId, job.leaseEpoch, PROVIDER_KEY_SOCKET_SCOPE);
+    const key = keyOf(job);
+    const existing = this.providerServers.get(key);
+    if (existing) {
+      await existing;
+      return sock;
+    }
+    const pending = this.listenProviderKeys(job, sock);
+    this.providerServers = new Map([...this.providerServers, [key, pending]]);
+    try {
+      await pending;
+    } catch (error) {
+      this.providerServers = new Map([...this.providerServers].filter(([other]) => other !== key));
+      throw error;
+    }
+    return sock;
+  }
+
+  /** US-008: the same lookup the socket answers with, as a yes/no (`true` only on a grant). */
+  async providerKeyGranted(job: JobRow, providerId: string): Promise<boolean> {
+    return (await this.providerKeyReply(job, providerId)).ok;
+  }
+
+  /**
+   * US-008: what the job's provider-key socket answers for one provider. A cached grant is served while more than the
+   * refresh margin is left; otherwise the request is queued for the sync loop and this waits up to 55 s. A denial is
+   * `none` for a provider the job never had and `revoked` for one it did, so nax never switches identity mid-job.
+   *
+   * US-009 (US-008 D-1): this lookup waits on the answer to its own request and nothing else — no later request of the
+   * same job can replace it, however many follow.
+   */
+  async providerKeyReply(job: JobRow, providerId: string): Promise<ProviderReply> {
+    const cache = this.deps.providerKeys;
+    if (!cache) return { ok: false, reason: 'error' };   // no vault wired: nothing can be granted, so invent nothing
+    const { nowMs, sleep, timing } = this.deps;
+    if (this.closing) return { ok: false, reason: 'error' };
+    const key = keyOf(job);
+    const epoch = this.providerEpochs.get(key) ?? {};
+    this.providerEpochs.set(key, epoch);
+    const deadline = nowMs() + (timing.providerKeyWaitMs ?? PROVIDER_KEY_WAIT_MS);
+    const serve = (grant: CachedProviderKey): ProviderReply => {
+      cache.markServed(job.jobId, job.leaseEpoch, providerId);
+      return { ok: true, key: grant.key, expiresAt: grant.expiresAtMs, account: grant.account };
+    };
+    const cached = cache.state(job.jobId, job.leaseEpoch, providerId, nowMs());
+    if (cached.kind === 'grant') return serve(cached.grant);   // no request needed: the lease still has margin
+    // A new lookup revalidates an earlier denial; from here it reads only the answer its own request settles with.
+    const cancelled = (): boolean => this.closing || this.providerEpochs.get(key) !== epoch || nowMs() >= deadline;
+    let wait = cache.want(job.jobId, job.leaseEpoch, providerId);
+    for (;;) {
+      // Check before waiting: a released waiter must never read a dropped epoch's answer as its own.
+      if (cancelled()) return { ok: false, reason: 'error' };
+      // The poll tick only re-checks those guards; the answer itself arrives as soon as the sync delivers it.
+      const answer = await Promise.race([wait.answered, sleep(timing.pollMs).then((): null => null)]);
+      // … and again after it: an answer that lands while the epoch is being released, the broker is closing or the wait
+      // runs out must neither be served nor re-queued, so the check has to sit between the await and any use of it.
+      if (cancelled()) return { ok: false, reason: 'error' };
+      if (answer === null) continue;
+      if (answer.kind === 'denied') return { ok: false, reason: answer.reason };
+      if (answer.grant.expiresAtMs - nowMs() > cache.refreshMarginMs) return serve(answer.grant);
+      wait = cache.want(job.jobId, job.leaseEpoch, providerId);   // too short a lease to hand out: ask for a new key
+    }
+  }
+
+  /** US-008: this epoch's provider-key socket closes and its grants and served set go. Other epochs are untouched. */
+  async releaseProviderKeys(job: JobRow): Promise<void> {
+    const key = keyOf(job);
+    const pending = this.providerServers.get(key);
+    this.providerEpochs.delete(key);   // invalidate every provider waiter before dropping this epoch's cache
+    this.providerServers = new Map([...this.providerServers].filter(([other]) => other !== key));
+    this.deps.providerKeys?.drop(job.jobId, job.leaseEpoch);
+    if (pending) await closeQuietly(pending);
+  }
+
   /** D90: daemon stop or crash. The sockets go; the tokens stay wanted and the shims stay, for a readopt. */
   async closeAll(): Promise<void> {
     this.closing = true;   // a prepare still waiting for its first token stops at once (daemon stop must not wait 120 s)
-    const pending = [...this.servers.values()];
+    this.providerEpochs.clear();
+    const pending = [...this.servers.values(), ...this.providerServers.values()];
     this.servers = new Map();
+    this.providerServers = new Map();
     await Promise.all(pending.map(closeQuietly));
+  }
+
+  /** US-008: the socket directory is checked again here, as the git sockets do (D109); a provider request waits inside. */
+  private async listenProviderKeys(job: JobRow, sock: string): Promise<CredentialServer> {
+    await ensureSocketDir(this.deps.socketDir, this.deps.uid ?? process.getuid?.() ?? 0);
+    return CredentialServer.listenProviderKeys(sock, (providerId) => this.providerKeyReply(job, providerId));
   }
 
   private async serve(job: JobRow, sock: string, target: URL, repoId?: string): Promise<void> {

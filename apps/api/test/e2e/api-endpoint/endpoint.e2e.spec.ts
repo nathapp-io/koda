@@ -6316,3 +6316,135 @@ describeIntegration('Fleet ruling endpoint lifecycle', () => {
     refusal(await request(server()).get('/api/projects/web/fleet/jobs/unknown/rulings').set(auth()).expect(404), 'fleet.jobs.404');
   });
 });
+
+/**
+ * C10 US-003/US-005: the provider credential routes over the real HTTP stack — the GLOBAL ones and,
+ * from US-005, the project ones. The vault is on for this boot (the suite's `.env.test` leaves the
+ * master key unset), so a create really seals; the full approval/audit lifecycle of the same routes
+ * lives in `test/integration/fleet-provider-credentials-create.integration.spec.ts` and
+ * `test/integration/project-provider-credentials.integration.spec.ts`.
+ *
+ * The two scopes share this boot on purpose: one `resetDb()` and one app for the whole credential
+ * surface keeps the shared test database's drop-schema windows (and the app boots in this
+ * `isolate: false` file) to a minimum.
+ */
+describeIntegration('GLOBAL and PROJECT provider credential endpoints', () => {
+  const ENCRYPTION_KEY_ENV = 'PROVIDER_CREDENTIAL_ENCRYPTION_KEY';
+  const CREATE = '/api/fleet/provider-credentials';
+  const PROJECT = '/api/projects/web/provider-credentials';
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let previousKey: string | undefined;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  /** `viewer` holds the project-admin role on `web`: the project routes' Project Admin actor. */
+  const projectAdmin = () => auth(world.tokens.viewer);
+  // Provider ids no other case in this block uses: the GLOBAL cases seed `openrouter` rows of their own,
+  // and the project scope is unique on `(projectId, repoId, providerId)`.
+  const projectBody = (over: Record<string, unknown> = {}) => ({ providerId: 'project-e2e', name: 'project', key: 'sk-or-abcdef123456', ...over });
+
+  beforeAll(async () => {
+    previousKey = process.env[ENCRYPTION_KEY_ENV];
+    process.env[ENCRYPTION_KEY_ENV] = 'abcdef0123456789'.repeat(4);
+    try {
+      await resetDb();
+      app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    } finally {
+      if (previousKey === undefined) delete process.env[ENCRYPTION_KEY_ENV];
+      else process.env[ENCRYPTION_KEY_ENV] = previousKey;
+    }
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    // Granted before `viewer` makes its first project request, so the cold effective-key cache holds it.
+    await grantRole(db, { type: 'USER', id: world.ids.viewer }, 'project-admin', world.projectId);
+  }, 90_000);
+
+  afterAll(async () => { await app?.close(); });
+
+  it('creates a GLOBAL key and lists it as metadata, never the key (happy path)', async () => {
+    const created = body<{ id: string; scope: string; last4: string }>(await request(server()).post(CREATE)
+      .set(auth(world.tokens.root)).send({ providerId: 'openrouter', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    expect(created).toMatchObject({ scope: 'GLOBAL', last4: '3456' });
+    expect(created).not.toHaveProperty('key');
+
+    const page = body<{ records: { id: string; providerId: string; last4: string; disabled: boolean }[] }>(
+      await request(server()).get(CREATE).set(auth(world.tokens.root)).expect(200),
+    );
+    expect(page.records).toEqual([expect.objectContaining({ id: created.id, providerId: 'openrouter', last4: '3456', disabled: false })]);
+    expect(page.records[0]).not.toHaveProperty('key');
+  });
+
+  it('rotates, disables and deletes a GLOBAL credential (happy path)', async () => {
+    const created = body<{ id: string; fingerprint: string }>(await request(server()).post(CREATE).set(auth(world.tokens.root))
+      .send({ providerId: 'openrouter-rotate-e2e', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    const rotated = body<{ fingerprint: string; disabled: boolean }>(await request(server()).patch(`${CREATE}/${created.id}`)
+      .set(auth(world.tokens.root)).send({ key: 'sk-or-zyxwvu987654' }).expect(200));
+    expect(rotated.fingerprint).not.toBe(created.fingerprint);
+    expect((await request(server()).patch(`${CREATE}/${created.id}`).set(auth(world.tokens.root)).send({ disabled: true }).expect(200)).body.data.disabled).toBe(true);
+    await request(server()).delete(`${CREATE}/${created.id}`).set(auth(world.tokens.root)).expect(200);
+  });
+
+  it('refuses an update without the GLOBAL credential key and hides project credentials (error case)', async () => {
+    const created = body<{ id: string }>(await request(server()).post(CREATE).set(auth(world.tokens.root))
+      .send({ providerId: 'openrouter-deny-e2e', name: 'fleet', key: 'sk-or-abcdef123456' }).expect(201));
+    await request(server()).patch(`${CREATE}/${created.id}`).set(auth(world.tokens.dev)).send({ name: 'blocked' }).expect(403);
+    const project = await db.project.findFirstOrThrow();
+    const projectCredential = await db.providerCredential.create({ data: {
+      scope: 'PROJECT', scopeKey: `project:${project.id}`, projectId: project.id, providerId: 'openrouter', name: 'project',
+      encryptedKey: 'ciphertext', last4: '1234', fingerprint: '123456789abc', createdById: world.ids.root, updatedById: world.ids.root,
+    } });
+    await request(server()).delete(`${CREATE}/${projectCredential.id}`).set(auth(world.tokens.root)).expect(404);
+  });
+
+  it('refuses a create and a list for a user without the GLOBAL credential keys (error case)', async () => {
+    refusal(await request(server()).post(CREATE).set(auth(world.tokens.dev))
+      .send({ providerId: 'openrouter', name: 'dev', key: 'sk-or-abcdef123456' }).expect(403), 'permissions.40003');
+    refusal(await request(server()).get(CREATE).set(auth(world.tokens.dev)).expect(403), 'permissions.40003');
+  });
+
+  // ── US-005: the PROJECT and REPO routes, in the same boot as the GLOBAL ones ──
+
+  it('creates and lists PROJECT and REPO keys as metadata (happy path)', async () => {
+    const project = body<{ id: string; scope: string; projectId: string; repoId: string | null }>(
+      await request(server()).post(PROJECT).set(projectAdmin()).send(projectBody()).expect(201),
+    );
+    expect(project).toMatchObject({ scope: 'PROJECT', projectId: world.projectId, repoId: null });
+    const repo = body<{ id: string; scope: string; repoId: string | null }>(
+      await request(server()).post(PROJECT).set(projectAdmin()).send(projectBody({ providerId: 'repo-e2e', repoId: world.repoId })).expect(201),
+    );
+    expect(repo).toMatchObject({ scope: 'REPO', repoId: world.repoId });
+
+    const listed = body<{ records: { id: string; scope: string; projectId: string | null; last4: string }[] }>(
+      await request(server()).get(PROJECT).set(auth(world.tokens.dev)).expect(200),
+    );
+    // The scope filter, not the exact set: the GLOBAL cases above seed a PROJECT row of their own, so this
+    // pins that both new keys are listed and that nothing outside this project's scopes is.
+    expect(listed.records.map(({ id }) => id)).toEqual(expect.arrayContaining([project.id, repo.id]));
+    expect(listed.records.every(({ projectId, scope }) => projectId === world.projectId && scope !== 'GLOBAL')).toBe(true);
+    expect(listed.records[0]).not.toHaveProperty('key');
+  });
+
+  it('rotates and deletes a PROJECT key (happy path)', async () => {
+    const created = body<{ id: string; fingerprint: string }>(
+      await request(server()).post(PROJECT).set(projectAdmin()).send(projectBody({ providerId: 'openrouter-rotate-project' })).expect(201),
+    );
+    const rotated = body<{ fingerprint: string }>(
+      await request(server()).patch(`${PROJECT}/${created.id}`).set(projectAdmin()).send({ key: 'sk-or-zyxwvu987654' }).expect(200),
+    );
+    expect(rotated.fingerprint).not.toBe(created.fingerprint);
+    await request(server()).delete(`${PROJECT}/${created.id}`).set(projectAdmin()).expect(200);
+    expect(await db.providerCredential.findUnique({ where: { id: created.id } })).toBeNull();
+  });
+
+  it('refuses a Developer create, a foreign repo and a foreign credential (error cases)', async () => {
+    refusal(await request(server()).post(PROJECT).set(auth(world.tokens.dev)).send(projectBody()).expect(403), 'permissions.40003');
+    refusal(await request(server()).post(PROJECT).set(projectAdmin()).send(projectBody({ repoId: world.foreignRepoId })).expect(404), 'fleet.repos.404');
+    const foreign = body<{ id: string }>(
+      await request(server()).post('/api/projects/ops/provider-credentials').set(auth(world.tokens.root))
+        .send(projectBody({ providerId: 'ops-e2e' })).expect(201),
+    );
+    refusal(await request(server()).patch(`${PROJECT}/${foreign.id}`).set(projectAdmin()).send({ name: 'hijacked' }).expect(404), 'fleet.providerCredentials.notFound.404');
+    refusal(await request(server()).delete(`${PROJECT}/${foreign.id}`).set(projectAdmin()).expect(404), 'fleet.providerCredentials.notFound.404');
+  });
+});

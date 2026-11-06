@@ -271,6 +271,21 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return turn ? { kind: turn.thread.kind === 'WORKSPACE' ? 'WORKSPACE' : turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
   }
 
+  /**
+   * US-006: the thread's own credential scope. A REPO thread resolves in its own repo; a PROJECT or
+   * WORKSPACE thread has no repo scope of its own (`repoId: null`), so its project key answers — the
+   * thread's anchor project is non-null even for a WORKSPACE thread.
+   */
+  async findThreadCredentialScope(jobId: string): Promise<{ projectId: string; repoId: string | null } | null> {
+    const turn = await this.db.fleetThreadTurn.findUnique({
+      where: { jobId },
+      select: { thread: { select: { projectId: true, kind: true, repoId: true } } },
+    });
+    if (!turn) return null;
+    const { projectId, kind, repoId } = turn.thread;
+    return { projectId, repoId: kind === 'REPO' ? repoId : null };
+  }
+
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({ where: { jobId } });
     if (!turn) return null;

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import type { AssignPayload, ConfigEditPayload } from '@nathapp/fleet-protocol';
+import type { CredentialProvider } from '../../src/credentials/broker';
 import { CLEANUP_TIMEOUT_MS, restoreConfigClone } from '../../src/executor/config-job/cleanup';
 import type { ConfigJobContext } from '../../src/executor/job-executor';
 import { HostExecutor } from '../../src/executor/host-executor';
@@ -397,5 +398,114 @@ describe('HostExecutor config jobs (S3 §5)', () => {
     expect(await w.ex.matchesProcess({ ...w.row, jobId: 'other', jobDir: w.row.jobDir, pid, pgid: pid, assign: { ...w.row.assign, repo: { ...w.row.assign.repo, name: 'other' } } })).toBe(false);
     expect(await w.ex.matchesProcess({ ...w.row, pid: null })).toBe(false);
     expect(pids).toEqual([pid, pid]);
+  });
+});
+
+describe('config job provider-key socket (US-009)', () => {
+  const SOCKET_ENV = 'KODA_PROVIDER_CRED_SOCKET';
+  const SOCKET_PATH = '/run/koda/provider-keys/cjob1.sock';
+
+  /** A provider that serves and releases the job's provider-key socket, and records every call it gets. */
+  function provider() {
+    const served: JobRow[] = [];
+    const released: JobRow[] = [];
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      serveProviderKeys: async (job) => { served.push(job); return SOCKET_PATH; },
+      releaseProviderKeys: async (job) => { released.push(job); },
+    };
+    return { credentials, served, released };
+  }
+
+  /** A config world whose `nax` is the fake, dumping the environment it was started with to `dump`. */
+  async function providerWorld(credentials: CredentialProvider) {
+    const base = await tmp.make('cfg-pk');
+    const origin = await makeOrigin(base, 'origin', { files: SEED });
+    const workspaceRoot = join(base, 'ws');
+    const assign: AssignPayload = assignFor('CONFIG_EDIT', { jobId: 'cjob1', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: origin.url } });
+    const journal = Journal.open(':memory:');
+    const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, 'cjob1') }).row;
+    const ex = new HostExecutor({
+      config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: createGit(), log: createMemoryLogger(),
+      nowMs: () => Date.now(), sleep: async () => undefined, credentials, approvals: NO_APPROVALS,
+    });
+    const dump = join(base, 'nax-env.json');
+    const steps: string[] = [];
+    const ctx = (payload: ConfigEditPayload, over: Partial<ConfigJobContext> = {}): ConfigJobContext => ({
+      payload, deadlineMs: Date.now() + 60_000, isStopped: () => false, onProcess: () => undefined, step: (m) => { steps.push(m); }, ...over,
+    });
+    return { base, ex, row, dump, steps, ctx, head: () => sh(origin.dir, 'rev-parse', 'main') };
+  }
+
+  /** Run one regenerate job with `FAKE_NAX_ENV_DUMP` set, then read the environment the fake nax was started with. */
+  async function runAndDump(w: Awaited<ReturnType<typeof providerWorld>>, over: Partial<ConfigJobContext> = {}) {
+    const saved = process.env['FAKE_NAX_ENV_DUMP'];
+    process.env['FAKE_NAX_ENV_DUMP'] = w.dump;
+    try {
+      await w.ex.prepareConfigJob(w.row);
+      const run = await w.ex.runConfigJob(w.row, w.ctx({ mode: 'regenerate', baseSha: await w.head(), prTitle: 'Regenerate', prBody: null, edits: [] }, over));
+      return { run, env: JSON.parse(await readFile(w.dump, 'utf8')) as Record<string, string> };
+    } finally {
+      if (saved === undefined) delete process.env['FAKE_NAX_ENV_DUMP'];
+      else process.env['FAKE_NAX_ENV_DUMP'] = saved;
+    }
+  }
+
+  test('AC-12: the config job\'s nax environment carries the path serveProviderKeys returned', async () => {
+    const p = provider();
+    const w = await providerWorld(p.credentials);
+    const { run, env } = await runAndDump(w);
+    expect(run).toMatchObject({ kind: 'result', result: { outcome: 'ok' } });
+    expect(env[SOCKET_ENV]).toBe(SOCKET_PATH);
+    expect(p.served).toEqual([w.row]);
+  });
+
+  test('AC-12: the config job releases its provider-key socket after the run', async () => {
+    const p = provider();
+    const w = await providerWorld(p.credentials);
+    const { run } = await runAndDump(w);
+    expect(run).toMatchObject({ kind: 'result', result: { outcome: 'ok' } });
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-12: a config job that fails still releases its provider-key socket', async () => {
+    const p = provider();
+    const w = await providerWorld(p.credentials);
+    const saved = process.env['FAKE_NAX_ENV_DUMP'];
+    process.env['FAKE_NAX_ENV_DUMP'] = w.dump;
+    try {
+      await w.ex.prepareConfigJob(w.row);
+      const run = await w.ex.runConfigJob(w.row, w.ctx({
+        mode: 'edit', baseSha: await w.head(), prTitle: 'T', prBody: null,
+        edits: [{ path: '.nax/rules/bad.md', op: 'put', content: 'FAKE_LINT_FAIL', baseSha: null }],
+      }));
+      expect(run).toMatchObject({ kind: 'result', result: { outcome: 'invalid' } });
+    } finally {
+      if (saved === undefined) delete process.env['FAKE_NAX_ENV_DUMP'];
+      else process.env['FAKE_NAX_ENV_DUMP'] = saved;
+    }
+    expect(p.released).toEqual([w.row]);
+  });
+
+  test('AC-15: an acquire/release-only provider keeps today\'s config-job nax environment', async () => {
+    const w = await providerWorld(NO_CREDENTIALS);
+    const { run, env } = await runAndDump(w);
+    expect(run).toMatchObject({ kind: 'result', result: { outcome: 'ok' } });
+    expect(SOCKET_ENV in env).toBe(false);
+  });
+
+  test('a provider-key socket that cannot be served does not fail the config job, and is logged', async () => {
+    const served: JobRow[] = [];
+    const credentials: CredentialProvider = {
+      acquire: async () => ({ ok: true, credentials: { helper: null, binDir: null } }),
+      release: async () => undefined,
+      serveProviderKeys: async (job) => { served.push(job); throw new Error('socket dir unsafe'); },
+    };
+    const w = await providerWorld(credentials);
+    const { run, env } = await runAndDump(w);
+    expect(run).toMatchObject({ kind: 'result', result: { outcome: 'ok' } });
+    expect(SOCKET_ENV in env).toBe(false);
+    expect(served).toEqual([w.row]);
   });
 });

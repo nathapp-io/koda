@@ -36,6 +36,10 @@ export interface OpenPullRequest {
 }
 
 const b64url = (value: string | Buffer) => Buffer.from(value).toString('base64url');
+/** US-014 (#394): one comments page, the size nax's item-index comment lives within. */
+const ISSUE_COMMENT_PAGE_SIZE = 100;
+/** US-014 (#394): the preflight `w-index` read must not hold a user's ruling request for the fleet default. */
+const ISSUE_COMMENTS_TIMEOUT_MS = 5_000;
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (typeof v === 'object' && v !== null ? (v as Obj) : {});
 
@@ -141,6 +145,21 @@ export class GitHubAppClient {
       : [];
 
     return { repoOwner, repoName, prNumber: pullRequest.number, authors };
+  }
+
+  /**
+   * US-014 (#394): the first page of a pull request's issue comments, as bodies. One read, no pagination and
+   * no author check — the caller only looks for the nax item-index marker. Bounded to 5 s because it runs
+   * inside a user-facing preflight, not a background sweep.
+   */
+  async listIssueComments(token: string, owner: string, name: string, number: number): Promise<string[]> {
+    const path = `${this.repoPath(owner, name)}/issues/${number}/comments?per_page=${ISSUE_COMMENT_PAGE_SIZE}`;
+    const res = await this.http.request('GET', `${this.api}${path}`, this.headers(token), undefined, { timeoutMs: ISSUE_COMMENTS_TIMEOUT_MS });
+    if (res.status !== 200 || !Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+    return res.body.flatMap((raw): string[] => {
+      const body = obj(raw).body;
+      return typeof body === 'string' ? [body] : [];
+    });
   }
 
   /** Best-effort default branch protection probe. Any inability to confirm both endpoints fails closed. */

@@ -2,12 +2,17 @@ import { Inject, Injectable } from '@nestjs/common';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { BudgetGate } from '../budgets/budget-gate';
 import { QUEUED_SCAN_LIMIT, toLoads } from '../jobs/placement-rules';
+import { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
+import { providerScopeLookupKey, type ProviderLookupScope } from '../provider-credentials/provider-credential.domain';
 import { buildAttention } from './attention-rules';
 import { buildDashboardView, DashboardView, readCapabilities } from './dashboard-view';
-import { AttentionThresholds, DASHBOARD_LIMITS, DashboardRunnerRow, DashboardScope } from './dashboard.types';
+import { AttentionThresholds, DASHBOARD_LIMITS, DashboardJobRow, DashboardRunnerRow, DashboardScope } from './dashboard.types';
 import { DASHBOARD_REPOSITORY, IDashboardRepository } from './domain/dashboard.domain';
 
 type DashboardConfig = Pick<IFleetConfig, 'runnerOfflineSec' | 'jobSilentSec' | 'jobSilentErrorSec' | 'jobStartSec' | 'jobQueuedWarnSec' | 'credentialExpiryWarnDays'>;
+
+/** The answer for a scope the vault can serve nothing for; shared, never mutated. */
+const NO_PROVIDERS: ReadonlySet<string> = new Set<string>();
 
 /** S2b (c) spec §1: one snapshot per request; reads in parallel, no transaction (D411). */
 @Injectable()
@@ -16,6 +21,11 @@ export class FleetDashboardService {
     @Inject(DASHBOARD_REPOSITORY) private readonly repo: IDashboardRepository,
     private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly cfg: DashboardConfig,
+    /**
+     * C10 (branch review B3): the dry-run judges provider needs exactly as placement does, so it asks the
+     * vault's public service which providers it can serve for the queued window's scopes.
+     */
+    private readonly credentials: ProviderCredentialsService,
   ) {}
 
   async snapshot(scope: DashboardScope, now: Date): Promise<DashboardView> {
@@ -39,8 +49,23 @@ export class FleetDashboardService {
       runnerOfflineSec: this.cfg.runnerOfflineSec, jobSilentSec: this.cfg.jobSilentSec, jobSilentErrorSec: this.cfg.jobSilentErrorSec,
       jobStartSec: this.cfg.jobStartSec, jobQueuedWarnSec: this.cfg.jobQueuedWarnSec, credentialExpiryWarnDays: this.cfg.credentialExpiryWarnDays,
     };
-    const attention = buildAttention({ scope, runners, heldByRunner, activeJobs: listed, pending, dryRun: { queued, loads, pauses } }, now, thresholds);
+    const attention = buildAttention({ scope, runners, heldByRunner, activeJobs: listed, pending, dryRun: { queued, loads, pauses, ...(await this.vaultAvailability(queued, runners)) } }, now, thresholds);
     const runLoads = new Map([...loads].map(([id, load]) => [id, load.active] as const));
     return buildDashboardView({ scope, now, offlineSec: this.cfg.runnerOfflineSec, runners, heldByRunner: runLoads, active, recent, counts, pending, attention });
+  }
+
+  /**
+   * C10 (branch review B3): the providers the vault can serve each queued job, read once for the whole
+   * window. A fleet whose runners report no `providerVault` helper pays no read and the dry-run keeps
+   * today's stricter rules, which is the same answer placement gives.
+   */
+  private async vaultAvailability(
+    queued: readonly DashboardJobRow[],
+    runners: readonly DashboardRunnerRow[],
+  ): Promise<{ vaultProviders?: (job: DashboardJobRow) => ReadonlySet<string> }> {
+    if (queued.length === 0 || !runners.some((runner) => runner.capabilities?.providerVault === true)) return {};
+    const scopes: ProviderLookupScope[] = queued.map((job) => ({ projectId: job.projectId, repoId: job.repoId }));
+    const answers = await this.credentials.availableProviders(scopes);
+    return { vaultProviders: (job) => answers.get(providerScopeLookupKey(job)) ?? NO_PROVIDERS };
   }
 }

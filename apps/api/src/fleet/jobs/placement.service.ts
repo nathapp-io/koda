@@ -14,10 +14,12 @@ import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { addJobToLoad, EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MAX_QUEUED_SCAN_PAGES, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob, withVaultProviders } from './placement-rules';
 import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
 import { withProjectRepos } from './project-repos-assign';
 import type { RunnerCapabilities } from '../common/protocol';
+import { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
+import { providerScopeLookupKey, type ProviderLookupScope } from '../provider-credentials/provider-credential.domain';
 import { RunnerNotifier } from './runner-notifier';
 import {
   FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow, QueuedCursor, QueuedScanFilter,
@@ -29,6 +31,12 @@ export interface PlacementOutcome {
   leaseEpoch: number | null;
   misfits: Array<{ runnerId: string; name: string; reason: MisfitReason }>;
 }
+
+/** C10 (branch review B3): one placement pass's vault availability answers, keyed by job scope. */
+type VaultMemo = Map<string, Promise<ReadonlySet<string>>>;
+
+/** The answer for a scope the vault can serve nothing for; shared, never mutated. */
+const NO_PROVIDERS: ReadonlySet<string> = new Set<string>();
 
 /**
  * Spec §4 + §6.1. placeJob runs at dispatch and requeue; fillRunner when a runner syncs
@@ -49,6 +57,12 @@ export class PlacementService {
     @Inject(FLEET_CFG) private readonly fleetConfig: IFleetConfig,
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl' | 'gitlabApiUrl'>,
     private readonly audit: AuditRecorder,
+    /**
+     * C10 (branch review B3): the vault's public service, for the providers koda can serve a job. Placement
+     * never reads the credential repository: it asks which providers resolve for the job's scope and nothing
+     * about the keys themselves.
+     */
+    private readonly credentials: ProviderCredentialsService,
   ) {}
 
   /**
@@ -63,7 +77,27 @@ export class PlacementService {
     if (!runner) return 'not_found';
     const loads = toLoads(await this.repo.findActiveLoads([runner.id]));
     const budgetPaused = (await this.budgets.snapshot(now)).runnerPaused(runner.id);
-    return firstMisfit(job, { ...runner, budgetPaused }, loads.get(runner.id) ?? EMPTY_LOAD, now, this.fleetConfig.runnerOfflineSec);
+    const judged = await this.judgedJob(job, [runner], new Map());
+    return firstMisfit(judged, { ...runner, budgetPaused }, loads.get(runner.id) ?? EMPTY_LOAD, now, this.fleetConfig.runnerOfflineSec);
+  }
+
+  /**
+   * C10 (branch review B3): the job with the provider ids the vault could hand a candidate runner, so a
+   * `providerVault` runner skips a local credential refusal only for a provider koda can actually serve for
+   * this job's project and repo. Read once per job scope per pass (`memo`), and only when some candidate
+   * reports the helper — a fleet without the vault, and every run whose runners cannot use it, pays no read.
+   */
+  private async judgedJob(job: PlacementJob, candidates: readonly { capabilities: RunnerCapabilities }[], memo: VaultMemo): Promise<PlacementJob> {
+    if (!candidates.some((candidate) => candidate.capabilities.providerVault === true)) return job;
+    return withVaultProviders(job, await this.vaultProviders({ projectId: job.projectId, repoId: job.repoId }, memo));
+  }
+
+  /** One availability question per scope per pass: a fill scans many jobs and most share a repo. */
+  private vaultProviders(scope: ProviderLookupScope, memo: VaultMemo): Promise<ReadonlySet<string>> {
+    const key = providerScopeLookupKey(scope);
+    const pending = memo.get(key) ?? this.credentials.availableProviders([scope]).then((answers) => answers.get(key) ?? NO_PROVIDERS);
+    memo.set(key, pending);
+    return pending;
   }
 
   async placeJob(jobId: string, now = new Date()): Promise<PlacementOutcome> {
@@ -93,7 +127,7 @@ export class PlacementService {
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const threadAssign = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : null;
       const placementJob = toPlacementJob(job, repo, isThreadKind(job.command) && threadAssign ? { backend: threadAssign.backend, enabled: this.fleetConfig.threadsEnabled, action: threadAssign.action, kind: threadAssign.kind, mode: threadAssign.mode } : undefined);
-      const evaluated = evaluateRunners(placementJob, runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
+      const evaluated = evaluateRunners(await this.judgedJob(placementJob, runners, new Map()), runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
       const misfits = evaluated
         .filter((e) => e.reason !== null)
         .map((e) => ({ runnerId: e.runner.id, name: e.runner.name, reason: e.reason as MisfitReason }));
@@ -120,6 +154,7 @@ export class PlacementService {
       let load = toLoads(await this.repo.findActiveLoads([runner.id])).get(runner.id) ?? EMPTY_LOAD;
       let slots = Math.min(freeSlots, runner.capacity - load.active);
       const events: LiveFleetJobEvent[] = [];
+      const vault: VaultMemo = new Map();
       let count = 0;
       // US-004: SQL decides which jobs this runner can take, and the scan pages past a full page of per-job misfits.
       await this.scanQueuedCandidates({ runnerId: runner.id, threads: false }, () => slots <= 0, async (id) => {
@@ -133,7 +168,7 @@ export class PlacementService {
           return;
         }
         const repo = await this.repo.findRepo(job.repoId);
-        if (!repo || firstMisfit(toPlacementJob(job, repo), runner, load, now, this.fleetConfig.runnerOfflineSec) !== null) return;
+        if (!repo || firstMisfit(await this.judgedJob(toPlacementJob(job, repo), [runner], vault), runner, load, now, this.fleetConfig.runnerOfflineSec) !== null) return;
         const done = await this.assign(job, repo, runner, now);
         if (!done) return;
         events.push(done.live);

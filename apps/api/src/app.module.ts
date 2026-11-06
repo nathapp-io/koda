@@ -62,6 +62,7 @@ import { globalThrottleLimit } from './config/throttle-limit';
 import { liveConfig } from './config/live.config';
 import { webhookConfig } from './config/webhook.config';
 import { fleetConfig } from './config/fleet.config';
+import { providerCredentialsConfig } from './config/provider-credentials.config';
 import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
 
@@ -70,7 +71,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, providerCredentialsConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,

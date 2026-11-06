@@ -15,9 +15,17 @@
     "notDraft": { "409": "只能裁定具有 GitHub 拉取请求的草稿 RUN 作业" },
     "notLatest": { "409": "只能裁定此拉取请求的最新 RUN 作业" },
     "settled": { "409": "此事项已应用" },
+    "notRulable": { "409": "CI 条目无法裁定；FIX 无法处理它们" },
+    "noItemIndex": { "409": "此拉取请求没有 nax 条目索引，FIX 无法应用其上的裁定；请重新运行作业以重新发布" },
     "invalidText": { "-2": "{property}: 文本必须以支持的裁决关键字及所需证据开头" },
     "unknownItem": { "404": "未找到工作流条目" },
     "invalidPr": { "400": "任务必须指定 GitHub 拉取请求" }
+  },
+  "providerCredentials": {
+    "duplicate": { "409": "该范围内已存在此提供商的密钥" },
+    "vaultOff": { "503": "提供商凭证保险库未配置" },
+    "notFound": { "404": "未找到提供商凭证" },
+    "validation": { "-2": "{property} 不是有效的提供商凭证" }
   },
   "jobs": { "404": "未找到任务", "409": "该功能已有进行中的任务：{activeJobId}" },
   "jobState": { "409": "任务状态为 {state}，不允许此操作" },

@@ -63,6 +63,18 @@ export async function readNativeModels(naxHome: string, available: ReadonlySet<s
   return nativeModelsForProviders(await readNativeModelConfig(naxHome), available);
 }
 
+/**
+ * US-011 (round 1, F2): the providers a configured tier may be offered for. Without a provider vault only the
+ * providers this machine holds a credential for, exactly as before. With one, koda may hold the key for a provider the
+ * machine is not signed in to — the whole point of the vault — so every *configured* provider stays eligible:
+ * `ThreadSessionFactory.open` asks the broker for that session's provider and opens on the machine's own store when
+ * koda has no key. This widens which providers may serve a model, never which models exist: a model no configured tier
+ * names stays ineligible either way.
+ */
+export function tierProvidersFor(config: NativeModelConfig, available: ReadonlySet<string>, providerVault: boolean): ReadonlySet<string> {
+  return providerVault ? new Set(config.tiers.map((tier) => tier.provider)) : available;
+}
+
 export async function nativeModelProviders(naxHome: string): Promise<string[]> {
   return [...(await readNativeModelConfig(naxHome)).providers];
 }

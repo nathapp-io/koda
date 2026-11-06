@@ -1163,7 +1163,7 @@
       "disposition": { "fixed": "Fixed", "waived": "Waived", "overridden": "Overridden", "confirmed": "Confirmed", "verified": "Verified" },
       "state": { "pending": "Pending", "applied": "Applied", "skipped": "Skipped", "replaced": "Replaced" },
       "skipReason": {
-        "unknown-item": "Unknown item",
+        "unknown-item": "This PR has no nax item index (published before nax 0.91.2); re-run to republish",
         "stale-key": "Item key is stale",
         "already-settled": "Already settled",
         "superseded-by-writer": "Superseded by a repository writer",
@@ -1214,16 +1214,80 @@
       "title": "Credential board",
       "subtitle": "Provider credentials and profiles on every runner. OAuth credentials expiring within {days} days are flagged.",
       "refresh": "Refresh",
+      "manageKeys": "Provider keys",
       "empty": "No runners enrolled",
       "loadFailed": "Could not load the credential board",
       "tabs": { "grid": "Credentials", "profiles": "Profiles" },
-      "grid": { "provider": "Provider", "unreadable": "Capabilities unreadable", "expires": "until {date}" },
+      "grid": {
+        "provider": "Provider", "unreadable": "Capabilities unreadable", "expires": "until {date}",
+        "koda": "Koda keys", "vaultOff": "Vault off"
+      },
       "state": {
         "ok": "OK", "expiring": "Expiring", "expired": "Expired", "unavailable": "Unavailable", "missing": "Missing", "unknown": "Unknown"
       },
       "profiles": {
         "profile": "Profile", "needs": "Needs", "needsValue": "{protocol} · {providers}", "sandbox": "sandbox",
         "differs": "differs by runner", "ready": "Ready", "absent": "Not installed", "unknown": "Unknown"
+      }
+    },
+    "providerKeys": {
+      "title": "Provider keys",
+      "projectTitle": "Provider keys",
+      "projectDescription": "Manage provider credentials for this project. Key values are never shown after saving.",
+      "noReadPermission": "You do not have permission to view provider keys.",
+      "projectScope": "Project",
+      "repoScope": "Repository",
+      "addTitle": "Add provider key",
+      "repoPlaceholder": "Choose a repository",
+      "unknownRepo": "Unknown repository",
+      "providerId": "Provider ID",
+      "name": "Name",
+      "key": "Key",
+      "add": "Add key",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "newKey": "New key",
+      "rotate": "Rotate",
+      "enable": "Enable",
+      "disable": "Disable",
+      "delete": "Delete",
+      "subtitle": "Keys koda holds for every runner and serves through nax. A key is write-only: after saving, only its last four characters and fingerprint are shown.",
+      "refresh": "Refresh",
+      "empty": "No provider keys stored",
+      "pending": "Approval is pending; the key list has not changed.",
+      "deleteConfirm": "Delete the provider key for {provider}?",
+      "state": { "enabled": "Enabled", "disabled": "Disabled" },
+      "table": {
+        "provider": "Provider", "name": "Name", "last4": "Last 4", "fingerprint": "Fingerprint", "state": "State"
+      },
+      "form": {
+        "providerId": "Provider id",
+        "providerIdPlaceholder": "openrouter",
+        "name": "Name",
+        "namePlaceholder": "Team key",
+        "key": "Key",
+        "keyPlaceholder": "Paste the provider key",
+        "newKey": "New key",
+        "submit": "Add key",
+        "saving": "Saving...",
+        "writeOnly": "The key is stored encrypted and never shown again."
+      },
+      "actions": { "rotate": "Rotate", "enable": "Enable", "disable": "Disable", "delete": "Delete" },
+      "pager": { "info": "Page {current} · {total} keys", "prev": "Previous page", "next": "Next page" },
+      "validation": {
+        "invalid": "Check the provider key fields.",
+        "repoRequired": "Choose a repository.",
+        "providerId": "Use lowercase letters, digits, dots, dashes or underscores (up to 48 characters).",
+        "nameLength": "Enter a name of 1 to 64 characters.",
+        "keyLength": "A key is 16 to 8192 characters.",
+        "keyWhitespace": "A key cannot contain spaces."
+      },
+      "toast": {
+        "created": "Provider key added.",
+        "rotated": "Provider key rotated.",
+        "enabled": "Provider key enabled.",
+        "disabled": "Provider key disabled.",
+        "deleted": "Provider key deleted."
       }
     },
     "runners": {

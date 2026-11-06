@@ -12,6 +12,8 @@ import { PlacementService } from '../jobs/placement.service';
 import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
 import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain';
+import { FleetActivityService } from '../activity/fleet-activity.service';
+import type { ProviderCredentialsService } from '../provider-credentials/provider-credentials.service';
 import type { GitToken } from '../common/protocol';
 import { SyncService } from './sync.service';
 import { parseSyncRequest } from './sync-request.parser';
@@ -29,6 +31,7 @@ function harness() {
   repo.recordRunnerSync.mockResolvedValue({ previousBootId: 'b1' });
   repo.findPendingCommands.mockResolvedValue([]);
   repo.findThreadTokenScope.mockResolvedValue({ kind: 'PROJECT', action: 'SESSION' });
+  repo.findThreadCredentialScope.mockResolvedValue({ projectId: 'p1', repoId: null });
   repo.findProjectRepos.mockResolvedValue([r1]);
   repo.findRepo.mockResolvedValue(repository('anchor'));
   const broker = createMock<GitTokenBroker>();
@@ -47,7 +50,8 @@ function harness() {
   const placement = createMock<PlacementService>();
   const service = new SyncService(repo, createMock(), createMock<CommandAckProcessor>({ process: async () => ({ live: [] }) }),
     placement, createMock(), createMock(), { syncWaitMs: 0 }, broker, fence,
-    createMock(), createMock(), tx, createMock(), createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }));
+    createMock(), createMock(), tx, createMock(), createMock<ChatThreadRepository>({ archivedThreadIds: async () => [] }),
+    createMock<ProviderCredentialsService>(), createMock<FleetActivityService>());
   const sync = (requests: unknown[] = [request], overrides: Record<string, unknown> = {}) => service.sync('runner1', { ...base, ...overrides, tokenRequests: requests });
   return { repo, job, r1, broker, token, fence, placement, sync };
 }

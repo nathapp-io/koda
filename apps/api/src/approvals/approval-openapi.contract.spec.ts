@@ -40,6 +40,13 @@ const gatedOperations = [
   ['post', '/api/projects/{slug}/fleet/jobs/{id}/requeue'],
   ['delete', '/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}'],
   ['post', '/api/fleet/repos'],
+  ['post', '/api/fleet/provider-credentials'],
+  ['patch', '/api/fleet/provider-credentials/{id}'],
+  ['delete', '/api/fleet/provider-credentials/{id}'],
+  // C10 US-005: the project provider key routes are gated writes of the same shape.
+  ['post', '/api/projects/{slug}/provider-credentials'],
+  ['patch', '/api/projects/{slug}/provider-credentials/{id}'],
+  ['delete', '/api/projects/{slug}/provider-credentials/{id}'],
   ['delete', '/api/fleet/repos/{id}'],
   ['post', '/api/fleet/repos/{id}/check'],
   ['patch', '/api/fleet/repos/{id}/auto-review'],
@@ -182,7 +189,7 @@ function operationsWith202(): string[] {
   ).sort();
 }
 
-describe('OpenAPI contract for 134 gated operations', () => {
+describe('OpenAPI contract for 140 gated operations', () => {
   it('AC-1: POST /api/roles has a 202 response', () => {
     expect(openapi.paths['/api/roles']?.post?.responses).toHaveProperty('202');
   });
@@ -263,9 +270,9 @@ describe('OpenAPI contract for 134 gated operations', () => {
     expect(openapi.paths['/api/threads']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-5: 202 responses exist on exactly the 134 gated operations', () => {
+  it('AC-5: 202 responses exist on exactly the 140 gated operations', () => {
     const expected = gatedOperations.map(([method, path]) => `${method} ${path}`).sort();
-    expect(expected).toHaveLength(134);
+    expect(expected).toHaveLength(140);
     expect(operationsWith202()).toEqual(expected);
   });
 });
