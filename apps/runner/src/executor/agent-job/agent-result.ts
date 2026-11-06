@@ -125,6 +125,31 @@ function clipText(value: string, max: number): string {
   return clip(value, max) ?? value;
 }
 
+/**
+ * The API's own string sanitization, applied here first so the fitted result is measured as the server
+ * will store it: `stripNul` in apps/api/src/fleet/sync/sync-request.parser.ts replaces every U+0000 with
+ * U+FFFD (Postgres refuses U+0000). A NUL is one UTF-8 byte here and three there, so a result fitted
+ * before that replacement can outgrow `maxOutputBytes` or `budgetBytes` on the server, which then drops
+ * the whole `agentResult` and keeps only the rest of the snapshot.
+ */
+const NUL_REPLACEMENT = '\uFFFD';
+
+export function apiSafeText(value: string): string {
+  return value.includes('\u0000') ? value.replaceAll('\u0000', NUL_REPLACEMENT) : value;
+}
+
+/** The result as the server will hold it, so every bound below is measured after the replacement. */
+function serverText(result: RawAgentResult): RawAgentResult {
+  return {
+    ...result,
+    output: apiSafeText(result.output),
+    ...(result.model !== undefined ? { model: apiSafeText(result.model) } : {}),
+    deniedAsks: result.deniedAsks.map((ask) => (ask.kind === 'question'
+      ? { kind: 'question' as const, text: apiSafeText(ask.text) }
+      : { kind: 'approval' as const, tool: apiSafeText(ask.tool), summary: apiSafeText(ask.summary) })),
+  };
+}
+
 function fitAsk(ask: RawAgentResult['deniedAsks'][number]): { ask: RawAgentResult['deniedAsks'][number]; clipped: boolean } {
   if (ask.kind === 'question') {
     const text = clipText(ask.text, AGENT_RESULT_LIMITS.maxAskChars);
@@ -136,7 +161,10 @@ function fitAsk(ask: RawAgentResult['deniedAsks'][number]): { ask: RawAgentResul
 }
 
 /** Fit within protocol snapshot limits, preferring the earliest asks and the tail of output. */
-export function fitAgentResult(result: RawAgentResult): AgentJobResult {
+export function fitAgentResult(raw: RawAgentResult): AgentJobResult {
+  // Replace U+0000 first: the API does it before it validates, and fitting the pre-replacement bytes
+  // would let a result that fits here fail its bound there.
+  const result = serverText(raw);
   const cappedAsks = result.deniedAsks.slice(0, AGENT_RESULT_LIMITS.maxDeniedAsks).map(fitAsk);
   let asks = cappedAsks.map(({ ask }) => ask);
   let output = tailBytes(result.output, AGENT_RESULT_LIMITS.maxOutputBytes);

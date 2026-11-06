@@ -6406,7 +6406,7 @@ describeIntegration('fleet AGENT dispatch route (US-004)', () => {
     expect(missingAgent.body.message).toContain('agent required for AGENT');
     for (const [command, reason] of [['REVIEW', 'review is GitHub-only'], ['FIX', 'fix is GitHub-only']] as const) {
       const response = await request(server()).post(base).set(auth(world.tokens.root)).send({
-        repoId: gitlabRepoId, command, feature: `flow-${command.toLowerCase()}`, maxCostUsd: 1,
+        repoId: gitlabRepoId, command, prNumber: 7, maxCostUsd: 1,
       }).expect(422);
       expect(response.body.message).toContain(reason);
     }

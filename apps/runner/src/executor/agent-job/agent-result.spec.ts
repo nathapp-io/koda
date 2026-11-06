@@ -2,7 +2,23 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { AGENT_RESULT_LIMITS } from '@nathapp/fleet-protocol';
 import { AGENT_STDOUT_MAX_BYTES, fitAgentResult, readAgentResult } from './agent-result';
+
+/**
+ * The server's `stripNul` (apps/api/src/fleet/sync/sync-request.parser.ts): Postgres refuses U+0000, so
+ * every payload string and key is written with U+FFFD instead before the result is validated. It is
+ * reproduced here because the runner package cannot import the API, and pinned on the API side by
+ * `sync-request.parser.spec.ts` and by `agent-result.spec.ts` there.
+ */
+function replaceNul(value: unknown): unknown {
+  if (typeof value === 'string') return value.replaceAll('\u0000', '\uFFFD');
+  if (Array.isArray(value)) return value.map(replaceNul);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k.replaceAll('\u0000', '\uFFFD'), replaceNul(v)]));
+  }
+  return value;
+}
 
 const sample = {
   agent: 'spec-reviewer', model: 'acp:claude', status: 'completed' as const, output: 'ok',
@@ -134,5 +150,27 @@ describe('AGENT result', () => {
 
   test('AC-12 omits cost when nax did not price the run', () => {
     expect('costUsd' in fitAgentResult({ ...sample, costUsd: undefined })).toBe(false);
+  });
+
+  test('F3 (B1): a NUL-bearing result survives the sync replacement inside both API limits', () => {
+    // The API replaces U+0000 with U+FFFD in every payload string before it validates the result
+    // (`stripNul` in apps/api/src/fleet/sync/sync-request.parser.ts, pinned by sync-request.parser.spec.ts).
+    // A NUL is one byte here and three there, so a result fitted before that replacement grows past
+    // `maxOutputBytes` or `budgetBytes` on the server and is dropped whole.
+    const output = `${'a'.repeat(8191)}\u0000`;
+    const deniedAsks = [
+      { kind: 'question' as const, text: `q${'\u0000'.repeat(20)}` },
+      { kind: 'approval' as const, tool: `t${'\u0000'}`, summary: `s${'\u0000'.repeat(5)}` },
+    ];
+    const fitted = fitAgentResult({ ...sample, model: `m${'\u0000'}`, output, deniedAsks });
+    // The sync body as JSON, then the API's replacement: exactly what the server validates and stores.
+    const stored = replaceNul(JSON.parse(JSON.stringify(fitted))) as typeof fitted;
+    expect(JSON.stringify(stored)).not.toContain('\\u0000');
+    expect(Buffer.byteLength(stored.output, 'utf8')).toBeLessThanOrEqual(AGENT_RESULT_LIMITS.maxOutputBytes);
+    expect(Buffer.byteLength(JSON.stringify(stored), 'utf8')).toBeLessThanOrEqual(AGENT_RESULT_LIMITS.budgetBytes);
+    // The replacement is not a cut: a whole output inside the bound stays whole and untruncated.
+    const whole = fitAgentResult({ ...sample, output: 'done\u0000' });
+    expect(whole.truncated).toBe(false);
+    expect(whole.output).toBe('done\uFFFD');
   });
 });
