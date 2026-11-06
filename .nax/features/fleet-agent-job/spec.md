@@ -170,14 +170,21 @@ key socket included). The per-job profile carries `agent.modelAliases` when the 
 
 ## Stories
 
-### US-001: AGENT dispatch input
+### US-001: AGENT kind and dispatch shape
 
 Workdir: `apps/api`. No dependencies.
 
-Adds `AGENT` to the API enums and the protocol types, the nested `agent` dispatch object with its bounds, and an
-`AGENT` branch in `normalizeDispatch` that returns `agentInput`.
+Adds `AGENT` to the API enums and the protocol types, the optional nested `agent` dispatch object, and an `AGENT`
+branch in `normalizeDispatch` that returns `agentInput` and refuses the fields `AGENT` does not take.
 
-### US-002: AGENT job persistence
+### US-002: Agent input bounds
+
+Workdir: `apps/api`. Depends on US-001.
+
+`normalizeDispatch` and `DispatchAgentDto` enforce the `agent` bounds: name, model, model aliases (count, keys, nax
+alias-target shape), task length and timeout.
+
+### US-003: AGENT job persistence
 
 Workdir: `apps/api`. Depends on US-001.
 
@@ -185,51 +192,57 @@ New nullable JSON columns `FleetJob.agentInput` and `FleetJob.agentResult` (migr
 `20261127090000_fleet_job_agent`), mapped through guards, written on insert, patched by the mirror, cleared on
 requeue (`agentResult` only) and exposed on `FleetJobDto` as `agent` and `agentResult`.
 
-### US-003: AGENT through the dispatch route
+### US-004: AGENT through the dispatch route
 
-Workdir: `apps/api`. Depends on US-002.
+Workdir: `apps/api`. Depends on US-002, US-003.
 
 `FleetJobsService.dispatch` accepts `AGENT` on GitHub and GitLab repos and stores `agentInput`; `AGENT` joins the
 budget hard stop; the endpoint e2e and the OpenAPI contract cover it; `openapi.json` and the CLI client are
 regenerated.
 
-### US-004: Placement, assign and read-only token for AGENT
+### US-005: Placement, assign and read-only token for AGENT
 
-Workdir: `apps/api`. Depends on US-002.
+Workdir: `apps/api`. Depends on US-003.
 
 Runners report `agentsRun`; an `AGENT` is placed only on a runner with it (misfit `agents_run`, recoverable); the
 assign payload carries `agent`; the sync token grant for an `AGENT` is read-only.
 
-### US-005: AGENT result mirror
+### US-006: AGENT result mirror
 
-Workdir: `apps/api`. Depends on US-002.
+Workdir: `apps/api`. Depends on US-003.
 
 `parseAgentResult` checks the snapshot's `agentResult` against `AGENT_RESULT_LIMITS` and the mirror stores it.
 
-### US-006: Runner accepts AGENT
+### US-007: Runner accepts AGENT
 
-Workdir: `apps/runner`. Depends on US-004.
+Workdir: `apps/runner`. Depends on US-005.
 
 The capability probe reports `agentsRun`; `parseAssign` accepts `AGENT` and re-validates its `agent` block; checkout
 detaches at the ref; re-adopt after a restart treats `AGENT` like `REVIEW`.
 
-### US-007: AGENT spawn
+### US-008: AGENT spawn
 
-Workdir: `apps/runner`. Depends on US-006.
+Workdir: `apps/runner`. Depends on US-007.
 
 The per-job profile carries `agent.modelAliases`; the task is written to `agent-task.md`; `buildNaxArgv` builds the
 `agents run` argv; `HostExecutor.spawn` passes the task file.
 
-### US-008: AGENT verdict and result
+### US-009: AGENT result reader
 
-Workdir: `apps/runner`. Depends on US-007.
+Workdir: `apps/runner`. Depends on US-008.
 
-`readAgentResult` parses `nax.stdout`, `fitAgentResult` applies `AGENT_RESULT_LIMITS` (new runtime constant in
-`packages/fleet-protocol`), and `JobRun.judge` maps the result to a verdict, `agentResult` and `costSpentUsd`.
+`AGENT_RESULT_LIMITS` (new runtime constant in `packages/fleet-protocol`); `readAgentResult` parses `nax.stdout` and
+reads the first `nax.stderr` line on failure; `fitAgentResult` applies the limits and formats the cost.
 
-### US-009: AGENT on the web job page
+### US-010: AGENT verdict
 
-Workdir: `apps/web`. Depends on US-005.
+Workdir: `apps/runner`. Depends on US-009.
+
+`JobRun.judge` maps an `AGENT` job's result to a verdict, the snapshot's `agentResult` and `costSpentUsd`.
+
+### US-011: AGENT on the web job page
+
+Workdir: `apps/web`. Depends on US-006.
 
 The web types know `AGENT`, `agent` and `agentResult`; en and zh label the command and the `agents_run` misfit; the
 job page shows `FleetJobAgentResult` for an `AGENT` job.
@@ -245,20 +258,26 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 **US-002**
 
+- `apps/api/src/fleet/jobs/dispatch-input.ts` — the `AGENT` branch from US-001
+- `apps/api/src/fleet/common/agent-jobs.ts` — created by US-001; this story adds the bound constants and `isModelAliasTarget`
+- `apps/api/src/fleet/jobs/dto/dispatch-agent.dto.ts` — created by US-001; this story adds its validators
+
+**US-003**
+
 - `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` — insert, `toJob` and the patch writer
 - `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` — record and patch types
 - `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` — `FleetJobDto.from`
 - `apps/api/test/integration/fleet/thread-modes-migration.integration.spec.ts` — migration test pattern
 - `apps/api/src/fleet/common/agent-jobs.ts` — created by US-001, read here
 
-**US-003**
+**US-004**
 
 - `apps/api/src/fleet/jobs/fleet-jobs.service.ts` — dispatch
 - `apps/api/src/fleet/budgets/prisma-budget.repository.ts` — `BUDGET_STOP_COMMANDS`
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — the endpoint e2e file
 - `apps/api/src/fleet/fleet-openapi.contract.spec.ts` — the OpenAPI contract test
 
-**US-004**
+**US-005**
 
 - `apps/api/src/fleet/jobs/placement-rules.ts` — `capabilityMisfit`, `MisfitReason`
 - `apps/api/src/fleet/common/capabilities-core.ts` — the capability validator
@@ -266,33 +285,37 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/sync/sync.service.ts` — the token grant
 - `apps/api/src/fleet/dashboard/dashboard.types.ts` — misfit reason list
 
-**US-005**
+**US-006**
 
 - `apps/api/src/fleet/sync/event-payloads.ts` — `mirror`
 - `apps/api/src/fleet/repo-config/config-result.ts` — the `parseConfigResult` precedent
 - `apps/api/src/fleet/common/agent-jobs.ts` — created by US-001; this story adds `AGENT_RESULT_LIMITS` to it (same values as the protocol constant)
 
-**US-006**
+**US-007**
 
 - `apps/runner/src/capabilities/nax-probe.ts` — the probe and `botFix` precedent
 - `apps/runner/src/supervisor/assign-parser.ts` — `parseAssign`
 - `apps/runner/src/executor/checkout.ts` — `prepareCheckout`
 - `apps/runner/src/supervisor/supervisor.ts` — re-adopt
 
-**US-007**
+**US-008**
 
 - `apps/runner/src/executor/job-profile.ts` — the per-job profile
 - `apps/runner/src/executor/nax-process.ts` — `buildNaxArgv`
 - `apps/runner/src/executor/host-executor.ts` — `spawn` and prepare
 
-**US-008**
+**US-009**
 
-- `apps/runner/src/supervisor/job-run.ts` — `judge`
 - `apps/runner/src/executor/config-job/result-fit.ts` — the tail-fit precedent
 - `apps/runner/src/watcher/status-snapshot.ts` — `formatCost`
 - `packages/fleet-protocol/src/config-jobs.ts` — protocol constants precedent
 
-**US-009**
+**US-010**
+
+- `apps/runner/src/supervisor/job-run.ts` — `judge`
+- `apps/runner/src/executor/agent-job/agent-result.ts` — created by US-009, read here
+
+**US-011**
 
 - `apps/web/lib/fleet-types.ts` — web types
 - `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` — the job page
@@ -302,28 +325,28 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 **US-001**
 
-- `apps/api/src/fleet/common/agent-jobs.ts` — `AGENT_NAME_RE`, `AGENT_MODEL_RE`, `MODEL_ALIAS_KEY_RE`, `isModelAliasTarget`, `AGENT_TASK_MAX_CHARS`, `AGENT_MAX_ALIASES`, `AGENT_TIMEOUT_SEC`, types `AgentJobInput` and `AgentJobResult`
+- `apps/api/src/fleet/common/agent-jobs.ts` — `AGENT_NAME_RE`, types `AgentJobInput` and `AgentJobResult`
 - `apps/api/src/fleet/jobs/dto/dispatch-agent.dto.ts` — `DispatchAgentDto`
 
-**US-002**
+**US-003**
 
 - `apps/api/prisma/migrations/20261127090000_fleet_job_agent/migration.sql`
 - `apps/api/test/integration/fleet/fleet-job-agent-migration.integration.spec.ts`
 
-**US-005**
+**US-006**
 
 - `apps/api/src/fleet/sync/agent-result.ts` — `parseAgentResult`
 
-**US-007**
+**US-008**
 
 - `apps/runner/src/executor/agent-job/agent-task-file.ts` — `writeAgentTask`
 
-**US-008**
+**US-009**
 
 - `packages/fleet-protocol/src/agent-jobs.ts` — `AGENT_RESULT_LIMITS`
 - `apps/runner/src/executor/agent-job/agent-result.ts` — `readAgentResult`, `fitAgentResult`
 
-**US-009**
+**US-011**
 
 - `apps/web/components/fleet/FleetJobAgentResult.vue`
 
@@ -341,6 +364,10 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 **US-002**
 
+- `apps/api/src/fleet/jobs/dispatch-input.ts` — the `AGENT` branch checks name, model and model aliases.
+
+**US-003**
+
 - `apps/api/prisma/schema.prisma` — `FleetJob` gains `agentInput Json?` and `agentResult Json?`.
 - `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` — `FleetJobRecord` gains `agentInput` and `agentResult`; `agentResult` joins the mutable patch keys.
 - `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` — insert writes `agentInput`; `toJob` maps both columns; the patch writer handles `agentResult` (null as `Prisma.DbNull`).
@@ -349,7 +376,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/jobs/fleet-jobs.service.spec.ts` — exact expectations on the requeue reset patch gain `agentResult: null`.
 - `apps/api/src/fleet/jobs/dto/fleet-job.dto.spec.ts` — exact `FleetJobDto.from` expectations gain `agent: null` and `agentResult: null`.
 
-**US-003**
+**US-004**
 
 - `apps/api/src/fleet/jobs/fleet-jobs.service.ts` — `dispatch` stores `agentInput` for `AGENT`.
 - `apps/api/src/fleet/budgets/prisma-budget.repository.ts` — `BUDGET_STOP_COMMANDS` gains `AGENT`.
@@ -358,7 +385,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `openapi.json` — regenerated with `bun run generate` from the repo root.
 - `apps/cli/src/generated/types.gen.ts` — regenerated with `bun run generate`; never edited by hand.
 
-**US-004**
+**US-005**
 
 - `apps/api/src/fleet/jobs/placement-rules.ts` — `MisfitReason` and `capabilityMisfit` gain `agents_run`.
 - `apps/api/src/fleet/common/capabilities-core.ts` — the validator accepts and copies `agentsRun`.
@@ -367,29 +394,32 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/dashboard/dashboard.types.ts` — the misfit reason list gains `agents_run`; a closed-world assertion on the list gains it.
 - `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` — the misfit enum gains `agents_run`.
 
-**US-005**
+**US-006**
 
 - `apps/api/src/fleet/sync/event-payloads.ts` — `mirror` adds `agentResult`.
 
-**US-006**
+**US-007**
 
 - `apps/runner/src/capabilities/nax-probe.ts` — adds `agentsRun` to the probe result.
 - `apps/runner/src/supervisor/assign-parser.ts` — accepts `AGENT` and its `agent` block.
 - `apps/runner/src/executor/checkout.ts` — `AGENT` detaches at the ref.
 - `apps/runner/src/supervisor/supervisor.ts` — re-adopt treats `AGENT` like `REVIEW`.
 
-**US-007**
+**US-008**
 
 - `apps/runner/src/executor/job-profile.ts` — both functions gain the optional `modelAliases` parameter.
 - `apps/runner/src/executor/nax-process.ts` — `buildNaxArgv` gains the `AGENT` branch and `opts.agentTaskPath`.
 - `apps/runner/src/executor/host-executor.ts` — prepare passes `modelAliases` to `writeJobProfile`; `spawn` writes the task file and passes `agentTaskPath`.
 
-**US-008**
+**US-009**
 
 - `packages/fleet-protocol/src/index.ts` — re-exports `AGENT_RESULT_LIMITS` from the new protocol agent-jobs module.
+
+**US-010**
+
 - `apps/runner/src/supervisor/job-run.ts` — `judge` gains the `AGENT` branch.
 
-**US-009**
+**US-011**
 
 - `apps/web/lib/fleet-types.ts` — `FleetJobKind` gains `'AGENT'`; `FleetJobDto` gains `agent` and `agentResult`.
 - `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` — renders `FleetJobAgentResult` for an `AGENT` job.
@@ -398,16 +428,16 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 
 ### Seams
 
-- US-003 -> US-001: the dispatch route stores what `normalizeDispatch` returns as `agentInput`.
-- US-004 -> US-002: `buildAssignPayload` reads `FleetJobRecord.agentInput`.
-- US-005 -> US-002: the mirror's `agentResult` is written by the US-002 patch writer.
-- US-007 -> US-006: `HostExecutor.spawn` reads the `agent` block `parseAssign` validated.
-- US-008 -> US-007: `judge` reads the `nax.stdout` the `AGENT` spawn produced.
-- US-009 -> US-002: the web reads `FleetJobDto.agent` and `agentResult`.
+- US-004 -> US-001: the dispatch route stores what `normalizeDispatch` returns as `agentInput`.
+- US-005 -> US-003: `buildAssignPayload` reads `FleetJobRecord.agentInput`.
+- US-006 -> US-003: the mirror's `agentResult` is written by the US-003 patch writer.
+- US-008 -> US-007: `HostExecutor.spawn` reads the `agent` block `parseAssign` validated.
+- US-010 -> US-009: `judge` calls `readAgentResult` and `fitAgentResult`.
+- US-011 -> US-003: the web reads `FleetJobDto.agent` and `agentResult`.
 
 ## Acceptance Criteria
 
-### US-001: AGENT dispatch input
+### US-001: AGENT kind and dispatch shape
 
 - [unit] `FleetJobKind.AGENT` equals the string `'AGENT'`.
 - [unit] `normalizeDispatch` with command `AGENT`, feature `flow-a`, no `ref`, and `agent` `{ name: 'spec-reviewer', task: 'Review the spec' }` on a repo whose default branch is `main` returns command `AGENT`, ref `main`, and `agentInput` `{ name: 'spec-reviewer', task: 'Review the spec' }` with no other keys.
@@ -415,29 +445,41 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] `normalizeDispatch` with command `RUN` returns `agentInput` null.
 - [unit] `normalizeDispatch` with command `AGENT` and no `agent` throws `ValidationAppException` with reason `agent required for AGENT`.
 - [unit] `normalizeDispatch` with command `PLAN` carrying an `agent` object throws `ValidationAppException` with reason `agent is only for AGENT`.
-- [unit] For each `agent.name` in `-x`, `a b` and a 129-character name, `normalizeDispatch` with command `AGENT` throws `ValidationAppException` with reason `agent.name`; the name `plugin:spec-reviewer` is accepted.
-- [unit] `normalizeDispatch` with command `AGENT` and `agent.model` `fast model` (holding a space) throws `ValidationAppException` with reason `agent.model`; `agent.model` `acp:claude` is accepted and kept.
-- [unit] `normalizeDispatch` with command `AGENT` and `agent.modelAliases` `{ reviewer: 'not-a-model' }` throws `ValidationAppException` with reason `agent.modelAliases`; the values `acp:claude`, `acp:codex/gpt-5.4` and `openai/gpt-5.4[high]` are each accepted.
-- [unit] `normalizeDispatch` with command `AGENT` and `agent.modelAliases` holding nine entries throws `ValidationAppException` with reason `agent.modelAliases`.
 - [unit] `normalizeDispatch` with command `AGENT` and `bashMode` `gated` throws `ValidationAppException` with reason `bashMode must be raw for AGENT`.
 - [unit] `normalizeDispatch` with command `AGENT` and `ticketRefs` `['KD-1']` throws `ValidationAppException` with reason `ticketRefs is not for AGENT`.
 - [unit] `normalizeDispatch` with command `AGENT` and a `planFrom` throws `ValidationAppException` with reason `planFrom is only for PLAN`.
-- [unit] Validating a `DispatchFleetJobDto` with command `AGENT` and `agent.task` of 32,769 characters yields a validation error on `agent.task`, and an empty `agent.task` yields one too.
-- [unit] Validating a `DispatchFleetJobDto` with `agent.timeoutSec` 59, 86,401 or 60.5 yields a validation error on `agent.timeoutSec`; 60 and 86,400 validate.
+- [unit] `normalizeDispatch` with command `AGENT` and a `prNumber` throws `ValidationAppException` with reason `prNumber is only for REVIEW and FIX`.
+- [unit] Validating a `DispatchFleetJobDto` with command `AGENT` and `agent` `{ name: 'spec-reviewer', task: 'Review' }` yields no validation errors.
 
-### US-002: AGENT job persistence
+### US-002: Agent input bounds
+
+- [unit] For each `agent.name` in the table `-x`, `a b`, `../x` and a 129-character name, `normalizeDispatch` with command `AGENT` throws `ValidationAppException` with reason `agent.name`.
+- [unit] `normalizeDispatch` with command `AGENT` accepts `agent.name` `plugin:spec-reviewer` and keeps it.
+- [unit] For each `agent.model` in the table `fast model` (holding a space), the empty string and a 201-character string, `normalizeDispatch` with command `AGENT` throws `ValidationAppException` with reason `agent.model`.
+- [unit] `normalizeDispatch` with command `AGENT` accepts `agent.model` `acp:claude` and keeps it.
+- [unit] For each `agent.modelAliases` value in the table `not-a-model`, `acp:bogus`, `openai/gpt 5` and `acp:claude [high]`, `normalizeDispatch` with command `AGENT` throws `ValidationAppException` with reason `agent.modelAliases`.
+- [unit] For each `agent.modelAliases` value in the table `acp:claude`, `acp:codex/gpt-5.4`, `openai/gpt-5.4[high]` and `opencode-go/deepseek-v4.1-flash`, `normalizeDispatch` with command `AGENT` accepts the alias and keeps it.
+- [unit] `normalizeDispatch` with command `AGENT` and an `agent.modelAliases` key `-bad` throws `ValidationAppException` with reason `agent.modelAliases`.
+- [unit] `normalizeDispatch` with command `AGENT` and `agent.modelAliases` holding nine entries throws `ValidationAppException` with reason `agent.modelAliases`; eight entries are accepted.
+- [unit] For each `agent.task` in the table the empty string and a 32,769-character string, validating a `DispatchFleetJobDto` with command `AGENT` yields a validation error on `agent.task`.
+- [unit] Validating a `DispatchFleetJobDto` with command `AGENT` and an `agent.task` of exactly 32,768 characters yields no validation error.
+- [unit] For each `agent.timeoutSec` in the table 59, 86,401 and 60.5, validating a `DispatchFleetJobDto` with command `AGENT` yields a validation error on `agent.timeoutSec`.
+- [unit] Validating a `DispatchFleetJobDto` with command `AGENT` and `agent.timeoutSec` 60, and again with 86,400, yields no validation error.
+
+### US-003: AGENT job persistence
 
 - [integration] Inserting a `NewFleetJob` with command `AGENT` and `agentInput` `{ name: 'spec-reviewer', task: 'x' }` through the fleet job repository and reading it back by id returns the same `agentInput` and `agentResult` null.
 - [integration] Inserting a `RUN` job returns a record with `agentInput` null and `agentResult` null.
 - [integration] Updating an `AGENT` job with patch `agentResult` `{ status: 'completed', output: 'done', truncated: false, deniedAsks: [], deniedAsksTruncated: false, costUsd: '0.0123' }` and reading it back returns that `agentResult`.
 - [integration] Updating a job that has an `agentResult` with patch `agentResult: null` reads back `agentResult` null.
-- [unit] The repository's `agentResult` mapping returns null for a stored value whose `status` is `weird`, and the `agentInput` mapping returns null for a stored value with no `task`.
+- [unit] The repository's `agentResult` mapping returns null for a stored value whose `status` is `weird`.
+- [unit] The repository's `agentInput` mapping returns null for a stored value with no `task`.
 - [unit] `FleetJobDto.from` of an `AGENT` record returns `agent` equal to the record's `agentInput` and `agentResult` equal to the record's `agentResult`.
 - [unit] `FleetJobDto.from` of a `RUN` record returns `agent` null and `agentResult` null.
 - [integration] Requeueing a `FAILED` `AGENT` job that has an `agentResult` leaves the new attempt with `agentResult` null and the same `agentInput`.
 - [integration] Applying migration `20261127090000_fleet_job_agent` over the preceding schema leaves an existing `FleetJob` row with `agentInput` and `agentResult` null.
 
-### US-003: AGENT through the dispatch route
+### US-004: AGENT through the dispatch route
 
 - [integration] `POST /api/projects/:slug/fleet/jobs` by a user holding `fleet.job.dispatch` with command `AGENT`, feature `flow-a`, `maxCostUsd` 1 and `agent` `{ name: 'spec-reviewer', task: 'Review' }` on a GitHub repo returns 201 with command `AGENT`, state `QUEUED`, `agent` equal to the sent object and `agentResult` null.
 - [integration] The same request on a GitLab repo returns 201 (no `ReviewProviderException`).
@@ -448,7 +490,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [integration] A budget hard stop on the job's project cancels a `QUEUED` `AGENT` job in that scope.
 - [unit] The exported OpenAPI document lists `AGENT` in the dispatch body's `command` enum and describes an `agent` object with `name` and `task` required.
 
-### US-004: Placement, assign and read-only token for AGENT
+### US-005: Placement, assign and read-only token for AGENT
 
 - [unit] The capability validator keeps `agentsRun: true` from a runner's capabilities and drops the key when it is absent.
 - [unit] The capability validator rejects `agentsRun: false` with field `agentsRun`.
@@ -459,68 +501,73 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] `buildAssignPayload` for a `RUN` record returns no `agent` key.
 - [integration] A runner sync with a git token request for an `ASSIGNED` `AGENT` job calls `GitTokenBroker.mint` once with `readOnly: true` for the job's repo.
 - [integration] The same sync for an assigned `RUN` job calls `GitTokenBroker.mint` without `readOnly: true`.
-- [unit] The fleet dashboard's misfit reason list and the `FleetJobDto` misfit enum both contain `agents_run`.
+- [unit] The fleet dashboard's misfit reason list and the `FleetJobDto` misfit enum both include `agents_run`.
 
-### US-005: AGENT result mirror
+### US-006: AGENT result mirror
 
 - [unit] `parseAgentResult` of `{ status: 'completed', model: 'acp:claude', output: 'ok', truncated: false, deniedAsks: [{ kind: 'question', text: 'Which?' }], deniedAsksTruncated: false, costUsd: '0.0100' }` returns an equal object.
 - [unit] `parseAgentResult` of a result with no `costUsd` returns a result with no `costUsd`.
 - [unit] `parseAgentResult` returns null when `status` is not one of `completed`, `failed`, `cancelled`, `timeout`.
 - [unit] `parseAgentResult` returns null when `output` exceeds 65,536 UTF-8 bytes.
-- [unit] `parseAgentResult` returns null when `deniedAsks` holds 21 entries, or an entry whose `kind` is neither `approval` nor `question`.
+- [unit] For each `deniedAsks` in the table 21 entries, and one entry whose `kind` is `other`, `parseAgentResult` returns null.
 - [unit] `parseAgentResult` returns null when an approval ask's `summary` exceeds 1,000 characters.
-- [unit] `parseAgentResult` returns null when `costUsd` is `1.23456` or `-1`.
+- [unit] For each `costUsd` in the table `1.23456` and `-1`, `parseAgentResult` returns null.
 - [unit] `interpretEvent('snapshot', { agentResult: <valid result> })` returns a patch whose `agentResult` equals the parsed result.
 - [unit] `interpretEvent('snapshot', { agentResult: { status: 'weird' }, costSpentUsd: '0.5000' })` returns a patch with no `agentResult` key and `costSpentUsd` `0.5000`.
 - [integration] A runner sync carrying a snapshot event with a valid `agentResult` for a held `AGENT` job stores it, and `GET /api/projects/:slug/fleet/jobs/:id` returns it.
 
-### US-006: Runner accepts AGENT
+### US-007: Runner accepts AGENT
 
 - [unit] `NaxCapabilityProbe.probe` reports `agentsRun: true` when the stubbed `nax agents run --help` exits 0 with output mentioning `--task-file`.
-- [unit] `NaxCapabilityProbe.probe` reports no `agentsRun` key when `nax agents run --help` exits 1, and when it exits 0 without `--task-file` in its output.
+- [unit] For each stubbed `nax agents run --help` in the table exit 1, and exit 0 without `--task-file` in its output, `NaxCapabilityProbe.probe` reports no `agentsRun` key.
 - [unit] `parseAssign` of an `AGENT` assign with `agent` `{ name: 'spec-reviewer', task: 'Review' }` returns ok with `assign.agent` equal to that object.
 - [unit] `parseAssign` of an `AGENT` assign with no `agent` block returns `{ ok: false, detail: 'agent' }`.
-- [unit] `parseAssign` of an `AGENT` assign whose `agent.name` is `../x` returns `{ ok: false, detail: 'agent' }`.
-- [unit] `parseAssign` of an `AGENT` assign whose `agent.task` is 32,769 characters returns `{ ok: false, detail: 'agent' }`.
-- [unit] `parseAssign` of an `AGENT` assign whose `agent.modelAliases` holds a value with a space returns `{ ok: false, detail: 'agent' }`.
-- [unit] `parseAssign` of an `AGENT` assign whose `agent.timeoutSec` is 59 returns `{ ok: false, detail: 'agent' }`.
+- [unit] For each `agent` in the table name `../x`, a 32,769-character task, a `modelAliases` value holding a space, and `timeoutSec` 59, `parseAssign` of an `AGENT` assign returns `{ ok: false, detail: 'agent' }`.
 - [unit] `parseAssign` of a `RUN` assign carrying an `agent` block returns ok and drops `agent` from the parsed assign.
 - [unit] `prepareCheckout` for an `AGENT` assign at ref `main` checks out the ref's sha detached and returns `{ ok: true, branch: null, refSha }` without reading any `prd.json`.
 - [unit] `prepareCheckout` for an `AGENT` assign whose ref does not resolve returns `{ ok: false, reason: 'checkout: ref not found' }`.
-- [unit] After a daemon restart, the supervisor re-adopts an `AGENT` row whose recorded process is alive and matches as `watch`, and one whose process is gone as `finish`.
+- [unit] After a daemon restart, the supervisor re-adopts an `AGENT` row whose recorded process is alive and matches as `watch`.
+- [unit] After a daemon restart, the supervisor re-adopts an `AGENT` row whose recorded process is gone as `finish`.
 
-### US-007: AGENT spawn
+### US-008: AGENT spawn
 
 - [unit] `jobProfileContent` with `modelAliases` `{ reviewer: 'acp:claude' }` returns a profile whose `agent.modelAliases` equals that object.
-- [unit] `jobProfileContent` with no `modelAliases`, and with an empty object, returns a profile with no `agent` key.
+- [unit] For each `modelAliases` in the table absent and `{}`, `jobProfileContent` returns a profile with no `agent` key.
 - [unit] `writeAgentTask(jobDir, 'Review the spec')` writes `agent-task.md` in `jobDir` holding exactly that text with file mode 0600, and returns its path.
 - [unit] `buildNaxArgv(['nax'], <AGENT assign with agent { name: 'spec-reviewer', task: 'x' }, profiles ['p1'], jobId 'j1'>, { agentTaskPath: '/jobs/j1/agent-task.md' })` returns `['nax', 'agents', 'run', 'spec-reviewer', '--task-file', '/jobs/j1/agent-task.md', '--json', '--profile', 'p1,koda-job-j1']`.
 - [unit] `buildNaxArgv` for an `AGENT` assign with `model` `reviewer` and `timeoutSec` 600 appends `--model reviewer --timeout 600` after the profile chain.
-- [unit] `buildNaxArgv` for an `AGENT` assign never includes `--max-cost`.
+- [unit] `buildNaxArgv` for an `AGENT` assign with `maxCostUsd` `5` returns an argv with no `--max-cost`.
 - [unit] `buildNaxArgv` for an `AGENT` assign with no `agentTaskPath` throws an `Error`.
-- [unit] `HostExecutor.spawn` of an `AGENT` job writes the task file into the job directory and calls `spawnNax` with the `agents run` argv carrying that file's path, the clone directory as `cwd`, and the same provider-key socket variable it gives a `RUN`.
+- [unit] `HostExecutor.spawn` of an `AGENT` job writes the task file into the job directory and calls `spawnNax` with the `agents run` argv carrying that file's path, the clone directory as `cwd`, and the provider-key socket variable it gives a `RUN`.
 - [unit] Preparing an `AGENT` job whose `agent.modelAliases` is `{ reviewer: 'acp:claude' }` writes the `koda-job-<jobId>` profile with that `agent.modelAliases`.
 - [unit] Preparing a `REVIEW` job writes the `koda-job-<jobId>` profile with no `agent` key.
 
-### US-008: AGENT verdict and result
+### US-009: AGENT result reader
 
 - [unit] `AGENT_RESULT_LIMITS` from `@nathapp/fleet-protocol` equals `{ maxOutputBytes: 65536, maxDeniedAsks: 20, maxAskChars: 1000, maxModelChars: 200 }`.
 - [unit] `readAgentResult(jobDir)` with `nax.stdout` holding `{"agent":"spec-reviewer","model":"acp:claude","status":"completed","output":"ok","deniedAsks":[],"costUsd":0.0123}` returns `{ ok: true }` with that parsed result.
-- [unit] `readAgentResult` with an empty `nax.stdout` returns `{ ok: false }` carrying the first non-empty line of `nax.stderr`.
-- [unit] `readAgentResult` with `nax.stdout` that is not JSON, or JSON whose `status` is `weird`, returns `{ ok: false }`.
-- [unit] `fitAgentResult` of a result whose output is 70,000 bytes returns `output` equal to its last 65,536 bytes and `truncated: true`; a short output gives `truncated: false`.
+- [unit] `readAgentResult` with an empty `nax.stdout` and `nax.stderr` `\nerror: unknown agent x\nmore` returns `{ ok: false, stderrLine: 'error: unknown agent x' }`.
+- [unit] For each `nax.stdout` in the table `not json` and `{"status":"weird"}`, `readAgentResult` returns `{ ok: false }`.
+- [unit] `readAgentResult` cuts a first `nax.stderr` line of 500 characters to 300 characters.
+- [unit] `fitAgentResult` of a result whose output is 70,000 bytes returns `output` equal to its last 65,536 bytes and `truncated: true`.
+- [unit] `fitAgentResult` of a result whose output is 10 bytes returns that output and `truncated: false`.
 - [unit] `fitAgentResult` of a result with 25 denied asks keeps the first 20 and sets `deniedAsksTruncated: true`.
 - [unit] `fitAgentResult` cuts a denied question's `text` of 1,500 characters to 1,000 characters.
-- [unit] `fitAgentResult` of a result with `costUsd` 0.0123 returns `costUsd` `0.0123`, and of a result with no `costUsd` returns no `costUsd`.
+- [unit] `fitAgentResult` of a result with `costUsd` 0.0123 returns `costUsd` `0.0123`.
+- [unit] `fitAgentResult` of a result with no `costUsd` returns no `costUsd`.
+
+### US-010: AGENT verdict
+
 - [unit] `JobRun.judge` for an `AGENT` job whose result status is `completed` returns verdict `COMPLETED` and a snapshot carrying the fitted `agentResult` and `costSpentUsd` `0.0123`.
 - [unit] `JobRun.judge` for an `AGENT` job whose result status is `timeout` returns verdict `FAILED` with reason `agent timeout` and still carries `agentResult`.
 - [unit] `JobRun.judge` for an `AGENT` job whose result status is `failed` returns verdict `FAILED` with reason `agent failed`.
 - [unit] `JobRun.judge` for an `AGENT` job whose result status is `cancelled` and no cancel request returns verdict `FAILED` with reason `agent cancelled`.
-- [unit] `JobRun.judge` for an `AGENT` job with no readable result and `nax.stderr` first line `error: unknown agent spec-reviewer` returns `FAILED` with reason `agent result unreadable: error: unknown agent spec-reviewer` and no `agentResult`.
-- [unit] `JobRun.judge` for an `AGENT` job with no readable result and an empty `nax.stderr` returns `FAILED` with reason `agent result unreadable`.
+- [unit] `JobRun.judge` for an `AGENT` job whose result has no `costUsd` returns a snapshot with no `costSpentUsd`.
+- [unit] `JobRun.judge` for an `AGENT` job with no readable result and stderr line `error: unknown agent spec-reviewer` returns `FAILED` with reason `agent result unreadable: error: unknown agent spec-reviewer` and no `agentResult`.
+- [unit] `JobRun.judge` for an `AGENT` job with no readable result and no stderr line returns `FAILED` with reason `agent result unreadable`.
 - [unit] `JobRun.judge` for an `AGENT` job with a cancel request returns verdict `CANCELLED`.
 
-### US-009: AGENT on the web job page
+### US-011: AGENT on the web job page
 
 - [unit] The job page for an `AGENT` job renders `FleetJobAgentResult` with the job's `agentResult`.
 - [unit] The job page for a `RUN` job does not render `FleetJobAgentResult`.
@@ -530,4 +577,5 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - [unit] `FleetJobAgentResult` with one denied approval `{ tool: 'Bash', summary: 'rm -rf x' }` and one denied question `{ text: 'Which?' }` lists both entries.
 - [unit] `FleetJobAgentResult` with no `costUsd` shows the `fleet.agentResult.costUnknown` notice.
 - [unit] `FleetJobAgentResult` with a null `agentResult` shows the `fleet.agentResult.pending` notice.
-- [unit] The English label for command `AGENT` is `Agent task` and the English `agents_run` misfit label is `nax on this runner cannot run agent tasks`; the Chinese locale has both keys.
+- [unit] The English label for command `AGENT` is `Agent task` and the English `agents_run` misfit label is `nax on this runner cannot run agent tasks`.
+- [unit] The Chinese locale defines `fleet.command.AGENT` and the `agents_run` misfit label.
