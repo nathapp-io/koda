@@ -22,6 +22,17 @@ function setup() {
 }
 
 describe('FlowRouteCommands', () => {
+  it('F4: JSON-persisted parser output reparses and deferred execution creates the flow', async () => {
+    const { command: registeredCommand, flows } = setup();
+    const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
+    const first = command.parse({ projectId: 'project-1', threadId: 'thread-1', body: { features: [{ feature: 'flow-x', specPath: '.nax/features/flow-x/spec.md' }], roles: { reviewer: 'reviewer', supervisor: 'supervisor' }, costCapUsd: 25 } });
+    const persisted = JSON.parse(JSON.stringify(first)) as unknown;
+    const reparsed = command.parse(persisted);
+    expect(reparsed).toEqual(first);
+    await command.execute(reparsed);
+    expect(flows.create).toHaveBeenCalledOnce();
+  });
+
   it('AC-10: validates thread create body before execution can open an approval', async () => {
     const { command: registeredCommand, flows } = setup();
     const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
@@ -35,7 +46,7 @@ describe('FlowRouteCommands', () => {
     const create = flows.create;
     const command = registeredCommand(THREAD_FLOW_CREATE_VARIANT);
     const routeInput = { projectId: 'project-1', threadId: 'thread-1', body: parsed };
-    expect(command.parse(routeInput)).toEqual({ projectId: 'project-1', threadId: 'thread-1', flow: parsed });
+    expect(command.parse(routeInput)).toEqual({ projectId: 'project-1', threadId: 'thread-1', body: parsed });
     await command.execute(command.parse(routeInput));
     expect(create).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledWith({ entry: 'THREAD', threadId: 'thread-1', ...parsed }, { type: 'USER', id: user.id }, { projectId: 'project-1' });

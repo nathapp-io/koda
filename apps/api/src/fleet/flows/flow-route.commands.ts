@@ -17,7 +17,7 @@ export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
   clear: 'rest:fleet-thread-preapproval.clear',
 } as const;
 
-interface ThreadFlowCreateInput { projectId: string; threadId: string; flow: NormalizedFlowInput }
+interface ThreadFlowCreateInput { projectId: string; threadId: string; body: NormalizedFlowInput }
 interface SetPreApprovalInput { projectId: string; threadId: string; costCapUsd: string }
 interface ClearPreApprovalInput { projectId: string; threadId: string }
 
@@ -37,13 +37,13 @@ export class FlowRouteCommands implements OnModuleInit {
         const route = parseRouteInput(input, ['projectId', 'threadId']);
         if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ValidationAppException({}, 'approvals.invalidInput');
         const body = (input as Record<string, unknown>).body;
-        return { projectId: route.projectId, threadId: route.threadId, flow: parseFlowInput(body, 'THREAD') };
+        return { projectId: route.projectId, threadId: route.threadId, body: parseFlowInput(body, 'THREAD') };
       },
       run: async (principal, input) => {
         const creator: FlowCreator = principal.actorType === 'user'
           ? { type: 'USER', id: principal.id }
           : { type: 'AGENT', id: principal.id };
-        return this.flows.create({ entry: 'THREAD', threadId: input.threadId, ...input.flow }, creator, { projectId: input.projectId });
+        return this.flows.create({ entry: 'THREAD', threadId: input.threadId, ...input.body }, creator, { projectId: input.projectId });
       },
     }, this.loader));
     this.registry.register(routeCommand<SetPreApprovalInput, ThreadPreApproval>({
