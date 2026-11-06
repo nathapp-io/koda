@@ -3,7 +3,7 @@
   "feature": "fleet-flow-record",
   "branchName": "feat/fleet-flow-record",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T08:01:59.696Z",
+  "updatedAt": "2026-11-06T08:23:09.292Z",
   "userStories": [
     {
       "id": "US-001",
@@ -787,14 +787,17 @@
       "dependencies": [
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two authorization surfaces and gated terminal mutation require isolation against project disclosure and late-approval races; strict security TDD covers HTTP, audit and request cancellation."
+        "reasoning": "Two authorization surfaces and gated terminal mutation require isolation against project disclosure and late-approval races; strict security TDD covers HTTP, audit and request cancellation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.controller.ts",
@@ -829,7 +832,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "68a4309cdea78d2ab8b7cd6b4fb2603588db7f71"
     },
     {
       "id": "US-012",
