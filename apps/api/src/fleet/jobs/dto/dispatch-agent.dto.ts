@@ -13,7 +13,7 @@ class AgentModelAliasesValidator implements ValidatorConstraintInterface {
 }
 
 export class DispatchAgentDto {
-  @ApiProperty({ pattern: AGENT_NAME_RE.source, maxLength: 128 }) @IsString() @Matches(AGENT_NAME_RE) @Matches(/^(?!.*\.\.).*$/) declare name: string;
+  @ApiProperty({ pattern: `^(?!.*\\.\\.)${AGENT_NAME_RE.source.slice(1)}`, maxLength: 128 }) @IsString() @Matches(AGENT_NAME_RE) @Matches(/^(?!.*\.\.).*$/) declare name: string;
   @ApiProperty({ minLength: 1, maxLength: AGENT_TASK_MAX_LENGTH }) @IsString() @Length(1, AGENT_TASK_MAX_LENGTH) @Matches(/\S/) declare task: string;
   @ApiPropertyOptional({ maxLength: AGENT_MODEL_MAX_LENGTH }) @IsOptional() @IsString() @Length(1, AGENT_MODEL_MAX_LENGTH) @Matches(/\S/) model?: string;
   @ApiPropertyOptional({ type: Object, maxProperties: AGENT_MODEL_ALIAS_MAX_ENTRIES }) @IsOptional() @IsObject() @Validate(AgentModelAliasesValidator) modelAliases?: Record<string, string>;
