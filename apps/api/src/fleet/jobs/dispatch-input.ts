@@ -3,6 +3,7 @@ import { PROFILE_NAME_RE } from '../common/capabilities';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
 import { REVIEW_FEATURE_PREFIX, reviewFeature } from '../common/review-jobs';
 import type { BashMode } from '../common/protocol';
+import type { AgentJobInput } from '../common/agent-jobs';
 import type { NewFleetJob } from './domain/fleet-job.domain';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 
@@ -25,6 +26,11 @@ function checkPlanFrom(path: string): string {
 
 /** Spec §5.1 checks the DTO decorators cannot express; returns the insertable fields. */
 export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: string): Omit<NewFleetJob, 'projectId' | 'requestedById'> {
+  if (dto.agent !== undefined && dto.command !== 'AGENT') fail('agent is only for AGENT');
+  if (dto.command === 'AGENT' && dto.agent === undefined) fail('agent required for AGENT');
+  if (dto.command === 'AGENT' && dto.bashMode !== undefined && dto.bashMode !== 'raw') fail('bashMode must be raw for AGENT');
+  if (dto.command === 'AGENT' && (dto.ticketRefs?.length ?? 0) > 0) fail('ticketRefs is not for AGENT');
+
   let feature: string;
   let ref: string;
   if (dto.command === 'REVIEW' || dto.command === 'FIX') {
@@ -44,7 +50,7 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
     feature = dto.feature;
     if (!FEATURE_RE.test(feature) || feature.includes('..')) fail('feature');
     if (dto.command === 'PLAN' && !dto.planFrom) fail('planFrom required for PLAN');
-    if (dto.command === 'RUN' && dto.planFrom !== undefined) fail('planFrom is only for PLAN');
+    if (dto.planFrom !== undefined && dto.command !== 'PLAN') fail('planFrom is only for PLAN');
     ref = dto.ref ?? defaultBranch;
   }
   const profiles = dto.profiles ?? [];
@@ -53,6 +59,9 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
   if (!GIT_REF_RE.test(ref)) fail('ref');
   const bashMode: BashMode = dto.bashMode ?? 'raw';
   if (dto.command === 'PLAN' && bashMode !== 'raw') fail('bashMode must be raw for PLAN');
+  const agentInput: AgentJobInput | null = dto.command === 'AGENT' && dto.agent
+    ? { name: dto.agent.name, task: dto.agent.task, ...(dto.agent.model !== undefined ? { model: dto.agent.model } : {}), ...(dto.agent.modelAliases !== undefined ? { modelAliases: dto.agent.modelAliases } : {}), ...(dto.agent.timeoutSec !== undefined ? { timeoutSec: dto.agent.timeoutSec } : {}) }
+    : null;
   return {
     repoId: dto.repoId,
     ref,
@@ -65,5 +74,6 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
     approvalTimeoutSec: dto.approvalTimeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC,
     selectorLabels: [...new Set(dto.selectorLabels ?? [])].sort(),
     pinnedRunnerId: dto.pinnedRunnerId ?? null,
+    agentInput,
   };
 }

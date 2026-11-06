@@ -23,6 +23,10 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ bashMode: 'yolo' })));
     expect(errors.map((e) => e.property)).toContain('bashMode');
   });
+  it('accepts AGENT with a valid nested agent input', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review' } })));
+    expect(errors).toEqual([]);
+  });
   it('accepts FIX as a command', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'FIX', feature: undefined, prNumber: 7 })));
     expect(errors).toEqual([]);

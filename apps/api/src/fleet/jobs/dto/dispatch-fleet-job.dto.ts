@@ -1,13 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import type { BashMode } from '../../common/protocol';
+import { Type } from 'class-transformer';
+import { ValidateNested } from 'class-validator';
+import { DispatchAgentDto } from './dispatch-agent.dto';
 import { LABEL_PATTERN } from '../../runners/dto/create-enrollment.dto';
 
 export class DispatchFleetJobDto {
   @ApiProperty() @IsString() @Length(1, 64) declare repoId: string;
   @ApiPropertyOptional({ description: 'Git ref to check out detached; defaults to the repo default branch' })
   @IsOptional() @IsString() @MaxLength(255) ref?: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW', 'FIX'] }) @IsIn(['RUN', 'PLAN', 'REVIEW', 'FIX']) declare command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'REVIEW', 'FIX', 'AGENT'] }) @IsIn(['RUN', 'PLAN', 'REVIEW', 'FIX', 'AGENT']) declare command: 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'AGENT';
+  @ApiPropertyOptional({ type: DispatchAgentDto }) @IsOptional() @ValidateNested() @Type(() => DispatchAgentDto) agent?: DispatchAgentDto;
   @ApiPropertyOptional({ description: 'nax feature name; derived from prNumber for REVIEW and FIX' }) @IsOptional() @IsString() @MaxLength(128) feature?: string;
   @ApiPropertyOptional({ minimum: 1, maximum: 2147483647, description: 'Pull request number, REVIEW and FIX only' })
   @ValidateIf((_object, value) => value !== undefined) @IsInt() @Min(1) @Max(2147483647) prNumber?: number;

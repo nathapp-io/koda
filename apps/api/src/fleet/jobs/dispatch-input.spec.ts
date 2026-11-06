@@ -9,7 +9,7 @@ describe('normalizeDispatch (spec §5.1)', () => {
   it('fills defaults', () => {
     expect(normalizeDispatch(dto(), 'trunk')).toEqual({
       repoId: 'repo-1', ref: 'trunk', command: 'RUN', feature: 'auth-flow', planFrom: null, profiles: [],
-      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
+      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, agentInput: null,
     });
   });
 
@@ -84,7 +84,37 @@ describe('normalizeDispatch (spec §5.1)', () => {
   );
 });
 
-describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => {
+describe('AGENT dispatch input', () => {
+  const agent = { name: 'spec-reviewer', task: 'Review the spec' };
+  it('normalizes default ref and stores only supplied agent keys', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent }), 'main'))
+      .toEqual(expect.objectContaining({ command: 'AGENT', ref: 'main', agentInput: agent }));
+  });
+  it('preserves optional agent input keys', () => {
+    const input = { ...agent, task: 'x', model: 'reviewer', modelAliases: { reviewer: 'acp:claude' }, timeoutSec: 600 };
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', ref: 'feat/flow-a', agent: input }), 'main'))
+      .toEqual(expect.objectContaining({ ref: 'feat/flow-a', agentInput: input }));
+  });
+  it.each([
+    [{ agent: undefined }, 'agent required for AGENT'],
+    [{ command: 'PLAN', planFrom: 'docs/a.md', agent }, 'agent is only for AGENT'],
+    [{ command: 'AGENT', agent, bashMode: 'gated' }, 'bashMode must be raw for AGENT'],
+    [{ command: 'AGENT', agent, ticketRefs: ['KD-1'] }, 'ticketRefs is not for AGENT'],
+    [{ command: 'AGENT', agent, planFrom: 'docs/a.md' }, 'planFrom is only for PLAN'],
+    [{ command: 'AGENT', agent, prNumber: 2 }, 'prNumber is only for REVIEW and FIX'],
+  ] as const)('rejects incompatible AGENT dispatch %#', (over, reason) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent, ...over }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason } }));
+  });
+  it('returns null agent input for RUN', () => expect(normalizeDispatch(dto(), 'main').agentInput).toBeNull());
+  it('keeps the existing PLAN dispatch shape with additive null agentInput', () => {
+    expect(normalizeDispatch(dto({ command: 'PLAN', feature: 'legacy', planFrom: 'specs/legacy.md' }), 'main')).toEqual(expect.objectContaining({
+      command: 'PLAN', feature: 'legacy', ref: 'main', planFrom: 'specs/legacy.md', bashMode: 'raw', agentInput: null,
+    }));
+  });
+});
+
+describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => { 
   const run = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
 
   it('defaults to raw and 600 s', () => {

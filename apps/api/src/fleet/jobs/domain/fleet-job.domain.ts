@@ -7,6 +7,7 @@ import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 import type { ThreadAssign } from '../../common/thread-jobs';
 import type { ConfigJobResult } from '../../common/config-jobs';
+import type { AgentJobInput } from '../../common/agent-jobs';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 
@@ -166,6 +167,7 @@ export interface NewFleetJob {
   requestedByType?: 'USER' | 'AGENT';
   threadId?: string | null;
   scheduleId?: string | null;
+  agentInput?: AgentJobInput | null;
 }
 
 type Mutable =
