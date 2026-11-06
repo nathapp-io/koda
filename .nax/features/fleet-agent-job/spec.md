@@ -108,7 +108,7 @@ Read only (verified on main `d992bd58`):
   `collectBundle` (`apps/runner/src/executor/host-executor.ts:167,484,477`), `spawnNax`
   (`apps/runner/src/executor/nax-process.ts:59`), `formatCost` (`apps/runner/src/watcher/status-snapshot.ts`), the
   `fitConfigResult` budget precedent (`apps/runner/src/executor/config-job/result-fit.ts`), `TokenCache.apply`
-  (`apps/runner/src/sync/token-cache.ts:114`, matches on `(jobId, repoId)`).
+  (`apps/runner/src/credentials/token-cache.ts:114`, matches on `(jobId, repoId)`).
 - nax `agents run` (0.91.8-canary.4): `nax agents run <agent> (--task <text> | --task-file <path>) [--profile <names>]
   [--model <id>] [--json] [--timeout <seconds>]`; exit 0 when the status is `completed`, 1 for any other run status, 2
   for usage, config, trust or catalog errors (one stderr line, no JSON). With `--json`, stdout is one JSON object
@@ -326,7 +326,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/api/src/fleet/git-broker/git-token.broker.ts` — `mint` and `fresh`
 - `apps/api/src/fleet/sync/sync.service.ts` — the token grant
 - `apps/api/src/fleet/jobs/assign-payload.ts` — `buildAssignPayload`
-- `apps/runner/src/sync/token-cache.ts` — how the runner matches a granted token to its request (read only)
+- `apps/runner/src/credentials/token-cache.ts` — how the runner matches a granted token to its request (read only)
 
 **US-006**
 
@@ -342,7 +342,7 @@ job page shows `FleetJobAgentResult` for an `AGENT` job.
 - `apps/runner/src/executor/checkout.ts` — `prepareCheckout`
 - `apps/runner/src/supervisor/supervisor.ts` — re-adopt
 - `apps/runner/test/helpers/fake-nax-cli.ts` — the fake nax used by probe tests
-- `apps/runner/src/sync/token-cache.ts` — `TokenCache.apply`, pinned for the AGENT token shape
+- `apps/runner/src/credentials/token-cache.ts` — `TokenCache.apply`, pinned for the AGENT token shape
 
 **US-008**
 
