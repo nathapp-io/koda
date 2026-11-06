@@ -3,7 +3,7 @@
   "feature": "fleet-agent-job",
   "branchName": "feat/fleet-agent-job",
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T12:48:48.487Z",
+  "updatedAt": "2026-11-06T12:57:31.460Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "dispatch"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The API/protocol edits are additive constants, optional types and an existing normalization branch; existing DTO and protocol-pin patterns require focused TDD but no new runtime integration or abstraction."
+        "reasoning": "The API/protocol edits are additive constants, optional types and an existing normalization branch; existing DTO and protocol-pin patterns require focused TDD but no new runtime integration or abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/dispatch-input.ts",
@@ -87,7 +90,12 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6d3d7af33a2dcf7c64c3127b2ba494f739a13355",
+      "failureStage": "workflow"
     },
     {
       "id": "US-002",
@@ -145,7 +153,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -217,7 +228,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -289,7 +303,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -368,7 +385,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -436,7 +456,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -510,7 +533,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -583,7 +609,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -638,7 +667,10 @@
         "readAgentResult returns { ok:false } rather than throwing when nax.stdout is missing."
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -692,7 +724,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -769,7 +804,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Feature intent and completion: F2 adds a read-only GitHub AGENT fleet job, dispatched through the existing fleet.job.dispatch route/service, capability-gated, executed by nax agents run against a detached ref, with one bounded terminal result persisted and displayed. It adds no fleet-flow orchestration. The binding eleven-story graph is retained exactly, including apps/api ownership of the protocol package edits and generated CLI contract updates. The source spec is .nax/features/fleet-agent-job/spec.md. Exploration used direct Read/Grep/Glob because codebase-memory MCP tools are unavailable in this session; no runtime tests or shell commands were available or run while drafting. Paths below are repository-root-relative.\n\nArchitecture and guidance: this is an existing Bun/Turborepo enhancement, not greenfield. The detected Express/Next.js labels in the prompt are inaccurate: .nax/mono/apps/api/context.md:28 identifies NestJS 12 + Fastify with Prisma 7 and Vitest; .nax/mono/apps/web/context.md:21 identifies Nuxt 4 SSR, Vue, Tailwind, Jest/Playwright. The runner is Bun-only ESM with real SQLite and injected external seams (.nax/mono/apps/runner/context.md:16). Read app context before implementation and the nathapp-nestjs-patterns skill before writing NestJS code. AGENTS.md files are generated and must not be edited. API production imports from @nathapp/fleet-protocol must remain type-only: apps/api/src/fleet/common/protocol.spec.ts:34 enforces this across production source. Therefore put runtime AGENT_RESULT_LIMITS in packages/fleet-protocol/src/agent-jobs.ts for the runner, and maintain a local API copy pinned by a test; structural AgentJobInput/AgentJobResult mirrors live in apps/api/src/fleet/common/agent-jobs.ts. Do not introduce runtime workspace-package imports to the API image.\n\nUS-001/002 dispatch and contract seams: apps/api/src/fleet/jobs/dispatch-input.ts:27 is normalizeDispatch; it returns an insertable Omit<NewFleetJob,...> and already owns feature/ref/profile checks and ValidationAppException({reason}, 'fleet.dispatchInput'). Its REVIEW/FIX branch derives a reserved feature; the other branch currently only rejects planFrom for RUN at line 46, so AGENT must explicitly follow the non-PLAN refusal without weakening PLAN/REVIEW/FIX regressions. Its return at line 56 currently has no agentInput. apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:10 restricts command to RUN/PLAN/REVIEW/FIX and line 18 keeps maxCostUsd required. Add DispatchAgentDto with nested transformation/validation and Swagger metadata; preserve the optional agent property on the outer DTO so missing AGENT input reaches normalizeDispatch with the specified reason. Service callers in F3 do not pass through a validation pipe: decorators are not a substitute for all agent bounds in normalizeDispatch. The input is name/task plus optional model/modelAliases/timeoutSec, with no added defaults in stored agentInput; default ref remains the repo default branch, default bashMode raw, timeout default is applied only at execution. Copy nax's alias-target grammar, not a permissive ad hoc regex; exact upstream schema availability must be checked during implementation. packages/fleet-protocol/src/index.ts:135,155,270 contain the kind, snapshot and assign contracts, and RunnerCapabilities starts at line 64. These additive optional wire fields avoid an incompatible protocol bump; old runners lack agentsRun and must never receive AGENT. apps/api/src/fleet/common/protocol.spec.ts:50 has the exhaustive seven-kind record which becomes eight kinds. Existing dispatch-input.spec.ts and dto/dispatch-fleet-job.dto.spec.ts should gain AGENT cases and updated whole-object expectations for agentInput:null on other commands. US-001 creates the shape/type seam; US-002 completes all input validation and decorators.\n\nUS-003 persistence/migration: apps/api/prisma/schema.prisma:1056 models FleetJob.command as String, not a Prisma enum. Add nullable agentInput/agentResult JSON columns in migration 20261127090000_fleet_job_agent, leaving old rows null with no data rewrite or index changes. apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:74,149,180 define the record, builder and mutable patch. Keep the two record fields and builder agentInput optional like fixOutcome to avoid rewriting old typed fixtures/config/thread builders; repository output must nevertheless always include both fields, null when absent/invalid. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:24 maps rows via toJob, :75 inserts and :155 writes patches; Prisma JSON SQL null requires Prisma.DbNull rather than an unsafe spread of null. Guards must reject malformed stored JSON (unknown result status/missing task) instead of asserting types. US-003 cannot depend on the future US-006 result parser or sibling US-002: establish sufficient persistence guards using currently available local types/helpers without importing future outputs; US-006 may later reuse/strengthen the shared guard. apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:112 maps public fields and :135 summarizes; expose agent from agentInput and agentResult with ?? null. Requeue clears only agentResult alongside existing result fields at apps/api/src/fleet/jobs/fleet-jobs.service.ts:361, retaining immutable agentInput and current epoch/cost rules. The migration test pattern at apps/api/test/integration/fleet/thread-modes-migration.integration.spec.ts:1 uses scratchSchemaBefore/applyMigration plus canRunDbTests, not db-push as evidence of migration correctness. Reuse existing fleet-job-repository.integration.spec.ts and fleet-job-cancel-requeue.integration.spec.ts patterns for real round trips. Regenerate the Prisma client after schema changes, importing it from src/generated/prisma/client per guidance.\n\nUS-004 route/service/budget integration: apps/api/src/fleet/jobs/fleet-jobs.controller.ts:37 protects POST with ProjectMembershipGuard, RequiresGuard, Requires('fleet.job.dispatch') and ApprovalGated; its actual HTTP body is the existing JSON envelope around DispatchResultDto, whose job is nested (controller :53, service :179). Endpoint ACs refer to that job; do not flatten or replace the response shape. apps/api/src/fleet/jobs/fleet-jobs.service.ts:95 accepts programmatic dispatch too, checks repo project/provider, normalizes, evaluates pinned placement and budgets, creates transactionally at :135, handles DuplicateActiveJobError outside the failed transaction at :166, then publishes and places after commit. Extend the existing ReviewProviderException approach (:40) for lower-case 'agent is GitHub-only', HTTP 422; no GitLab job may be inserted. agentInput flows from normalized input into createJob through the existing spread. Keep auth/approval route variants, actor attribution, active (repoId,feature) uniqueness, row locks and audit behavior unchanged. A queued response test must arrange no eligible runner, since dispatch immediately attempts placement. apps/api/src/fleet/budgets/prisma-budget.repository.ts:22 BUDGET_STOP_COMMANDS currently includes RUN/PLAN/REVIEW/FIX/THREAD and drives both queued and held job queries at :130/:140; add AGENT, without pretending maxCostUsd is enforced by nax agents run. Existing endpoint e2e file and fleet-openapi.contract.spec.ts cover the HTTP and committed schema; the latter reads root openapi.json at :15. Root package.json:19-22 defines bun run generate (export API spec then regenerate CLI), so use it rather than editing apps/cli/src/generated/types.gen.ts. US-004 owns initial regeneration; independent later API stories add emitted enum/DTO fields, so at feature integration ensure generated artifacts reflect the combined API changes, not an earlier sibling's snapshot. Keep the binding dependency graph unchanged.\n\nUS-005 placement and credential security: apps/api/src/fleet/jobs/placement-rules.ts:10 has MisfitReason, :21 PERMANENT_MISFITS, :124 capabilityMisfit, :150 raw-project trust-domain rules. Add recoverable agents_run while preserving existing placement ordering, profile/provider/tool/budget/capacity/repo exclusion checks; missing agentsRun must leave the job QUEUED even for a pin. apps/api/src/fleet/common/capabilities-core.ts:164 destructures untrusted claims, :194 validates optional true-only flags, :221 copies them; agentsRun follows the strict true-or-absent flags, NOT the lenient providerVault behavior. Propagate the reason to dashboard/dashboard.types.ts and PlacementMisfitDto (apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:140). apps/api/src/fleet/jobs/assign-payload.ts:29 serializes a job, conditionally review/thread/expectBranch; add agent only for AGENT from persisted agentInput. apps/api/src/fleet/git-broker/git-token.broker.ts:35 mint and :66 fresh distinguish purpose credentials from PROJECT readOnly repo-scoped tokens. A read purpose is GitHub-only, calls mintReadOnlyToken, caches at jobId:leaseEpoch:read, and returns NO repoId. Do not reuse readOnly:true unchanged: that currently returns repoId and caches at :ro:<repo>, which would not satisfy an AGENT default token request. Do not share with default write, review or FIX caches. Preserve existing refresh margin, fresh-request behavior, errors without secrets and eviction. apps/api/src/fleet/sync/sync.service.ts:144 grantTokens fences/locks requests in a transaction, gathers mints, then performs forge HTTP outside it; :175 currently chooses review/fix purposes. Add read for default AGENT requests while RUN retains no purpose and PROJECT scoped requests retain readOnly:true. apps/runner/src/credentials/token-cache.ts:114 matches tokens to requests by (jobId,repoId), then epoch; omission of repoId is a correctness/security boundary. Reuse git-token.broker.purpose.spec.ts, placement-rules.spec.ts, capabilities.spec.ts, assign-payload.spec.ts, sync.service.token-purpose.spec.ts, sync-token-fence.spec.ts and runner-git-tokens.integration.spec.ts. US-005 requires strict three-session TDD for credential isolation; US-004 does too for permissions.\n\nUS-006 untrusted result mirror: apps/api/src/fleet/repo-config/config-result.ts:7 is the reject-whole-field precedent. apps/api/src/fleet/sync/event-payloads.ts:93 mirror parses independently bounded fields and :126 omits undefined entries, allowing a bad result to leave cost/heartbeat and other fields unaffected. parseAgentResult should copy only the typed result fields, enforce all six limits, required booleans, four statuses, denied-ask discriminants and strings, optional model, and nonnegative decimal cost strings with at most four fractional digits consistent with formatCost/COST_RE. Count output and serialized budgets in UTF-8 bytes, not JS characters. The snapshot's result budget is 12,288 out of the 16,384-byte event payload so other fields fit. Mirror through FleetJobPatch; existing JobReportProcessor/fencing/persistence path supplies the transactional update and GET serialization. Reject invalid result whole, never fail the sync or coerce an unknown status. Runtime API constants are locally copied and pinned to protocol in protocol.spec.ts. Extend event-payloads.spec.ts plus a real held-job sync round-trip.\n\nUS-007 runner acceptance and re-adoption: apps/runner/src/capabilities/nax-probe.ts:168 assembles a bounded capability report from injected NaxCli commands, with botFix-style help probes. Add an independent agents run --help success+--task-file probe within the existing timeout; do not infer support only from a version or botReview. test/helpers/fake-nax-cli.ts:23/:63 is the opt-in fake-help seam, defaulting unknown command. apps/runner/src/supervisor/assign-parser.ts:202 rejects malformed assigns and copies only validated fields; :224 forces raw bash on special commands and :271 conditionally builds payloads. Revalidate every server agent bound and reject an agent block on any other command with detail agent. Existing planFrom/review/thread/expectBranch strictness stays. apps/runner/src/executor/checkout.ts:25 resolves the ref; :41 already detaches REVIEW/FIX without reading a PRD. Extend that branch for AGENT, not RUN's branch/PRD logic. apps/runner/src/supervisor/supervisor.ts:183 watches matching alive PLAN/REVIEW/FIX processes and finishes dead ones without requiring a status.json/naxRunId; AGENT uses that route. Preserve recorded pid identity, journal sequencing and epoch fences. TokenCache.apply needs a regression test, not new AGENT token logic. Reuse nax-probe.spec.ts, assign-parser.spec.ts, test/unit/checkout.spec.ts, supervisor.spec.ts and credential cache specs; real process/socket tests need host verification, injected tests do not. This story includes credential matching and trust-boundary assign validation, so strict security TDD applies.\n\nUS-008 spawning and resource cleanup: apps/runner/src/executor/job-profile.ts:31/:46 generate the final per-job profile; add an optional LAST modelAliases parameter without shifting relay or botCostLimitUsd callers, omitting agent for absent/empty aliases. Profiles continue to end in koda-job-<id>, preserving matchesProcess's marker. apps/runner/src/executor/nax-process.ts:16 currently falls back to nax run after PLAN/REVIEW/FIX, so AGENT must branch before the RUN fallback and never emit --max-cost. apps/runner/src/executor/host-executor.ts:65 attempt wipe, :119 prepare, :167 spawn and :484 cleanup are the integration points. Write exactly agent-task.md with mode 0600 under the validated private jobDir, pass its path to buildNaxArgv (task text never in argv), carry model aliases in the profile, and keep clone cwd, stripped credential environment, provider socket, detached child and log files unchanged. Existing spawnNax injection (:51) makes argv/env tests process-free. Cleanup currently uses nested finally blocks to independently release profile, approvals, credentials/provider socket and review token; task removal must not bypass any of those releases or be bypassed by an earlier failure. Existing collectBundle at :477 only stashes PLAN/RUN outputs, then calls the usual bundle builder; AGENT keeps normal bundle/log behavior. JobRun.finish currently only publishes PLAN or RUN branches, so no AGENT publish operation should be added. Reuse job-profile.spec.ts, nax-process.spec.ts and test/unit/host-executor.spec.ts (real files, injected spawn) plus host-executor-auth.spec.ts for regression. Provider-key/credential environment propagation and a private task file warrant strict security TDD.\n\nUS-009 result fitting: apps/runner/src/executor/config-job/result-fit.ts:8 already offers a UTF-8 character-boundary tailBytes helper, but its config algorithm shortens output before dropping files; AGENT specifically drops trailing denied asks BEFORE shortening output further. Implement readAgentResult in the new agent-job directory: cap stdout reads at 16 MiB before parsing, accept only nax's single typed JSON object, and obtain the first non-empty stderr line capped at 300 characters on failure. Do not load arbitrarily large files to discover they are too large, and do not use exit codes to infer results. Keep raw cost numeric/optional at the reader boundary, then fit to string-valued AgentJobResult with formatCost from apps/runner/src/watcher/status-snapshot.ts:13 (finite, nonnegative, <1e8, fixed four places). Fit first 10 asks with bounded text/summary/tool/model, preserve the LAST 8,192 UTF-8 bytes of output, and then drop asks from the end and shorten the output tail until JSON.stringify's UTF-8 byte length is <=12,288, setting the appropriate truncation flags. Escaped quotes/control characters can blow the serialized budget despite per-field bounds. Keep full stdout in logs/bundle. Use real temporary files and table-driven malformed/oversize/Unicode/escape cases.\n\nUS-010 verdict and final sync: apps/runner/src/supervisor/job-run.ts:457 judge branches on job kind, :552 finish drains logs, judges, performs PLAN/RUN-only publishing, transitions RUNNING->UPLOADING, uploads and sends judged.snapshot before terminal transition at :634. AGENT's verdict must come solely from its parsed result and cancel request, never status.json, workflow, exit code, PR posting or finish ledgers. Call US-009's reader/fitter via the established executor/logSources seam; do not expand this into an unrelated JobExecutor abstraction redesign. Snapshot includes fitted agentResult once at end and costSpentUsd only when priced; unknown cost remains absent, with the server's existing zero default. Cancel wins over every nax status. Unreadable result must use the exact reason and bounded stderr suffix. Preserve existing upload/fencing conflict behavior, journal-before-send guarantees and restart finish path. Extend co-located job-run.spec.ts with FakeExecutor/injected files and explicit cancellation precedence, retaining RUN/PLAN/REVIEW/FIX regressions.\n\nUS-011 web rendering: apps/web/lib/fleet-types.ts:156/:162/:277 contain the handwritten unions and FleetJobDto. Widen only the documented kind/misfit and agent/result shapes; no web generated client. apps/web/pages/[project]/fleet/jobs/[id]/index.vue:156 loads the DTO through useFleetJobs and the existing live-refresh path, with progress at :351 and analytics at :398. Add an AGENT-only result panel to this existing page; it needs no polling/SSE of its own, form, navigation or flow view. Show status, optional model/cost, literal preformatted output, asks, truncation and pending/unknown-cost notices from en+zh keys. Treat all agent text as untrusted, using interpolation, never v-html/markdown. apps/web/tests/i18n/fleet-locale-parity.spec.ts:22/:32 pin exact misfit and command keys, so update both lists and locales. Existing tests/pages/fleet-job-detail.spec.ts has source-order/template regression anchors (e.g. :93) and a mounted harness (:332), so insert without gratuitously rewriting neighboring panels. Add a mounted result component spec for literal HTML and a page condition test; XSS safety makes strict security TDD appropriate. Preserve SSR-safe rendering and use existing tokens/components rather than layout redesign.\n\nCompatibility, migration and verification risks: deploy the additive nullable DB migration before API code selecting the new columns; old rows map to null, old builders keep compiling, and capability absence prevents placement on old runners. The provided nax floor already supports this command in the feature baseline, but capability detection, not a global version bump, is the placement authority. All money at the API boundary remains decimal strings/Prisma.Decimal; unknown cost is deliberately a gap, not an error, and maxCostUsd remains informational for AGENT. Read-only is enforced by token mint/no publication, not a filesystem sandbox: agents can still dirty tracked/untracked/ignored/.git state, and cleanWorkspace intentionally leaves ignored/.git state. Tasks/results are intentionally not redacted. All state changes still go through existing transition/CAS/fencing services, live publication occurs after commit, and forge HTTP remains outside transactions. Do not broaden ingest eligibility or analytics: apps/api/src/fleet/analytics/prisma-analytics.repository.ts:11 defines NAX_JOBS as RUN/PLAN; ingest review paths at apps/api/src/fleet/ingest/bundle-ingest.service.ts:106 are explicitly REVIEW/FIX, with RUN handling at :115. US-003 must be independently runnable before US-006, and US-007+ must only consume upstream-created protocol/assign types; do not silently add dependency edges. Verify additive contract generation after all API schema work. API unit tests are co-located src/**/*.spec.ts using vi, no DB for DI tests; integration/e2e DB runs require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, compose PostgreSQL or a private Testcontainers DB. The migration must actually run against the preceding schema outside the sandbox. Runner bun tests use real temp files/SQLite/git plus FakeNaxCli/injected spawn; host-only sockets/process checks must run outside the sandbox. Web uses Jest component/page tests and locale parity. Generated acceptance files stay under each app's .nax/features/fleet-agent-job and must not be edited or copied into source tests. No quality gate is substituted for a behavioral acceptance criterion.\n\nRefine audit: re-read the spec's complete Acceptance Criteria, Failure Handling, Out of Scope and Context Files sections and the current dispatch normalizer, EventEffect mirror implementation, token broker, runner argv/profile/environment and fake-nax seams. There are 119 stated spec acceptance bullets. The following enumerates every bullet by its 1-based ordinal within the corresponding spec story and maps it to that story's revised acceptanceCriteria ordinal (s=d means the same ordinal; paired destinations mean a composite spec bullet was split without losing assertions). US-001: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12. US-002: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=(10,11), 11=12, 12=13, 13=14. US-003: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10. US-004: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8. US-005: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12. US-006: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12. US-007: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12. US-008: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12. US-009: 1=1, 2=2, 3=3, 4=4, 5=(5,6), 6=7, 7=8, 8=9, 9=10, 10=(11,12). US-010: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8. US-011: 1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10. No spec AC is removed or moved across stories. Qualifiers retained include agentInput having no extra keys, no shared token cache entry, otherwise-fitting placement, no PRD read on detached checkout, same-job-and-epoch token matching, migration over the preceding schema with an existing row, retaining agentInput on requeue, result bounds despite individually valid fields, preserving the output suffix, unpriced-field omission, and REVIEW profiles with no agent key. US-011's final parity bullet is expressed as the observable exact-key correspondence rather than a generic tests-pass quality gate. No deprecated file/grep/verbatim AC tags were present.\n\nEvery story already has a negative-path criterion: US-001 missing/forbidden input; US-002 invalid bounds; US-003 invalid stored JSON; US-004 provider/permission denial; US-005 absent capability/GitLab mint rejection; US-006 malformed results with unrelated fields preserved; US-007 invalid assign and unresolved ref; US-008 missing task path/write failure; US-009 unreadable stdout; US-010 unreadable/failed result; US-011 literal HTML and non-AGENT panel exclusion. All 18 Failure Handling rows remain represented in matching stories. Added regression criteria explicitly pin existing PLAN normalization (US-001), gated RUN normalization (US-002), REVIEW/FIX GitLab errors (US-004), RUN parsing and REVIEW/FIX checkout (US-007), old positional job-profile calls and RUN argv (US-008), and REVIEW judgment (US-010). Existing US-003 RUN/migration cases, US-005 default RUN token grant, US-006 preserved cost patch, US-009 short-output identity and US-011 RUN exclusion already anchor compatibility.\n\nAudit corrections: interpretEvent returns EventEffect, not the patch itself (apps/api/src/fleet/sync/event-payloads.ts:141), so its ACs now assert effect.kind and effect.patch. buildNaxArgv's model/timeout are nested under assign.agent, so the corresponding AC names agent.model/agent.timeoutSec. Runner assign validation does not invent ticketRefs/prNumber wire fields; those remain dispatch exclusions. US-007 now embeds the full runner-local bounds without assuming sibling US-002 runs first, and uses the fake-nax helper in its five context slots; the sixth spec recommendation, token-cache.ts, is explicitly linked in its description. All other spec-recommended context paths fit and remain listed, and no story lists its own output as input context. Binding IDs, workdirs and dependencies are unchanged, with no missing dependency IDs. US-001 and US-006 use medium/tdd-simple because they follow additive DTO/protocol and configResult parser precedents; US-004 is medium with the security override; multi-subsystem persistence/runner/token stories retain their justified routing. All 14 feature-level exclusions were checked against the spec and preserved verbatim, with nearby story boundaries echoed in Scope. Generated CLI artifacts are explicitly in US-004 scope; only handwritten CLI commands are excluded. No runtime tests or JSON parser were executed during this document-only audit.",
