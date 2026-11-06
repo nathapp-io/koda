@@ -82,7 +82,13 @@ describeDb('FleetFlowsService.create', () => {
     await db.auditEntry.deleteMany({ where: { key: 'fleet.flow.create' } });
     await db.fleetActivity.deleteMany({ where: { entityType: 'flow' } });
   });
-  afterEach(() => { vi.restoreAllMocks(); });
+  /**
+   * Spies are restored one by one: `vi.restoreAllMocks()` would also undo `test-setup.ts`'s no-op
+   * `Logger.prototype` spies, which the next file in this shared (isolate: false) DB worker relies on.
+   */
+  const spies: Array<{ mockRestore: () => void }> = [];
+  const spyOn = <T extends { mockRestore: () => void }>(spy: T): T => { spies.push(spy); return spy; };
+  afterEach(() => { for (const spy of spies.splice(0)) spy.mockRestore(); });
 
   it('AC-1: a USER creator with no tick writes a PENDING flow and opens the start ask', async () => {
     const row = await thread();
@@ -120,7 +126,7 @@ describeDb('FleetFlowsService.create', () => {
 
   it('AC-4: a thread entry takes branch, sha and runner from the record lockForFlow returned', async () => {
     const row = await thread({ feature: 'thread-entry', publishedSha: OTHER_SHA });
-    const lock = vi.spyOn(ThreadsService.prototype, 'lockForFlow');
+    const lock = spyOn(vi.spyOn(ThreadsService.prototype, 'lockForFlow'));
     const { flow } = await create(user('flow-author'), threadInput(row.id));
 
     expect(lock).toHaveBeenCalledTimes(1);
@@ -244,7 +250,7 @@ describeDb('FleetFlowsService.create', () => {
 
   it('AC-15: a failing ask leaves no flow or feature row behind', async () => {
     const row = await thread();
-    const ask = vi.spyOn(ApprovalAskService.prototype, 'open').mockRejectedValue(new Error('ask exploded'));
+    const ask = spyOn(vi.spyOn(ApprovalAskService.prototype, 'open')).mockRejectedValue(new Error('ask exploded'));
 
     await expect(create(user('flow-author'), threadInput(row.id))).rejects.toThrow('ask exploded');
 
