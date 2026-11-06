@@ -4968,6 +4968,56 @@ describeIntegration('API Integration Tests', () => {
       threadMessage(res, 'permissions.40003');
     });
 
+    describe('US-011 flow read and stop routes', () => {
+      let sequence = 0;
+      const flowsUrl = () => `/api/projects/${projectSlug}/flows`;
+      const flowAuth = () => ({ Authorization: `Bearer ${world.tokens.dev}` });
+      async function seedFlow() {
+        return db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
+          branch: `feat/read-stop-e2e-${++sequence}`, specSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
+        } });
+      }
+      it('GET /projects/:slug/flows returns 200 with records and total', async () => {
+        const flow = await seedFlow();
+        const page = body<{ records: { id: string }[]; total: number }>(await request(httpServer).get(flowsUrl()).set(flowAuth()).expect(200));
+        expect(page.records.map(({ id }) => id)).toContain(flow.id);
+        expect(page.total).toBeGreaterThan(0);
+      });
+      it('GET /projects/:slug/flows returns 404 for an unknown project', async () => {
+        await request(httpServer).get('/api/projects/missing-flow-project/flows').set(flowAuth()).expect(404);
+      });
+      it('GET /projects/:slug/flows/:flowId returns 200 with a complete flow DTO', async () => {
+        const flow = await seedFlow();
+        expect(body(await request(httpServer).get(`${flowsUrl()}/${flow.id}`).set(flowAuth()).expect(200)))
+          .toMatchObject({ id: flow.id, costCapUsd: '25.0000', features: [{ feature: 'read-stop' }], url: `/${projectSlug}/flows/${flow.id}` });
+      });
+      it('GET /projects/:slug/flows/:flowId returns fleet.flows.notFound 404 for a missing flow', async () => {
+        refusal(await request(httpServer).get(`${flowsUrl()}/missing`).set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('GET /fleet/flows/:flowId returns 200 with the same DTO', async () => {
+        const flow = await seedFlow();
+        const project = await request(httpServer).get(`${flowsUrl()}/${flow.id}`).set(flowAuth()).expect(200);
+        const global = await request(httpServer).get(`/api/fleet/flows/${flow.id}`).set(flowAuth()).expect(200);
+        expect(global.body).toEqual(project.body);
+      });
+      it('GET /fleet/flows/:flowId returns fleet.flows.notFound 404 for a missing flow', async () => {
+        refusal(await request(httpServer).get('/api/fleet/flows/missing').set(flowAuth()).expect(404), 'fleet.flows.notFound.404');
+      });
+      it('POST /projects/:slug/flows/:flowId/stop returns 200 and persists STOPPED', async () => {
+        const flow = await seedFlow();
+        expect(body(await request(httpServer).post(`${flowsUrl()}/${flow.id}/stop`).set(flowAuth()).expect(200)))
+          .toMatchObject({ id: flow.id, state: 'STOPPED', stopReason: 'human_stop', endedAt: expect.any(String) });
+        expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED' });
+      });
+      it('POST /projects/:slug/flows/:flowId/stop returns fleet.flows.notStoppable 409 for COMPLETED', async () => {
+        const flow = await seedFlow();
+        await db().fleetFlow.update({ where: { id: flow.id }, data: { state: 'COMPLETED' } });
+        refusal(await request(httpServer).post(`${flowsUrl()}/${flow.id}/stop`).set(flowAuth()).expect(409), 'fleet.flows.notStoppable.409');
+      });
+    });
+
     describe('US-010 nax flow entry route', () => {
       const sha = 'c'.repeat(40);
       const flowInput = { remoteUrl: 'https://github.com/acme/threads-app.git', branch: 'feat/nax-entry-e2e', specSha: sha,

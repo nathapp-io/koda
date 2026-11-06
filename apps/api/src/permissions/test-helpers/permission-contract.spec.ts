@@ -8,11 +8,9 @@ describe('permission contract checker', () => {
     'member.remove',
     'fleet.job.shell.escalate',
     'fleet.budget.override',
-    'fleet.flow.read',
     'fleet.flow.start',
-    'fleet.flow.stop',
     'system.flow.respec',
-    // Flow create is declared by the thread-entry route; read/stop and respec remain later surfaces.
+    // Flow routes declare create/read/stop; respec remains a later surface.
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

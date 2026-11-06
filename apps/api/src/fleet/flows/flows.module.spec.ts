@@ -30,7 +30,8 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { ProjectsModule } from '../../projects/projects.module';
 import { ProjectsService } from '../../projects/projects.service';
 import { FleetFlowsController } from './fleet-flows.controller';
-import { NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
+import { FLOW_STOP_VARIANT, NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
+import { ProjectFlowsController } from './project-flows.controller';
 
 @Module({
   providers: [
@@ -128,5 +129,7 @@ describe('FlowsModule', () => {
     expect(testingModule.get(FleetFlowsService, { strict: false })).toBeInstanceOf(FleetFlowsService);
     expect(testingModule.get(FleetFlowsController, { strict: false })).toBeInstanceOf(FleetFlowsController);
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.create', NAX_FLOW_CREATE_VARIANT)).toBeDefined();
+    expect(testingModule.get(ProjectFlowsController)).toBeInstanceOf(ProjectFlowsController);
+    expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.stop', FLOW_STOP_VARIANT)).toBeDefined();
   });
 });

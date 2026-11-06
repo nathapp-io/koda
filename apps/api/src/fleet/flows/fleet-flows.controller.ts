@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { AppException, ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -16,7 +16,7 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { FleetFlowDto } from './dto/fleet-flow.dto';
-import type { CreatedFlow } from './fleet-flows.service';
+import { FleetFlowsService, type CreatedFlow } from './fleet-flows.service';
 import { parseFlowInput } from './flow-input';
 import { NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
 
@@ -31,7 +31,24 @@ export class FleetFlowsController {
     private readonly permissions: PermissionService,
     private readonly github: GitHubAppClient,
     private readonly routeGate: ApprovalRouteGate,
+    private readonly flows: FleetFlowsService,
   ) {}
+
+  @Get(':flowId')
+  @Requires('fleet.flow.read', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Read a fleet flow in its reachable project (fleet.flow.read)' })
+  @ApiResponse({ status: 200, type: FleetFlowDto })
+  @ApiResponse({ status: 403, description: 'fleet.flow.read is missing in the flow project' })
+  @ApiResponse({ status: 404, description: 'fleet.flows.notFound' })
+  async get(@Param('flowId') flowId: string, @Principal() principal: KodaPrincipal) {
+    const flow = await this.flows.findById(flowId);
+    const project = (await this.projects.findAllForPrincipal(principal)).find((candidate) => candidate.id === flow.projectId);
+    if (!project) throw new NotFoundAppException({}, 'fleet.flows.notFound');
+    if (!(await this.permissions.can(principal, 'fleet.flow.read', { projectId: project.id })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+    return JsonResponse.Ok(FleetFlowDto.from(flow, project.slug));
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

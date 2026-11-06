@@ -26,6 +26,15 @@ function approvalOf(record: FleetFlowRecord): FleetFlowApprovalDto | null {
   };
 }
 
+export class FleetFlowPageDto {
+  @ApiProperty({ type: () => [FleetFlowDto] }) declare records: FleetFlowDto[];
+  @ApiProperty() declare total: number;
+  @ApiProperty() declare current: number;
+  @ApiProperty() declare size: number;
+  @ApiProperty() declare hasNext: boolean;
+  @ApiProperty() declare hasPrev: boolean;
+}
+
 export class FleetFlowCreatorDto {
   @ApiProperty({ enum: ['USER', 'AGENT'] }) declare type: 'USER' | 'AGENT';
   @ApiProperty() declare id: string;

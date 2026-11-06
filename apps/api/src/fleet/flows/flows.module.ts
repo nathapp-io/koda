@@ -16,11 +16,12 @@ import { ThreadPreApprovalController } from './thread-preapproval.controller';
 import { ThreadFlowsController } from './thread-flows.controller';
 import { FlowRouteCommands } from './flow-route.commands';
 import { FleetFlowsController } from './fleet-flows.controller';
+import { ProjectFlowsController } from './project-flows.controller';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { ProjectsModule } from '../../projects/projects.module';
 
 @Module({
-  controllers: [ThreadPreApprovalController, ThreadFlowsController, FleetFlowsController],
+  controllers: [ThreadPreApprovalController, ThreadFlowsController, FleetFlowsController, ProjectFlowsController],
   // ThreadsModule owns the thread-entry guards (`lockForFlow`); FleetReposModule owns the repo row lock
   // the nax entry serialises on; ApprovalEngineModule owns the ask both entries open.
   imports: [ApprovalEngineModule, AuthRepositoryModule, AuditLogModule, FleetActivityModule, FleetReposModule, GitBrokerModule, ProjectsModule, ProjectAccessModule, ThreadsModule, PrismaModule],

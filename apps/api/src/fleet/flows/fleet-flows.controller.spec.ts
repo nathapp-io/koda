@@ -16,7 +16,7 @@ function setup() {
   const forge = { mintReadOnlyToken: vi.fn().mockResolvedValue({ token: 'ephemeral-secret' }), getBranchHead: vi.fn().mockResolvedValue(sha),
     getFile: vi.fn().mockResolvedValue({ content: Buffer.from('spec') }) };
   const gate = { run: vi.fn().mockResolvedValue({ status: 'pending', request: { id: 'create-ask' } }) };
-  const controller = new FleetFlowsController(repos as never, projects as never, permissions as never, forge as never, gate as never);
+  const controller = new FleetFlowsController(repos as never, projects as never, permissions as never, forge as never, gate as never, {} as never);
   const principal = { actorType: 'agent', id: 'agent-1' } as const;
   const send = (input: unknown = body) => controller.create(input, principal as never);
   return { repo, repos, projects, permissions, forge, gate, principal, send };

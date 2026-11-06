@@ -12,6 +12,7 @@ import { ThreadsService } from '../threads/threads.service';
 
 export const THREAD_FLOW_CREATE_VARIANT = 'rest:fleet-thread-flow.create';
 export const NAX_FLOW_CREATE_VARIANT = 'rest:fleet-nax-flow.create';
+export const FLOW_STOP_VARIANT = 'rest:fleet-flow.stop';
 
 export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
   set: 'rest:fleet-thread-preapproval.set',
@@ -33,6 +34,13 @@ export class FlowRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    this.registry.register(routeCommand<{ projectId: string; flowId: string }, Awaited<ReturnType<FleetFlowsService['stop']>>>({
+      key: 'fleet.flow.stop', variant: FLOW_STOP_VARIANT,
+      parse: (input) => parseRouteInput(input, ['projectId', 'flowId']),
+      run: (principal, input) => this.flows.stop(input.projectId, input.flowId, {
+        type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id,
+      }),
+    }, this.loader));
     this.registry.register(routeCommand<NaxFlowCreateInput, Awaited<ReturnType<FleetFlowsService['create']>>>({
       key: 'fleet.flow.create', variant: NAX_FLOW_CREATE_VARIANT,
       parse: (input) => {

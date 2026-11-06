@@ -86,6 +86,14 @@ export class ThreadsService {
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
   }
 
+  /** Parent row lock for an existing flow's transition; no create-only eligibility guards.
+   * Archived, disabled or runner-less threads must still allow their existing flow to stop.
+   * The caller owns the transaction and takes the flow row lock next.
+   */
+  lockForFlowTransition(projectId: string, threadId: string): Promise<ChatThreadRecord | null> {
+    return this.threads.lockForFlow(projectId, threadId);
+  }
+
   async lockForFlow(projectId: string, threadId: string): Promise<ChatThreadRecord> {
     const thread = await this.threads.lockForFlow(projectId, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');

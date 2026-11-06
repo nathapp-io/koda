@@ -65,9 +65,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'member.remove',
   'fleet.job.shell.escalate',
   'fleet.budget.override',
-  'fleet.flow.read',
   'fleet.flow.start',
-  'fleet.flow.stop',
   'system.flow.respec',
   // C10 US-004 declared the two GLOBAL credential update and delete routes, so
   // `fleet.credential.update` and `fleet.credential.delete` left this list; US-005's project routes

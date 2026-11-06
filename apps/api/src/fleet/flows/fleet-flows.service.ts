@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
+import { canTransitionFlow } from './flow-states';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -75,6 +77,51 @@ export class FleetFlowsService {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
+
+  list(projectId: string, page: IPageOption): Promise<IPageResult<FleetFlowRecord>> {
+    return this.flows.findPage({ projectId }, page);
+  }
+
+  /** Global readers resolve project reach before returning this record to the caller. */
+  async findById(id: string): Promise<FleetFlowRecord> {
+    const flow = await this.flows.findById(id);
+    if (!flow) throw new NotFoundAppException({}, 'fleet.flows.notFound');
+    return flow;
+  }
+
+  async get(projectId: string, id: string): Promise<FleetFlowRecord> {
+    const flow = await this.findById(id);
+    if (flow.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.flows.notFound');
+    return flow;
+  }
+
+  async stop(projectId: string, id: string, actor: FlowCreator, now = new Date()): Promise<FleetFlowRecord> {
+    return this.txManager.run(async () => {
+      // Only use the unlocked lookup to select the parent lock. State is read again under the flow
+      // lock, after the parent, just as create and re-publish serialise on that parent first.
+      const target = await this.get(projectId, id);
+      if (target.threadId !== null) await this.threads.lockForFlowTransition(projectId, target.threadId);
+      else await this.repos.lockById(target.repoId);
+      const flow = await this.flows.lockById(id);
+      if (!flow || flow.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.flows.notFound');
+      if (!canTransitionFlow(flow.state, 'STOPPED')) throw new ConflictAppException({}, 'fleet.flows.notStoppable');
+      const stopped = await this.flows.stop(flow.id, 'human_stop', now);
+      // A decision may already hold the ask. SKIP LOCKED returning null is fine: the start command
+      // re-reads the terminal flow and cannot approve it after this transaction commits.
+      if (flow.approvalRequestId !== null) {
+        await this.asks.close(flow.approvalRequestId, { status: 'cancelled', reason: 'flow_stopped' }, now);
+      }
+      await this.audit.record({
+        key: 'fleet.flow.stop', resourceType: 'flow', resourceId: flow.id, projectId,
+        summary: 'flow stopped',
+      });
+      await this.activity.record({
+        actorType: actor.type, actorId: actor.id, action: 'flow.stopped', entityType: 'flow',
+        entityId: flow.id, projectId, payload: { flowId: flow.id, stopReason: 'human_stop' },
+      });
+      return stopped;
+    });
+  }
 
   async create(input: CreateFlowInput, creator: FlowCreator, context: CreateFlowContext): Promise<CreatedFlow> {
     const now = context.now ?? new Date();

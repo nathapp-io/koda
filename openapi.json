@@ -14245,6 +14245,48 @@
         ]
       }
     },
+    "/api/fleet/flows/{flowId}": {
+      "get": {
+        "operationId": "FleetFlowsController_get",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing in the flow project"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a fleet flow in its reachable project (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/flows": {
       "post": {
         "operationId": "FleetFlowsController_create",
@@ -14385,6 +14427,189 @@
           }
         ],
         "summary": "Create a nax fleet flow from verified branch-head specs (fleet.flow.create)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows": {
+      "get": {
+        "operationId": "ProjectFlowsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowPageDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project flows newest first (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows/{flowId}": {
+      "get": {
+        "operationId": "ProjectFlowsController_get",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.read is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a project flow (fleet.flow.read)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/flows/{flowId}/stop": {
+      "post": {
+        "operationId": "ProjectFlowsController_stop",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.stop\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "fleet.flow.stop is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          },
+          "409": {
+            "description": "fleet.flows.notStoppable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop a fleet flow (fleet.flow.stop)",
         "tags": [
           "fleet"
         ]
@@ -25482,6 +25707,40 @@
           "createdAt",
           "features",
           "url"
+        ]
+      },
+      "FleetFlowPageDto": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "current": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number"
+          },
+          "hasNext": {
+            "type": "boolean"
+          },
+          "hasPrev": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "records",
+          "total",
+          "current",
+          "size",
+          "hasNext",
+          "hasPrev"
         ]
       },
       "HomeActivityDto": {
