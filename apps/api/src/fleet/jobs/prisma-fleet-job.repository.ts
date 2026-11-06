@@ -75,6 +75,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
     const { reviewDecisions, prRulings, ...rest } = data;
+    // The AGENT input column is introduced by US-003; keep the additive dispatch shape out of Prisma until then.
+    delete rest.agentInput;
     try {
       // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
       return toJob(await this.db.fleetJob.create({

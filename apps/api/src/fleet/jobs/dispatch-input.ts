@@ -27,7 +27,7 @@ function checkPlanFrom(path: string): string {
 /** Spec §5.1 checks the DTO decorators cannot express; returns the insertable fields. */
 export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: string): Omit<NewFleetJob, 'projectId' | 'requestedById'> {
   if (dto.agent !== undefined && dto.command !== 'AGENT') fail('agent is only for AGENT');
-  if (dto.command === 'AGENT' && dto.agent === undefined) fail('agent required for AGENT');
+  if (dto.command === 'AGENT' && dto.agent == null) fail('agent required for AGENT');
   if (dto.command === 'AGENT' && dto.bashMode !== undefined && dto.bashMode !== 'raw') fail('bashMode must be raw for AGENT');
   if (dto.command === 'AGENT' && (dto.ticketRefs?.length ?? 0) > 0) fail('ticketRefs is not for AGENT');
 

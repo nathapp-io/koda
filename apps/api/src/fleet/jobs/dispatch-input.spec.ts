@@ -97,6 +97,7 @@ describe('AGENT dispatch input', () => {
   });
   it.each([
     [{ agent: undefined }, 'agent required for AGENT'],
+    [{ agent: null as unknown as DispatchFleetJobDto['agent'] }, 'agent required for AGENT'],
     [{ command: 'PLAN', planFrom: 'docs/a.md', agent }, 'agent is only for AGENT'],
     [{ command: 'AGENT', agent, bashMode: 'gated' }, 'bashMode must be raw for AGENT'],
     [{ command: 'AGENT', agent, ticketRefs: ['KD-1'] }, 'ticketRefs is not for AGENT'],
