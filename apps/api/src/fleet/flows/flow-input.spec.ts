@@ -18,6 +18,13 @@ describe('parseFlowInput', () => {
       expect(parseFlowInput(JSON.parse(JSON.stringify(normalized)), entry)).toEqual(normalized);
     }
   });
+  it.each(['./docs/spec.md', 'docs//spec.md', 'docs/./spec.md'])('canonicalizes accepted POSIX spec alias %s for both entries', (specPath) => {
+    for (const entry of ['THREAD', 'NAX'] as const) {
+      const parsed = parseFlowInput(naxBody({ features: [{ feature: 'flow-a', specPath }] }), entry);
+      expect(parsed.features[0].specPath).toBe('docs/spec.md');
+      expect(parseFlowInput(parsed, entry)).toEqual(parsed);
+    }
+  });
   it('provides localized validation messages in both locales', () => {
     expect(enFleet.flowInput['-2']).toContain('{reason}');
     expect(zhFleet.flowInput['-2']).toContain('{reason}');

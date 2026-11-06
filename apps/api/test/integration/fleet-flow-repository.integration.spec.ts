@@ -1,15 +1,19 @@
 import { canRunDbTests } from '../helpers/test-environment';
 import { resetDb } from '../helpers/reset-db';
-import { createTestPrismaClient } from '../helpers/test-prisma';
-import type { PrismaClient } from '../../src/generated/prisma/client';
+import { Test, type TestingModule } from '@nestjs/testing';
+import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { PrismaClient } from '../../src/generated/prisma/client';
+import { createPgAdapter } from '../../src/prisma/pg-adapter';
 import { seedFleetBase } from '../helpers/fleet-fixtures';
 import { PrismaFleetFlowRepository } from '../../src/fleet/flows/prisma-fleet-flow.repository';
 import { FlowTransitionError } from '../../src/fleet/flows/domain/fleet-flow.domain';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
-const tx = { run: (fn: () => Promise<unknown>) => fn() };
 
 describeDb('PrismaFleetFlowRepository', () => {
+  let module: TestingModule;
+  let tx: ITransactionManager;
   let prisma: PrismaClient;
   let repo: PrismaFleetFlowRepository;
   let projectId: string;
@@ -17,11 +21,21 @@ describeDb('PrismaFleetFlowRepository', () => {
 
   beforeAll(async () => {
     await resetDb();
-    prisma = createTestPrismaClient();
+    module = await Test.createTestingModule({
+      imports: [PrismaModule.forRoot({
+        client: PrismaClient,
+        transaction: true,
+        clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) },
+      })],
+      providers: [PrismaFleetFlowRepository],
+    }).compile();
+    await module.init();
+    prisma = module.get<PrismaService<PrismaClient>>(PrismaService).client;
+    tx = module.get(TRANSACTION_MANAGER);
+    repo = module.get(PrismaFleetFlowRepository);
     ({ projectId, repoId } = await seedFleetBase(prisma));
-    repo = new PrismaFleetFlowRepository(tx as never, { client: prisma } as never);
   }, 60_000);
-  afterAll(async () => { await prisma?.$disconnect(); });
+  afterAll(async () => { await module?.close(); });
 
   async function createFlow(overrides: Partial<Parameters<PrismaFleetFlowRepository['create']>[0]> = {}) {
     return repo.create({
@@ -46,6 +60,57 @@ describeDb('PrismaFleetFlowRepository', () => {
     const before = await prisma.fleetFlow.count();
     await expect(createFlow({ features: [1, 2].map(() => ({ feature: 'same', specPath: 'spec.md', dependsOn: [] })) })).rejects.toBeDefined();
     expect(await prisma.fleetFlow.count()).toBe(before);
+  });
+  it.each(['./docs/spec.md', 'docs//spec.md', 'docs/./spec.md'])('B1 persists canonical specPath for %s', async (specPath) => {
+    const flow = await createFlow({ features: [{ feature: 'flow', specPath, dependsOn: [] }] });
+    expect(flow.features[0].specPath).toBe('docs/spec.md');
+    expect((await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } })).specPath).toBe('docs/spec.md');
+  });
+  it('M1 rolls back nested repository transitions with the caller transaction', async () => {
+    const flow = await createFlow();
+    const failure = new Error('abort caller transaction');
+    await expect(tx.run(async () => {
+      await repo.approve(flow.id, { mode: 'REQUEST', approverId: 'approver', approvedAt: new Date(), approvalRequestId: 'request' });
+      await repo.updateSha(flow.id, 'rolled-back-sha');
+      throw failure;
+    })).rejects.toBe(failure);
+    expect(await repo.findById(flow.id)).toEqual(flow);
+  });
+  it('M1 holds the flow lock until commit and rejects approval racing a stop', async () => {
+    const flow = await createFlow();
+    let releaseLock!: () => void;
+    let locked!: (pid: number) => void;
+    const held = new Promise<number>((resolve) => { locked = resolve; });
+    const release = new Promise<void>((resolve) => { releaseLock = resolve; });
+    const holder = tx.run(async () => {
+      const [{ pid }] = await prisma.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      const stopped = await repo.stop(flow.id, 'human_stop', new Date());
+      locked(pid);
+      await release;
+      return stopped;
+    });
+    let contender: Promise<unknown> | undefined;
+    try {
+      const pid = await Promise.race([held, holder.then(() => { throw new Error('holder ended before signalling'); })]);
+      // Independent reads must still see the committed PENDING snapshot, not the nested stop.
+      expect((await repo.findById(flow.id))?.state).toBe('PENDING');
+      contender = repo.approve(flow.id, { mode: 'REQUEST', approverId: 'racer', approvedAt: new Date(), approvalRequestId: 'request' })
+        .then((value) => value, (error: unknown) => error);
+      // Observe a real Postgres lock wait rather than relying on a scheduling delay.
+      await vi.waitFor(async () => {
+        const [row] = await prisma.$queryRaw<Array<{ blocked: boolean }>>`
+          SELECT EXISTS (
+            SELECT 1 FROM pg_stat_activity WHERE ${pid} = ANY(pg_blocking_pids(pid))
+          ) AS blocked`;
+        expect(row.blocked).toBe(true);
+      }, { timeout: 2_000, interval: 20 });
+    } finally {
+      releaseLock();
+      await Promise.allSettled([holder, contender]);
+    }
+    const stopped = await holder;
+    expect(await contender).toBeInstanceOf(FlowTransitionError);
+    expect(await repo.findById(flow.id)).toEqual(stopped);
   });
   it('AC-4 and AC-5 query live flow state for a thread', async () => {
     const thread = await prisma.chatThread.create({ data: { projectId, title: 'flow thread', createdById: 'creator', backend: {}, skills: [] } });

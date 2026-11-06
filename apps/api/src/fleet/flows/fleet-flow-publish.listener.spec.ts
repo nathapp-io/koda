@@ -63,6 +63,18 @@ describe('FleetFlowPublishListener / respec', () => {
     expect(s.activity.record).toHaveBeenCalledWith({ actorType: 'SYSTEM', actorId: 'flow', action: 'flow.respec', entityType: 'flow', entityId: 'F', projectId: 'P', payload: { flowId: 'F', state: 'PENDING' } });
   });
 
+  it.each(
+    [PATH, './docs/spec.md', 'docs//spec.md', 'docs/./spec.md'].flatMap((storedPath) =>
+      [PATH, './docs/spec.md', 'docs//spec.md', 'docs/./spec.md'].map((publishedPath) => [storedPath, publishedPath])),
+  )('AC-3/B1: stored %s and published %s denote the same spec and require reapproval', async (storedPath, publishedPath) => {
+    const s = setup('APPROVED');
+    s.row().features[0].specPath = storedPath;
+    await deliver(s, [publishedPath]);
+    expect(s.row()).toMatchObject({ state: 'PENDING', specSha: NEW, approvalMode: null, approverId: null, approvedAt: null, approvalRequestId: 'new' });
+    expect(s.asks.open).toHaveBeenCalledOnce();
+    expect(s.flows.updateSha).not.toHaveBeenCalled();
+  });
+
   it.each([[PATH], ['docs/unrelated.md']])('AC-4/5: PENDING always re-asks, paths %s', async (path) => {
     const s = setup();
     await deliver(s, [path]);

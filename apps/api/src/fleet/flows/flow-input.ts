@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { parseGitHubUrl } from '../../skills/github-url';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
@@ -46,7 +47,7 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
     if (typeof item.specPath !== 'string' || item.specPath.length < 1 || item.specPath.length > 300 || item.specPath.includes('\0') || item.specPath.startsWith('/') || !item.specPath.endsWith('.md') || item.specPath.split('/').includes('..')) fail(`features.${index}.specPath`);
     const dependsOn = item.dependsOn === undefined ? [] : item.dependsOn;
     if (!Array.isArray(dependsOn) || dependsOn.some((dependency) => typeof dependency !== 'string' || !featureNames.has(dependency) || dependency === name) || new Set(dependsOn).size !== dependsOn.length) fail(`features.${index}.dependsOn`);
-    return { feature: name, specPath: item.specPath, dependsOn: [...dependsOn] as string[] };
+    return { feature: name, specPath: posix.normalize(item.specPath), dependsOn: [...dependsOn] as string[] };
   });
 
   if (!isRecord(body.roles) || typeof body.roles.reviewer !== 'string' || !ROLE_RE.test(body.roles.reviewer)) fail('roles.reviewer');

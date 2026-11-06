@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
@@ -139,8 +140,10 @@ export class FleetFlowsService {
       // Paths describe only this publication, not any intervening ones. A stale/skipped event
       // (including an earlier line of this same committed batch) may have changed a spec, so
       // carrying approval forward is safe only from the flow's immediately preceding snapshot.
+      // Normalize both sides: older rows and publication events can still contain path aliases.
+      const publishedPaths = new Set(event.paths.map((path) => posix.normalize(path)));
       const reask = flow.state === 'PENDING' || event.previousSha !== flow.specSha ||
-        flow.features.some(({ specPath }) => event.paths.includes(specPath));
+        flow.features.some(({ specPath }) => publishedPaths.has(posix.normalize(specPath)));
       let changed: FleetFlowRecord;
       if (reask) {
         if (!canTransitionFlow(flow.state, 'PENDING')) return;

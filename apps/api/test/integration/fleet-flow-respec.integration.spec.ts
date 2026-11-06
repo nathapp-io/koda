@@ -116,6 +116,15 @@ integration('thread publication -> flow respec', () => {
     expect(row).toMatchObject({ state: 'PENDING', specSha: NEW, approvalMode: null, approverId: null, approvedAt: null });
     expect(await requests()).toMatchObject([{ id: row.approvalRequestId, input: { flowId: flow.id, specSha: NEW }, onBehalfOfType: 'USER', onBehalfOfId: creatorId, origin: 'system' }]);
   });
+  it.each(['./docs/spec.md', 'docs//spec.md', 'docs/./spec.md'])('AC-3/B1: a legacy stored alias %s cannot retain approval after the canonical spec changes', async (specPath) => {
+    const flow = await create(true);
+    // Simulate rows written before canonicalization; new writes must not be the only protection.
+    await db.fleetFlowFeature.updateMany({ where: { flowId: flow.id }, data: { specPath } });
+    await fold([published(['docs/spec.md'])]);
+    const row = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
+    expect(row).toMatchObject({ state: 'PENDING', specSha: NEW, approvalMode: null, approverId: null, approvedAt: null });
+    expect(await requests()).toMatchObject([{ id: row.approvalRequestId, input: { flowId: flow.id, specSha: NEW } }]);
+  });
   it('F1: a spec publication followed by an unrelated publication in one fold must re-ask at the final sha', async () => {
     const flow = await create(true);
     const finalSha = 'c'.repeat(40);

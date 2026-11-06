@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import { resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
@@ -27,7 +28,7 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
       createdByType: data.createdByType, createdById: data.createdById, branch: data.branch, specSha: data.specSha,
       pinnedRunnerId: data.pinnedRunnerId ?? null, reviewerRole: data.reviewerRole, supervisorRole: data.supervisorRole,
       costCapUsd: data.costCapUsd, approvalMode: data.approvalMode ?? null,
-      features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({ position, feature, specPath, dependsOn, state: 'PENDING' })) },
+      features: { create: data.features.map(({ feature, specPath, dependsOn }, position) => ({ position, feature, specPath: posix.normalize(specPath), dependsOn, state: 'PENDING' })) },
     }, include: { features: true } }));
   }
   async findById(id: string): Promise<FleetFlowRecord | null> {
