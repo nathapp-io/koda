@@ -1124,12 +1124,25 @@
       "unknown": "未知"
     },
     "command": {
+      "AGENT": "代理任务",
       "RUN": "运行",
       "PLAN": "规划",
       "CONFIG_EDIT": "配置修改",
       "CONFIG_DRIFT": "漂移检查",
       "REVIEW": "PR 评审",
       "FIX": "PR 修复"
+    },
+    "agentResult": {
+      "title": "代理任务结果",
+      "pending": "代理任务结果尚未生成。",
+      "status": { "completed": "已完成", "failed": "失败", "cancelled": "已取消", "timeout": "已超时" },
+      "model": "模型：{model}",
+      "costUnknown": "费用未知",
+      "output": "输出",
+      "truncated": "输出内容已截断。",
+      "deniedAsksTruncated": "部分被拒绝的请求已省略。",
+      "approval": "被拒绝的工具：{tool}",
+      "question": "被拒绝的问题：{text}"
     },
     "fixOutcome": {
       "pushed": "修复已推送",
@@ -1193,6 +1206,7 @@
       "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）",
       "bot_review": "此运行器上的 nax 无法执行 PR 评审",
       "bot_fix": "此运行器上的 nax 无法执行 PR 修复",
+      "agents_run": "此运行器上的 nax 无法执行代理任务",
       "trust_domain": "执行机正在运行其他项目的任务（隔离）"
     },
     "repoReason": {
