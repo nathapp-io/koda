@@ -1,6 +1,8 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { describe, expect, it } from 'vitest';
 import { parseFlowInput } from './flow-input';
+import enFleet from '../../i18n/en/fleet.json';
+import zhFleet from '../../i18n/zh/fleet.json';
 
 const threadBody = (patch: Record<string, unknown> = {}) => ({ features: [{ feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md' }], roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: 25, ...patch });
 const naxBody = (patch: Record<string, unknown> = {}) => ({ ...threadBody(), remoteUrl: 'https://github.com/org/repo.git', branch: 'feat/flow-a', specSha: 'a'.repeat(40), ...patch });
@@ -10,6 +12,19 @@ function reason(fn: () => unknown): string {
 }
 describe('parseFlowInput', () => {
   it('AC-1 normalizes defaults and cap data', () => { const parsed = parseFlowInput(threadBody(), 'THREAD'); expect(parsed.features).toEqual([{ feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [] }]); expect(parsed.costCapUsd).toBe('25'); expect(JSON.parse(JSON.stringify(parsed))).toEqual(parsed); });
+  it('round-trips normalized thread and nax inputs', () => {
+    for (const [body, entry] of [[threadBody(), 'THREAD'], [naxBody(), 'NAX']] as const) {
+      const normalized = parseFlowInput(body, entry);
+      expect(parseFlowInput(JSON.parse(JSON.stringify(normalized)), entry)).toEqual(normalized);
+    }
+  });
+  it('provides localized validation messages in both locales', () => {
+    expect(enFleet.flowInput['-2']).toContain('{reason}');
+    expect(zhFleet.flowInput['-2']).toContain('{reason}');
+  });
+  it('rejects a NUL in specPath', () => {
+    expect(reason(() => parseFlowInput(threadBody({ features: [{ feature: 'flow-a', specPath: `a${String.fromCharCode(0)}.md` }] }), 'THREAD'))).toBe('features.0.specPath');
+  });
   it('AC-2 rejects zero features', () => expect(reason(() => parseFlowInput(threadBody({ features: [] }), 'THREAD'))).toBe('features'));
   it('AC-3 rejects over 20 features', () => expect(reason(() => parseFlowInput(threadBody({ features: Array.from({ length: 21 }, (_, i) => ({ feature: `f${i}`, specPath: `f${i}.md` })) }), 'THREAD'))).toBe('features'));
   it('AC-4 rejects invalid feature grammar', () => expect(reason(() => parseFlowInput(threadBody({ features: [{ feature: '-flow', specPath: 'x.md' }] }), 'THREAD'))).toBe('features.0.feature'));

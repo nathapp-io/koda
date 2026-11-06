@@ -35,7 +35,7 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
     if (!isRecord(item) || typeof item.feature !== 'string' || !FEATURE_RE.test(item.feature) || featureNames.has(item.feature)) fail(`features.${index}.feature`);
     const name = item.feature;
     featureNames.add(name);
-    if (typeof item.specPath !== 'string' || item.specPath.length < 1 || item.specPath.length > 300 || item.specPath.startsWith('/') || !item.specPath.endsWith('.md') || item.specPath.split('/').includes('..')) fail(`features.${index}.specPath`);
+    if (typeof item.specPath !== 'string' || item.specPath.length < 1 || item.specPath.length > 300 || item.specPath.includes('\0') || item.specPath.startsWith('/') || !item.specPath.endsWith('.md') || item.specPath.split('/').includes('..')) fail(`features.${index}.specPath`);
     const dependsOn = item.dependsOn === undefined ? [] : item.dependsOn;
     if (!Array.isArray(dependsOn) || dependsOn.some((dependency) => typeof dependency !== 'string' || !featureNames.has(dependency) || dependency === name) || new Set(dependsOn).size !== dependsOn.length) fail(`features.${index}.dependsOn`);
     return { feature: name, specPath: item.specPath, dependsOn: [...dependsOn] as string[] };
@@ -43,12 +43,13 @@ export function parseFlowInput(body: unknown, entry: FlowEntry): NormalizedFlowI
 
   if (!isRecord(body.roles) || typeof body.roles.reviewer !== 'string' || !ROLE_RE.test(body.roles.reviewer)) fail('roles.reviewer');
   if (!isRecord(body.roles) || typeof body.roles.supervisor !== 'string' || !ROLE_RE.test(body.roles.supervisor)) fail('roles.supervisor');
-  if (typeof body.costCapUsd !== 'number' || !Number.isFinite(body.costCapUsd) || body.costCapUsd <= 0 || body.costCapUsd > 1000 || !COST_RE.test(String(body.costCapUsd))) fail('costCapUsd');
+  const costCap = body.costCapUsd;
+  if ((typeof costCap !== 'number' && typeof costCap !== 'string') || !Number.isFinite(Number(costCap)) || Number(costCap) <= 0 || Number(costCap) > 1000 || !COST_RE.test(String(costCap))) fail('costCapUsd');
 
   const normalized: NormalizedFlowInput = {
     features,
     roles: { reviewer: body.roles.reviewer, supervisor: body.roles.supervisor },
-    costCapUsd: String(body.costCapUsd),
+    costCapUsd: String(costCap),
   };
   if (entry === 'NAX') {
     if (typeof body.remoteUrl !== 'string') fail('remoteUrl');
