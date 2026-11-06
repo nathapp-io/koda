@@ -1,4 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { THREAD_SPEC_PUBLISHED, type ThreadSpecPublishedEvent } from './thread-spec-published.event';
 import { randomUUID } from 'node:crypto';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { runAsSystem } from '../../../action-context/action-context';
@@ -44,11 +46,14 @@ const isWriteLine = (line: ThreadLine): line is WriteLine =>
 
 @Injectable()
 export class PrismaThreadIngestRepository implements ThreadIngestRepository {
+  private readonly logger = new Logger(PrismaThreadIngestRepository.name);
+
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly budgets: BudgetEvaluator,
     private readonly audit: AuditRecorder,
+    private readonly emitter: EventEmitter2,
   ) {}
 
   /** Startup catch-up candidates (US-007): a THREAD attempt whose stream holds bytes past its cursor, at most 200. */
@@ -78,6 +83,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
 
   async fold(batch: ThreadIngestBatch): Promise<FoldResult> {
     let spendKeys: string[] = [];
+    const publications: ThreadSpecPublishedEvent[] = [];
     // Permissions P2 US-007: the transcript, its cost mirror rows and the session fields *are* the domain rows a
     // runner's stream produces, so the whole transaction body is bookkeeping. The `turn_end` entry still counts —
     // bookkeeping drops writes only, never entries recorded through AuditRecorder.
@@ -150,6 +156,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             }
             else if (isWriteLine(line)) {
               await this.foldWriteLine(batch, threadId, line);
+              if (line.type === 'published') publications.push({ threadId, sha: line.sha, paths: line.paths });
               threadChanged = true;
             }
             else if (line.type === 'usage') {
@@ -209,6 +216,15 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         return { costChanged, events: liveEvents };
     }));
     if (result.costChanged) this.budgets.signal(spendKeys);
+    // Best-effort, after commit and outside transcript bookkeeping. One failing listener must not
+    // reject a committed fold or prevent emission of the batch's remaining publications.
+    for (const event of publications) {
+      try {
+        await this.emitter.emitAsync(THREAD_SPEC_PUBLISHED, event);
+      } catch (error) {
+        this.logger.error(`thread ${event.threadId} spec publish listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return result;
   }
 

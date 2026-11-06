@@ -11,6 +11,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { FleetReposService } from '../repos/fleet-repos.service';
 import { repoThreadFields } from '../threads/domain/chat-thread.domain';
 import { ThreadsService } from '../threads/threads.service';
+import type { ThreadSpecPublishedEvent } from '../threads/ingest/thread-spec-published.event';
 import { GIT_REF_RE } from '../jobs/dispatch-input';
 import {
   FLEET_FLOW_REPOSITORY,
@@ -123,6 +124,46 @@ export class FleetFlowsService {
     });
   }
 
+  /** Re-evaluate a committed publication. Later-state coordination belongs to F3. */
+  async respec(event: ThreadSpecPublishedEvent): Promise<void> {
+    // The unlocked lookup selects the project/flow only; state and sha are re-read under locks.
+    const target = await this.flows.findLiveForThread(event.threadId);
+    if (!target) return;
+    await this.txManager.run(async () => {
+      const thread = await this.threads.lockForFlowTransition(target.projectId, event.threadId);
+      const flow = await this.flows.lockById(target.id);
+      if (!thread || !flow || flow.projectId !== target.projectId || flow.threadId !== event.threadId) return;
+      if (event.sha !== thread.publishedSha || event.sha === flow.specSha) return;
+      if (flow.state !== 'PENDING' && flow.state !== 'APPROVED') return;
+
+      const reask = flow.state === 'PENDING' || flow.features.some(({ specPath }) => event.paths.includes(specPath));
+      let changed: FleetFlowRecord;
+      if (reask) {
+        if (!canTransitionFlow(flow.state, 'PENDING')) return;
+        const now = new Date();
+        // close uses SKIP LOCKED. Even when a decision holds the old ask, the new request id
+        // and sha on the flow make that late decision a no-op after our transaction commits.
+        if (flow.approvalRequestId !== null) {
+          await this.asks.close(flow.approvalRequestId, { status: 'cancelled', reason: 'superseded' }, now);
+        }
+        const requestId = await this.openStartRequest({ ...flow, specSha: event.sha }, {
+          type: flow.createdByType, id: flow.createdById,
+        }, now);
+        changed = await this.flows.reask(flow.id, { specSha: event.sha, approvalRequestId: requestId });
+      } else {
+        changed = await this.flows.updateSha(flow.id, event.sha);
+      }
+      await this.audit.record({
+        key: 'system.flow.respec', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId,
+        summary: 'flow spec republished',
+      });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: 'flow', action: 'flow.respec', entityType: 'flow',
+        entityId: flow.id, projectId: flow.projectId, payload: { flowId: flow.id, state: changed.state },
+      });
+    });
+  }
+
   async create(input: CreateFlowInput, creator: FlowCreator, context: CreateFlowContext): Promise<CreatedFlow> {
     const now = context.now ?? new Date();
     return this.txManager.run(async () => {
@@ -173,6 +214,10 @@ export class FleetFlowsService {
    * that resolved to `none` would be a catalog regression, not a case to handle.
    */
   private async askStart(flow: FleetFlowRecord, creator: FlowCreator, now: Date): Promise<FleetFlowRecord> {
+    return this.flows.setApprovalRequestId(flow.id, await this.openStartRequest(flow, creator, now));
+  }
+
+  private async openStartRequest(flow: FleetFlowRecord, creator: FlowCreator, now: Date): Promise<string> {
     const outcome = await this.asks.open({
       key: 'fleet.flow.start',
       projectId: flow.projectId,
@@ -183,7 +228,7 @@ export class FleetFlowsService {
       deadline: null,
     }, now);
     if (outcome.status === 'not-needed') throw new Error('fleet.flow.start resolved to no approval');
-    return this.flows.setApprovalRequestId(flow.id, outcome.request.id);
+    return outcome.request.id;
   }
 
   /** Spends the thread's tick and starts the flow APPROVED; the tick is gone for the next flow. */

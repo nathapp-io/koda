@@ -12,6 +12,7 @@ import { PrismaFleetFlowRepository } from './prisma-fleet-flow.repository';
 import { FLEET_FLOW_REPOSITORY } from './domain/fleet-flow.domain';
 import { FleetFlowStartCommand } from './fleet-flow-start.command';
 import { FleetFlowsService } from './fleet-flows.service';
+import { FleetFlowPublishListener } from './fleet-flow-publish.listener';
 import { ThreadPreApprovalController } from './thread-preapproval.controller';
 import { ThreadFlowsController } from './thread-flows.controller';
 import { FlowRouteCommands } from './flow-route.commands';
@@ -31,6 +32,7 @@ import { ProjectsModule } from '../../projects/projects.module';
     FleetFlowStartCommand,
     FlowRouteCommands,
     FleetFlowsService,
+    FleetFlowPublishListener,
   ],
   exports: [FleetFlowsService],
 })

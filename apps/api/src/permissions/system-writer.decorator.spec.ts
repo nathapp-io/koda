@@ -40,6 +40,7 @@ import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outc
 import { AssistantActionOutcomeSubscriber } from '../fleet/assistant/requests/assistant-action-outcome.subscriber';
 import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { FleetFlowPublishListener } from '../fleet/flows/fleet-flow-publish.listener';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
@@ -84,6 +85,7 @@ const writers = new Map<Function, string>([
   [ThreadIngestHook, 'system.thread.ingest'],
   [AssistantActionOutcomeSubscriber, 'system.thread.ingest'],
   [FanOutPublisher, 'system.outbox.dispatch'],
+  [FleetFlowPublishListener, 'system.flow.respec'],
 ]);
 
 const reflector = new Reflector();
@@ -108,12 +110,13 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(39);
+    expect(writers).toHaveLength(40);
     expect(actual).toEqual(expected);
   });
 
-  it('US-001: leaves the future flow respec writer pending until its listener is added', () => {
-    expect(PENDING_SURFACE_KEYS.has('system.flow.respec')).toBe(true);
+  it('US-012: the respec listener declares the now-live system writer', () => {
+    expect(PENDING_SURFACE_KEYS.has('system.flow.respec')).toBe(false);
+    expect(writers.get(FleetFlowPublishListener)).toBe('system.flow.respec');
   });
 
   it('AC-5: declares every non-pending system catalog key and no other key', () => {
