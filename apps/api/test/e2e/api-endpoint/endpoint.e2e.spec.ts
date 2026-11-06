@@ -15,7 +15,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/e2e/api-endpoint/endpoint.e2e.spec.ts
  * File: test/integration/api-e2e/api-e2e.integration.spec.ts
  */
-import { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
@@ -103,7 +103,7 @@ function refusal(res: request.Response, key: string, args: Record<string, unknow
 
 describeIntegration('API Integration Tests', () => {
   let app: NathApplication;
-  let httpServer: ReturnType<INestApplication['getHttpServer']>;
+  let httpServer: Server;
 
   // Shared state across ordered test sections
   let userAccessToken: string;
@@ -186,13 +186,27 @@ describeIntegration('API Integration Tests', () => {
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
-    // NOW init — compiles route handlers with the guards registered above
+    // NOW init — compiles route handlers with the guards registered above.
     await app.init();
+    // Own one IPv4 loopback listener for the lifecycle instead of letting Supertest bind/close an
+    // unspecified-address ephemeral server on every request. This avoids repeated port churn through
+    // host proxy interception, whose 407 responses otherwise fail arbitrary endpoint assertions.
+    await app.listen(0, '127.0.0.1');
     httpServer = app.getHttpServer();
   }, 30_000);
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('F1: keeps one explicit loopback listener alive between Supertest requests', async () => {
+    const address = httpServer.address();
+    expect(address).toMatchObject({ address: '127.0.0.1', family: 'IPv4', port: expect.any(Number) });
+    for (let index = 0; index < 2; index++) {
+      await request(httpServer).get('/api/auth/me').expect(401);
+      expect(httpServer.listening).toBe(true);
+      expect(httpServer.address()).toEqual(address);
+    }
   });
 
   // ─────────────────────────────────────────────────────────────────
