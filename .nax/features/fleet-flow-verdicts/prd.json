@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T11:59:57.610Z",
+  "updatedAt": "2026-11-07T12:05:59.215Z",
   "userStories": [
     {
       "id": "US-001",
@@ -581,14 +581,17 @@
       "dependencies": [
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "This mirrors the existing fleet subscriber and pure draft builders; SystemWriter reuses existing metadata only, while all authorization/eligibility enforcement stays unchanged in NotificationWriter, so ordinary unit TDD is sufficient."
+        "reasoning": "This mirrors the existing fleet subscriber and pure draft builders; SystemWriter reuses existing metadata only, while all authorization/eligibility enforcement stays unchanged in NotificationWriter, so ordinary unit TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/notifications/fleet/fleet-job-outcome.subscriber.ts",
@@ -615,7 +618,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a5c5ca603f78c67aec31023f7e6adbb8387a7789"
     },
     {
       "id": "US-010",
