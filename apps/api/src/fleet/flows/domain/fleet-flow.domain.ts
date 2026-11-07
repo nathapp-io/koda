@@ -1,6 +1,7 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetFlowState } from '../flow-states';
+import type { FlowAnswer, FlowQuestion } from '../flow-calls';
 
 export const FLEET_FLOW_REPOSITORY = Symbol('FLEET_FLOW_REPOSITORY');
 
@@ -19,6 +20,12 @@ export interface FleetFlowFeatureRecord {
   currentStep: string | null;
   prNumber: number | null;
   callsJobId?: string | null;
+  /** The review job the stored questions and answers belong to: a later review replaces them. */
+  questionsJobId?: string | null;
+  questions?: FlowQuestion[] | null;
+  answers?: FlowAnswer[] | null;
+  answeredById?: string | null;
+  answeredAt?: Date | null;
 }
 
 export interface FleetFlowRecord {
@@ -91,4 +98,13 @@ export interface IFleetFlowRepository {
   reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord>;
   updateSha(id: string, specSha: string): Promise<FleetFlowRecord>;
   stop(id: string, reason: string, now: Date, detail?: string | null): Promise<FleetFlowRecord>;
+  /**
+   * Stores the answers a human gave to the review the feature waits on, and resumes the flow. The
+   * answers stay bound to the review job that asked the questions (`questionsJobId`).
+   */
+  recordAnswers(
+    flowId: string,
+    featureId: string,
+    input: { answers: FlowAnswer[]; userId: string; at: Date },
+  ): Promise<FleetFlowRecord>;
 }

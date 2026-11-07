@@ -1272,6 +1272,11 @@ model FleetFlowFeature {
   currentStep String?
   prNumber    Int?
   callsJobId  String?
+  questionsJobId String? // the review job the stored questions and answers belong to
+  questions      Json? // FlowQuestion[]: the questions the review asked
+  answers        Json? // FlowAnswer[]: the human answers, bound to questionsJobId
+  answeredById   String?
+  answeredAt    DateTime?
 
   flow FleetFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
 

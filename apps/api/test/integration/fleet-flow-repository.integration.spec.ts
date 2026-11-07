@@ -7,6 +7,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 import { createPgAdapter } from '../../src/prisma/pg-adapter';
 import { seedFleetBase } from '../helpers/fleet-fixtures';
 import { PrismaFleetFlowRepository } from '../../src/fleet/flows/prisma-fleet-flow.repository';
+import { PrismaFleetFlowStepRepository } from '../../src/fleet/flows/prisma-fleet-flow-step.repository';
 import { FlowTransitionError } from '../../src/fleet/flows/domain/fleet-flow.domain';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
@@ -16,6 +17,7 @@ describeDb('PrismaFleetFlowRepository', () => {
   let tx: ITransactionManager;
   let prisma: PrismaClient;
   let repo: PrismaFleetFlowRepository;
+  let steps: PrismaFleetFlowStepRepository;
   let projectId: string;
   let repoId: string;
 
@@ -27,12 +29,13 @@ describeDb('PrismaFleetFlowRepository', () => {
         transaction: true,
         clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) },
       })],
-      providers: [PrismaFleetFlowRepository],
+      providers: [PrismaFleetFlowRepository, PrismaFleetFlowStepRepository],
     }).compile();
     await module.init();
     prisma = module.get<PrismaService<PrismaClient>>(PrismaService).client;
     tx = module.get(TRANSACTION_MANAGER);
     repo = module.get(PrismaFleetFlowRepository);
+    steps = module.get(PrismaFleetFlowStepRepository);
     ({ projectId, repoId } = await seedFleetBase(prisma));
   }, 60_000);
   afterAll(async () => { await module?.close(); });
@@ -43,6 +46,14 @@ describeDb('PrismaFleetFlowRepository', () => {
       branch: 'main', specSha: 'sha-1', reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '4.25',
       features: [], ...overrides,
     });
+  }
+
+  /** A flow with its single feature, in the state a review leaves it in. */
+  async function createRunningFlow() {
+    const flow = await createFlow({ features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { state: 'RUNNING' } });
+    await prisma.fleetFlowFeature.update({ where: { id: flow.features[0].id }, data: { state: 'RUNNING' } });
+    return flow;
   }
 
   it('AC-1 persists ordered features with pending state', async () => {
@@ -189,5 +200,64 @@ describeDb('PrismaFleetFlowRepository', () => {
     expect(await prisma.fleetFlowFeature.count({ where: { flowId: flow.id } })).toBe(0);
     expect(await prisma.fleetRepo.findUnique({ where: { id: repoId } })).not.toBeNull();
     expect((await createFlow()).repoId).toBe(repoId);
+  });
+
+  it('AC-1 reads a feature created without the answer columns as empty', async () => {
+    const flow = await createFlow({ features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
+    const feature = (await repo.findById(flow.id))?.features[0];
+    expect(feature).toMatchObject({ questionsJobId: null, questions: null, answers: null, answeredById: null, answeredAt: null });
+  });
+
+  it('AC-2 waits for an answer and stores the questions of the review', async () => {
+    const flow = await createRunningFlow();
+    await steps.setWaiting(flow.id, flow.features[0].id, { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] });
+    const stored = await repo.findById(flow.id);
+    expect(stored?.state).toBe('WAITING_ANSWER');
+    expect(stored?.features[0]).toMatchObject({
+      state: 'WAITING_ANSWER', questionsJobId: 'j1', questions: [{ id: '2', question: 'Q1' }],
+    });
+  });
+
+  it('AC-3 clears the answers of an earlier review when a new wait starts', async () => {
+    const flow = await createRunningFlow();
+    await prisma.fleetFlowFeature.update({
+      where: { id: flow.features[0].id },
+      data: {
+        answers: [{ id: '2', answer: 'A1' }], answeredById: 'u1', answeredAt: new Date('2026-11-05T12:00:00.000Z'),
+      },
+    });
+    await steps.setWaiting(flow.id, flow.features[0].id, { jobId: 'j2', questions: [{ id: '4', question: 'Q2' }] });
+    const feature = (await repo.findById(flow.id))?.features[0];
+    expect(feature).toMatchObject({ questionsJobId: 'j2', questions: [{ id: '4', question: 'Q2' }], answers: null, answeredById: null, answeredAt: null });
+    // The column is SQL NULL: a plain `null` would write the JSON null instead of clearing it.
+    const [row] = await prisma.$queryRaw<Array<{ cleared: boolean }>>`SELECT "answers" IS NULL AS cleared FROM "FleetFlowFeature" WHERE "id" = ${flow.features[0].id}`;
+    expect(row?.cleared).toBe(true);
+  });
+
+  it('AC-4 records the answers and resumes the flow', async () => {
+    const flow = await createRunningFlow();
+    await steps.setWaiting(flow.id, flow.features[0].id, { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] });
+    const at = new Date('2026-11-05T12:00:00.000Z');
+    const recorded = await repo.recordAnswers(flow.id, flow.features[0].id, { answers: [{ id: '2', answer: 'A1' }], userId: 'u1', at });
+    expect(recorded.state).toBe('RUNNING');
+    expect(recorded.features[0]).toMatchObject({
+      state: 'RUNNING', answers: [{ id: '2', answer: 'A1' }], answeredById: 'u1', answeredAt: at,
+    });
+  });
+
+  it('AC-5 reads the questions of a waiting flow as an array of question objects', async () => {
+    const flow = await createRunningFlow();
+    await steps.setWaiting(flow.id, flow.features[0].id, { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] });
+    const feature = (await repo.findById(flow.id))?.features[0];
+    expect(Array.isArray(feature?.questions)).toBe(true);
+    expect(feature?.questions).toEqual([{ id: '2', question: 'Q1' }]);
+  });
+
+  it('AC-8 keeps the flow running when the feature of a wait does not exist', async () => {
+    const flow = await createRunningFlow();
+    await expect(tx.run(async () => {
+      await steps.setWaiting(flow.id, 'missing-feature', { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] });
+    })).rejects.toThrow(/not found/i);
+    expect((await repo.findById(flow.id))?.state).toBe('RUNNING');
   });
 });

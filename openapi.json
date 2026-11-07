@@ -25626,6 +25626,36 @@
           "mode"
         ]
       },
+      "FleetFlowQuestionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question"
+        ]
+      },
+      "FleetFlowAnswerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "answer"
+        ]
+      },
       "FleetFlowFeatureDto": {
         "type": "object",
         "properties": {
@@ -25650,6 +25680,28 @@
           },
           "prNumber": {
             "type": "number",
+            "nullable": true
+          },
+          "questionsJobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "questions": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowQuestionDto"
+            }
+          },
+          "answers": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetFlowAnswerDto"
+            }
+          },
+          "answeredAt": {
+            "type": "string",
             "nullable": true
           }
         },

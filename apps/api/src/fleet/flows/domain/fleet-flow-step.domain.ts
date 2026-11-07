@@ -1,6 +1,7 @@
 import type { FleetJobRecord } from '../../jobs/domain/fleet-job.domain';
 import type { PrincipalRef } from '../../../permissions/permissions.types';
 import type { FlowStep } from '../flow-steps';
+import type { FlowQuestion } from '../flow-calls';
 
 export const FLEET_FLOW_STEP_REPOSITORY = Symbol('FLEET_FLOW_STEP_REPOSITORY');
 
@@ -47,6 +48,11 @@ export interface IFleetFlowStepRepository {
   /** Adopt the PLAN output branch before applying PRD calls or re-asking that branch's head. */
   setBranch(flowId: string, branch: string): Promise<void>;
   recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void>;
+  /**
+   * Puts the feature and its flow into `WAITING_ANSWER` for the review job `jobId`: the questions are
+   * stored and the answers of an earlier review are cleared, so a wait never answers a later review.
+   */
+  setWaiting(flowId: string, featureId: string, input: { jobId: string; questions: FlowQuestion[] }): Promise<void>;
   setTicket(flowId: string, ticketId: string): Promise<boolean>;
   sumCost(flowId: string): Promise<string>;
   ingestSettled(jobId: string, leaseEpoch: number): Promise<boolean>;

@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStep } from './flow-steps';
+import type { FlowQuestion } from './flow-calls';
 import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, LatestFlowJob, MarkFlowStepData } from './domain/fleet-flow-step.domain';
 
 @Injectable()
@@ -104,6 +105,26 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
   async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void> {
     await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha } });
+  }
+
+  /**
+   * The feature waits for the answers to the questions of the review job `jobId`. The answers of an
+   * earlier review are cleared with `Prisma.DbNull` (a nullable JSON column keeps its value for a
+   * plain `null`), so the stored answers only ever belong to the review that is waited on.
+   */
+  async setWaiting(flowId: string, featureId: string, input: { jobId: string; questions: FlowQuestion[] }): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { state: 'WAITING_ANSWER' } });
+    await this.db.fleetFlowFeature.update({
+      where: { id: featureId },
+      data: {
+        questionsJobId: input.jobId,
+        questions: input.questions as unknown as Prisma.InputJsonValue,
+        state: 'WAITING_ANSWER',
+        answers: Prisma.DbNull,
+        answeredById: null,
+        answeredAt: null,
+      },
+    });
   }
 
   async setTicket(flowId: string, ticketId: string): Promise<boolean> {
