@@ -1,0 +1,970 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-steps",
+  "branchName": "feat/fleet-flow-steps",
+  "createdAt": "2026-11-28T00:00:00.000Z",
+  "updatedAt": "2026-11-07T03:42:22.421Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Flow steps and review tasks",
+      "description": "**Goal** — Define the fixed step vocabulary and exact tasks used by the two flow review agents.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — Pure module `flow-steps.ts`: `FlowStep`, `FLOW_VERDICT_INSTRUCTION`, `FLOW_STOP_DETAIL_MAX` and `buildReviewTask(step, specPath, feature)`.\n\nReview agent = api setting. `FLEET_FLOW_REVIEW_AGENT` (default `Explore`) names the nax agent of both review steps; the model is always the flow's `reviewerRole`; the task starts with `/spec-review` so nax expands the skill.\n\nThe verdict instruction appended to both review tasks:\n```text\nWhen you are done, end your reply with exactly one JSON object on its own line, with no text after it:\n{\"findings\":[{\"id\":\"<short id>\",\"summary\":\"<one sentence>\"}]}\nUse {\"findings\":[]} when you found nothing that should change before the next step.\n```\nKeep the quoted verdict instruction, including its empty-findings example; ensure the exact line `{\"findings\":[]}` is also present, without surrounding spaces, to satisfy the instruction AC. Do not add invented runtime rejection behavior for inputs outside the existing validated path/feature contract. Build SPEC_REVIEW as `/spec-review <specPath>` and PRD_REVIEW as `/spec-review --spec <specPath> --prd .nax/features/<feature>/prd.json`, followed by a blank line and the exported instruction. Respect the existing 16,384-character AGENT task bound.\n\n**Scope** — In: the pure step constants and review-task builder, with colocated unit tests. Out: parsing verdicts (US-002), dispatch-body construction (US-010), and config resolution (US-017).\n\n**Interface** — `FlowStep` (`'SPEC_REVIEW' | 'PLAN' | 'PRD_REVIEW' | 'RUN' | 'REVIEW' | 'FIX'`), `FLOW_VERDICT_INSTRUCTION`, `FLOW_STOP_DETAIL_MAX` (2000), `buildReviewTask(step, specPath, feature)`.",
+      "acceptanceCriteria": [
+        "[unit] buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a') returns `/spec-review .nax/features/a/spec.md`, a blank line, then FLOW_VERDICT_INSTRUCTION.",
+        "[unit] buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a') returns `/spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json`, a blank line, then FLOW_VERDICT_INSTRUCTION.",
+        "[unit] buildReviewTask('SPEC_REVIEW', p, 'a') for a 400-character spec path p returns at most 16,384 characters.",
+        "[unit] FLOW_VERDICT_INSTRUCTION includes the line `{\"findings\":[]}`.",
+        "[unit] FLOW_STOP_DETAIL_MAX equals 2000.",
+        "[unit] buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a') does not include the PRD-only --spec or --prd flags."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure additive constants and deterministic string construction, using existing agent bounds."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/common/agent-jobs.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/flows/flow-steps.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "The verdict parser",
+      "description": "**Goal** — Parse a review agent's final JSON verdict and produce bounded stop details for findings.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — Review steps stop strictly. F3 reads only the final verdict JSON of a review `AGENT` job. No findings: the flow continues. Any finding, or no parseable verdict: the flow stops with the findings in its detail. F4 replaces \"any finding stops\" with classify, fix and ask.\n\nVerdict strictness. The verdict is the text from the last `{\"findings\"` to the end, after removing a trailing code fence and whitespace; any other trailing text makes it unreadable, as the instruction asks for nothing after it.\n\nStop details are at most 2,000 characters (`FLOW_STOP_DETAIL_MAX`).\n\nRequire a findings array whose entries have string summary; keep id only when it is a string. Return `{ ok: false }` for null, absent JSON, malformed JSON, a non-array findings property or an entry without summary. Format one finding as `1 finding: 1. a`, multiple findings as `2 findings: 1. [F1] a 2. b`, and truncate overlong output to exactly 2,000 characters ending in `…`.\n\n**Scope** — In: pure parser/formatter and unit tests. Out: decision transitions (US-008), AGENT dispatch (US-010). Verdict classification (`answered`/`minor`/`ambiguous`), spec-fix jobs, batched questions, agent rulings on open PR items and the flow's ticket (fleet flow F4).\n\n**Interface** — `FlowFinding`, `parseFlowVerdict(output)` and `formatFindings(findings)` in `flow-verdict.ts`.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowVerdict('Looks good.\\n{\"findings\":[]}') returns { ok: true, findings: [] }.",
+        "[unit] parseFlowVerdict of text ending in `{\"findings\":[{\"id\":\"F1\",\"summary\":\"Missing AC for 409\"}]}` returns ok true with the one finding { id: 'F1', summary: 'Missing AC for 409' }.",
+        "[unit] parseFlowVerdict('{\"findings\":[{\"summary\":\"x\"}]}\\nmore text\\n{\"findings\":[]}') returns ok true with no findings.",
+        "[unit] parseFlowVerdict('{\"findings\":[]}\\n```\\n  ') returns ok true with no findings.",
+        "[unit] parseFlowVerdict('{\"findings\":[]} thanks') returns { ok: false }.",
+        "[unit] parseFlowVerdict('All fine, no JSON.') returns { ok: false }.",
+        "[unit] parseFlowVerdict(null) returns { ok: false }.",
+        "[unit] parseFlowVerdict('{\"findings\": oops') returns { ok: false }.",
+        "[unit] parseFlowVerdict('{\"findings\":{\"a\":1}}') returns { ok: false }.",
+        "[unit] parseFlowVerdict('{\"findings\":[{\"id\":\"F1\"}]}') returns { ok: false }.",
+        "[unit] parseFlowVerdict('{\"findings\":[{\"id\":7,\"summary\":\"s\"}]}') returns ok true with the one finding { summary: 's' }.",
+        "[unit] formatFindings([{ id: 'F1', summary: 'a' }, { summary: 'b' }]) returns `2 findings: 1. [F1] a 2. b`.",
+        "[unit] formatFindings([{ summary: 'a' }]) returns `1 finding: 1. a`.",
+        "[unit] formatFindings of 100 findings of 100 characters each returns exactly 2,000 characters ending in `…`."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure",
+        "parsing"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Bounded untrusted-output parsing and formatting with fully specified deterministic cases; no auth or credential handling."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-verdict.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Flow job columns and flow stop/re-ask",
+      "description": "**Goal** — Persist flow-job linkage and stop detail, and make stop/re-ask update all feature states.\n\n**Motivation** — F1 (`fleet-flow-record`, #400) records flows and their one approval, and F2 (`fleet-agent-job`, #403) added the `AGENT` job kind, but nothing moves an approved flow: `FleetFlowStartCommand.execute` and the thread tick both leave it `APPROVED` and stop.\n\n**Approach** — One migration adds `FleetJob.flowId` (nullable, relation to `FleetFlow` with `onDelete: SetNull`, index on `flowId, queuedAt`), `FleetJob.flowStep` (nullable string), `FleetFlow.stopDetail` (nullable string) and the index `FleetFlow(state, id)`. `FleetFlowRecord` gains optional `stopDetail`. `PrismaFleetFlowRepository.stop` takes an optional `detail` and stops every feature; `reask` resets every feature to `PENDING` with no `currentStep`.\n\nA human stop does not cancel the running job (design, Stops). The record phase writes nothing when the flow has meanwhile left `APPROVED`/`RUNNING`. `IFleetFlowRepository.stop` now also marks every feature `STOPPED`, for every caller.\n\nUpdate the Prisma relation inverse and domain mapping; deploy this additive migration before selecting new columns. Use the preceding-schema scratch migration pattern for the migration test and existing flow repository/read-stop integration fixtures for behavior.\n\n**Scope** — In: schema, migration, domain optional field and repository stop/reask semantics, retaining existing transition errors. Out: job dispatch/adoption (US-004), step repository (US-005/006). Every web page and the `FleetFlowDto` fields for steps, jobs and `stopDetail` (fleet flow F6), including the \"cap excludes N jobs with unknown cost\" display. Cancelling a running job when a flow stops or returns to `PENDING`: by design the flow only starts nothing more.\n\n**Interface** — `stopDetail?: string | null`; `stop(id: string, reason: string, now: Date, detail?: string | null)` writes `stopDetail` (null when omitted) and sets every feature's `state` to `STOPPED`; `reask` also sets every feature's `state` to `PENDING` and `currentStep` to null.",
+      "acceptanceCriteria": [
+        "[integration] After the migration, a FleetJob inserted with flowId set to an existing flow's id and flowStep 'PLAN' reads back with both values.",
+        "[integration] Deleting a FleetFlow sets flowId to null on its jobs.",
+        "[integration] Deleting a FleetFlow deletes no job.",
+        "[integration] PrismaFleetFlowRepository.stop(id, 'cost_cap', now, 'spent 5 of cap 5') returns a record with state STOPPED, stopReason cost_cap and stopDetail `spent 5 of cap 5`.",
+        "[integration] After stop(id, 'cost_cap', now, 'x'), every feature of that flow has state STOPPED.",
+        "[integration] stop(id, 'human_stop', now) without a detail stores stopDetail null.",
+        "[integration] stop on a PENDING flow, as FleetFlowsService.stop calls it, also sets its features to STOPPED.",
+        "[integration] reask(id, { specSha, approvalRequestId }) on a RUNNING flow whose feature is RUNNING at currentStep SPEC_REVIEW leaves the feature with state PENDING and currentStep null.",
+        "[integration] findById returns stopDetail from the row.",
+        "[integration] PrismaFleetFlowRepository.stop(id, 'human_stop', now) on a COMPLETED flow rejects with FlowTransitionError, preserving the existing terminal-state transition restriction."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "prisma",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Five-file additive migration/domain/repository change follows existing transition and nested-write patterns; scratch-schema and repository DB tests cover SetNull and feature resets without a new orchestration abstraction."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/test/integration/fleet/thread-modes-migration.integration.spec.ts",
+        "apps/api/test/integration/fleet-flow-read-stop.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261128090000_fleet_flow_steps/migration.sql",
+        "apps/api/test/integration/fleet/fleet-flow-steps-migration.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Flow fields on jobs and the system key",
+      "description": "**Goal** — Link every dispatched or adopted flow job durably and register the flow engine's system audit key.\n\n**Motivation** — F1 (`fleet-flow-record`, #400) records flows and their one approval, and F2 (`fleet-agent-job`, #403) added the `AGENT` job kind, but nothing moves an approved flow: `FleetFlowStartCommand.execute` and the thread tick both leave it `APPROVED` and stop.\n\n**Approach** — The job row is the source of truth. Every flow job stores `flowId` and `flowStep` in the same insert that creates it. The engine reads the flow's latest job (by `queuedAt`) on every tick, so a crash between dispatch and the bookkeeping that follows loses nothing: the next tick sees the job. `FleetFlowFeature.state`, `currentStep` and `prNumber` are written after each dispatch; the `FIX` step reads `prNumber` from the feature.\n\n`opts` adds `flowId?: string` and `flowStep?: FlowStep`, the `auditKey` union adds `'system.flow.advance'`, and both flow fields are written in the job insert. A new method `adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean>` sets them on an existing job whose `flowId` is null, through a new `IFleetJobRepository.adoptForFlow(jobId, flowId, step): Promise<boolean>` (a conditional update; `FleetJobPatch` does not carry `flowId`).\n\n`NewFleetJob` and `FleetJobRecord`: both add optional `flowId?: string | null` and `flowStep?: string | null`. `buildAssignPayload` also gives a `PLAN` with a non-null `flowId` `expectBranch: job.ref`. Append `system.flow.advance` (`'any'`) right after `system.flow.respec` in NEW_KEY_SCOPES and add it to PENDING_SURFACE_KEYS until US-017 declares the ticker. Update catalog.spec.ts's mirrored table; every role in __snapshots__/role-matrix.json gains `\"system.flow.advance\": [\"non-role-key\",\"non-role-key\"]` right after system.flow.respec, with no other entry changes; permission-contract.spec.ts expectedPending gains the key. Preserve all existing dispatch callers and current FK not-found mapping. Extend existing job integration/assign-payload unit suites.\n\n**Scope** — In: dispatch opts/insert, domain mapping, conditional adoption, PLAN assignment including existing thread PLAN behavior, and permission-catalog contracts. Out: calling adoption in a record transaction (US-016), ticker declaration/removing the pending key (US-017), and public DTO changes. Mapping a `flowId` foreign-key failure at dispatch (a flow deleted mid-pass) to anything but the existing `createJob` not-found path. Regenerating the CLI client and CLI commands for flows; `openapi.json` does not change.\n\n**Interface** — `adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean>` on FleetJobsService and IFleetJobRepository; dispatch opts add `flowId?: string`, `flowStep?: FlowStep` and audit key `'system.flow.advance'`.",
+      "acceptanceCriteria": [
+        "[integration] FleetJobsService.dispatch with opts { flowId, flowStep: 'PLAN', auditKey: 'system.flow.advance' } creates a job whose stored flowId and flowStep equal those values.",
+        "[integration] FleetJobsService.dispatch without flowId creates a job whose flowId and flowStep are null.",
+        "[integration] A job created with flowId and read back through the job repository's findById carries flowId and flowStep.",
+        "[integration] FleetJobsService.adoptForFlow(jobId, flowId, 'REVIEW') on a job with no flowId sets both fields and returns true.",
+        "[integration] adoptForFlow on a job whose flowId is another flow's id writes nothing and returns false.",
+        "[unit] buildAssignPayload for a PLAN job with flowId flow-1, no threadId and ref feat/x sets expectBranch feat/x.",
+        "[unit] buildAssignPayload for a RUN job with flowId flow-1 sets no expectBranch.",
+        "[unit] buildAssignPayload for a PLAN job with neither threadId nor flowId sets no expectBranch.",
+        "[unit] findCatalogEntry('system.flow.advance') returns an entry with access system.",
+        "[unit] buildAssignPayload for a PLAN job with an existing threadId, no flowId and ref feat/x still sets expectBranch feat/x."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "jobs",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module job persistence and adoption plus security-sensitive system-key/catalog and role snapshot changes require strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/assign-payload.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its mirrored `NEW_KEY_SCOPES` table ends at `system.flow.respec`; append `system.flow.advance: 'any'` after it so the table still equals the catalog's, in the same order."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role's map gains `\"system.flow.advance\": [\"non-role-key\",\"non-role-key\"]` right after `system.flow.respec`, the same value that key has; no other entry changes."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`expectedPending` gains `system.flow.advance`, because `PENDING_SURFACE_KEYS` now holds it until the ticker declares it."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Step repository reads",
+      "description": "**Goal** — Provide the durable reads needed to select live single-feature flows and reconstruct job progress and spend.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — `IFleetFlowStepRepository` (token `FLEET_FLOW_STEP_REPOSITORY`) and its Prisma implementation, read half: `listAdvanceable(limit, afterId)`, `latestJob(flowId)`, `latestJobForStep(flowId, step)`, `sumCost(flowId)` and `ingestSettled(jobId, leaseEpoch)`.\n\nCross-table reads in the flow's repository. The step repository reads `FleetJob`, `FleetBundleIngest`, `User` and `Agent` rows, as `PrismaScheduleRepository` already does for its cost totals and `findOwnerAccess`. The one write to `FleetJob` (adoption) goes through `FleetJobsService`.\n\nPaging. `listAdvanceable(limit, afterId)` returns single-feature `APPROVED`/`RUNNING` flows ordered by `id`, after the given id; the ticker pages 50 at a time until a short page, at most 10 pages per tick. A new index `FleetFlow(state, id)` serves it.\n\nCap. `spentUsd` is recomputed on every tick as the sum of `costSpentUsd + costCarriedUsd` over jobs with the flow's id. Before any dispatch, a remaining cap (`costCapUsd - spentUsd`, rounded down to 4 decimals) below `0.0001` stops the flow (`cost_cap`); otherwise the remaining cap is the job's `maxCostUsd`. A job with unknown cost adds 0.\n\nLatest jobs are selected by queuedAt, with latestJobForStep filtering the requested flowStep before ordering. Ingest settlement is tied to the exact job lease; done, partial and failed settle it. Use generated Prisma.Decimal for the sum and return four-place strings. Write DB-backed repository tests in the declared new suite; US-006 extends it.\n\n**Scope** — In: repository token/interface, AdvanceableFlow, read implementation and integration cases. Out: creatorAccess and mutations (US-006), pure cap subtraction (US-010), ticker paging loop (US-017).\n\n**Interface** — `FLEET_FLOW_STEP_REPOSITORY`, `IFleetFlowStepRepository`, `AdvanceableFlow`; `listAdvanceable(limit, afterId)`, `latestJob(flowId)`, `latestJobForStep(flowId, step)`, `sumCost(flowId)`, `ingestSettled(jobId, leaseEpoch)`.",
+      "acceptanceCriteria": [
+        "[integration] listAdvanceable(50, null) returns flows in state APPROVED or RUNNING that have exactly one feature, each as { id, createdByType, createdById }, ordered by id.",
+        "[integration] listAdvanceable(50, null) omits a two-feature APPROVED flow.",
+        "[integration] listAdvanceable(50, null) omits flows in PENDING, WAITING_MERGE, WAITING_ANSWER, COMPLETED and STOPPED.",
+        "[integration] listAdvanceable(1, firstId) with three eligible flows returns the second one.",
+        "[integration] latestJob(flowId) returns the flow's job with the greatest queuedAt.",
+        "[integration] latestJob(flowId) returns null for a flow with no jobs.",
+        "[integration] latestJobForStep(flowId, 'PLAN') returns the newest job of that flow whose flowStep is PLAN, ignoring newer jobs of other steps.",
+        "[integration] sumCost(flowId) over jobs with costSpentUsd 1.2500/costCarriedUsd 0.5000 and costSpentUsd 2.0000/costCarriedUsd 0 returns '3.7500'.",
+        "[integration] sumCost(flowId) ignores a job with another flowId.",
+        "[integration] sumCost(flowId) returns '0.0000' for a flow with no jobs.",
+        "[integration] ingestSettled(jobId, leaseEpoch) returns true for a FleetBundleIngest row of that job and lease with status done.",
+        "[integration] ingestSettled returns true for status failed.",
+        "[integration] ingestSettled returns false for status running.",
+        "[integration] ingestSettled returns false when the only row belongs to another lease."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "repository",
+        "prisma"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small repository interface and Prisma adapter use existing scheduling query/Decimal patterns; relational eligibility, keyset paging and lease filters need focused DB tests but no cross-service orchestration."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/schedules/prisma-schedule.repository.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ingestSettled(jobId, leaseEpoch) returns true for status partial.",
+        "ingestSettled(jobId, leaseEpoch) returns false when no ingest row exists."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Step repository writes and lookups",
+      "description": "**Goal** — Add transaction-aware progress/spend/completion writes and creator existence/disabled lookups to the step repository.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — The step repository's other half: `setSpent(flowId, spentUsd)`, `creatorAccess(ref)`, `markStep(flowId, featureId, step, data)` and `complete(flowId, now)`.\n\nCross-table reads in the flow's repository. The step repository reads `FleetJob`, `FleetBundleIngest`, `User` and `Agent` rows, as `PrismaScheduleRepository` already does for its cost totals and `findOwnerAccess`. The one write to `FleetJob` (adoption) goes through `FleetJobsService`.\n\nRead User.disabled for users, return exists false/disabled false for absent users, and determine agent existence without treating agent liveness as disabled. markStep writes the flow state and sets the specified feature RUNNING/currentStep; set prNumber only when supplied, preserving an existing value otherwise. complete writes COMPLETED and endedAt on the flow and COMPLETED on its feature. All methods use the transaction-scoped Prisma client so the advance service can audit mutations atomically. Extend the repository interface and the integration suite created by US-005.\n\n**Scope** — In: creatorAccess, setSpent, markStep and complete. Out: evaluating effective permission keys/cap (US-014), the bookkeeping reason and audit orchestration (US-012), job adoption (US-004/016). Notifications on a flow stop or completion: until F4, a stop is visible only in flow activity, audit, `stopReason` and `stopDetail`.\n\n**Interface** — `setSpent(flowId, spentUsd)`, `creatorAccess(ref)`, `markStep(flowId, featureId, step, data)` and `complete(flowId, now)` on IFleetFlowStepRepository.",
+      "acceptanceCriteria": [
+        "[integration] setSpent(flowId, '3.7500') stores spentUsd 3.7500 on the flow.",
+        "[integration] creatorAccess({ type: 'USER', id }) returns { exists: true, disabled: true } for a disabled user.",
+        "[integration] creatorAccess({ type: 'USER', id }) returns { exists: false, disabled: false } for an unknown id.",
+        "[integration] creatorAccess({ type: 'AGENT', id }) returns exists true for an existing agent.",
+        "[integration] creatorAccess({ type: 'AGENT', id }) returns exists false for an unknown agent.",
+        "[integration] markStep(flowId, featureId, 'REVIEW', { flowState: 'RUNNING', prNumber: 7 }) leaves the flow RUNNING.",
+        "[integration] After that markStep, the feature has state RUNNING, currentStep REVIEW and prNumber 7.",
+        "[integration] markStep(flowId, featureId, 'PLAN', { flowState: 'RUNNING' }) keeps the feature's existing prNumber.",
+        "[integration] complete(flowId, now) sets the flow state COMPLETED with endedAt now.",
+        "[integration] complete(flowId, now) sets the feature's state COMPLETED."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "repository",
+        "access-control"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard repository updates, with a security override because creator existence and disabled-state lookups underpin dispatch access control."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/schedules/prisma-schedule.repository.ts",
+        "apps/api/src/fleet/schedules/domain/schedule.domain.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Step decision, gating and job ends",
+      "description": "**Goal** — Establish the pure flow decision model, approval-epoch gate, active-job waiting and generic job-failure stops.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — Pure `decideFlowStep(input: FlowStepInput): FlowStepAction`, first part: the single-feature gate, the `APPROVED` start and adoption rule, waiting on an active job, and the stop rules for failed, cancelled, crashed and escalated jobs.\n\nMulti-feature flows wait. F3 advances only flows with exactly one feature. A flow with more stays `APPROVED` and nothing is dispatched for it until F5.\n\nRe-approval restarts at spec review. An `APPROVED` flow dispatches `SPEC_REVIEW`, unless its latest job is a `SPEC_REVIEW` queued at or after `approvedAt` (a dispatch whose bookkeeping did not commit), which the engine adopts. A re-ask resets the feature's `state` to `PENDING` and `currentStep` to null.\n\nAn active eligible latest job returns wait; a RUNNING flow without a job dispatches SPEC_REVIEW. A job ending FAILED, CANCELLED or CRASHED stops step_failed; a non-RUN job ending ESCALATED does too. Detail is `<STEP> job <id> <state>: <stateReason or 'no reason'>`. RUN ESCALATED remains eligible for its PR path, rather than this generic stop. No failed-step retry.\n\n**Scope** — In: shared pure decision types, approval/start/wait/failure rules, the explicitly required ESCALATED RUN-with-PR handoff to REVIEW, and unit tests. Out: completed review/PLAN rules (US-008), remaining RUN/REVIEW/FIX progression and PR-wait/ready rules (US-009), service-side recovery recording (US-013). Flows with more than one feature, feature order, merge waits and independent features (fleet flow F5); F3 leaves such a flow `APPROVED`. Retrying a failed step: any failure stops the flow; a stopped flow is never restarted in place.\n\n**Interface** — `FlowJobView`, `FlowStepInput`, `FlowStepAction`, `FlowStopReason`, `decideFlowStep`.\n```ts\nexport type FlowStepAction =\n  | { kind: 'skip' }                                   // not single-feature\n  | { kind: 'wait' }\n  | { kind: 'complete' }\n  | { kind: 'stop'; reason: FlowStopReason; detail: string }\n  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string } };\n```\nStop reasons: `step_failed`, `verdict_unreadable`, `review_findings`, `plan_no_result`, `run_no_pr`, `pr_not_ready`, `cost_cap`, `creator_lost_access`, `budget_paused`, `dispatch_refused`.",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep with featureCount 2 returns { kind: 'skip' }.",
+        "[unit] decideFlowStep with flow state APPROVED and no latest job returns { kind: 'dispatch', step: 'SPEC_REVIEW' }.",
+        "[unit] decideFlowStep with flow state APPROVED and a latest PLAN job queued before approvedAt returns { kind: 'dispatch', step: 'SPEC_REVIEW' }.",
+        "[unit] decideFlowStep with flow state APPROVED and a latest SPEC_REVIEW job in RUNNING queued at approvedAt returns { kind: 'wait' }.",
+        "[unit] decideFlowStep with flow state RUNNING and no latest job returns { kind: 'dispatch', step: 'SPEC_REVIEW' }.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest job in QUEUED returns { kind: 'wait' }.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest job in UPLOADING returns { kind: 'wait' }.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest PLAN job j1 in FAILED with stateReason `checkout: no .nax dir` returns a stop with reason step_failed and detail `PLAN job j1 FAILED: checkout: no .nax dir`.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest job in CANCELLED returns a stop with reason step_failed.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest job in CRASHED with stateReason null returns a stop whose detail ends `CRASHED: no reason`.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest REVIEW job in ESCALATED returns a stop with reason step_failed.",
+        "[unit] decideFlowStep with flow state RUNNING and a latest RUN job in ESCALATED with prNumber 12 returns a REVIEW dispatch, not a stop.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is FAILED, CANCELLED or CRASHED, decideFlowStep returns detail `<STEP> job <id> <state>: <stateReason or 'no reason'>`.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is a non-RUN job in ESCALATED, decideFlowStep returns a step_failed stop with detail `<STEP> job <id> ESCALATED: <stateReason or 'no reason'>`."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure decision abstraction with approval-epoch and terminal-state rules; no persistence or access-control side effects."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/jobs/job-state.ts",
+        "apps/api/src/fleet/flows/flow-states.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Step decision, reviews and plan",
+      "description": "**Goal** — Extend the pure decision engine through strict spec review, PLAN results and strict PRD review.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — `decideFlowStep` for `COMPLETED` `SPEC_REVIEW`, `PRD_REVIEW` and `PLAN` jobs: the verdict rule and the `PLAN` result rule.\n\nReview steps stop strictly. F3 reads only the final verdict JSON of a review `AGENT` job. No findings: the flow continues. Any finding, or no parseable verdict: the flow stops with the findings in its detail. F4 replaces \"any finding stops\" with classify, fix and ask.\n\nAGENT verdict rule (F2): an `AGENT` job ends `COMPLETED` only when `nax agents run` reported status `completed`; `failed`, `timeout` and `cancelled` end the job `FAILED`. So a `COMPLETED` review job's `agentResult.status` is always `completed`, and `agentResult.output` keeps the last 8,192 bytes, where the verdict sits.\n\nFor completed reviews, call parseFlowVerdict; no findings dispatches PLAN after SPEC_REVIEW or RUN after PRD_REVIEW. Findings stop review_findings with formatFindings detail. Missing/unparseable output stops verdict_unreadable with `<STEP> job <id>: no verdict JSON in the agent output`. Completed PLAN must contain both resultBranch and resultSha to dispatch PRD_REVIEW; either absent stops plan_no_result. Extend the shared decision tests rather than creating another decision engine.\n\n**Scope** — In: completed review/PLAN decisions and preservation of active-review waiting. Out: parsing implementation (US-002), RUN/REVIEW/FIX outcomes (US-009), dispatch refs (US-010). Verdict classification (`answered`/`minor`/`ambiguous`), spec-fix jobs, batched questions, agent rulings on open PR items and the flow's ticket (fleet flow F4).\n\n**Interface** — `decideFlowStep(input: FlowStepInput): FlowStepAction`; `parseFlowVerdict`, `formatFindings`.",
+      "acceptanceCriteria": [
+        "[unit] On a RUNNING flow, a COMPLETED SPEC_REVIEW job whose agentOutput ends in `{\"findings\":[]}` makes decideFlowStep return { kind: 'dispatch', step: 'PLAN' }.",
+        "[unit] On a RUNNING flow, a COMPLETED PRD_REVIEW job whose agentOutput ends in `{\"findings\":[]}` makes decideFlowStep return { kind: 'dispatch', step: 'RUN' }.",
+        "[unit] On a RUNNING flow, a COMPLETED SPEC_REVIEW job whose verdict has one finding makes decideFlowStep return a stop with reason review_findings.",
+        "[unit] That review_findings stop's detail equals formatFindings of the verdict's findings.",
+        "[unit] On a RUNNING flow, a COMPLETED PRD_REVIEW job whose verdict has one finding makes decideFlowStep return a stop with reason review_findings.",
+        "[unit] On a RUNNING flow, a COMPLETED SPEC_REVIEW job j2 whose agentOutput is null makes decideFlowStep return a stop with reason verdict_unreadable and detail `SPEC_REVIEW job j2: no verdict JSON in the agent output`.",
+        "[unit] On a RUNNING flow, a COMPLETED PRD_REVIEW job whose agentOutput has no verdict makes decideFlowStep return a stop with reason verdict_unreadable.",
+        "[unit] On a RUNNING flow, a COMPLETED PLAN job with resultBranch and resultSha makes decideFlowStep return { kind: 'dispatch', step: 'PRD_REVIEW' }.",
+        "[unit] On a RUNNING flow, a COMPLETED PLAN job with no resultSha makes decideFlowStep return a stop with reason plan_no_result.",
+        "[unit] On a RUNNING flow, a COMPLETED PLAN job with no resultBranch makes decideFlowStep return a stop with reason plan_no_result.",
+        "[unit] On a RUNNING flow, a RUNNING SPEC_REVIEW job whose agentOutput already contains an empty-findings verdict still makes decideFlowStep return { kind: 'wait' }, preserving active-job waiting."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Deterministic additions to an existing pure decision function using the upstream parser."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Step decision, run, review and fix",
+      "description": "**Goal** — Complete the pure step engine with ingest-aware RUN PR waits and the one-REVIEW/one-FIX completion path.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — PR phase = `REVIEW` then one `FIX`. `REVIEW` goes through the existing head claim, so auto-review cannot double-dispatch. A `COMPLETED` `FIX` whose `fixReady.markedReady` is true completes the feature; any other `COMPLETED` `FIX` end stops the flow as `pr_not_ready`. Failed, cancelled, crashed or escalated FIX jobs retain the generic `step_failed` rule. Agent rulings for open items are F4.\n\n`RUN` waits for its PR. `resultPrUrl` is filled by bundle ingest, after the job ends. A `COMPLETED` or `ESCALATED` `RUN` (a draft PR escalates at ingest) with no PR yet waits until its `FleetBundleIngest` row for the job's lease is `done`, `partial` or `failed`, or until `FLEET_FLOW_PR_WAIT_MS` (default 1,800,000) has passed since `finishedAt`; then it stops as `run_no_pr`.\n\nA terminal eligible RUN with parsed PR dispatches REVIEW with number and RUN.resultSha as headSha. A completed REVIEW dispatches FIX using the feature's prNumber. A completed FIX with markedReady true completes; otherwise stop pr_not_ready with readyHeld or `FIX ended without a ready result`. Generic failure-state rules remain authoritative for failed/cancelled/crashed/escalated FIX and REVIEW. Extend existing decision tests.\n\n**Scope** — In: pure RUN/REVIEW/FIX progression, timeout boundary and preservation of generic job-failure precedence. Out: reading PR URLs/repos/ingest rows (US-012), claim orchestration (US-016), dispatch bodies (US-010). Verdict classification (`answered`/`minor`/`ambiguous`), spec-fix jobs, batched questions, agent rulings on open PR items and the flow's ticket (fleet flow F4). Retrying a failed step: any failure stops the flow; a stopped flow is never restarted in place.\n\n**Interface** — `decideFlowStep(input: FlowStepInput): FlowStepAction`; REVIEW action `{ kind: 'dispatch', step: 'REVIEW', pr: { number: 12, headSha: 'abc1234' } }`; FIX action `{ kind: 'dispatch', step: 'FIX', pr: { number: 12 } }`.",
+      "acceptanceCriteria": [
+        "[unit] On a RUNNING flow, a COMPLETED RUN job whose prNumber is 12 and resultSha is abc1234 makes decideFlowStep return { kind: 'dispatch', step: 'REVIEW', pr: { number: 12, headSha: 'abc1234' } }.",
+        "[unit] On a RUNNING flow, a COMPLETED RUN job with no prNumber, ingestSettled false and now - finishedAt below prWaitMs makes decideFlowStep return { kind: 'wait' }.",
+        "[unit] On a RUNNING flow, a COMPLETED RUN job with no prNumber and ingestSettled true makes decideFlowStep return a stop with reason run_no_pr.",
+        "[unit] On a RUNNING flow, a COMPLETED RUN job with no prNumber, ingestSettled false and now - finishedAt equal to prWaitMs makes decideFlowStep return a stop with reason run_no_pr.",
+        "[unit] On a RUNNING flow whose feature's prNumber is 12, a COMPLETED REVIEW job makes decideFlowStep return { kind: 'dispatch', step: 'FIX', pr: { number: 12 } }.",
+        "[unit] On a RUNNING flow, a COMPLETED FIX job whose fixReady.markedReady is true makes decideFlowStep return { kind: 'complete' }.",
+        "[unit] On a RUNNING flow, a COMPLETED FIX job whose fixReady is { markedReady: false, readyHeld: 'no CI' } makes decideFlowStep return a stop pr_not_ready with detail `no CI`.",
+        "[unit] On a RUNNING flow, a COMPLETED FIX job whose fixReady is null makes decideFlowStep return a stop pr_not_ready with detail `FIX ended without a ready result`.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is an ESCALATED RUN with no PR, unsettled ingest and elapsed time below prWaitMs, decideFlowStep returns { kind: 'wait' }.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is an ESCALATED RUN with no PR and settled ingest or elapsed time at least prWaitMs, decideFlowStep returns a run_no_pr stop.",
+        "[unit] On a RUNNING flow, a FAILED RUN job with prNumber 12 still makes decideFlowStep return a step_failed stop rather than dispatching REVIEW, preserving generic failure precedence."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure terminal-result and time-boundary decisions; integration effects belong to later stories."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/sync/event-payloads.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts"
+      ],
+      "suggestedCriteria": [
+        "Given a COMPLETED RUN with no PR and elapsed time greater than prWaitMs, decideFlowStep returns a run_no_pr stop even when ingest remains unsettled."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Step dispatch bodies and the remaining cap",
+      "description": "**Goal** — Build each step's exact dispatch body and compute a safely rounded remaining per-flow cap.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — Refs. `SPEC_REVIEW` runs at `flow.specSha`. `PLAN` runs at `flow.branch` with `planFrom` = the spec path, and gets `expectBranch` like a thread `PLAN`, so a thread entry's local-only branch is used. `PRD_REVIEW` runs at the `PLAN` job's `resultSha` and reviews `.nax/features/<feature>/prd.json` (where `nax plan` writes it) against the spec. `RUN` runs at the `PLAN` job's `resultBranch`.\n\nEvery flow job is pinned to `flow.pinnedRunnerId` when it is set (thread entry); nax-entry flows have none.\n\nReview agent = api setting. `FLEET_FLOW_REVIEW_AGENT` (default `Explore`) names the nax agent of both review steps; the model is always the flow's `reviewerRole`; the task starts with `/spec-review` so nax expands the skill.\n\nCap. `spentUsd` is recomputed on every tick as the sum of `costSpentUsd + costCarriedUsd` over jobs with the flow's id. Before any dispatch, a remaining cap (`costCapUsd - spentUsd`, rounded down to 4 decimals) below `0.0001` stops the flow (`cost_cap`); otherwise the remaining cap is the job's `maxCostUsd`. A job with unknown cost adds 0.\n\nUse Decimal subtraction/rounding, returning null below the threshold. For an unpinned flow, both review-agent bodies have exactly repoId, command AGENT, feature, selected ref, bashMode raw, remaining numeric maxCostUsd and agent { name, task, model }, with no profiles or extra keys. For a pinned flow, add pinnedRunnerId to every step's body, including both AGENT review bodies. PLAN/RUN/REVIEW/FIX use profiles []. REVIEW/FIX bodies have prNumber but no ref/feature. Missing PLAN context for RUN throws an Error naming the missing plan. Omit pinnedRunnerId entirely when null. expectBranch is built by assign-payload, not an extra dispatch-body key.\n\n**Scope** — In: pure cap and DTO-body builders. Out: config/env loading (US-017), job insert and expectBranch assignment (US-004), permission checks (US-014). Running `REVIEW` and `FIX` on the reviewer role's model: flow `PLAN`, `RUN`, `REVIEW` and `FIX` jobs use the default profile chain (`profiles: []`). Enforcing the cap inside `AGENT`, `PLAN`, `REVIEW` or `FIX` jobs beyond the `maxCostUsd` each job already receives.\n\n**Interface** — `remainingCapUsd(capUsd, spentUsd): string | null` and `buildStepDispatch(input): DispatchFleetJobDto`.",
+      "acceptanceCriteria": [
+        "[unit] remainingCapUsd('10', '3.25') returns '6.7500'.",
+        "[unit] remainingCapUsd('1', '0.33333') returns '0.6666'.",
+        "[unit] remainingCapUsd('10', '9.99995') returns null.",
+        "[unit] remainingCapUsd('5', '6') returns null.",
+        "[unit] buildStepDispatch for SPEC_REVIEW on a flow with specSha s1, reviewerRole opus, feature f, spec path .nax/features/f/spec.md, review agent Explore and remaining '6.7500' returns { repoId, command: 'AGENT', feature: 'f', ref: 's1', bashMode: 'raw', maxCostUsd: 6.75, agent: { name: 'Explore', task, model: 'opus' } } with no other keys, where task is buildReviewTask('SPEC_REVIEW', '.nax/features/f/spec.md', 'f').",
+        "[unit] buildStepDispatch for PLAN on a flow with branch feat/f returns command PLAN, ref feat/f, feature f, planFrom the spec path, profiles [] and the remaining cap as maxCostUsd.",
+        "[unit] buildStepDispatch for PRD_REVIEW returns command AGENT, ref equal to the given PLAN job's resultSha, and the task buildReviewTask('PRD_REVIEW', specPath, feature).",
+        "[unit] buildStepDispatch for RUN returns command RUN, ref equal to the given PLAN job's resultBranch, feature f and profiles [].",
+        "[unit] buildStepDispatch for REVIEW with pr { number: 12 } returns command REVIEW, prNumber 12, profiles [] and no ref or feature.",
+        "[unit] buildStepDispatch for FIX with pr { number: 12 } returns command FIX, prNumber 12, profiles [] and no ref or feature.",
+        "[unit] buildStepDispatch for PLAN on a flow with pinnedRunnerId r1 sets pinnedRunnerId r1.",
+        "[unit] buildStepDispatch for PLAN on a flow with pinnedRunnerId null has no pinnedRunnerId key.",
+        "[unit] buildStepDispatch for RUN with no PLAN job throws an Error whose message names the missing plan."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "pure",
+        "cost"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Deterministic DTO construction and exact Decimal arithmetic with established dispatch shapes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "remainingCapUsd('1.0000', '0.9999') returns '0.0001'.",
+        "buildStepDispatch includes the non-null flow pinnedRunnerId for SPEC_REVIEW, PRD_REVIEW, RUN, REVIEW and FIX as well as PLAN."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "The review head claim service",
+      "description": "**Goal** — Expose a bounded review-head claim API without exposing the reviews module's private repository.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — `REVIEW` claim states (a new exported `FleetReviewClaimService` in the reviews module, since the review repository is module-private): no row → claimed; a row with a job → owned (adopted); a `pending` row younger than `prReviewPollMs` → busy (wait); an older `pending` row (a dead pass's claim, as `ReviewHeadDispatcher.reopenStaleClaim` treats it) → removed, then claimed; a `failed:*` row → stop `dispatch_refused`. Adoption (`FleetJobsService.adoptForFlow`) runs in the record transaction, after the flow-state check, with its audit entry. Any dispatch error after a claim releases the claim before the error is handled or rethrown.\n\nThis story returns the claim outcome; the flow caller owns adoption/stop behavior. Try insertPending, then findHead when insertion loses; a missing row after a lost insert is busy. A pending row is stale only when strictly older than prReviewPollMs, matching the existing dispatcher; remove and retry insertion without assuming the retry wins. All writes run under bookkeeping('fleet.pr-review-bookkeeping', ...). Add the provider/export to FleetReviewsModule and update its unit wiring expectations if pinned. Keep the repository module-private and preserve existing auto-review dispatcher behavior.\n\n**Scope** — In: claimHead, markDispatched, release and service export/DB-free DI unit tests, preserving FleetReviewEventsService export. Out: flow-specific REVIEW dispatch/adoption/stop orchestration (US-016). Reading the PR head from the forge for the `REVIEW` claim: the claim uses the `RUN` job's `resultSha`.\n\n**Interface** — `claimHead(repoId, prNumber, headSha, now): Promise<HeadClaim>`, `markDispatched(claimId, jobId)` and `release(claimId)`; outcomes `{ kind: 'claimed', claimId }`, `{ kind: 'owned', jobId }`, `{ kind: 'busy' }`, `{ kind: 'failed', outcome }`.",
+      "acceptanceCriteria": [
+        "[unit] claimHead(repoId, 12, 'h1', now) when insertPending returns a row returns { kind: 'claimed', claimId } with that row's id.",
+        "[unit] claimHead when insertPending returns null and findHead returns a row with jobId j9 returns { kind: 'owned', jobId: 'j9' }.",
+        "[unit] claimHead when the existing row is pending, has no job and was created less than prReviewPollMs before now returns { kind: 'busy' }.",
+        "[unit] claimHead when the existing row is pending, has no job and is older than prReviewPollMs calls remove with its id.",
+        "[unit] In that stale case, claimHead calls insertPending again and returns { kind: 'claimed' } with the new row's id.",
+        "[unit] claimHead when the existing row's outcome is failed:repo gone returns { kind: 'failed', outcome: 'failed:repo gone' }.",
+        "[unit] claimHead when insertPending returns null and findHead returns null returns { kind: 'busy' }.",
+        "[unit] markDispatched(claimId, jobId) calls the review repository's markDispatched with both ids inside bookkeeping('fleet.pr-review-bookkeeping', ...).",
+        "[unit] release(claimId) calls the review repository's remove(claimId) inside bookkeeping('fleet.pr-review-bookkeeping', ...).",
+        "[unit] A test module that imports FleetReviewsModule resolves FleetReviewClaimService.",
+        "[unit] A test module importing FleetReviewsModule still resolves its existing exported FleetReviewEventsService after FleetReviewClaimService is added."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "reviews",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The claim service wraps the existing unique-head repository and stale-claim algorithm in four production/test files; mocked race outcomes and DB-free module tests suffice without redesigning claim persistence."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/reviews/domain/fleet-pr-review.domain.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.ts",
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/reviews/fleet-review-claim.service.ts",
+        "apps/api/src/fleet/reviews/fleet-review-claim.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "claimHead returns { kind: 'busy' } for a pending row created exactly prReviewPollMs before now.",
+        "When stale-claim replacement loses to another pending claim without a job, claimHead returns { kind: 'busy' }."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/reviews/fleet-reviews.module.spec.ts",
+          "reason": "if it pins the module's exports, the list gains `FleetReviewClaimService`; nothing else changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Advance, decide phase",
+      "description": "**Goal** — Implement the transaction-bounded decision phase, spend reconciliation and audited stop/completion writes.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — `advance(flowId, now)` runs three phases.\n\nDecide (one transaction). Unlocked read of the flow and its latest job. When the next step can be `SPEC_REVIEW` or `PLAN` on a nax-entry flow, read the repo with `findReviewRepo` and the forge head of `flow.branch` before the transaction (a `RepoCheckException` ends this pass for the flow with nothing written); when the latest job is a `RUN` with a `resultPrUrl`, read the repo for `prNumberFor`. Then lock parent and flow; return when the parent is gone or the state is not `APPROVED` or `RUNNING`; update `spentUsd` if the sum changed; build `FlowStepInput` from the latest flow job and call `decideFlowStep`. `stop` and `complete` actions are written here. A `dispatch` action passes the guards in order: cap, creator access, then (for `SPEC_REVIEW` and `PLAN`) the spec sha; the first failing guard stops or re-asks instead.\n\nThis story implements decision/stop/complete/spend/PR lookup; dispatch guards and forge SHA checks are completed by US-014/015 before ticker wiring.\n\nPR number. When the latest job is a `RUN` with a `resultPrUrl`, `advance` reads the repo with `FleetReposService.findReviewRepo(flow.repoId)` and parses the number with `prNumberFor({ provider: 'github', owner, name }, resultPrUrl)` (flows are GitHub-only: `AGENT`, `REVIEW` and `FIX` refuse GitLab). The `REVIEW` claim key is the `RUN` job's `resultSha`: the head the `RUN` pushed; nothing else writes the feature branch between the `RUN` and the flow's `REVIEW`. The `FIX` needs only the PR number.\n\nAudit. Every flow write the engine makes is covered, inside the transaction that writes it: each stop, completion, step record and job adoption records an `AuditRecorder` entry with key `system.flow.advance`, resource type `flow`; `setSpent` runs under a new bookkeeping reason `fleet.flow-bookkeeping`; claim writes run under the existing `fleet.pr-review-bookkeeping`. `setSpent` is called only when the sum differs from the stored `spentUsd`.\n\nStop details are at most 2,000 characters (`FLOW_STOP_DETAIL_MAX`).\n\nLock order is parent, then flow. Use thread lockForFlowTransition for thread entry and repos.lockById for nax entry. Re-read authoritative state/job context under locks. Activities are SYSTEM/flow; flow.stopped carries { flowId, stopReason, detail, step, jobId }; flow.completed accompanies complete. Add fleet.flow-bookkeeping to BOOKKEEPING_REASONS and EXPECTED_REASON_IDS in audit-coverage.bookkeeping.spec.ts, not a blanket exemption for state writes.\n\n**Scope** — In: advance service skeleton, decide phase, stop/complete/activity/audit and spend bookkeeping. Out: actual dispatch/record (US-013), cap/access guards (US-014), spec checks/reask (US-015), REVIEW claims (US-016). Recomputing `spentUsd` after a flow has stopped or completed, when a late ingest raises a job's cost. Notifications on a flow stop or completion: until F4, a stop is visible only in flow activity, audit, `stopReason` and `stopDetail`.\n\n**Interface** — `FleetFlowAdvanceService.advance(flowId: string, now: Date): Promise<void>`.",
+      "acceptanceCriteria": [
+        "[unit] advance on a flow in state PENDING dispatches nothing and writes nothing.",
+        "[unit] advance on a flow in state STOPPED dispatches nothing and writes nothing.",
+        "[unit] advance locks the thread with ThreadsService.lockForFlowTransition before flows.lockById for a thread-entry flow.",
+        "[unit] advance locks the repo with FleetReposService.lockById before flows.lockById for a nax-entry flow.",
+        "[unit] advance writes nothing when lockForFlowTransition returns null.",
+        "[unit] advance calls steps.setSpent(flowId, '3.7500') inside bookkeeping('fleet.flow-bookkeeping', ...) when sumCost returns '3.7500' and the stored spentUsd is '0.0000'.",
+        "[unit] advance does not call steps.setSpent when sumCost equals the stored spentUsd.",
+        "[unit] When the latest job is a RUN with resultPrUrl https://github.com/o/r/pull/12 and findReviewRepo resolves owner o and name r, advance calls findReviewRepo(flow.repoId) and passes prNumber 12 to decideFlowStep.",
+        "[unit] When the decision is a stop, advance calls flows.stop(flowId, reason, now, detail).",
+        "[unit] When the decision is a stop, advance records activity flow.stopped with payload { flowId, stopReason, detail, step, jobId }.",
+        "[unit] When the decision is a stop, advance records an AuditRecorder entry with key system.flow.advance, resource type flow and the flow's id.",
+        "[unit] When the decision is complete, advance calls steps.complete(flowId, now) and records activity flow.completed.",
+        "[unit] When the decision is complete, advance records an AuditRecorder entry with key system.flow.advance.",
+        "[unit] When the decision is wait, advance dispatches nothing and writes no step, stop or audit entry.",
+        "[unit] When the nax-entry parent repo row is gone at lock time, advance writes nothing."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "orchestration",
+        "audit"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-006",
+        "US-009",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The new advance service composes existing parent locks, transaction manager, repositories and audit/activity services; cross-module atomicity merits isolated sessions, but existing F1/scheduler patterns avoid an expert-level redesign."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/action-context/audit-coverage.reasons.ts",
+        "apps/api/src/fleet/sync/pr-attribution.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "`EXPECTED_REASON_IDS` gains `fleet.flow-bookkeeping`, matching the new `BOOKKEEPING_REASONS` entry."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-013",
+      "title": "Advance, dispatch and record phases",
+      "description": "**Goal** — Dispatch non-REVIEW steps outside transactions and record progress without overwriting a concurrent stop/re-ask.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — Dispatch (no transaction held). `REVIEW` goes through `FleetReviewClaimService`; every other step calls `jobs.dispatch(flow.createdById, flow.projectId, buildStepDispatch(...), { flowId, flowStep, auditKey: 'system.flow.advance' })`.\n\nRecord (one transaction). Lock parent and flow; if the flow is still `APPROVED` or `RUNNING`, adopt the job when the claim was owned, mark the step (`APPROVED` becomes `RUNNING` with activity `flow.started`), record activity `flow.step` and the audit entry.\n\nREVIEW-specific orchestration/adoption is US-016; here implement every other step with the exact body selected by decideFlowStep/buildStepDispatch.\n\nDispatch refusals stop. `BudgetPausedException` stops as `budget_paused`; `ConflictAppException`, `ValidationAppException`, `NotFoundAppException` and `FleetDispatchException` stop as `dispatch_refused` with detail `<STEP>: <reason>`, where the reason is the `ValidationAppException`'s `args.reason` when it is a string and the exception's class name otherwise (the `ReviewHeadDispatcher` rule). Any other error propagates, the ticker logs it, and the next tick tries again.\n\nA human stop does not cancel the running job (design, Stops). The record phase writes nothing when the flow has meanwhile left `APPROVED`/`RUNNING`. `IFleetFlowRepository.stop` now also marks every feature `STOPPED`, for every caller.\n\nThe job row is the source of truth. Every flow job stores `flowId` and `flowStep` in the same insert that creates it. The engine reads the flow's latest job (by `queuedAt`) on every tick, so a crash between dispatch and the bookkeeping that follows loses nothing: the next tick sees the job. `FleetFlowFeature.state`, `currentStep` and `prNumber` are written after each dispatch; the `FIX` step reads `prNumber` from the feature.\n\nFor APPROVED recovery, recognize a SPEC_REVIEW queued at/after approvedAt rather than dispatching it twice; reconcile missing progress with audit/activity in a record transaction. Record flow.started only on APPROVED -> RUNNING and include approvalMode/approverId. flow.step payload is { step, jobId }. Stop/complete/record/adoption audits use system.flow.advance, resourceType flow in the writing transaction. Activities use actorType SYSTEM/actorId flow. Retain guard seams for US-014/015.\n\n**Scope** — In: non-REVIEW dispatch/record, exact option seam, failure mapping and durable recovery. Out: cap/creator guards (US-014), SHA reask (US-015), REVIEW claims (US-016). Cancelling a running job when a flow stops or returns to `PENDING`: by design the flow only starts nothing more. Retrying a failed step: any failure stops the flow; a stopped flow is never restarted in place. The next tick retry after an unexpected dispatch error is recovery of a pass, not a retry of a failed job step.\n\n**Interface** — `FleetFlowAdvanceService.advance(flowId: string, now: Date): Promise<void>`; `jobs.dispatch(flow.createdById, flow.projectId, buildStepDispatch(...), { flowId, flowStep, auditKey: 'system.flow.advance' })`.",
+      "acceptanceCriteria": [
+        "[unit] advance on an APPROVED single-feature flow whose decision is dispatch SPEC_REVIEW calls FleetJobsService.dispatch once with flow.createdById, flow.projectId and the body buildStepDispatch returns.",
+        "[unit] That dispatch call's opts equal { flowId, flowStep: 'SPEC_REVIEW', auditKey: 'system.flow.advance' }.",
+        "[unit] After that dispatch returns job j1, advance calls steps.markStep with flow state RUNNING and step SPEC_REVIEW.",
+        "[unit] After that dispatch, advance records activity flow.started with approvalMode and approverId in its payload, actorType SYSTEM and actorId flow.",
+        "[unit] After that dispatch, advance records activity flow.step with payload { step: 'SPEC_REVIEW', jobId: 'j1' }.",
+        "[unit] After that dispatch, advance records an AuditRecorder entry with key system.flow.advance for the flow.",
+        "[unit] advance on a RUNNING flow whose decision is dispatch PLAN records flow.step and no flow.started.",
+        "[unit] advance stops with reason budget_paused when dispatch throws BudgetPausedException.",
+        "[unit] advance stops with reason dispatch_refused and detail `PLAN: specMissing` when dispatch throws a ValidationAppException whose args.reason is specMissing.",
+        "[unit] advance stops with reason dispatch_refused and detail `PLAN: FleetDispatchException` when dispatch throws a FleetDispatchException.",
+        "[unit] advance stops with reason dispatch_refused when dispatch throws a ConflictAppException, with detail `<STEP>: ConflictAppException`.",
+        "[unit] advance rethrows an Error thrown by dispatch that is not a conflict, validation, not-found or dispatch exception.",
+        "[unit] After that rethrow, no stop has been written.",
+        "[unit] advance writes no step and no activity when the flow is STOPPED at the record phase after a successful dispatch, and the record phase likewise writes nothing when the flow has returned to PENDING between dispatch and record, the dispatched job keeping running.",
+        "[unit] When dispatch throws NotFoundAppException, or a ValidationAppException without a string args.reason, advance stops dispatch_refused with detail `<STEP>: NotFoundAppException` or `<STEP>: ValidationAppException` respectively."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "orchestration",
+        "audit"
+      ],
+      "dependencies": [
+        "US-012"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Dispatch/record orchestration adds crash-recovery and concurrent-state checks across existing transaction boundaries; the scheduler and review dispatcher already supply the required patterns, so expert routing is unnecessary."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given an APPROVED flow whose SPEC_REVIEW job was inserted at approvedAt but progress recording failed, the next advance creates no replacement job and records the existing job's step with system.flow.advance audit.",
+        "When dispatch is called from advance, the transaction manager reports no transaction open."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-014",
+      "title": "Dispatch guards: cap and creator access",
+      "description": "**Goal** — Stop new step dispatches when the cap is exhausted or the original creator can no longer dispatch in the project.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, Cost cap, Stops) asks for a deterministic engine that chains the existing jobs, checks the cap between jobs and stops instead of retrying.\n\n**Approach** — Creator access. Before each dispatch the creator must still exist, not be disabled, and hold `fleet.job.dispatch` in the flow's project (`mayDispatch` from `apps/api/src/fleet/schedules/schedule-access.ts` over the step repository's `creatorAccess` and `PermissionService.effectiveKeys`); otherwise the flow stops as `creator_lost_access`.\n\nCap. `spentUsd` is recomputed on every tick as the sum of `costSpentUsd + costCarriedUsd` over jobs with the flow's id. Before any dispatch, a remaining cap (`costCapUsd - spentUsd`, rounded down to 4 decimals) below `0.0001` stops the flow (`cost_cap`); otherwise the remaining cap is the job's `maxCostUsd`. A job with unknown cost adds 0.\n\nA `dispatch` action passes the guards in order: cap, creator access, then (for `SPEC_REVIEW` and `PLAN`) the spec sha; the first failing guard stops or re-asks instead.\n\nUse the freshly reconciled spend, remainingCapUsd and buildStepDispatch, not floating-point subtraction. cost_cap detail is `spent <spent> of cap <cap>`. Resolve PrincipalRef from createdByType/createdById, check effectiveKeys in { projectId: flow.projectId }, and reuse mayDispatch for both user and agent. Stops use the existing audited stop path and bounded detail. The approver/system principal's permissions must not substitute for the creator's.\n\n**Scope** — In: cap-first and creator-access guards before each dispatch, remaining cap propagation. Out: pure arithmetic (US-010), creator row lookup (US-006), spec guard (US-015). Enforcing the cap inside `AGENT`, `PLAN`, `REVIEW` or `FIX` jobs beyond the `maxCostUsd` each job already receives. Recomputing `spentUsd` after a flow has stopped or completed, when a late ingest raises a job's cost.\n\n**Interface** — `remainingCapUsd(capUsd, spentUsd): string | null`; `PermissionService.effectiveKeys(principal: PrincipalRef, scope)`; `mayDispatch(access, keys)`.",
+      "acceptanceCriteria": [
+        "[unit] advance with spentUsd '5.0000', costCapUsd '5.0000' and a dispatch decision stops with reason cost_cap and detail `spent 5.0000 of cap 5.0000`.",
+        "[unit] In that cost_cap case, advance does not call dispatch.",
+        "[unit] advance passes maxCostUsd 1.5 to dispatch when costCapUsd is '5' and sumCost returns '3.5000'.",
+        "[unit] advance stops with reason creator_lost_access when creatorAccess returns { exists: true, disabled: true }.",
+        "[unit] advance stops with reason creator_lost_access when creatorAccess returns { exists: false, disabled: false }.",
+        "[unit] advance stops with reason creator_lost_access when the creator's effectiveKeys in the flow's project lack fleet.job.dispatch.",
+        "[unit] In each creator_lost_access case, advance does not call dispatch.",
+        "[unit] advance checks the cap before creator access: with the cap reached and the creator disabled, it stops with cost_cap."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "cost",
+        "access-control",
+        "security"
+      ],
+      "dependencies": [
+        "US-013"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The guards extend one service and its tests using existing remainingCapUsd, creatorAccess, effectiveKeys and mayDispatch helpers; creator authorization still mandates the security override despite standard implementation scope."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/schedules/schedule-access.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given an agent-created flow, advance requests effectiveKeys for { type: 'AGENT', id: flow.createdById } in the flow's project.",
+        "Given a creator who may dispatch in another project but not the flow's project, advance stops creator_lost_access."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-015",
+      "title": "Spec change before PLAN",
+      "description": "**Goal** — Reuse F1 approval invalidation whenever the spec SHA changes before SPEC_REVIEW or PLAN.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — Spec check only before the flow's first push. Before dispatching `SPEC_REVIEW` or `PLAN` the engine compares the flow's `specSha` with the thread's `publishedSha` (thread entry) or the forge head of `flow.branch` (nax entry). Any difference re-asks through the F1 path (`PENDING`, new `fleet.flow.start` request, new `specSha`). After `PLAN` pushes, the branch moves by the flow's own commits and the PRD freezes the spec, so no later step checks. The forge head is read only when the next step can be `SPEC_REVIEW` or `PLAN`: the flow is `APPROVED`, has no flow job yet, or its latest job is a terminal `SPEC_REVIEW`.\n\n`FleetFlowsService.respec`: its re-ask branch moves into a new public `reaskLocked(flow: FleetFlowRecord, specSha: string, now: Date): Promise<FleetFlowRecord>` (close the old request if any with reason `superseded`, open a new `fleet.flow.start` request, `flows.reask`, audit `system.flow.respec`, activity `flow.respec`), which `respec` calls; the caller holds the locks.\n\nBefore a nax-entry candidate's transaction, findReviewRepo and mintReadOnlyToken/getBranchHead; never hold a transaction across forge HTTP and never log/store the token. A RepoCheckException resolves the pass with no writes and no dispatch. If the parent can still be locked and the flow remains advanceable, a missing review-repo lookup or githubInstallationId null stops dispatch_refused with `<STEP>: repo not connected`. A parent gone at lock time instead returns without writes, as required by the parent-lock gate. For a thread entry use publishedSha from the locked parent, including local-only branches. In the decide transaction apply cap then creator access then this SHA guard. Preserve respec's updateSha carry-forward behavior and avoid duplicate audit/activity after extraction. Reask resets feature state/currentStep through US-003 and does not cancel any running job.\n\n**Scope** — In: reaskLocked extraction, thread/forge SHA checks, transient forge failure semantics and preserving respec's existing carry-forward branch. Out: dispatch/cap/access implementations (US-013/014), spec-fix jobs (F4). Re-checking the spec sha after `PLAN` has been dispatched, and reacting to a thread re-publish while a flow is `RUNNING` (the F1 listener ignores it). Cancelling a running job when a flow stops or returns to `PENDING`: by design the flow only starts nothing more.\n\n**Interface** — `reaskLocked(flow: FleetFlowRecord, specSha: string, now: Date): Promise<FleetFlowRecord>`; `GitHubAppClient.mintReadOnlyToken(installationId, repoName)` and `getBranchHead(token, owner, name, branch)`.",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowsService.reaskLocked(flow, 'newsha', now) on an APPROVED flow with a request id closes that request with reason superseded.",
+        "[unit] reaskLocked opens a new fleet.flow.start request and returns the record from flows.reask(flow.id, { specSha: 'newsha', approvalRequestId }).",
+        "[unit] FleetFlowsService.respec with a re-ask case still produces a PENDING flow with the new sha and audit system.flow.respec, through reaskLocked.",
+        "[unit] advance on a thread-entry flow whose decision is dispatch SPEC_REVIEW and whose thread publishedSha differs from specSha calls reaskLocked(flow, publishedSha, now) and does not call dispatch.",
+        "[unit] advance on a thread-entry flow whose decision is dispatch PLAN and whose thread publishedSha differs calls reaskLocked and does not call dispatch.",
+        "[unit] advance on a thread-entry flow whose decision is dispatch RUN dispatches RUN although publishedSha differs from specSha.",
+        "[unit] advance on a nax-entry flow with no flow job reads getBranchHead with a token from mintReadOnlyToken, and with a head equal to specSha dispatches SPEC_REVIEW.",
+        "[unit] advance on a nax-entry flow whose forge head differs from specSha calls reaskLocked(flow, head, now) and does not dispatch.",
+        "[unit] advance on a nax-entry flow when getBranchHead throws RepoCheckException dispatches nothing and writes nothing.",
+        "[unit] advance on a nax-entry flow when getBranchHead throws RepoCheckException resolves without throwing.",
+        "[unit] advance on a nax-entry flow whose findReviewRepo returns a repo with githubInstallationId null, or returns null, stops with reason dispatch_refused and detail `SPEC_REVIEW: repo not connected`.",
+        "[unit] advance on a nax-entry flow whose latest job is a COMPLETED RUN does not call getBranchHead.",
+        "[unit] advance on a nax-entry flow whose latest job is a RUNNING SPEC_REVIEW does not call getBranchHead.",
+        "[unit] When a nax-entry PLAN candidate has a lockable parent repo but findReviewRepo returns null or githubInstallationId null, advance stops dispatch_refused with detail `PLAN: repo not connected`.",
+        "[unit] Given an APPROVED flow, event.previousSha equal to flow.specSha, a new event.sha equal to the locked thread.publishedSha, and event.paths excluding every normalized flow specPath, FleetFlowsService.respec still calls flows.updateSha without opening a new start request, preserving the existing carry-forward branch."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "approvals",
+        "forge",
+        "security"
+      ],
+      "dependencies": [
+        "US-013"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Approval lifecycle extraction, external forge token handling and SHA-dependent guards are security-sensitive cross-module changes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/fleet-flows.controller.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/flows/fleet-flow-publish.listener.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-016",
+      "title": "REVIEW through the head claim",
+      "description": "**Goal** — Dispatch or adopt the RUN head's REVIEW without duplicating auto-review, releasing claims on dispatch failures.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — `REVIEW` claim states (a new exported `FleetReviewClaimService` in the reviews module, since the review repository is module-private): no row → claimed; a row with a job → owned (adopted); a `pending` row younger than `prReviewPollMs` → busy (wait); an older `pending` row (a dead pass's claim, as `ReviewHeadDispatcher.reopenStaleClaim` treats it) → removed, then claimed; a `failed:*` row → stop `dispatch_refused`. Adoption (`FleetJobsService.adoptForFlow`) runs in the record transaction, after the flow-state check, with its audit entry. Any dispatch error after a claim releases the claim before the error is handled or rethrown.\n\nThe `REVIEW` claim key is the `RUN` job's `resultSha`: the head the `RUN` pushed; nothing else writes the feature branch between the `RUN` and the flow's `REVIEW`. The `FIX` needs only the PR number.\n\nCall claimHead(repoId, pr.number, pr.headSha, now) outside the dispatch transaction. claimed dispatches the exact REVIEW body with flowId/flowStep/auditKey, then markDispatched links the claim to the returned job. owned never dispatches: lock parent/flow in the record phase, check APPROVED/RUNNING, call jobs.adoptForFlow, markStep REVIEW/prNumber and record flow.step and system.flow.advance audit in that transaction. Adoption false stops dispatch_refused with `REVIEW: head claimed by another flow`. busy returns with no step/stop; failed stops dispatch_refused with `REVIEW: <outcome>`. Any newly claimed dispatch error releases the claim first; BudgetPausedException stops budget_paused, declared refusal exceptions stop dispatch_refused, plain errors rethrow. If the flow has stopped/re-asked before record, do not adopt or write progress.\n\n**Scope** — In: REVIEW claim/dispatch/adoption/record and release semantics. Out: claim-service internals (US-011), permission/cap guards (US-014), alternative FIX/ruling loops (F4). Reading the PR head from the forge for the `REVIEW` claim: the claim uses the `RUN` job's `resultSha`. Running `REVIEW` and `FIX` on the reviewer role's model: flow `PLAN`, `RUN`, `REVIEW` and `FIX` jobs use the default profile chain (`profiles: []`).\n\n**Interface** — `FleetReviewClaimService.claimHead(repoId, prNumber, headSha, now): Promise<HeadClaim>`; `markDispatched(claimId, jobId)`; `release(claimId)`; `FleetJobsService.adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean>`.",
+      "acceptanceCriteria": [
+        "[unit] advance with decision dispatch REVIEW for PR 12 at head h1 calls claimHead(repoId, 12, 'h1', now).",
+        "[unit] On { kind: 'claimed', claimId: 'c1' }, advance calls dispatch with the REVIEW body and flowStep REVIEW.",
+        "[unit] After that dispatch returns job j3, advance calls markDispatched('c1', 'j3').",
+        "[unit] After that dispatch, advance calls steps.markStep with step REVIEW and prNumber 12.",
+        "[unit] On { kind: 'owned', jobId: 'j9' }, advance calls FleetJobsService.adoptForFlow('j9', flowId, 'REVIEW') in the record phase and does not call dispatch.",
+        "[unit] After that adoption, advance calls steps.markStep with step REVIEW and prNumber 12, records flow.step with jobId j9, and records an audit entry with key system.flow.advance.",
+        "[unit] On { kind: 'owned' } when the flow is STOPPED at the record phase, advance does not call adoptForFlow.",
+        "[unit] On { kind: 'owned' } when adoptForFlow returns false, advance stops with reason dispatch_refused and detail `REVIEW: head claimed by another flow`.",
+        "[unit] On { kind: 'busy' }, advance dispatches nothing and writes no step or stop.",
+        "[unit] On { kind: 'failed', outcome: 'failed:repo gone' }, advance stops with reason dispatch_refused and detail `REVIEW: failed:repo gone`.",
+        "[unit] When the REVIEW dispatch throws ConflictAppException, advance calls release('c1') before stopping with reason dispatch_refused.",
+        "[unit] When the REVIEW dispatch throws BudgetPausedException, advance calls release('c1') before stopping with reason budget_paused.",
+        "[unit] When the REVIEW dispatch throws a plain Error, advance calls release('c1') before rethrowing.",
+        "[unit] When a claimed REVIEW dispatch throws ValidationAppException, NotFoundAppException or FleetDispatchException, advance releases the claim before handling the dispatch_refused stop."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "reviews",
+        "concurrency",
+        "audit"
+      ],
+      "dependencies": [
+        "US-011",
+        "US-013"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The service integrates upstream claim outcomes and conditional adoption with existing audited record transactions; race-sensitive ownership requires isolated verification, but this is not a new distributed coordination architecture."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/fleet-review-claim.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-017",
+      "title": "The flow ticker and its config",
+      "description": "**Goal** — Wire the finished single-feature engine into a bounded, creator-attributed, single-flight API ticker.\n\n**Motivation** — F1 (`fleet-flow-record`, #400) records flows and their one approval, and F2 (`fleet-agent-job`, #403) added the `AGENT` job kind, but nothing moves an approved flow: `FleetFlowStartCommand.execute` and the thread tick both leave it `APPROVED` and stop.\n\n**Approach** — `FleetFlowTicker.poll()` returns at once while a pass runs; otherwise it calls `tick(new Date())`. `tick(now)` pages through advanceable flows and, for each, runs `advance(id, now)` inside `runAsSystem('flow', ..., { onBehalfOf: { type: createdByType, id: createdById } })`, logging and continuing on error.\n\nTicker only, no event hook. Nothing fires on approval or on a job's end; the ticker finds the work within one interval. Steps take minutes to hours, so up to 30 s of delay is acceptable, and a tick is crash-safe where an in-process event is not.\n\nActor. Each flow is advanced inside `runAsSystem('flow', ..., { onBehalfOf: { type: createdByType, id: createdById } })`, as `FixFollowUpSubscriber` does, so `actorTypeFor` records an agent creator as `AGENT`. Flow jobs are dispatched through `FleetJobsService.dispatch` with `createdById` as requester and the new system key `system.flow.advance` as `auditKey`. The ticker declares `@SystemWriter('system.flow.advance')`.\n\nPaging. `listAdvanceable(limit, afterId)` returns single-feature `APPROVED`/`RUNNING` flows ordered by `id`, after the given id; the ticker pages 50 at a time until a short page, at most 10 pages per tick. A new index `FleetFlow(state, id)` serves it.\n\nConfig bounds. `FLEET_FLOW_TICK_MS` 1,000-3,600,000; `FLEET_FLOW_PR_WAIT_MS` 60,000-86,400,000; `FLEET_FLOW_REVIEW_AGENT` must match `AGENT_NAME_RE`; all three are validated by the Joi schema in `apps/api/src/config/env.validation.ts`.\n\nAdd flowTickMs (default 30,000), flowPrWaitMs (default 1,800,000) and flowReviewAgent (default Explore) to IFleetConfig, FleetConfigSchema, factory and testFleetConfig; update pinned config tests. onModuleInit starts no interval when sweepEnabled is false; otherwise start an unref'ed configurable interval, clear it on destroy, and reset poll's single-flight flag in finally. Errors log the failing flow id without stopping subsequent flows.\n\nFlowsModule imports FleetJobsModule and FleetReviewsModule; provides the step repository/token, FleetFlowAdvanceService and FleetFlowTicker. Neither imported module reaches FlowsModule, so there is no import cycle. Remove system.flow.advance from PENDING_SURFACE_KEYS and permission-contract.spec.ts expectedPending; system-writer.decorator.spec.ts gains [FleetFlowTicker, 'system.flow.advance'], length 40 -> 41 and asserts pending false. Extend flows.module.spec.ts's imported-module stubs for FleetJobsService, FleetReviewClaimService, PermissionService and FLEET_CFG; resolve the three new providers without a database.\n\n**Scope** — In: timer lifecycle, per-creator system context, pagination/error isolation, config/Joi, catalog transition, module wiring and preserving existing start-command registration. Out: changing decision/dispatch logic (US-012–016), database seam proof (US-018). A durable outbox event for job ends; the ticker's interval is the only trigger. Running more than one api instance's ticker against the same database: the single-flight guard is per process, and duplicate dispatches are left to the existing one-active-job-per-`(repoId, feature)` 409 and the review head claim. More than 500 advanceable flows in one tick: the ticker stops after 10 pages of 50 and continues on the next tick.\n\n**Interface** — `FleetFlowTicker` with `poll(): Promise<void>` (single-flight, called by the interval) and `tick(now: Date): Promise<void>` (one pass); `flowTickMs`, `flowPrWaitMs`, `flowReviewAgent` on IFleetConfig.",
+      "acceptanceCriteria": [
+        "[unit] fleetConfig() with no flow variables set returns flowTickMs 30000, flowPrWaitMs 1800000 and flowReviewAgent Explore.",
+        "[unit] fleetConfig() with FLEET_FLOW_REVIEW_AGENT plugin:reviewer returns that name.",
+        "[unit] validate from env.validation.ts throws for FLEET_FLOW_REVIEW_AGENT ../x.",
+        "[unit] validate throws for FLEET_FLOW_TICK_MS 0.",
+        "[unit] FleetFlowTicker.onModuleInit with sweepEnabled false starts no interval.",
+        "[unit] FleetFlowTicker.onModuleInit with sweepEnabled true starts an interval of flowTickMs, and onModuleDestroy clears it.",
+        "[unit] FleetFlowTicker.tick(now) calls steps.listAdvanceable(50, null) and then FleetFlowAdvanceService.advance(id, now) once for each returned flow, in order.",
+        "[unit] When the first page has 50 flows, tick asks for the next page with the last id, and stops at a page shorter than 50.",
+        "[unit] Inside tick, each advance call runs with a currentContext() whose actor is of type SYSTEM and whose onBehalfOf equals that flow's { type: createdByType, id: createdById }.",
+        "[unit] Inside tick, actorTypeFor(createdById) returns AGENT for an agent-created flow.",
+        "[unit] FleetFlowTicker.tick continues with the next flow when advance throws for one flow, and logs the error with the flow id.",
+        "[unit] A second poll() while the first is still running returns without calling listAdvanceable again.",
+        "[unit] FleetFlowTicker declares the system writer system.flow.advance, and PENDING_SURFACE_KEYS.has('system.flow.advance') is false.",
+        "[unit] Compiling FlowsModule resolves FleetFlowTicker and FleetFlowAdvanceService.",
+        "[unit] After initializing FlowsModule, ApprovalCommandRegistry.get('fleet.flow.start') still resolves FleetFlowStartCommand, preserving the existing approval command registration."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "ticker",
+        "config",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-014",
+        "US-015",
+        "US-016"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Lifecycle and paging are standard, but creator impersonation context, actor attribution and system-writer permission declaration require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/src/fleet/flows/fleet-flow.ticker.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When every page contains 50 flows, tick calls listAdvanceable exactly ten times and advances no more than 500 flows.",
+        "validate throws for FLEET_FLOW_TICK_MS values below 1000 or above 3600000.",
+        "validate throws for FLEET_FLOW_PR_WAIT_MS values below 60000 or above 86400000.",
+        "After an earlier poll rejects, a subsequent poll starts a new pass rather than remaining permanently single-flight-blocked."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer list gains `[FleetFlowTicker, 'system.flow.advance']`, its `toHaveLength(40)` becomes `toHaveLength(41)`, and a pending-key assertion expects `PENDING_SURFACE_KEYS.has('system.flow.advance')` to be false."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`expectedPending` loses `system.flow.advance` again, now that the ticker declares it."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-config.ts",
+          "reason": "`testFleetConfig` returns a full `IFleetConfig`; add `flowTickMs: 30000`, `flowPrWaitMs: 1800000` and `flowReviewAgent: 'Explore'` so it still type-checks."
+        },
+        {
+          "path": "apps/api/src/config/fleet.config.spec.ts",
+          "reason": "where it pins the full resolved config or the env key set, add the three flow fields with their defaults."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "the \"compiles the real module\" test stubs each import; add stubs for `FleetJobsModule`'s `FleetJobsService`, `FleetReviewsModule`'s `FleetReviewClaimService`, `PermissionService` and `FLEET_CFG`, and expect the three new providers."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-018",
+      "title": "Flow ticks against the database",
+      "description": "**Goal** — Exercise the assembled ticker through real flow/job/review-claim persistence and audit coverage.\n\n**Motivation** — F3 builds that engine for one feature; verdict classification and spec fixes (F4), multi-feature order and merge waits (F5) and the web pages (F6) build on it.\n\n**Approach** — Integration tests that run `FleetFlowTicker.tick` over real flows, jobs and review claims in the test database.\n\nUS-004 → US-013: `advance` passes `flowId`, `flowStep` and `auditKey: 'system.flow.advance'` to `FleetJobsService.dispatch` (US-013 pins the call; US-018 proves the stored row).\nUS-009/US-010 → US-013: `advance` dispatches exactly the body `buildStepDispatch` returns for the step `decideFlowStep` chose.\nUS-011 → US-016: `advance` calls `FleetReviewClaimService.claimHead` before a `REVIEW` dispatch (US-016 pins; US-018 proves against the real table).\nUS-012 → US-017: `FleetFlowTicker.tick` calls `FleetFlowAdvanceService.advance` once per advanceable flow inside `runAsSystem` on the creator's behalf (US-017 seam AC, entered at `tick`).\nUS-015 → US-013: `advance` calls `FleetFlowsService.reaskLocked` before a `SPEC_REVIEW`/`PLAN` dispatch whose sha check fails.\n\nUse the existing flow-respec and fix-follow-up integration fixtures, actual FleetJobsService and real claim repository. Keep external forge/runner boundaries controlled, seed eligible creator access, disable automatic sweep intervals, and enter at tick(now), not by directly calling the decision helper. Verify stored linkage, progress/audit, queued-job non-duplication, multi-feature non-dispatch, stop detail without unaudited-write errors, PLAN progression and review auto-job adoption. The schema/DB harness must retain existing partial indexes and audit-aware fixture helpers. Tests use canRunDbTests and must run outside the sandbox with KODA_DB_TESTS=1 and isolated Postgres; skips are not verification. This is the spec's explicit binding test-only story and must remain separate.\n\n**Scope** — In: the declared new real-database integration suite proving the assembled seams. Out: new runtime engine behavior (US-001–017), F4/F5/F6 features, generated acceptance edits, and running host-dependent DB suites inside the sandbox.\n\n**Interface** — `FleetFlowTicker.tick(now: Date): Promise<void>` with the real `FleetJobsService` and `FleetReviewClaimService`.",
+      "acceptanceCriteria": [
+        "[integration] With an APPROVED single-feature thread-entry flow whose specSha equals its thread's publishedSha, FleetFlowTicker.tick(now) with the real FleetJobsService creates one FleetJob with flowId the flow's id, flowStep SPEC_REVIEW, command AGENT and ref the flow's specSha.",
+        "[integration] After that tick the flow is RUNNING.",
+        "[integration] After that tick its feature's currentStep is SPEC_REVIEW.",
+        "[integration] After that tick an audit row with key system.flow.advance exists for the flow.",
+        "[integration] A second tick while that job is QUEUED creates no other job.",
+        "[integration] With an APPROVED flow with two features, tick(now) creates no job.",
+        "[integration] With an APPROVED flow with two features, tick(now) leaves the flow APPROVED.",
+        "[integration] With a RUNNING flow whose latest SPEC_REVIEW job j is FAILED with reason `checkout: ref not found`, tick(now) leaves the flow STOPPED with stopReason step_failed and stopDetail `SPEC_REVIEW job j FAILED: checkout: ref not found`, without an unaudited-write error.",
+        "[integration] With a RUNNING flow whose latest SPEC_REVIEW job is COMPLETED with agentResult.output ending in `{\"findings\":[]}`, tick(now) creates a PLAN job with flowStep PLAN for the flow.",
+        "[integration] With a RUNNING flow whose latest SPEC_REVIEW job is COMPLETED with a verdict holding one finding, tick(now) leaves the flow STOPPED with stopReason review_findings.",
+        "[integration] With a RUNNING flow whose latest RUN job is COMPLETED with resultPrUrl for PR 12 and resultSha h1, tick(now) creates a FleetPrReview row for the repo, PR 12 and head h1 linked to a new REVIEW job whose flowId is the flow's id.",
+        "[integration] With the same flow when a FleetPrReview row for PR 12 and head h1 already links an auto-review REVIEW job, tick(now) creates no job.",
+        "[integration] With that existing auto-review job, tick(now) sets that job's flowId to the flow's id.",
+        "[integration] With that existing auto-review job, tick(now) sets the feature's prNumber to 12."
+      ],
+      "tags": [
+        "fleet-flow-steps",
+        "api",
+        "integration",
+        "prisma",
+        "audit"
+      ],
+      "dependencies": [
+        "US-017"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The binding test-only story adds one integration suite using existing real-app, audit-aware flow and review-claim fixtures; it verifies assembled services without adding runtime abstractions or changing authorization logic."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/test/integration/fleet-flow-respec.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-fix-follow-up.integration.spec.ts",
+        "apps/api/test/helpers/action-context.ts",
+        "apps/api/test/helpers/test-environment.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "This is an enhancement of the existing F1 flow record and F2 AGENT infrastructure, entirely in apps/api. Repository guidance is authoritative over the detected-stack summary: the API is NestJS 12 with Fastify, Prisma 7 and Vitest, not an Express application; the web is Nuxt, not Next.js. Read .nax/mono/apps/api/context.md before implementation and the nathapp-nestjs-patterns skill before writing NestJS code. Graph-first navigation could not be used because this session exposes no codebase-memory MCP tools; direct source reads and searches were used instead. Only the requested PRD artifact is written under .nax; implementation must not change .nax rules, config, or generated acceptance material.\n\nExisting flow architecture: apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:12 defines feature records with state/currentStep/prNumber, :24 defines FleetFlowRecord without stopDetail, and :75 defines IFleetFlowRepository. apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:13 follows AbstractPrismaRepository and transaction-manager conventions; :19 maps Decimal values to four-place strings and sorts features; :41 locks a flow using SELECT FOR UPDATE; :58 centralizes checked transitions; :79 reask currently clears approval but not feature progress; :92 stop currently changes only the flow. Extend these existing contracts compatibly: optional stopDetail on typed records, optional detail on stop, null by default; stop every feature for all callers, including human stops on PENDING flows; reask every feature to PENDING/currentStep null. apps/api/src/fleet/flows/flow-states.ts:13 already permits APPROVED -> RUNNING/PENDING/STOPPED and RUNNING -> COMPLETED/PENDING/STOPPED, so no new flow-state vocabulary is required. No Prisma enums.\n\nExisting locking and approvals: apps/api/src/fleet/flows/fleet-flows.service.ts:99 implements human stop with parent-before-flow locks, transaction-local audit and activity; :130 respec reads live flow, locks thread then flow, and :153 contains the re-ask branch to extract into reaskLocked. :170 currently records the common respec audit/activity, so extracting the branch must avoid duplicate entries while preserving the updateSha carry-forward path. :237 opens the fleet.flow.start ask programmatically on the creator's behalf. ReaskLocked must close an old request as superseded, open the new ask, reset progress and write system.flow.respec/flow.respec inside the caller's transaction. Keep FleetFlowStartCommand and thread pre-approval behavior at APPROVED: no immediate job or end-event hook. Re-approval starts SPEC_REVIEW; only a SPEC_REVIEW queued at/after approvedAt belongs to the new approval epoch. Recover a dispatch whose later record failed by reading the durable job link, not by using feature.currentStep as the source of truth.\n\nSchema and migration: apps/api/prisma/schema.prisma:1056 has FleetJob, :1112 its existing schedule/thread-related bookkeeping fields, :1122 its agent input/result fields, :1219 FleetFlow, and :1254 FleetFlowFeature. Add one migration at apps/api/prisma/migrations/20261128090000_fleet_flow_steps/migration.sql with nullable FleetJob.flowId and flowStep, a relation to FleetFlow with onDelete SetNull and its inverse, index (flowId, queuedAt), nullable FleetFlow.stopDetail, and index (state, id). Existing jobs remain unlinked; deleting a flow must preserve jobs and their costs. Deploy the additive migration and regenerate Prisma before deploying code that selects the new columns. Import generated Prisma from src/generated/prisma/client, never @prisma/client. Migration tests must exercise SQL over the preceding schema, not merely prisma db push. apps/api/test/integration/fleet/thread-modes-migration.integration.spec.ts:1 uses scratchSchemaBefore/applyMigration; :20 explains why pre-migration fixtures need SQL rather than a current generated client selecting future columns. Retain existing partial active-job indexes and test/helpers/partial-indexes.ts semantics. No new API DTO fields, OpenAPI export, CLI generation, runner protocol or web changes are required.\n\nJob dispatch seam: apps/api/src/fleet/jobs/fleet-jobs.service.ts:96 dispatch has opts for schedule/thread and a closed audit-key union, but no flow linkage. :99 refuses non-GitHub AGENT/REVIEW/FIX; :121 checks the budget gate; :134 inserts jobs with actorTypeFor in its own transaction, then :171 publishes/places after commit. Add flowId/flowStep at this insert, not as a patch afterward, and add system.flow.advance to its audit union. apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:151 FleetJobRecord and :223 NewFleetJob must gain optional nullable flow fields; extend IFleetJobRepository with conditional adoptForFlow, not FleetJobPatch. apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:23 spreads scalar row fields in toJob and :80 spreads NewFleetJob into createJob; :100 maps P2003 to the existing not-found path. Do not invent a different flow-FK error mapping. Adoption updates only a job whose flowId is null, returns false otherwise, and is invoked through FleetJobsService inside the flow record transaction with an audit entry. apps/api/src/fleet/jobs/assign-payload.ts:65 currently adds expectBranch only to thread PLAN jobs; include non-null flowId while preserving no expectBranch for RUN or ordinary PLAN. The internal opts must not leak into DispatchFleetJobDto or public job/flow DTOs. apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.ts:9 supplies AGENT/PLAN/RUN/REVIEW/FIX bodies and a numeric maxCostUsd; :20 exposes profiles and :22 bounds cost. apps/api/src/fleet/threads/threads.service.ts:177 and :197 are handoff precedents for PLAN/RUN.\n\nNew engine layers: keep flow-steps, flow-verdict, flow-step-decision and flow-step-dispatch pure. SPEC_REVIEW and PRD_REVIEW use AGENT with configured name, reviewerRole as model, bashMode raw and the exact /spec-review task plus final-JSON instruction. AGENT_NAME_RE and task max 16,384 are apps/api/src/fleet/common/agent-jobs.ts:2-3; output retains the last 8,192 bytes (:15). Parser uses the last literal {\"findings\" suffix, tolerates a trailing code fence/whitespace only, requires an array and string summaries, drops non-string optional ids, and bounds formatted findings to 2,000 characters with an ellipsis. The instruction includes a standalone {\"findings\":[]} example as required by US-001. PLAN uses flow.branch and planFrom spec path, PRD_REVIEW uses the PLAN resultSha, RUN uses the PLAN resultBranch, and REVIEW/FIX use prNumber with profiles [], no ref/feature. Every body carries the pinned runner when set. Decimal cap arithmetic must round down before comparison; convert to numeric maxCostUsd only after computing a four-place remainder. A RUN missing its PLAN context is a programming error, not a fabricated ref.\n\nRepository division: introduce IFleetFlowStepRepository and PrismaFleetFlowStepRepository for cross-table reads and flow/feature writes. apps/api/src/fleet/schedules/prisma-schedule.repository.ts:25 uses the transaction-scoped Prisma client; :112 reads User.disabled or Agent existence and :121 aggregates both cost fields using Decimal. Mirror this precedent for creatorAccess and sumCost; an agent's PAUSED/liveness status is not disabled access. Advanceable rows are only single-feature APPROVED/RUNNING flows, selecting id/createdByType/createdById ordered by id with keyset paging. Read latest job by queuedAt, latest PLAN by step for later refs, and ingest status by job plus leaseEpoch. done/partial/failed mean settled; missing/running/other-lease rows do not. Sum all flow-linked jobs' costSpentUsd + costCarriedUsd, treating unknown values as zero, and compare Decimal values rather than textual representations before setSpent. setSpent is narrowly exempted via new fleet.flow-bookkeeping; markStep/complete/stop/adoption are audited mutations, not blanket bookkeeping. US-005 authors the repository interface/read half and US-006 extends it; keep intermediate dependency changes compatible rather than pulling downstream implementations forward.\n\nJob-end rules: apps/api/src/fleet/jobs/job-state.ts:8 lists QUEUED/ASSIGNED/RUNNING/UPLOADING as active and :11 lists terminal states. Failed/cancelled/crashed and all non-RUN escalations stop with the precise STEP/job/state/reason detail. Only completed AGENT review jobs are parsed, no verdict classification or retries. Completed PLAN needs both resultBranch and resultSha. COMPLETED or ESCALATED RUN may proceed with its PR; without one it waits for ingest settlement or finishedAt-based timeout. apps/api/src/fleet/sync/pr-attribution.service.ts:13 prNumberFor verifies a URL belongs to the named repo; reuse it with provider github after findReviewRepo rather than extracting a trailing integer. The REVIEW claim uses RUN.resultSha, not a forge PR head. A completed REVIEW dispatches one FIX using feature.prNumber; only completed FIX with fixReady.markedReady true completes, otherwise it stops with readyHeld or the specified fallback. Existing FixReady is apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:20.\n\nReview concurrency seam: apps/api/src/fleet/reviews/domain/fleet-pr-review.domain.ts:11 defines jobId/outcome/createdAt and :28 the private claim repository. apps/api/src/fleet/reviews/review-head-dispatcher.ts:66 claims heads under fleet.pr-review-bookkeeping, :87 treats strictly older-than-one-poll pending rows as stale, and :105 shows exception reason extraction. apps/api/src/fleet/reviews/fleet-reviews.module.ts:29 provides the private repository and :44 currently exports only FleetReviewEventsService. Add/export FleetReviewClaimService rather than exporting the repository or importing FlowsModule. Claim outcomes are claimed/owned/busy/failed. Stale claims are removed and insertion retried; racing missing rows are busy. All claim writes retain fleet.pr-review-bookkeeping. An owned job is adopted only after the flow-state check in the record transaction; another flow's ownership stops without dispatch. Release a newly acquired claim on every dispatch error before handling/rethrowing it. BudgetPausedException is a conflict subtype and must be caught first. Unlike existing auto-review's retry rules, all listed permanent/refusal exceptions stop this flow. Plain errors propagate to the ticker; do not silently turn them into flow stops.\n\nAdvance transactions and security: decide, dispatch and record are separate phases; never keep a database transaction open across forge calls or FleetJobsService.dispatch. Read minimal unlocked facts for external lookup; then re-read authoritative flow/jobs under parent (thread or repo) then flow locks. Missing parent or inactive flow makes no writes. Forge head lookup is only for nax-entry candidates before SPEC_REVIEW/PLAN; RepoCheckException returns with no writes, while missing/disconnected repo stops dispatch_refused with STEP: repo not connected. Guard order is cap, creator access, spec SHA; prefetch does not reorder persisted decisions. apps/api/src/fleet/schedules/schedule-access.ts:12 requires existence, !disabled and fleet.job.dispatch. Reuse PermissionService.effectiveKeys in the flow's project for USER or AGENT, not the approver's or system actor's rights. apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts:66 demonstrates runAsSystem with onBehalfOf and :82 creator permission checks; apps/api/src/action-context/action-context.ts:130 supplies runAsSystem and :177 actorTypeFor preserves AGENT requesters on whose behalf the engine runs. Ticker calls advance inside that context for every flow. Audit entries for stop/complete/record/adoption use system.flow.advance, resourceType flow and the same mutation transaction; activities use actorType SYSTEM/actorId flow, never token material. apps/api/src/action-context/audit-coverage.reasons.ts:23-24 has the existing schedule/review bookkeeping exemptions; add only the narrowly scoped fleet.flow-bookkeeping exemption and its pinned expectation. Human stops and re-asks must not cancel jobs; the record phase must write nothing if the flow has since left APPROVED/RUNNING.\n\nPermissions, config and module consumers: apps/api/src/permissions/catalog.ts:64 PENDING_SURFACE_KEYS and :120 NEW_KEY_SCOPES require ordered addition of system.flow.advance after system.flow.respec (:155), initially pending in US-004 and removed when US-017 declares its writer. Update catalog.spec.ts's mirrored table, __snapshots__/role-matrix.json for every role with [non-role-key,non-role-key] and no other entry changes, and permission-contract.spec.ts expectedPending at both stages. This is a system key, not a user-role grant. apps/api/src/config/fleet.config.ts:8 defines IFleetConfig, :73 FleetConfigSchema and :132 the factory; add all three env names/defaults and Joi bounds in apps/api/src/config/env.validation.ts adjacent to the existing fleet settings (:95, :113). IFleetConfig is a full object in src/common/test-helpers/fleet-config.ts, so its defaults and pinned factory tests must change together. apps/api/src/fleet/flows/flows.module.ts:28 currently imports no jobs/reviews; add those modules plus step repository/token, advance service and ticker. The reviews module imports jobs but neither reaches flows, so avoid a reverse import. apps/api/src/fleet/flows/flows.module.spec.ts:110 compiles the real module with stub imports and no DB; extend these stubs for jobs, claim service, PermissionService and FLEET_CFG and assert all three new providers. Reviews module DI checks stay unit-level. Update system-writer.decorator.spec.ts's writer table/count 40 -> 41 and assert the key is no longer pending.\n\nTicker and scale: apps/api/src/fleet/schedules/schedule-ticker.ts:55 is the SystemWriter/lifecycle precedent, :72 respects sweepEnabled, :79 unrefs its interval and :97 resets the single-flight flag in finally. New FleetFlowTicker uses configurable 30,000 ms interval, poll single-flight and tick(now) as a deterministic test hook. Pages are 50, afterId is the last returned id, stop on a short page or ten pages, and log each failing flow id while continuing. It is intentionally single-instance, no distributed lock/outbox/end hook and no immediate approval trigger. Job inserts and the existing active (repoId,feature) index plus review claims are the durable duplicate defenses; job linkage lets a later tick recover from dispatch/record crashes. More than 500 flows and continuously full first pages are bounded-operation concerns, not a new scheduling architecture.\n\nTesting and rollout: use colocated *.spec.ts Vitest tests with vi, not Jest, for pure rules, dispatch bodies, mocked advance phases, module DI, config and timer lifecycle. Extend existing tests where stories modify their files; expectedFiles list only newly authored artifacts, not previously created dependencies. Existing flow suites include src/fleet/flows/fleet-flow-read-stop.spec.ts, fleet-flow-publish.listener.spec.ts, fleet-flow-start.command.spec.ts, flows.module.spec.ts and test/integration/fleet-flow-{repository,read-stop,respec,start,create,schema}.integration.spec.ts. Existing fleet job persistence/dispatch tests under test/integration/fleet and assign-payload unit tests cover compatibility seams. US-018 remains the binding database test story despite generic test-story guidance. apps/api/test/integration/fleet-flow-respec.integration.spec.ts:20 gates on canRunDbTests, :77 boots the real app and seeds fleet fixtures, and :88 uses controlled fixture writes/cleanup; use the same audit-aware helpers and sweep-disabled test environment. Combine real dispatch/persistence/review claims in US-018, substituting only external forge/placement boundaries as needed, not the engine seam under test. Test-only terminal fixture mutation may use fixture helpers, but production job state changes still go through JobTransitionsService. Run bun run test:scoped on integration files outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1 and isolated test Postgres; skipped DB tests are not verification. DB global setup force-resets the test DB, so do not run simultaneous DB suites against it; a second checkout uses KODA_TEST_DB_CONTAINER=1. No shell execution capability is exposed in this PRD session, so no tests or JSON parser were executed here.\n\nImplementation sequence is exactly the binding 18-story DAG. Partial advance-service stories US-012/013 intentionally establish seams before guards/review/spec behavior are added; they must not be wired into an enabled ticker until US-017 depends on US-014/015/016. Preserve F1 behavior throughout extraction, existing dispatch callers without opts, all typed fixtures through optional fields, review auto-dispatch ownership, and audit-coverage enforcement. Main risks are duplicate work after partial failure, poisoning a transaction with dispatch conflicts, stale approval/job confusion, flow-state races during record, incorrect actor attribution, floating-point cap errors, treating late RUN ingest as missing PR too early, and accidentally exposing new internal fields through API DTO generation. Feature-level deferrals are retained verbatim below; F4 classification/tickets/notifications, F5 multi-feature ordering, and F6 DTO/UI presentation are not part of F3.\n\nSecond-turn adversarial audit: manually enumerated every source AC in .nax/features/fleet-flow-steps/spec.md:587-835 and matched all 198 to the same binding story's acceptanceCriteria. Source per-story counts, US-001 through US-018, are 5, 14, 8, 9, 14, 10, 12, 10, 8, 13, 10, 14, 14, 8, 13, 13, 14, 9. In stories without split compound criteria, the original source criteria remain the leading criteria in original order. Explicit split mappings (source-local ordinal -> PRD-local ordinal): US-003 source 1->1, 2->2/3, 3->4, 4->5, 5->6, 6->7, 7->8, 8->9; US-012 source 1..11->1..11, 12->12/13, 13->14, 14->15; US-015 source 1->1, 2->2/3, 3..13->4..14; US-016 source 1..5->1..5, 6->6/7/8, 7..13->9..15; US-017 source 1..5->1..5, 6->6/7, 7->8, 8->9, 9->10, 10->11, 11->12/13, 12->14, 13->15/16, 14->17; US-018 source 1->1, 2->2/3/4, 3->5, 4->6/7, 5->8, 6->9, 7->10, 8->11, 9->12/13/14. These splits retain every original assertion in its original story. Regression qualifiers retained include US-003's PENDING human-stop caller, US-005's ignoring newer jobs of other steps, US-006's existing prNumber, US-015's still/through-reaskLocked behavior, and US-018's real FleetJobsService, already-linked auto-review job and absence of unaudited-write errors. No deprecated grep/file/verbatim-tagged source AC exists. All 17 feature-level out-of-scope items were matched verbatim to the top-level array; close story boundaries now echo the relevant full statements.\n\nAudit corrections: add negative branch exclusion to US-001 without inventing unsupported-input exceptions; preserve terminal FlowTransitionError in US-003 and existing thread PLAN expectBranch in US-004; protect active-review waits in US-008, generic FAILED RUN precedence in US-009, FleetReviewEventsService export in US-011, respec carry-forward in US-015 and start-command registration in US-017. Every story now has an observable negative path: US-001 excludes PRD-only flags; US-002 rejects malformed/trailing verdict output; US-003 rejects terminal stops; US-004 refuses foreign adoption; US-005 excludes ineligible rows/leases; US-006 reports missing creators; US-007 stops failed jobs; US-008 rejects unreadable verdicts/missing PLAN outputs; US-009 stops missing PR/not-ready FIX; US-010 returns null for exhausted caps and throws for missing PLAN; US-011 reports failed/busy claims; US-012 ignores inactive/missing parents; US-013 maps/refuses dispatch errors; US-014 stops lost access; US-015 does nothing on RepoCheckException; US-016 releases/refuses failed claims; US-017 rejects invalid env and isolates flow errors; US-018 persists a failed-step stop.\n\nDescription/semantic fixes: US-007's scope explicitly includes the spec-required ESCALATED RUN-with-PR handoff despite remaining RUN progression belonging to US-009. Generic failure criteria are limited to a RUNNING single-feature flow's latest job so they cannot override approval-epoch restart/skip rules. US-009 limits pr_not_ready to COMPLETED FIX, keeping non-success terminal states step_failed. US-010's exact AGENT key set is for unpinned input; a set pinnedRunnerId is still included on every step. PR-number fixture lookup explicitly returns owner o/name r, matching prNumberFor's repo-aware semantics. Missing review-repo checks assume a surviving locked parent; actual parent disappearance returns without writes. US-017 contextFiles now contains all five spec-recommended files, including permissions/catalog.ts; all other spec-recommended context files are present and no story's own outputs appear as its inputs. Dependencies/workdirs remain exactly the binding table; all 18 references resolve and no dependency was removed for apparent redundancy. Lighter routing follows existing migration/query/claim precedents and existing transaction/orchestration patterns, while permission/catalog, creator authorization, token and system-context stories retain three-session-tdd under the security override. Added regression/negative criteria are explicit audit hardening requirements, not misrepresented as source ACs; the source-to-PRD mapping above distinguishes them.",
+  "outOfScope": [
+    "Verdict classification (`answered`/`minor`/`ambiguous`), spec-fix jobs, batched questions, agent rulings on open PR items and the flow's ticket (fleet flow F4).",
+    "Notifications on a flow stop or completion: until F4, a stop is visible only in flow activity, audit, `stopReason` and `stopDetail`.",
+    "Flows with more than one feature, feature order, merge waits and independent features (fleet flow F5); F3 leaves such a flow `APPROVED`.",
+    "Every web page and the `FleetFlowDto` fields for steps, jobs and `stopDetail` (fleet flow F6), including the \"cap excludes N jobs with unknown cost\" display.",
+    "Running `REVIEW` and `FIX` on the reviewer role's model: flow `PLAN`, `RUN`, `REVIEW` and `FIX` jobs use the default profile chain (`profiles: []`).",
+    "Cancelling a running job when a flow stops or returns to `PENDING`: by design the flow only starts nothing more.",
+    "Retrying a failed step: any failure stops the flow; a stopped flow is never restarted in place.",
+    "Re-checking the spec sha after `PLAN` has been dispatched, and reacting to a thread re-publish while a flow is `RUNNING` (the F1 listener ignores it).",
+    "Reading the PR head from the forge for the `REVIEW` claim: the claim uses the `RUN` job's `resultSha`.",
+    "Recomputing `spentUsd` after a flow has stopped or completed, when a late ingest raises a job's cost.",
+    "Enforcing the cap inside `AGENT`, `PLAN`, `REVIEW` or `FIX` jobs beyond the `maxCostUsd` each job already receives.",
+    "A durable outbox event for job ends; the ticker's interval is the only trigger.",
+    "Running more than one api instance's ticker against the same database: the single-flight guard is per process, and duplicate dispatches are left to the existing one-active-job-per-`(repoId, feature)` 409 and the review head claim.",
+    "More than 500 advanceable flows in one tick: the ticker stops after 10 pages of 50 and continues on the next tick.",
+    "Mapping a `flowId` foreign-key failure at dispatch (a flow deleted mid-pass) to anything but the existing `createJob` not-found path.",
+    "Regenerating the CLI client and CLI commands for flows; `openapi.json` does not change.",
+    "Changes under `.nax/` (rules, config): none are needed; `.nax/` is read-only to the run."
+  ],
+  "routingProfile": "native-codex-ds"
+}
