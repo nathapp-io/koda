@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T10:41:55.878Z",
+  "updatedAt": "2026-11-07T10:51:49.901Z",
   "userStories": [
     {
       "id": "US-001",
@@ -161,14 +161,17 @@
         "migration"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Nullable columns and four standard Prisma operations extend existing repository/transaction patterns; Postgres-backed TDD verifies SetNull, inclusive counting and null-only ticket linking without a new abstraction."
+        "reasoning": "Nullable columns and four standard Prisma operations extend existing repository/transaction patterns; Postgres-backed TDD verifies SetNull, inclusive counting and null-only ticket linking without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -196,7 +199,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f9d406ec15c23040ee822400d81659233d8c8424"
     },
     {
       "id": "US-004",
