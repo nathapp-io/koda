@@ -1,0 +1,789 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-verdicts",
+  "branchName": "feat/fleet-flow-verdicts",
+  "createdAt": "2026-11-29T09:00:00.000Z",
+  "updatedAt": "2026-11-07T12:32:03.013Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Classified verdicts",
+      "description": "**Goal** — Require classified findings from both flow review tasks and retain class-specific fix/question text.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — `FlowFinding` and `parseFlowVerdict` (`apps/api/src/fleet/flows/flow-verdict.ts`). Target: `FlowFinding { id?: string; class: FlowFindingClass; summary: string; fix?: string; question?: string }` with `FlowFindingClass = 'answered' | 'minor' | 'ambiguous'`. A finding whose `class` is missing or not one of the three, an `answered`/`minor` finding without a non-blank string `fix`, or an `ambiguous` finding without a non-blank string `question` makes the whole verdict unreadable (`{ ok: false }`).\n\n`formatFindings` (same file). Target: entries `<n>. [<id>] (<class>) <summary>`; the 2,000-character cap is unchanged.\n\nThe verdict instruction appended to both review tasks:\n```text\nWhen you are done, end your reply with exactly one JSON object on its own line, with no text after it:\n{\"findings\":[{\"id\":\"<short id>\",\"class\":\"answered|minor|ambiguous\",\"summary\":\"<one sentence>\",\"fix\":\"<the change, for answered and minor>\",\"question\":\"<the question, for ambiguous>\"}]}\nClasses: \"answered\" = the spec, the brainstorm or the code already settles it; \"minor\" = a small call you can make\nand record; \"ambiguous\" = only the user can settle it, because the answer changes what gets built.\nUse {\"findings\":[]} when you found nothing that should change before the next step.\n{\"findings\":[]}\n```\n\nUpdate flow-verdict.spec.ts findings fixtures to include class and required text and expected class labels; missing JSON, trailing text and non-array findings keep their expectations. Update flow-steps.spec.ts from F3's two-field example to the classified example while retaining the final empty-verdict line. Update the existing strict-stop fixtures in flow-step-decision.spec.ts with `class: 'minor'` and a fix so they still expect review_findings and formatFindings detail. The existing thread-entry integration case 'a SPEC_REVIEW finding stops the flow' gains `\"class\":\"minor\",\"fix\":\"f\"` and retains review_findings. Do not yet change the decision policy.\n\n**Scope** — In: finding types, parsing/formatting, both review prompts and dependent fixture compatibility. Out: calls block construction (US-002), classified transition rules (US-005), calls application (US-006/007). Classifying `REVIEW` (PR review) findings; `REVIEW` and `FIX` jobs are dispatched exactly as in F3.\n\n**Interface**\n```typescript\nexport type FlowFindingClass = 'answered' | 'minor' | 'ambiguous';\nexport interface FlowFinding { id?: string; class: FlowFindingClass; summary: string; fix?: string; question?: string }\nexport function parseFlowVerdict(output: string | null | undefined): FlowVerdict;\nexport function formatFindings(findings: readonly FlowFinding[]): string;\n```",
+      "acceptanceCriteria": [
+        "[unit] parseFlowVerdict('ok\\n{\"findings\":[{\"id\":\"F1\",\"class\":\"minor\",\"summary\":\"s\",\"fix\":\"f\"}]}') returns ok true with the finding { id: 'F1', class: 'minor', summary: 's', fix: 'f' }.",
+        "[unit] parseFlowVerdict of a verdict with one ambiguous finding carrying question: 'q' returns ok true with that finding's class ambiguous and question q.",
+        "[unit] parseFlowVerdict of a verdict with one answered finding carrying fix: 'f' returns ok true with class answered.",
+        "[unit] parseFlowVerdict of a verdict whose only finding has no class returns { ok: false }.",
+        "[unit] parseFlowVerdict of a verdict whose only finding has class: 'major' returns { ok: false }.",
+        "[unit] parseFlowVerdict of a verdict with a minor finding and no fix returns { ok: false }.",
+        "[unit] parseFlowVerdict of a verdict with an answered finding whose fix is '   ' returns { ok: false }.",
+        "[unit] parseFlowVerdict of a verdict with an ambiguous finding and no question returns { ok: false }.",
+        "[unit] parseFlowVerdict('{\"findings\":[]}') still returns { ok: true, findings: [] }.",
+        "[unit] formatFindings([{ id: 'F1', class: 'minor', summary: 'Missing AC', fix: 'add it' }]) returns '1 finding: 1. [F1] (minor) Missing AC'.",
+        "[unit] formatFindings([{ class: 'answered', summary: 'S', fix: 'f' }]) (no id) returns '1 finding: 1. (answered) S'.",
+        "[unit] FLOW_VERDICT_INSTRUCTION includes the text '\"class\":\"answered|minor|ambiguous\"'.",
+        "[unit] FLOW_VERDICT_INSTRUCTION still ends with the line '{\"findings\":[]}'.",
+        "[unit] parseFlowVerdict('{\"findings\":[]} thanks') still returns { ok: false }, preserving rejection of trailing text after a verdict.",
+        "[unit] formatFindings returns exactly 2,000 characters ending in '…' when classified findings exceed FLOW_STOP_DETAIL_MAX, preserving the existing detail cap."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "verdicts"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure parser/prompt changes and fixture migrations using established Vitest patterns; no authorization or token behavior changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/flows/flow-verdict.spec.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-verdict.spec.ts",
+          "reason": "its findings fixtures have no `class`, which now makes a verdict unreadable; give each fixture finding a `class` (and the `fix` or `question` that class needs) and expect `formatFindings` entries with the `(<class>)` part; the cases for missing JSON, trailing text and non-array findings keep their expectations."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-steps.spec.ts",
+          "reason": "the instruction assertions pin F3's two-field example; they now expect the classified example with `class`, `fix` and `question`, and still expect the final `{\"findings\":[]}` line."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "the strict-stop cases feed class-less findings (`{\"id\":\"F1\",\"summary\":\"Missing AC\"}`, `{\"summary\":\"Update plan\"}`), which now parse as unreadable; give each `class: 'minor'` and a `fix` so they keep expecting `review_findings` with the `formatFindings` detail."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+          "reason": "the \"a SPEC_REVIEW finding stops the flow\" case's agent output gains `\"class\":\"minor\",\"fix\":\"f\"` on its finding; its flow is thread-entry, so it keeps expecting `review_findings`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b1da74be887528f70938b7db19f524849c42a24e"
+    },
+    {
+      "id": "US-002",
+      "title": "The calls block",
+      "description": "**Goal** — Build bounded, append-only, idempotent flow calls blocks and format ambiguous questions in a pure module.\n\n**Motivation** — Under F3's strict stop, `/spec-review` found something on almost every pass: two of three spec reviews and the one PRD review stopped the flow, all on hygiene or coverage findings the reviewer itself called minor.\n\n**Approach** — **At most 20 findings per review are applied** (`FLOW_CALLS_MAX_FINDINGS`); a verdict with more stops as `review_findings`. Each finding's summary and fix are collapsed to one line and cut at 1,000 characters (`FLOW_CALL_TEXT_MAX`) in the calls block. The decision policy owns rejecting excessive findings; this story supplies the constant and formatter.\n\n**Idempotent commit.** Each review's block has the heading `### <STEP> job <jobId>`. If the spec at the branch head already contains that heading (a crash after the commit, before the record), no second commit is made and the branch head is recorded instead. This module reports alreadyApplied so US-006 can implement that commit behavior.\n\nThe calls block (appended after a blank line; the `## Flow's calls` heading only when the spec has none):\n```markdown\n## Flow's calls\n\n### SPEC_REVIEW job cmw66x5ix002f08p2kcxvye58\n\n- **ac-untagged** (minor): All 7 ACs carry no mechanism tag. Call: append [unit] to each AC.\n- **2** (answered): The -0 bound is untested. Call: add an AC for clamp(-5, -0, 0).\n```\n\nA finding without an id is named by its 1-based position in the verdict; an id is collapsed to one line and cut at `FLOW_CALL_ID_MAX` (64) characters, so it can never write a heading line. Only `answered` and `minor` findings appear. A new block always goes at the end of the file, even when other text follows an existing `## Flow's calls` heading.\n\nNew symbols: `FLOW_CALLS_HEADING` (`## Flow's calls`), `FLOW_CALLS_MAX_FINDINGS` (20), `FLOW_CALL_TEXT_MAX` (1000), `FLOW_CALL_ID_MAX` (64), `formatQuestions(findings)`, `callsOutcomeForForgeError(reason: string): 'failed' | 'retry'`, `buildFlowCalls(specText: string, input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }): { text: string; alreadyApplied: boolean }`.\n\n`formatQuestions` lists ambiguous findings' question strings using numbered entries and optional ids, singular/plural question prefix, and the same 2,000-character cap with a final ellipsis when truncated. A `RepoCheckException`: `callsOutcomeForForgeError(reason)` is `failed` (detail = the reason) for `app_not_installed`, `app_permissions_insufficient` and `repo_not_found`, `retry` for any other reason. Any other error propagates in the service, not in this pure mapper.\n\n**Scope** — In: pure constants, calls text builder, questions formatter, forge-reason outcome mapping and co-located unit specs. Out: verdict parsing (US-001), persistence (US-003), decision enforcement (US-005), forge writes (US-004/006). Rewriting the spec body: calls are only appended under `## Flow's calls`; no finding edits an existing line.\n\n**Interface**\n```typescript\nexport function callsOutcomeForForgeError(reason: string): 'failed' | 'retry';\nexport function buildFlowCalls(specText: string, input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }): { text: string; alreadyApplied: boolean };\n```",
+      "acceptanceCriteria": [
+        "[unit] buildFlowCalls('# Spec\\n', { step: 'SPEC_REVIEW', jobId: 'j1', findings: [{ id: 'a', class: 'minor', summary: 'S', fix: 'F' }] }) returns alreadyApplied false.",
+        "[unit] For that call, the returned text ends with the seven lines: blank, '## Flow's calls', blank, '### SPEC_REVIEW job j1', blank, '- **a** (minor): S Call: F' and a final empty line, after the unchanged '# Spec\\n'.",
+        "[unit] buildFlowCalls of a spec that already contains the line '## Flow's calls' adds only the '### <STEP> job <jobId>' block at the end of the file, so '## Flow's calls' appears once in the returned text.",
+        "[unit] buildFlowCalls of a spec that already contains the line '### PRD_REVIEW job j2', called with step: 'PRD_REVIEW' and jobId: 'j2', returns alreadyApplied true and the spec text unchanged.",
+        "[unit] buildFlowCalls with a finding that has no id names it by its 1-based position in the findings list ('- **2** (answered): ...' for the second finding).",
+        "[unit] buildFlowCalls with an id of 'x\\n### SPEC_REVIEW job j9' writes the id on one line inside the bullet, so the returned text has no line equal to '### SPEC_REVIEW job j9'.",
+        "[unit] buildFlowCalls with a finding of class ambiguous among minor ones leaves the ambiguous finding out of the block.",
+        "[unit] buildFlowCalls with a summary containing a newline writes the summary on one line, the newline replaced by a space.",
+        "[unit] buildFlowCalls with a 3,000-character fix writes a bullet whose text after 'Call: ' is 1,000 (FLOW_CALL_TEXT_MAX) characters long.",
+        "[unit] buildFlowCalls with a 100-character id writes a bullet whose bold id is 64 (FLOW_CALL_ID_MAX) characters long.",
+        "[unit] formatQuestions([{ id: 'q1', class: 'ambiguous', summary: 's', question: 'Which DB?' }]) returns '1 question: 1. [q1] Which DB?'.",
+        "[unit] formatQuestions of two ambiguous findings returns a text starting with '2 questions: '.",
+        "[unit] formatQuestions of questions whose joined text exceeds 2,000 characters returns at most 2,000 characters ending in '…'.",
+        "[unit] callsOutcomeForForgeError('app_permissions_insufficient') returns 'failed'.",
+        "[unit] callsOutcomeForForgeError('provider_error') returns 'retry'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "pure"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A single additive pure source module formats bounded text and detects exact headings; co-located TDD needs neither I/O fixtures nor new infrastructure.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-steps.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-calls.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b4edde112fcfc7255e419758a07c7846422063cd"
+    },
+    {
+      "id": "US-003",
+      "title": "Calls and ticket columns",
+      "description": "**Goal** — Persist the last applied calls job and the flow's ticket, and expose the transactional repository operations needed by later stories.\n\n**Motivation** — F3 left stops silent (`stopReason` and `stopDetail` only).\n\n**Approach** — `FleetFlowFeatureRecord` and `FleetFlowRecord` (`apps/api/src/fleet/flows/domain/fleet-flow.domain.ts`). Target: the feature adds optional `callsJobId?: string | null`; the flow adds optional `ticketId?: string | null`.\n\n`IFleetFlowStepRepository` (`apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts`) and `PrismaFleetFlowStepRepository`. Target: adds `countJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number>` (jobs with `queuedAt` at or after `since`), `projectSlug(projectId: string): Promise<string | null>` (null when the project is gone or soft-deleted), `recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void>` (sets the feature's `callsJobId` and the flow's `specSha`) and `setTicket(flowId: string, ticketId: string): Promise<boolean>` (sets `ticketId` only where it is null; true when it set it).\n\nPrisma: `FleetFlowFeature.callsJobId String?`; `FleetFlow.ticketId String?` with a relation to `Ticket` (`onDelete: SetNull`) and the back-relation on `Ticket`.\n\nOne migration adds `FleetFlowFeature.callsJobId` and `FleetFlow.ticketId` (relation to `Ticket`, `onDelete: SetNull`). The domain records gain both optional fields; the step repository gains `countJobsForStepSince`, `projectSlug`, `recordCalls` and `setTicket`. Create migration 20261129090000_fleet_flow_verdicts/migration.sql and a real-Postgres migration/repository integration spec. Keep the Prisma schema and SQL in sync; regenerate the gitignored Prisma client, never edit generated client files. Existing rows read null without a backfill. Update PrismaFleetFlowRepository.toDomain only as needed to carry both columns, including features. recordCalls is a paired mutation intended for the caller's existing transaction; setTicket uses a null-only conditional update rather than an unconditional overwrite. If existing repository integration tests pin full returned columns, add callsJobId and ticketId as null; nothing else changes.\n\n**Scope** — In: nullable schema/relation/migration, domain projection, four repository methods and real database checks. Out: calls commits (US-006), engine orchestration (US-007), ticket creation/comment handling and its bookkeeping scope (US-010). Closing or transitioning the flow's ticket; it stays in its created state.\n\n**Interface**\n```typescript\ncountJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number>;\nprojectSlug(projectId: string): Promise<string | null>;\nrecordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void>;\nsetTicket(flowId: string, ticketId: string): Promise<boolean>;\n```",
+      "acceptanceCriteria": [
+        "[integration] After the migration, a FleetFlowFeature row inserted without callsJobId reads back with callsJobId null.",
+        "[integration] After the migration, a FleetFlow row inserted without ticketId reads back with ticketId null.",
+        "[integration] Deleting the Ticket a flow's ticketId points at leaves the flow row in place with ticketId null.",
+        "[integration] countJobsForStepSince(flowId, 'PLAN', since) returns 2 for a flow with two PLAN jobs queued after since and one SPEC_REVIEW job.",
+        "[integration] countJobsForStepSince(flowId, 'PLAN', since) does not count a PLAN job queued before since.",
+        "[integration] countJobsForStepSince(flowId, 'PLAN', since) returns 0 for a flow with no jobs.",
+        "[integration] projectSlug(projectId) returns the project's slug.",
+        "[integration] projectSlug(projectId) returns null for a soft-deleted project.",
+        "[integration] recordCalls(flowId, featureId, 'j1', 'abc123') sets the feature's callsJobId to 'j1'.",
+        "[integration] recordCalls(flowId, featureId, 'j1', 'abc123') sets the flow's specSha to 'abc123'.",
+        "[integration] setTicket(flowId, ticketId) on a flow with no ticket sets ticketId and returns true.",
+        "[integration] setTicket(flowId, otherTicketId) on a flow that already has a ticket leaves ticketId unchanged and returns false.",
+        "[integration] findById of a flow returns its ticketId and each feature's callsJobId."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "prisma",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Nullable columns and four standard Prisma operations extend existing repository/transaction patterns; Postgres-backed TDD verifies SetNull, inclusive counting and null-only ticket linking without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261129090000_fleet_flow_verdicts/migration.sql",
+        "apps/api/test/integration/fleet/fleet-flow-verdicts-migration.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "[integration] countJobsForStepSince(flowId, 'PLAN', since) includes a PLAN job whose queuedAt equals since.",
+        "[integration] projectSlug(projectId) returns null when no project row exists.",
+        "[integration] When the transaction containing recordCalls rolls back, both callsJobId and specSha retain their previous values."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "if it pins the full set of columns a feature or flow row returns, add `callsJobId` and `ticketId` as null; nothing else changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f9d406ec15c23040ee822400d81659233d8c8424"
+    },
+    {
+      "id": "US-004",
+      "title": "GitHub contents write",
+      "description": "**Goal** — Add a single-file GitHub contents write through the existing bounded, no-redirect forge client.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — `GitHubAppClient` (`apps/api/src/fleet/git-broker/github-app-client.ts`). Target: adds `putFile(token, owner, name, path, input: { branch: string; content: Buffer; blobSha: string; message: string }): Promise<PutFileResult>` with `PutFileResult = { kind: 'committed'; commitSha: string } | { kind: 'conflict' } | { kind: 'refused' }` (`409` is `conflict`, `422` is `refused`).\n\n`FleetHttpClient.request` (`apps/api/src/fleet/git-broker/fleet-http-client.ts`). Target: `method: 'GET' | 'POST' | 'PUT'`; a `PUT` sends its JSON body like a `POST`.\n\n**Write refusals.** A `422` from the contents write (a branch rule or an invalid request) is a refusal, not a transient error: the flow stops as `calls_failed`. This client reports refused; the calls service and engine own stopping.\n\n**Write conflicts.** A `409` from the contents write re-reads the file: if its blob sha is unchanged, the write was refused for another reason (a branch rule) and the flow stops as `calls_failed`; if it moved, this pass ends and the next tick retries against the new file. This client reports conflict; US-006 owns the re-read.\n\nputFile sends one PUT to the segment-encoded contents path with body { message, branch, sha: blobSha, content: content.toString('base64') }. Return committed with response commit.sha on 200 or 201; malformed success payload is provider_error. Map 404 to RepoCheckException('repo_not_found'), 403 to app_permissions_insufficient, and 500 to provider_error, using the existing exception type. Keep authorization headers, configured timeout, redirect refusal and JSON handling unchanged. Test PUT/body and all status mappings with the existing fake-forge pattern; no existing expectation changes. No change to token minting scopes is needed: mintInstallationToken already has contents:write.\n\n**Scope** — In: HTTP method union and GitHub file-replacement primitive with fake-forge tests. Out: calls text (US-002), repository/token orchestration and conflict re-read policy (US-006), advancement (US-007). GitLab repositories: flows are GitHub-only, and `putFile` exists only on the GitHub client. Signing the calls commit or setting its author: GitHub records it as the App.\n\n**Interface**\n```typescript\nexport type PutFileResult = { kind: 'committed'; commitSha: string } | { kind: 'conflict' } | { kind: 'refused' };\nputFile(token: string, owner: string, name: string, path: string, input: { branch: string; content: Buffer; blobSha: string; message: string }): Promise<PutFileResult>;\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetHttpClient.request('PUT', url, headers, body) sends a PUT whose JSON body reaches the fake forge unchanged.",
+        "[unit] putFile(token, 'o', 'r', '.nax/features/a/spec.md', { branch: 'feat/a', content, blobSha: 'b1', message: 'm' }) sends one PUT to '/repos/o/r/contents/.nax/features/a/spec.md' whose JSON body has message 'm', branch 'feat/a', sha 'b1' and content equal to the base64 of content.",
+        "[unit] putFile returns { kind: 'committed', commitSha } with the response's commit.sha when GitHub answers 200.",
+        "[unit] putFile returns { kind: 'committed', commitSha } when GitHub answers 201.",
+        "[unit] putFile returns { kind: 'conflict' } when GitHub answers 409.",
+        "[unit] putFile throws RepoCheckException with reason 'repo_not_found' when GitHub answers 404.",
+        "[unit] putFile throws RepoCheckException with reason 'app_permissions_insufficient' when GitHub answers 403.",
+        "[unit] putFile returns { kind: 'refused' } when GitHub answers 422.",
+        "[unit] putFile throws RepoCheckException with reason 'provider_error' when GitHub answers 500.",
+        "[unit] putFile throws RepoCheckException with reason 'provider_error' when a 200 response has no string commit.sha.",
+        "[unit] putFile with a path segment containing a space sends the segment URL-encoded.",
+        "[unit] FleetHttpClient.request('GET', url, {}) still returns { status: 200, body: { a: 1 } } when the fake forge responds with that JSON body, preserving existing GET behavior after PUT is added.",
+        "[unit] FleetHttpClient.request('POST', url, headers, body) still sends the supplied JSON body unchanged, preserving existing POST behavior after PUT is added."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "github",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A standard additive forge method, but it transmits an installation bearer token and performs repository writes, triggering the security strategy override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/git-broker/fleet-http-client.ts",
+        "apps/api/src/fleet/git-broker/fleet-http-client.spec.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts"
+      ],
+      "suggestedCriteria": [
+        "[unit] putFile throws RepoCheckException with reason 'provider_unreachable' when the forge answers a redirect, without forwarding the bearer token to the redirect target."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/git-broker/fleet-http-client.spec.ts",
+          "reason": "gains a case for a `PUT` with a JSON body; no existing expectation changes."
+        },
+        {
+          "path": "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+          "reason": "gains the `putFile` cases against the fake forge; no existing expectation changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a6608b843ca69acb65e8328328f450ba439fa033"
+    },
+    {
+      "id": "US-005",
+      "title": "Step decision for classified verdicts",
+      "description": "**Goal** — Select apply_calls, continuation or a precise stop using the ordered classified-review policy.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — `FlowStepInput`, `FlowStepAction`, `FlowStopReason` and `decideFlowStep` (`apps/api/src/fleet/flows/flow-step-decision.ts`). Target: the input adds `callsJobId: string | null` (the feature's last applied review job), `planCount: number` (the flow's `PLAN` jobs) and `canApplyCalls: boolean` (true for nax-entry flows); the action union adds `{ kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }`, exported as `ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>`; stop reasons add `review_ambiguous` and `calls_failed`.\n\n`decideFlowStep` for a `COMPLETED` review job whose verdict parsed, in this order (the first rule that matches wins):\n\n1. No findings: `SPEC_REVIEW` continues to `PLAN`, `PRD_REVIEW` to `RUN` (unchanged from F3).\n2. Any `ambiguous` finding: stop `review_ambiguous`, detail `formatQuestions` of the ambiguous findings.\n3. More than `FLOW_CALLS_MAX_FINDINGS` findings: stop `review_findings`, detail `formatFindings`.\n4. `canApplyCalls` false (thread entry): stop `review_findings`, detail `formatFindings`.\n5. `PRD_REVIEW` with `planCount` 2 or more: stop `review_findings`, detail `formatFindings` (the second round).\n6. `callsJobId` equals the job's id (calls already recorded): dispatch `PLAN`.\n7. Otherwise: `apply_calls` with the job's step, id and findings.\n\nBoth reviews are classified. `PRD_REVIEW` `answered`/`minor` findings are appended to the spec as calls, then the flow re-runs `PLAN` once. A second round of `PRD_REVIEW` findings stops the flow. Empty verdicts still proceed even in round two. Invalid classified findings follow the existing verdict_unreadable path. Preserve all unrelated failure, active-job, RUN ingest, REVIEW, FIX and multi-feature decisions.\n\nSo that `apps/api` still type-checks, `FleetFlowAdvanceService.decisionInput` supplies `callsJobId: null`, `planCount: 0` and `canApplyCalls: false` until US-007 fills them. The flow-step-decision.spec.ts input fixture helper gains the same defaults (false keeps every existing strict-stop expectation, as for a thread-entry flow); new F4a cases set them explicitly.\n\n**Scope** — In: pure decision inputs/action/stop reasons, ordered review rules and temporary engine input defaults. Out: real database input population/creator guards (US-007), forge service (US-006), stop event (US-008). `WAITING_ANSWER`, posting the batched questions on the ticket, the answers API and resuming after answers (fleet flow F4b); in F4a an `ambiguous` finding stops the flow. More than one re-plan per flow: a second `PRD_REVIEW` with findings stops the flow.\n\n**Interface**\n```typescript\n// Additional FlowStepInput members:\ncallsJobId: string | null;\nplanCount: number;\ncanApplyCalls: boolean;\n// Additional FlowStepAction member:\n{ kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }\nexport type ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>;\n```",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW whose verdict has one ambiguous finding returns stop review_ambiguous with the detail formatQuestions returns for it.",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW with one minor and one ambiguous finding returns stop review_ambiguous (rule 2 wins over rule 7).",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW with 21 minor findings and canApplyCalls true returns stop review_findings.",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW with one minor finding and canApplyCalls false returns stop review_findings with the formatFindings detail.",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW (job j1) with one minor finding, canApplyCalls true and callsJobId null returns apply_calls with step SPEC_REVIEW, job id j1 and that finding.",
+        "[unit] decideFlowStep for the same job with callsJobId j1 returns dispatch PLAN.",
+        "[unit] decideFlowStep for a COMPLETED PRD_REVIEW (job j2) with one answered finding, planCount 1, canApplyCalls true and callsJobId null returns apply_calls with step PRD_REVIEW and job id j2.",
+        "[unit] decideFlowStep for that PRD_REVIEW with callsJobId j2 and planCount 1 returns dispatch PLAN.",
+        "[unit] decideFlowStep for a COMPLETED PRD_REVIEW with one minor finding, canApplyCalls true and planCount 2 returns stop review_findings.",
+        "[unit] decideFlowStep for a COMPLETED PRD_REVIEW with no findings and planCount 2 returns dispatch RUN.",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW with no findings still returns dispatch PLAN.",
+        "[unit] decideFlowStep for a COMPLETED SPEC_REVIEW whose output has a class-less finding returns stop verdict_unreadable.",
+        "[unit] decideFlowStep returns stop verdict_unreadable for a COMPLETED review whose finding has class 'major'.",
+        "[unit] decideFlowStep returns stop verdict_unreadable for a COMPLETED review whose answered/minor finding lacks a nonblank fix.",
+        "[unit] decideFlowStep returns stop verdict_unreadable for a COMPLETED review whose ambiguous finding lacks a nonblank question."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A bounded pure-policy extension with explicit precedence and fixture defaults; creator access enforcement remains in US-007.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "its input fixture helper gains `callsJobId: null`, `planCount: 0` and `canApplyCalls: false` (false keeps every existing strict-stop expectation, as for a thread-entry flow); the new F4a cases set them explicitly."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "53e8dc0c965188187b015ac6cd4a6d3912545748"
+    },
+    {
+      "id": "US-006",
+      "title": "The calls service",
+      "description": "**Goal** — Append the review's calls to the remote spec with crash recovery, head validation and explicit forge outcomes.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — **Calls are appended by the api.** The verdict carries each finding's `fix`. The api commits them to the spec as a \"Flow's calls\" section through a new GitHub contents write (the App's installation token already has `contents: write`). No runner change; the spec body above the section is never rewritten.\n\n**A push between the review and the calls re-asks.** Before writing, `apply` compares the branch head with the head the review saw (`expectedHead`: `flow.specSha` for `SPEC_REVIEW`, the latest `PLAN` job's `resultSha` for `PRD_REVIEW`). A different head returns `stale`, and `advance` re-asks through `FleetFlowsService.reaskLocked` with that head, exactly as the F3 spec-sha check does before `PLAN`. The check runs only when the calls block is not on the branch yet, so the crash-recovery path (block present, head = the calls commit) never trips it. US-007 supplies expectedHead and performs the re-ask; this service only returns stale.\n\n`FleetFlowCallsService.apply` algorithm (the explicit three-argument interface below is authoritative):\n1. `findReviewRepo(flow.repoId)`; missing or no installation: `failed` `repo not connected`.\n2. `mintInstallationToken`, then `getFile(spec path, flow.branch)`; null: `failed` `spec missing on <branch>`.\n3. `buildFlowCalls(file text, action)`; `alreadyApplied`: `committed` with `getBranchHead(flow.branch)`. Otherwise `getBranchHead(flow.branch)` must equal `expectedHead`, else `stale` with that head.\n4. `putFile` with the file's blob sha and message `docs(<feature>): flow calls from <STEP> job <jobId>`; `committed`: `committed` with its commit sha; `refused`: `failed` `spec write refused`; `conflict`: `getFile` again, same blob sha: `failed` `spec write refused`, different: `retry`.\n5. A `RepoCheckException`: `callsOutcomeForForgeError(reason)` is `failed` (detail = the reason) for `app_not_installed`, `app_permissions_insufficient` and `repo_not_found`, `retry` for any other reason. Any other error propagates.\n\n**Write refusals.** A `422` from the contents write (a branch rule or an invalid request) is a refusal, not a transient error: the flow stops as `calls_failed`.\n\n**Write conflicts.** A `409` from the contents write re-reads the file: if its blob sha is unchanged, the write was refused for another reason (a branch rule) and the flow stops as `calls_failed`; if it moved, this pass ends and the next tick retries against the new file.\n\nReturn failed/retry rather than mutating flow state. The feature's specPath selects the file, not a hardcoded .nax path. Use the exact text returned by buildFlowCalls as UTF-8 Buffer content. Never persist/log the token or hold a transaction across HTTP. Pin the US-004 seam by asserting putFile's path, branch, blobSha, content and message; pin the US-002 seam by comparing its content with buildFlowCalls output. Service provision/wiring into FlowsModule belongs to US-007.\n\n**Scope** — In: new calls service and isolated collaborator tests. Out: pure text construction (US-002), GitHub HTTP primitive (US-004), creator guard/locks/recordCalls/re-ask/stop orchestration and DI registration (US-007). Rewriting the spec body: calls are only appended under `## Flow's calls`; no finding edits an existing line. Bounding retries of a calls step that keeps failing with a transient forge error (`provider_error`, `provider_unreachable`): it retries every tick, as F3's forge preflight does.\n\n**Interface**\n```typescript\nexport type CallsOutcome = { kind: 'committed'; specSha: string } | { kind: 'stale'; head: string } | { kind: 'retry' } | { kind: 'failed'; detail: string };\napply(flow: FleetFlowRecord, action: ApplyCallsAction, expectedHead: string): Promise<CallsOutcome>;\n```\nUse the canonical ApplyCallsAction export from flow-step-decision.ts; do not introduce a second competing action type. The binding DAG's omission of US-005 from this story's dependencies is a source-contract scheduling issue recorded in analysis, not permission to duplicate that contract or modify the binding DAG.",
+      "acceptanceCriteria": [
+        "[unit] apply reads the spec file at the feature's specPath on flow.branch with a token mintInstallationToken minted for the flow repo's installation and name.",
+        "[unit] apply calls putFile with the spec path, flow.branch and the read file's blob sha.",
+        "[unit] apply passes putFile the text buildFlowCalls returns for the read file and the action.",
+        "[unit] apply passes putFile the message 'docs(<feature>): flow calls from <STEP> job <jobId>'.",
+        "[unit] apply returns { kind: 'committed', specSha } with the commit sha putFile returned.",
+        "[unit] apply when the spec already contains the action's block heading calls no putFile and returns committed with the sha getBranchHead(flow.branch) returns.",
+        "[unit] apply when findReviewRepo returns null returns { kind: 'failed', detail: 'repo not connected' }.",
+        "[unit] apply when the repo's githubInstallationId is null returns failed with detail 'repo not connected'.",
+        "[unit] apply when getFile returns null returns failed with detail 'spec missing on <branch>'.",
+        "[unit] apply when putFile returns conflict and a second getFile returns the same blob sha returns failed with detail 'spec write refused'.",
+        "[unit] apply when putFile returns conflict and a second getFile returns a different blob sha returns { kind: 'retry' }.",
+        "[unit] apply when the token mint throws RepoCheckException('app_not_installed') returns failed with detail 'app_not_installed'.",
+        "[unit] apply when putFile throws RepoCheckException('provider_unreachable') returns { kind: 'retry' }.",
+        "[unit] apply when putFile returns refused returns failed with detail 'spec write refused'.",
+        "[unit] apply when the block is not on the branch and getBranchHead(flow.branch) differs from expectedHead returns { kind: 'stale', head } with that head and calls no putFile."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "github",
+        "security"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New external-write orchestration with blob/head concurrency, crash idempotency and permanent/transient failure mapping; installation-token handling triggers the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/git-broker/repo-check.exception.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "[unit] apply propagates an error that is not a RepoCheckException without converting it to a retry or failed outcome.",
+        "[unit] apply returns committed with the current branch head when the block already exists, even when that head differs from expectedHead."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "57180d0667f864e4ebe97dc94915052e324c604d"
+    },
+    {
+      "id": "US-007",
+      "title": "Advance applies calls",
+      "description": "**Goal** — Execute apply_calls outside transactions and record/re-ask/stop under existing generation-aware locks without self-invalidating the approved spec.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — `FleetFlowAdvanceService` (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts`). Target: `DispatchPass.action` is `DispatchAction | ApplyCallsAction`; for `apply_calls`, `decide` runs only the creator-access guard (inside its transaction, as for a dispatch; no cap or spec-sha guard) and returns the pass; `advance` then calls `FleetFlowCallsService.apply` outside a transaction, with `expectedHead` = `flow.specSha` for `SPEC_REVIEW` or the latest `PLAN` job's `resultSha` for `PRD_REVIEW`, and records under the locks. `decide` keeps a `SPEC_REVIEW` latest job whose id is the feature's `callsJobId` and whose `queuedAt` is at or after `approvedAt`, even though its `ref` is no longer `specSha`. `readSpecHead` also reads the forge head when the latest job is a terminal `PRD_REVIEW` whose id is the feature's `callsJobId` (a re-plan follows). `decisionInput` fills the three new inputs (`planCount` counts only `PLAN` jobs queued at or after `approvedAt`).\n\n**The flow's own spec commit never re-asks.** The calls commit moves `flow.specSha` to the new commit sha in the same transaction that records the calls, so the existing spec-sha check before `PLAN` sees its own commit as the approved spec. A later push by anyone else still re-asks.\n\n**Thread-entry flows cannot take calls.** A thread's branch is local to its runner (thread publish never pushes), so the api cannot commit to it. A thread-entry review with `answered`/`minor` findings stops as `review_findings`, as in F3.\n\n**The calls step is not billed** and runs no cap guard; it does run the creator-access guard (it writes to the repository on the creator's behalf).\n\nFor `apply_calls`, `decide` runs the creator-access guard under its locks (stop `creator_lost_access`) and returns the pass; `advance` calls `FleetFlowCallsService.apply` with no transaction open, then:\n\n- `committed`: one transaction locks parent and flow (`lockLive`); if still live, `recordCalls(flowId, featureId, jobId, specSha)`, an audit entry `system.flow.advance` (summary `flow calls <STEP>`) and activity `flow.calls` `{ step, jobId, specSha, count }`. The next tick dispatches `PLAN`.\n- `stale`: one transaction locks parent and flow; if still live, `reaskLocked(flow, head, now)` (the flow returns to `PENDING` with the new sha).\n- `retry`: nothing is written.\n- `failed`: stop `calls_failed`, detail `<STEP>: <detail>`.\n\nThe creator guard uses creatorAccess, PermissionService.effectiveKeys and mayDispatch as F3 does, but runs before returning an apply_calls pass without executing cap/spec-sha dispatch guards. Keep forge I/O outside transactions and narrow apply_calls away from dispatch-only action.pr consumers. Keep lockLive's approval-generation/state checks, so a flow that leaves APPROVED/RUNNING before the record receives no calls progress. ReadSpecHead must not read the forge for a terminal PRD_REVIEW with no findings and no callsJobId match; it proceeds to RUN as before.\n\nAppend FleetFlowCallsService after the config constructor parameter; OutboxService will be appended after it by US-008. Provide FleetFlowCallsService in FlowsModule. Update advance.service.spec.ts and advance-review.spec.ts positional constructors with the calls stub, and step repository stubs with countJobsForStepSince returning 0 and recordCalls; no existing expectation changes. Add fleet-flow-advance-calls.spec.ts entering at advance to pin the service seam and all four outcomes. flows.module.spec.ts must still compile the real module without a DB and expose FleetFlowCallsService.\n\n**Scope** — In: engine decision/record integration, real new decision inputs, generation-aware applied-review retention, re-plan head preflight and calls service DI. Out: text/service internals (US-002/006), stop outbox event (US-008), subscribers (US-009/010), real-DB scenarios (US-011). Applying calls for thread-entry flows: their branch exists only on the runner, so the api cannot commit to it.\n\n**Interface**\n```typescript\n// DispatchPass.action:\nDispatchAction | ApplyCallsAction\n// Calls service invoked by advance:\napply(flow: FleetFlowRecord, action: ApplyCallsAction, expectedHead: string): Promise<CallsOutcome>;\n```",
+      "acceptanceCriteria": [
+        "[unit] advance for a RUNNING nax-entry flow whose latest job is a COMPLETED SPEC_REVIEW with one minor finding calls FleetFlowCallsService.apply once with the flow and an apply_calls action for that job, and dispatches no job.",
+        "[unit] After apply returns committed with sha 's2', advance calls recordCalls(flowId, featureId, jobId, 's2').",
+        "[unit] After apply returns committed with sha 's2', advance records activity 'flow.calls' with { step: 'SPEC_REVIEW', jobId, specSha: 's2', count: 1 }.",
+        "[unit] After apply returns committed, advance records an AuditRecorder entry with key 'system.flow.advance' and summary 'flow calls SPEC_REVIEW'.",
+        "[unit] When apply returns retry, advance writes nothing: no recordCalls, no stop, no activity.",
+        "[unit] When apply returns stale with head 'h9', advance calls FleetFlowsService.reaskLocked with the flow and 'h9'.",
+        "[unit] For a PRD_REVIEW apply_calls, advance passes apply the latest PLAN job's resultSha as expectedHead.",
+        "[unit] When apply returns failed with detail 'spec write refused', advance stops the flow as calls_failed with detail 'SPEC_REVIEW: spec write refused'.",
+        "[unit] When the creator no longer holds fleet.job.dispatch, advance stops the flow as creator_lost_access and calls no apply.",
+        "[unit] When the flow left RUNNING between the decision and the record, advance calls no recordCalls after a committed outcome.",
+        "[unit] For a flow whose feature's callsJobId is the latest SPEC_REVIEW job's id and whose specSha is that job's calls commit (not the job's ref), advance dispatches PLAN instead of a new SPEC_REVIEW.",
+        "[unit] For a RUNNING nax-entry flow whose latest job is a COMPLETED PRD_REVIEW with calls already recorded (callsJobId = its id) and a forge head equal to specSha, advance dispatches PLAN.",
+        "[unit] For a RUNNING nax-entry flow whose latest job is a COMPLETED PRD_REVIEW with no findings, advance reads no forge head and dispatches RUN.",
+        "[unit] advance passes planCount from countJobsForStepSince(flowId, 'PLAN', approvedAt) to the decision, so a PRD_REVIEW with a minor finding on a flow with two PLAN jobs since approval stops as review_findings.",
+        "[unit] advance for a thread-entry flow whose latest SPEC_REVIEW has one minor finding stops it as review_findings and calls no apply."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "state-machine",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing decide/I-O/record phases already supply the architecture, but extending generation-aware recovery and creator-access guard ordering across a remote commit remains complex and requires the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+        "apps/api/src/fleet/flows/flows.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "[unit] advance calls apply with expectedHead equal to flow.specSha for SPEC_REVIEW.",
+        "[unit] advance calls FleetFlowCallsService.apply only while ITransactionManager.isInTransaction() is false.",
+        "[unit] advance applies calls for an authorized creator even when the flow has exhausted its cost cap, without recording a cost_cap stop.",
+        "[unit] When a later external push changes the head after recorded PRD_REVIEW calls, advance calls reaskLocked with the external head rather than dispatching PLAN.",
+        "[unit] When approvedAt changes between apply and record, advance records no calls progress for the obsolete approval generation."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "the positional constructor gains a `FleetFlowCallsService` stub after the config argument; the step repository stub gains `countJobsForStepSince` (returning 0) and `recordCalls`; no existing expectation changes."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts",
+          "reason": "the same constructor and stub additions; no existing expectation changes."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "the compiled module now also provides `FleetFlowCallsService`; expect it among the providers."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ef213d32ff4dcb02547c030d7e6d3569f8482df2"
+    },
+    {
+      "id": "US-008",
+      "title": "The flow-stopped event",
+      "description": "**Goal** — Record one bounded, validated flow-stop outbox event atomically with every engine stop.\n\n**Motivation** — F3 left stops silent (`stopReason` and `stopDetail` only).\n\n**Approach** — **Stop notices come from the outbox.** The engine's stop transaction records one outbox event `fleet_flow_stopped` (event id `<flowId>:stopped`). Two handlers consume it: a notifications handler (in-app and email per preference, category `FLEET_NEEDS_YOU`) and a fleet handler that creates the flow's ticket on first use and posts the stop comment. A human stop (`FleetFlowsService.stop`) and an approval rejection enqueue nothing: a human did them. This story implements the producer/shared payload only; US-009/010 implement handlers.\n\nThe stop event payload:\n`{ flowId, projectId, feature, stopReason, detail (first 500 characters), approverId: string | null, creatorType: 'USER' | 'AGENT', creatorId }`.\n\n`fleet-notification-events.ts` (`apps/api/src/notifications/fleet/`): adds `FLEET_FLOW_STOPPED` (`'fleet_flow_stopped'`), `FleetFlowStoppedPayload` and `parseFlowStoppedPayload`.\n\n`writeDecision` records the `fleet_flow_stopped` outbox event with every stop it writes. The constructor appends `FleetFlowCallsService` (US-007) and then `OutboxService` (US-008) after the config parameter.\n\nUse the package OutboxService from @nathapp/nestjs-outbox as FleetJobOutcomeRecorder does; keep metadata.projectId and stable eventId in the same stop transaction. Preserve stopDetail's 2,000-character cap and existing audit/activity; truncate only event.detail to its first 500 characters. The source feature is the flow's single feature and creatorType/creatorId come from createdByType/createdById. The parser validates all required fields and USER|AGENT creator type, preserving a valid payload's nullable approverId unchanged. Engine dispatch-refusal stops, including budget_paused, use the same enqueue path; dispatch and completion enqueue no flow-stopped event. Do not put enqueueing in the repository's stop method, which would also affect human stops/rejections.\n\nUpdate advance.service.spec.ts and advance-review.spec.ts constructors with an OutboxService record spy after the calls service argument. fleet-flow-advance-calls.spec.ts, created by US-007, gains the same stub. flows.module.spec.ts needs a test-only global module providing an OutboxService stub since its global package module is not compiled there. Extend fleet-notification-events.spec.ts parser cases without changing existing expectations. Keep pure shared event definitions independent of Nest modules so flows do not import NotificationsModule.\n\n**Scope** — In: event contract/parser, engine enqueueing and fixture/DI stubs. Out: recipient draft/delivery logic (US-009), flow ticket handler (US-010), real outbox fan-out verification (US-011). Notifications or ticket comments for a flow's completion, for a human stop and for an approval rejection. Carrying more than 500 characters of the stop detail in the stop event: the ticket comment and the notification show the first 500; the full detail (up to 2,000) stays in `stopDetail`.\n\n**Interface**\n```typescript\nexport const FLEET_FLOW_STOPPED = 'fleet_flow_stopped';\nexport interface FleetFlowStoppedPayload { flowId: string; projectId: string; feature: string; stopReason: string; detail: string; approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string }\nexport function parseFlowStoppedPayload(raw: unknown): FleetFlowStoppedPayload | null;\n// Called inside the stop transaction:\nOutboxService.record({ type, payload, metadata: { projectId, eventId } });\n```",
+      "acceptanceCriteria": [
+        "[unit] parseFlowStoppedPayload of a payload with every field returns it unchanged.",
+        "[unit] parseFlowStoppedPayload of a payload without flowId returns null.",
+        "[unit] parseFlowStoppedPayload of a payload whose creatorType is RUNNER returns null.",
+        "[unit] When advance stops a flow as step_failed, it calls OutboxService.record once with type 'fleet_flow_stopped' and metadata { projectId, eventId: '<flowId>:stopped' }.",
+        "[unit] That event's payload equals { flowId, projectId, feature, stopReason: 'step_failed', detail, approverId, creatorType, creatorId } for the stopped flow.",
+        "[unit] The event's detail is the stop detail cut to its first 500 characters.",
+        "[unit] When advance dispatches a step or completes a flow, it records no fleet_flow_stopped event.",
+        "[unit] When advance stops a flow as budget_paused after a dispatch refusal, it records the event with stopReason budget_paused inside the transaction that writes the stop.",
+        "[unit] When advance stops a flow with a 3,000-character detail, the persisted stopDetail is still the first 2,000 characters, preserving the existing storage cap independently of the new 500-character event excerpt."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "An additive pure payload/parser and one enqueue call reuse the existing centralized stop transaction and package outbox; ordinary unit TDD covers the established producer and DI-stub patterns.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+        "apps/api/src/fleet/jobs/job-outcome.recorder.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+        "apps/api/src/fleet/flows/flows.module.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "[unit] When OutboxService.record fails, the transaction writing the engine stop rolls back.",
+        "[unit] When FleetFlowsService.stop performs a human stop, no fleet_flow_stopped event is recorded.",
+        "[unit] When an approval is rejected, no fleet_flow_stopped event is recorded."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "the positional constructor gains an `OutboxService` stub (its `record` a spy) after the `FleetFlowCallsService` argument; no existing expectation changes."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts",
+          "reason": "the same `OutboxService` stub; no existing expectation changes."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "`OutboxService` comes from a global package module that this test does not compile; add a test-only global module that provides an `OutboxService` stub, so the advance service resolves."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+          "reason": "gains the `parseFlowStoppedPayload` cases; no existing expectation changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4b241bca494ca30efce24108c3352300db5d3820"
+    },
+    {
+      "id": "US-009",
+      "title": "Stop notifications",
+      "description": "**Goal** — Notify the stopped flow's approver and distinct human creator through the existing preference-aware, idempotent notification writer.\n\n**Motivation** — F3 left stops silent (`stopReason` and `stopDetail` only).\n\n**Approach** — `apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts`: `FleetFlowStoppedSubscriber` (`@SystemWriter('system.notification.fleet')`); a draft builder `flowStoppedDraft(payload, slug, userId)` in `fleet-notification-drafts.ts`, built directly (not through `fleetDraft`, which forces `body: null`) with the body `truncate(detail, BODY_MAX)`.\n\nThe notifications handler sends one draft to the approver and one to the creator when the creator is a user other than the approver: category `FLEET_NEEDS_YOU`, kind `flow_stopped`, title `Flow stopped: <feature>`, body the detail cut to `BODY_MAX` (280), link `/<slug>/flows/<flowId>`, params `{ flowId, feature, stopReason }`, source `fleet_flow` / `flowId`.\n\n`NotificationSourceType` (`apps/api/src/notifications/notification.types.ts`): adds `'fleet_flow'`.\n\n`NotificationsModule` (`apps/api/src/notifications/notifications.module.ts`): provides `FleetFlowStoppedSubscriber`.\n\nMirror FleetJobOutcomeSubscriber: register the handler for fleet_flow_stopped on FanOutPublisher in onModuleInit, parse through parseFlowStoppedPayload, warn and skip malformed payloads, and read the slug through FleetNotificationReader.projectSlug; null means return without delivery. Build one draft per distinct intended user (approver if present; creator only if USER and different), never an AGENT recipient. Use NotificationWriter.deliver as the only insert path; it already enforces eligibility, in-app preferences, deduplication and configured email scheduling per category preference. Use the shared TITLE_MAX/truncate convention for the English title and actorId:null, while preserving a non-null body. Ticket-handler availability does not gate this independent handler.\n\nUpdate permissions/system-writer.decorator.spec.ts with [FleetFlowStoppedSubscriber, 'system.notification.fleet'] beside sibling subscribers and change the pinned writer count 41 to 42. If notifications.module.spec.ts lists fleet subscribers, add the new one without changing other expectations. The seam is entered through the callback registered on FanOutPublisher, not only by calling a private helper.\n\n**Scope** — In: subscriber, draft builder/source type, module registration and unit-level registered-handler checks. Out: stop producer (US-008), ticket actor fallback/comment handling (US-010), real database fan-out (US-011). De-duplicating a flow-stop notification against the `fleet_job_outcome` notification the failed job itself sends. Web rendering of the `flow_stopped` notification kind and every flow page (fleet flow F6); clients fall back to the English `title` and `body`.\n\n**Interface**\n```typescript\nflowStoppedDraft(payload: FleetFlowStoppedPayload, slug: string, userId: string): NotificationDraft;\n// Subscriber registration:\nFanOutPublisher.register('fleet_flow_stopped', handler);\n// Shared insertion/delivery path:\nNotificationWriter.deliver(drafts);\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowStoppedSubscriber.onModuleInit registers its handler on FanOutPublisher for 'fleet_flow_stopped'.",
+        "[unit] The handler for a payload with approver 'u1' and USER creator 'u2' calls NotificationWriter.deliver with two drafts, for 'u1' and 'u2'.",
+        "[unit] The handler for a payload whose USER creator is also the approver delivers one draft.",
+        "[unit] The handler for a payload with an AGENT creator and approver 'u1' delivers one draft, for 'u1'.",
+        "[unit] The handler for a payload with no approver and an AGENT creator delivers nothing.",
+        "[unit] flowStoppedDraft(payload, 'sandbox', 'u1') returns category FLEET_NEEDS_YOU, kind flow_stopped and title 'Flow stopped: <feature>'.",
+        "[unit] flowStoppedDraft returns link '/sandbox/flows/<flowId>', source type fleet_flow and source id the flow id.",
+        "[unit] flowStoppedDraft of a payload with a 400-character detail returns a body of at most 280 characters.",
+        "[unit] flowStoppedDraft params are { flowId, feature, stopReason }.",
+        "[unit] The handler delivers nothing when FleetNotificationReader.projectSlug returns null.",
+        "[unit] The handler skips a malformed payload without calling deliver.",
+        "[unit] The handler logs a warning when it skips a malformed fleet_flow_stopped payload.",
+        "[unit] Given a valid FleetJobOutcomePayload named jobPayload, jobOutcomeDraft(jobPayload, 'sandbox') still returns body: null after flowStoppedDraft is added, preserving existing fleet-job notification drafts."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "notifications"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This mirrors the existing fleet subscriber and pure draft builders; SystemWriter reuses existing metadata only, while all authorization/eligibility enforcement stays unchanged in NotificationWriter, so ordinary unit TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/fleet/fleet-job-outcome.subscriber.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-drafts.ts",
+        "apps/api/src/notifications/notification.types.ts",
+        "apps/api/src/notifications/notifications.module.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts",
+        "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer list gains `[FleetFlowStoppedSubscriber, 'system.notification.fleet']` beside its sibling notification subscribers, and `toHaveLength(41)` becomes `toHaveLength(42)`."
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.module.spec.ts",
+          "reason": "if it lists the registered fleet subscribers, add `FleetFlowStoppedSubscriber`; nothing else changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a5c5ca603f78c67aec31023f7e6adbb8387a7789"
+    },
+    {
+      "id": "US-010",
+      "title": "The flow ticket",
+      "description": "**Goal** — Lazily create and link one flow ticket, then append an idempotent system stop comment under correct creator/approver attribution.\n\n**Motivation** — F3 left stops silent (`stopReason` and `stopDetail` only).\n\n**Approach** — `apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts`: `FleetFlowStopTicketSubscriber` (`@SystemWriter('system.flow.ticket')`, registers on `fleet_flow_stopped`; runs each event inside `runAsSystem('flow', ..., { onBehalfOf: { type: creatorType, id: creatorId } })`, as `FixFollowUpSubscriber` does).\n\n**Ticket author.** The flow's ticket is created as the flow's creator, loaded through `ActorPrincipalLoader.load`; when the creator is unavailable (deleted, disabled or paused), as the approver; when both are unavailable, no ticket is created and the handler logs and returns (the notification still goes out). Notification delivery is an independent fan-out handler and still applies its own recipient eligibility.\n\nThe fleet handler, inside `runAsSystem` on the creator's behalf and one transaction: lock the flow (gone: return); read the slug with `projectSlug(projectId)` (null: return); when `ticketId` is null, create a `TASK` ticket titled `Fleet flow: <feature>` with description `Flow <flowId> on <branch>` and `setTicket` (under `fleet.flow-bookkeeping`); then `commentOnFlowTicket(ticketId, projectId, \"Flow stopped (<stopReason>): <detail>\")`.\n\n`FleetJobTicketEffects` (`apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts`). Target: adds `commentOnFlowTicket(ticketId: string, projectId: string, body: string): Promise<void>` (skip when the ticket already has a comment with that body; else a system comment plus an `AuditRecorder` entry `comment.create`, as `commentOnFinish` does).\n\n`BOOKKEEPING_REASONS['fleet.flow-bookkeeping']` (`apps/api/src/action-context/audit-coverage.reasons.ts`): its text also covers linking the flow's ticket (`setTicket`).\n\n`NEW_KEY_SCOPES` (`apps/api/src/permissions/catalog.ts`): appends `system.flow.ticket` (`'any'`) after `system.flow.advance`.\n\n`FlowsModule` (`apps/api/src/fleet/flows/flows.module.ts`): provides `FleetFlowCallsService` and `FleetFlowStopTicketSubscriber`; imports what they need (`OutboxModule`, the module exporting `FleetJobTicketEffects` and `TicketsService`, the module exporting `ActorPrincipalLoader`). CallsService provision was delivered by US-007; preserve it. In this codebase FleetTicketsModule exports FleetJobTicketEffects, TicketsModule exports TicketsService, and already-imported AuthRepositoryModule exports ActorPrincipalLoader.\n\nRegister with FanOutPublisher in onModuleInit and enter tests through the registered handler. Both handlers log a warning and skip malformed fleet_flow_stopped payloads. Resolve fallback only for ActorUnavailableError; when there is no available approver after creator failure, log and return without creating/commenting. Do not swallow database failures needed for outbox retry. Existing ticket reuse does not require creating a new author. Extend the existing FleetJobTicketEffects unit tests to preserve commentOnReady's exact-body deduplication; test unavailable-author fan-out with a separately registered notification-handler spy, without adding a dependency on US-009's subscriber. Hold the flow lock through optional create, null-only setTicket and comment so event replay creates neither a second ticket nor identical comment; do not defer these writes after commit.\n\nUpdate catalog.spec.ts's mirrored NEW_KEY_SCOPES table after system.flow.advance. Every role map in permissions/__snapshots__/role-matrix.json gains `\"system.flow.ticket\": [\"non-role-key\",\"non-role-key\"]` immediately after system.flow.advance; no other entry changes. Add [FleetFlowStopTicketSubscriber, 'system.flow.ticket'] to system-writer.decorator.spec.ts and advance writer count 42 to 43 after US-009. If US-009 is not yet merged in an isolated branch, add one to the actual current writer list rather than adding a hidden story dependency; the completed feature has 43 writers. flows.module.spec.ts must stub imports/exported FanOutPublisher, FleetJobTicketEffects, TicketsService and ActorPrincipalLoader (FanOutPublisher via the US-008 test-only global module as needed), compile without a database, and expose the new subscriber.\n\n**Scope** — In: ticket subscriber, system key/catalog/snapshot, bookkeeping rationale, exact-body idempotent comment effect and required DI. Out: schema/repository operations (US-003), event enqueueing (US-008), notification delivery (US-009), database fan-out integration (US-011). Closing or transitioning the flow's ticket; it stays in its created state. `WAITING_ANSWER`, posting the batched questions on the ticket, the answers API and resuming after answers (fleet flow F4b); in F4a an `ambiguous` finding stops the flow.\n\n**Interface**\n```typescript\ncommentOnFlowTicket(ticketId: string, projectId: string, body: string): Promise<void>;\nActorPrincipalLoader.load({ type: 'USER' | 'AGENT', id });\nTicketsService.create(projectSlug, { type, title, description? }, principal);\n// Subscriber context:\nrunAsSystem('flow', ..., { onBehalfOf: { type: creatorType, id: creatorId } });\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowStopTicketSubscriber.onModuleInit registers its handler on FanOutPublisher for 'fleet_flow_stopped'.",
+        "[unit] The handler for a flow with no ticket loads the creator through ActorPrincipalLoader.load and calls TicketsService.create with the slug projectSlug(projectId) returns, type TASK, title 'Fleet flow: <feature>' and description 'Flow <flowId> on <branch>'.",
+        "[unit] The handler then calls setTicket(flowId, ticketId) with the created ticket's id.",
+        "[unit] The handler then calls FleetJobTicketEffects.commentOnFlowTicket(ticketId, projectId, 'Flow stopped (<stopReason>): <detail>').",
+        "[unit] The handler runs inside runAsSystem('flow', ...) on behalf of the payload's creator.",
+        "[unit] The handler for a flow that already has a ticket creates no ticket and comments on the existing one.",
+        "[unit] When loading the creator throws ActorUnavailableError, the handler creates the ticket as the approver.",
+        "[unit] When loading both the creator and the approver throws ActorUnavailableError, the handler creates no ticket and posts no comment.",
+        "[unit] The handler for a flow that no longer exists creates no ticket and posts no comment.",
+        "[unit] The handler for a project whose projectSlug is null creates no ticket.",
+        "[unit] The handler skips a malformed payload without creating a ticket.",
+        "[unit] commentOnFlowTicket on a ticket that already has a comment with the same body creates no comment.",
+        "[unit] commentOnFlowTicket on a ticket without that comment creates one system comment and records an audit entry with key 'comment.create' and the given project id.",
+        "[unit] The handler logs a warning when it skips a malformed fleet_flow_stopped payload.",
+        "[unit] When creator and approver are both unavailable for ticket authorship, the handler emits a log message before returning without creating a ticket."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "tickets",
+        "outbox",
+        "security",
+        "audit"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module transactional ticket/comment writes with actor fallback, delegated system context, new permission key and audit attribution require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/auth/principal/actor-principal.loader.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts",
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "[unit] When loading the creator throws a database error rather than ActorUnavailableError, the handler propagates the error for outbox retry.",
+        "[unit] When the creator is unavailable and approverId is null, the handler creates no ticket and posts no comment.",
+        "[unit] When a fallback approver authors the ticket, the handler's system context still identifies the creator as onBehalfOf."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its mirrored `NEW_KEY_SCOPES` table ends at `system.flow.advance`; append `system.flow.ticket: 'any'` after it so the table still equals the catalog's, in the same order."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role's map gains `\"system.flow.ticket\": [\"non-role-key\",\"non-role-key\"]` right after `system.flow.advance`, the same value that key has; no other entry changes."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer list gains `[FleetFlowStopTicketSubscriber, 'system.flow.ticket']` and `toHaveLength(42)` becomes `toHaveLength(43)`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "`FlowsModule` now imports `OutboxModule`, the tickets modules and the module exporting `ActorPrincipalLoader`; stub them with `overrideModule` (or their exported providers: `FanOutPublisher`, `FleetJobTicketEffects`, `TicketsService`, `ActorPrincipalLoader`; `FanOutPublisher` through the same test-only global module US-008 adds) and expect `FleetFlowStopTicketSubscriber` among the providers."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7303b479c4c5fd8b66c159673960e4b78118e5a7"
+    },
+    {
+      "id": "US-011",
+      "title": "Classified flows against the database",
+      "description": "**Goal** — Prove classified flow progression and replay-safe stop effects through the real ticker, repositories and outbox against Postgres with stubbed GitHub I/O.\n\n**Motivation** — A real flow therefore almost never reaches `RUN`.\n\n**Approach** — Integration tests that run `FleetFlowTicker.tick` over real flows and jobs with a stubbed GitHub client, and the stop handlers over a real outbox row.\n\nThe US-007 → US-011 seam: `FleetFlowTicker.tick` reaches the calls commit and then dispatches `PLAN` (US-011 proves it against the database).\n\nFor a nax-entry single-feature flow with a completed classified SPEC_REVIEW, tick invokes the real engine/calls service and records the forge commit/callsJobId; a second tick with forge head equal to that commit dispatches a real PLAN job. Seed approvedAt before review queuedAt and consistent currentStep/state to enter advancement rather than a bookkeeping-only recovery tick. Stub GitHubAppClient token/file/head/putFile collaborators, not FleetFlowCallsService or decideFlowStep. Forge I/O remains outside a transaction.\n\nFor an ambiguous verdict, tick stops review_ambiguous and atomically writes one fleet_flow_stopped row, event id <flowId>:stopped. Publish that actual row through FanOutPublisher so both registered handlers run. Assert the created TASK ticket's title, flow.ticketId, stop comment and approver notification, then republish the same row and observe no duplicate ticket or comment. Existing NotificationWriter deduplication is retained. A PRD_REVIEW minor verdict with two PLAN jobs since approval stops review_findings.\n\nMirror test/integration/fleet/fleet-flow-advance.integration.spec.ts for tick fixtures and test/integration/nax-flow-entry.integration.spec.ts for NAX/forge setup. Put the new file at test/integration/fleet/fleet-flow-verdicts.integration.spec.ts. Use canRunDbTests() and the real test Postgres setup; run test:scoped outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1. Database suites must execute, not merely compile or skip. Do not run destructive DB suites concurrently against the same test database. This binding test-only story remains separate as explicitly required by the spec.\n\n**Scope** — In: the declared real-database ticker and outbox seam scenarios. Out: new parser/policy/forge/engine/subscriber production behaviors (US-001 through US-010), no new endpoints or runner behavior. Notifications or ticket comments for a flow's completion, for a human stop and for an approval rejection.\n\n**Interface**\n```typescript\nFleetFlowTicker.tick(now: Date): Promise<void>;\nFanOutPublisher.publish(record: OutboxRecord): Promise<void>;\n```",
+      "acceptanceCriteria": [
+        "[integration] A tick over a RUNNING nax-entry flow whose latest job is a COMPLETED SPEC_REVIEW with one minor finding, with a stubbed GitHubAppClient whose putFile returns commit 'c2', sets the feature's callsJobId to that job's id and the flow's specSha to 'c2'.",
+        "[integration] A second tick over that flow, with the stubbed forge head 'c2', inserts a PLAN job with flowId the flow's id and flowStep PLAN.",
+        "[integration] A tick over a flow whose latest SPEC_REVIEW has an ambiguous finding leaves the flow STOPPED with stopReason review_ambiguous.",
+        "[integration] That stop leaves one outbox row of type 'fleet_flow_stopped' with event id '<flowId>:stopped'.",
+        "[integration] Publishing that outbox row through FanOutPublisher creates one ticket titled 'Fleet flow: <feature>'.",
+        "[integration] After that publish, the flow's ticketId is the created ticket's id.",
+        "[integration] After that publish, the ticket has one comment starting with 'Flow stopped (review_ambiguous):'.",
+        "[integration] Publishing the same outbox row a second time creates no second ticket and no second comment.",
+        "[integration] Publishing that outbox row creates one flow_stopped notification for the approver with source type fleet_flow and source id the flow id.",
+        "[integration] A tick over a RUNNING flow whose latest job is a COMPLETED PRD_REVIEW with one minor finding and two PLAN jobs since approval leaves it STOPPED with stopReason review_findings."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "integration",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-007",
+        "US-009",
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "This binding integration-only story needs real Postgres and cross-module ticker/outbox fixtures, but GitHub I/O is stubbed and no authentication, credential or access-control implementation changes; the default complex-story strategy is sufficient.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+        "apps/api/test/integration/nax-flow-entry.integration.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts",
+        "apps/api/src/outbox/fan-out-publisher.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7e7643b3cf854bb28ff3a4f48c4dafb7d9efffce"
+    }
+  ],
+  "analysis": "FEATURE AND SUCCESS: F4a replaces F3's stop-on-any-finding policy for SPEC_REVIEW and PRD_REVIEW with classified verdicts. NAX-entry flows append answered/minor calls to the remote spec through the GitHub App, atomically record callsJobId and the calls commit as specSha, and proceed to PLAN. PRD review allows one re-plan; genuine ambiguity stops with questions. Every engine stop atomically enqueues one fleet_flow_stopped event, consumed independently for notifications and a lazily created ticket/comment. Done means the eleven binding stories and their runtime/database assertions are implemented, including tick-to-commit-to-PLAN and idempotent stop fan-out. This is an enhancement, not greenfield.\n\nDISCOVERY AND GUIDANCE: The supplied execution root is /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. codebase-memory MCP tools are not exposed, so discovery used direct source reads and text searches; no graph index was queried. The package labels in the prompt are stale: .nax/mono/apps/api/context.md:23 specifies NestJS 12 + Fastify, Prisma 7, and Vitest, not Express, and root guidance identifies Nuxt rather than Next.js. All implementation stays in apps/api. Read the app context and nathapp-nestjs-patterns skill before writing NestJS implementation; that skill was not present among the exposed repository files. This task only authors the requested PRD artifact; implementation must not change .nax rules/config or generated acceptance files.\n\nVERDICTS AND TASKS (US-001/002): apps/api/src/fleet/flows/flow-verdict.ts:3 currently defines only id?/summary; parseFlowVerdict at :10 uses the last {\"findings\" marker, optionally strips a trailing code fence, parses the final JSON, and rejects malformed summaries/non-arrays. Preserve those parsing regression anchors while requiring class and nonblank class-specific text; legacy class-less nonempty verdicts deliberately become unreadable, not implicit minor findings. formatFindings at :43 currently caps details at FLOW_STOP_DETAIL_MAX. apps/api/src/fleet/flows/flow-steps.ts:5 defines the old instruction, :10 sets the 2000-character limit, and :14 appends the instruction to both /spec-review tasks within AGENT_TASK_MAX_LENGTH. Preserve task path construction and the final empty-verdict line. flow-calls.ts is a new pure helper module; it must preserve the original spec prefix byte-for-byte, append at EOF, detect exact heading lines for idempotency, collapse id/summary/fix to one line, bound id to 64 and each text to 1000, and omit ambiguous bullets. formatQuestions carries ambiguous questions, not summaries, within 2000 characters. The decision, not the builder, enforces the 20-finding application limit.\n\nSTATE MACHINE (US-005): apps/api/src/fleet/flows/flow-step-decision.ts:20 holds FlowStepInput, :32 stop reasons, :45 the action union, and :63 decideFlowStep. The COMPLETED review branch at :101 currently stops every nonempty parsed verdict. Replace only that branch with the seven ordered rules. Empty findings win first; ambiguity precedes size/thread/round limits; round-two PRD findings stop even if callsJobId matches; recorded calls otherwise select PLAN. Existing job failure precedence, RUN ingest/PR timeout behavior, REVIEW/FIX flow, and multi-feature skip remain unchanged. Direct dependents discovered are the advance service and flow-step-decision.spec.ts; flow-verdict also feeds that test and flow-verdict.spec.ts. US-005 temporarily adds callsJobId:null, planCount:0, canApplyCalls:false to decisionInput so upstream changes remain coherent until US-007.\n\nPERSISTENCE (US-003): apps/api/prisma/schema.prisma:1223 defines FleetFlow without ticketId and :1261 defines FleetFlowFeature without callsJobId; Ticket is at :201. Add nullable columns through apps/api/prisma/migrations/20261129090000_fleet_flow_verdicts/migration.sql, a nullable Ticket relation with onDelete:SetNull, and the Ticket back-relation. No callsJobId foreign key or Prisma enum is requested. Existing rows need no backfill. Domain interfaces at apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:11 and :24 gain optional nullable fields for fixture/source compatibility. apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:19 spreads database rows into domain records and includes ordered features on reads; verify the new fields survive findById, not just raw inserts. apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:35 is the step port; apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:10 implements it with transaction-aware PrismaService.client. Add inclusive queuedAt >= since PLAN counting, live project-slug lookup, paired recordCalls writes, and null-only setTicket CAS. recordCalls belongs inside the caller's transaction and locks; setTicket is derived bookkeeping. Deploy the additive migration before code that queries the new columns and regenerate the gitignored Prisma client using db:generate; no controller/DTO or OpenAPI change, no CLI regeneration. Tests use db push, so the migration must still ship the actual SQL constraint and be checked with a real database.\n\nFORGE INTEGRATION (US-004/006): apps/api/src/fleet/git-broker/fleet-http-client.ts:14 only types GET|POST, but already JSON-serializes a defined body at :28. Extend to PUT without changing timeouts, redirect:'manual', headers, provider_unreachable transport mapping, or provider_error malformed-JSON mapping. apps/api/src/fleet/git-broker/github-app-client.ts:98 already mints repo-scoped contents:write installation tokens; :110 exposes a read-only token for preflight. getBranchHead at :305 and getFile at :336 provide the needed reads; paths are encoded segment-by-segment. Add putFile following existing headers/repoPath conventions, replacing exactly one file with base64 content and blob CAS, mapping 409 to conflict and 422 to refused rather than exceptions. Validate response commit.sha for both 200 and 201. No signing/author override. FleetFlowCallsService is new, uses FleetReposService.findReviewRepo, feature.specPath, flow.branch, and the installation token only in memory. Its definitive interface has expectedHead and four outcomes including stale; the abbreviated US-006 summary that lists three outcomes does not override the explicit stale-head AC. Already-present block detection runs before expectedHead comparison. 409 re-read with unchanged blob is permanent refusal; changed blob returns retry; the next pass re-evaluates head and may re-ask. The spec does not define a special outcome if the conflict re-read returns null; leave any additional behavior out of mandatory ACs. Only the three named permanent RepoCheckException reasons fail; all other reasons retry, while non-RepoCheckException errors propagate. Do not log/store installation tokens.\n\nADVANCEMENT AND CONCURRENCY (US-007): apps/api/src/fleet/flows/fleet-flow-advance.service.ts:34 currently allows only DispatchAction in DispatchPass; :44 starts the positional constructor ending in FLEET_CFG. advance at :61 dispatches outside transactions, then lockLive at :179 checks live state, unchanged specSha and approval generation before recording. decide at :207 locks parent then flow, refreshes spend, reads latestJobWithIngest, reconciles crash-recovery state, applies cap/access/spec guards, and returns a pass. The stale SPEC_REVIEW filter at :234 currently discards ref != specSha; retain an applied review only when callsJobId matches and queuedAt >= approvedAt. readSpecHead at :310 currently preflights APPROVED or terminal SPEC_REVIEW only; add terminal applied PRD_REVIEW so a re-plan validates its calls commit and later external pushes re-ask. decisionInput at :334 fills real callsJobId, inclusive PLAN count since approvedAt, and canApplyCalls for NAX entry. For apply_calls, bypass billing/cap/spec-sha guards but keep creatorAccess + PermissionService.effectiveKeys + mayDispatch under locks. Supply flow.specSha for SPEC_REVIEW or latest PLAN.resultSha for PRD_REVIEW as expectedHead. Return enough typed pass data without widening dispatch-only methods unsafely; narrow action.kind before action.pr or dispatch operations. Run apply outside any transaction; then re-lock parent and flow using lockLive for committed/stale/failed outcomes. Record specSha and callsJobId together, audit system.flow.advance / flow calls <STEP>, and activity flow.calls with no secrets. The next tick, not the commit pass, dispatches PLAN. A stop/re-ask while HTTP runs may leave a remote commit but must not write stale database progress. Existing reaskLocked lives at apps/api/src/fleet/flows/fleet-flows.service.ts:157 and remains the approval-reset mechanism.\n\nOUTBOX AND NOTIFICATIONS (US-008/009): writeDecision at apps/api/src/fleet/flows/fleet-flow-advance.service.ts:385 centralizes engine stops and completions. Enqueue the stop event there, not in IFleetFlowRepository.stop or FleetFlowsService.stop (human stop at apps/api/src/fleet/flows/fleet-flows.service.ts:100), so rejection/manual stops remain silent. Existing flow stopDetail/activity cap is 2000; only event.detail is sliced to first 500. Use eventId <flowId>:stopped with projectId in the same transaction as the stop, including refuseDispatch/writeStop paths. apps/api/src/fleet/jobs/job-outcome.recorder.ts:2 imports OutboxService from @nathapp/nestjs-outbox and :56 illustrates record payload/metadata. There is no local outbox.service.ts; apps/api/src/outbox/outbox.module.ts:14 explains the package's global provider. apps/api/src/outbox/fan-out-publisher.ts:28 documents replay of all handlers, :52 registers independent handlers, and :75 runs every handler even when a sibling fails, so both new consumers must be idempotent. Shared event constants/types/parsers live at apps/api/src/notifications/fleet/fleet-notification-events.ts:9 without Nest imports: fleet may import that pure module, not NotificationsModule. Mirror apps/api/src/notifications/fleet/fleet-job-outcome.subscriber.ts:11, registration at :22, warn-and-skip malformed input at :28 and missing-project skip at :32. Add flow_stopped drafts directly rather than fleetDraft at apps/api/src/notifications/fleet/fleet-notification-drafts.ts:13 because it forces body:null. apps/api/src/notifications/notification.types.ts:27 holds the source union and :71-85 the 200/280 limits and whitespace/code-point-aware truncate helper. Use the specified English fallback strings/link/params. apps/api/src/notifications/notification-writer.ts:39 already owns eligibility, in-app preference filtering, idempotent insertion, transactional email scheduling when configured, and postcommit live signaling; do not duplicate those in the new subscriber. 'Notification still goes out' when ticket author lookup fails means notification fan-out is independent; the writer still applies eligibility for disabled/deleted users. Register FleetFlowStoppedSubscriber in apps/api/src/notifications/notifications.module.ts:40.\n\nFLOW TICKET AND ATTRIBUTION (US-010): apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts:38 uses @SystemWriter and :68 wraps each event in runAsSystem on behalf of the requester. The new ticket subscriber uses system.flow.ticket with component flow and retains the creator as onBehalfOf even when the ticket author falls back to the approver. ActorPrincipalLoader at apps/api/src/auth/principal/actor-principal.loader.ts:25 returns the proper principal or ActorUnavailableError for missing/disabled users and missing/paused agents; catch only that expected availability failure for fallback, not database failures. AuthRepositoryModule already exports it at apps/api/src/auth/auth-repository.module.ts:15 and is already imported by FlowsModule. TicketsService.create is at apps/api/src/tickets/tickets.service.ts:99. FleetTicketsModule exports FleetJobTicketEffects at apps/api/src/fleet/tickets/fleet-tickets.module.ts:27, but TicketsService must come from TicketsModule directly. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:82-89 shows transactional exact-body comment dedup plus comment.create audit; add commentOnFlowTicket using the existing repository helpers at apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:162 and :166, not best-effort failure-comment logic. Hold the flow lock through slug check, optional ticket creation/link and comment in one transaction so replay/concurrent delivery cannot create orphan duplicate tickets. Keep the ticket in its created state. Existing tickets do not need author re-resolution to receive a system comment. Missing flow/project or unavailable author fallbacks end quietly; database failures must propagate for outbox retry. Update bookkeeping rationale at apps/api/src/action-context/audit-coverage.reasons.ts:25 to cover setTicket, append system.flow.ticket:'any' after system.flow.advance at apps/api/src/permissions/catalog.ts:156, mirror catalog.spec.ts:117 and role-matrix.json entries, and register both new system writers.\n\nMODULES AND TEST IMPACT: FlowsModule imports/providers are at apps/api/src/fleet/flows/flows.module.ts:29-47. Add FleetFlowCallsService and FleetFlowStopTicketSubscriber and required OutboxModule/FleetTicketsModule/TicketsModule imports without introducing fleet->NotificationsModule cycles. Append constructor collaborators after config in order CallsService (US-007), OutboxService (US-008). Both positional fixtures at apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts:182 and fleet-flow-advance-review.spec.ts:119 need corresponding stubs; the new US-007 fixture also gains OutboxService in US-008. flows.module.spec.ts:123 compiles the real module with stub module overrides without a database; add a test-only global OutboxService/FanOutPublisher provider and override tickets/auth external collaborators, maintaining no-DB DI coverage. Parser/instruction regression tests are flow-verdict.spec.ts and flow-steps.spec.ts. Existing strict-stop decision cases at apps/api/src/fleet/flows/flow-step-decision.spec.ts:73-82 need minor+fix fixture updates in US-001; input helper at :6 gets false/null/0 defaults in US-005. The thread-based integration strict-stop fixture at apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts:129 must receive minor+fix but still stop review_findings. Other affected tests: prisma-fleet-flow-step.repository.spec.ts and its integration sibling; fleet-http-client.spec.ts/github-app-client.spec.ts fake-forge transport; fleet-notification-events.spec.ts; notifications.module.spec.ts; fleet-job-ticket.effects.spec.ts/finish-ticket.spec.ts; permissions/catalog.spec.ts, system-writer.decorator.spec.ts and __snapshots__/role-matrix.json. The pinned writer-list count goes 41->42 in US-009 then 42->43 in US-010; derive from the current list if branches execute independently.\n\nINTEGRATION AND VALIDATION (US-003/011): The binding US-011 is intentionally a test-only integration story and must remain separate despite generic story heuristics. apps/api/src/fleet/flows/fleet-flow.ticker.ts:14 owns system.flow.advance and :47 runs each advance as component flow on behalf of its creator. Enter new end-to-end tests through tick, not private decision/record helpers. Mirror apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts:28 for real app/database fixtures and apps/api/test/integration/nax-flow-entry.integration.spec.ts:68 for GitHub spies asserting no transaction during forge I/O. Stub GitHubAppClient only, not FleetFlowCallsService/decision/repository. Set up approvedAt <= review/PLAN queuedAt and feature state/currentStep consistent with the latest terminal job, or the existing recovery tick may run instead of the intended branch. Publish actual outbox records through FanOutPublisher twice to demonstrate ticket/comment/notification idempotency. Unit tests use Vitest vi.*, co-located *.spec.ts, mock DI, lazy import() where needed, and no Postgres. Database tests use test/integration/**/*.integration.spec.ts and shared canRunDbTests gate; run bun run test:scoped <files> outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1/compose test Postgres or Testcontainers. A skip is not verification. Global setup force-resets a local *_test database; never parallelize database-mode runs against the same database, and use KODA_TEST_DB_CONTAINER=1 for a second checkout. Use generated Prisma imports, createTestPrismaClient/createPgAdapter patterns, and no business logic in CLI/web/runner.\n\nORDER, RISKS, AND SEAMS: Exactly US-001..US-011 with the specified dependency DAG, no extra planning or test stories. US-004->006 pins putFile arguments, US-002->006 pins exact builder output, US-006->007 enters at advance and verifies apply, US-008->009/010 enters through registered outbox handlers, and US-007->011 enters through tick. Highest risks are intentional incompatibility of old review output, preserving generation-aware job adoption after self-authored SHA changes, guard ordering (calls must not be billed), remote commit/database crash recovery, repeated PRD PLAN counting after reapproval, and safe/replayable actor-attributed ticket writes. Treat the failure table as mandatory behavior and include additional criteria for its otherwise-uncovered reasons and warn/skip paths; optional hardening beyond the spec goes only in suggestedCriteria. Acceptance criteria override abbreviated prose: US-006 includes stale, no-findings second PRD review still RUNs, and a same-heading crash retry records branch head before expectedHead checking. No new public endpoint or DTO is needed. Existing review/fix PR handling, manual stops/rejections/completions, job notifications and generated clients remain unchanged.\n\nREFINE-PASS AUDIT: Re-read spec.md:522-691 against each story. All 136 explicit spec ACs remain in their original stories, in original order at the front of acceptanceCriteria; only additional failure-table/regression assertions follow them. Preservation inventory, with each listed local spec ordinal mapping to the same 1-based acceptanceCriteria ordinal: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-002 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-003 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-004 [1,2,3,4,5,6,7,8,9,10,11]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-007 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-008 [1,2,3,4,5,6,7,8]; US-009 [1,2,3,4,5,6,7,8,9,10,11]; US-010 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-011 [1,2,3,4,5,6,7,8,9,10]. Qualifiers retained include the empty-verdict still behavior, optional-id/no-id cases, unchanged spec prefix and idempotent unchanged text, already-present heading/recorded-calls paths, rule-2 precedence, original review ref versus the calls commit, transaction-local budget-refusal event, and duplicate-publish behavior. There are no deprecated grep/file/verbatim AC tags. Negative-path anchors are US-001:4 (class missing), US-002:6 (heading injection), US-003:8 (deleted project), US-004:5 (409), US-005:1 (ambiguity), US-006:7 (missing repo), US-007:8 (calls failure), US-008:2 (malformed payload), US-009:10 (missing project), US-010:8 (unavailable authors), US-011:3 (ambiguous stop). All sixteen feature-level exclusions were checked against spec.md:279-296 and remain verbatim in outOfScope. Every spec-recommended context file is retained, every context list is at most five, and own-story created files appear only in expectedFiles; upstream outputs in context remain allowed. All eleven binding workdirs/dependency lists are unchanged and reference existing stories.\n\nAUDIT CORRECTIONS AND CODEBASE FIT: Added observable backward-compatibility assertions for parser trailing-text rejection/detail truncation, GET/POST after adding PUT, full stopDetail versus bounded event excerpt, existing fleet-job draft body:null, and commentOnReady deduplication. Replaced the unobservable phrase 'notification fan-out able to run' with an explicit FanOutPublisher call to an independently registered notification-handler spy when both ticket-author loads fail; it does not bypass NotificationWriter eligibility or require US-009 as a hidden dependency of US-010. Rechecked that readiness comments delegate to commentOnFinish at apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:77-89. Rechecked the notification subscriber pattern at apps/api/src/notifications/fleet/fleet-job-outcome.subscriber.ts:22-34 and that SystemWriter is existing catalog-checked metadata, not an added authorization guard (apps/api/src/permissions/system-writer.decorator.ts:11-16). Lighter routing is therefore appropriate for pure formatting, additive repositories, the outbox producer and the notification template; creator authorization and installation-token implementations retain strict three-session TDD. US-007 extends the existing decide/I-O/record architecture rather than introducing an expert-level architectural redesign.\n\nBINDING-DAG CONTRACT HAZARD: The target US-006 service imports ApplyCallsAction, but that export is authored by sibling US-005, which is not in US-006's binding dependencies. This is a genuine spec-level source-availability hazard for isolated parallel execution, not a reason to invent a second action type, alter dependencies, or silently broaden US-002/003/004. Preserve the canonical type contract and surface missing availability to orchestration. Similarly, US-010's writer-list snapshot increment must be based on the writers actually present in its branch; US-009 is not a permitted additional dependency. The final combined feature still has the specified 43 writers.",
+  "outOfScope": [
+    "`WAITING_ANSWER`, posting the batched questions on the ticket, the answers API and resuming after answers (fleet flow F4b); in F4a an `ambiguous` finding stops the flow.",
+    "Agent rulings on the PR's open items after `FIX`: the PR phase is unchanged from F3 (`pr_not_ready` stops).",
+    "Applying calls for thread-entry flows: their branch exists only on the runner, so the api cannot commit to it.",
+    "Rewriting the spec body: calls are only appended under `## Flow's calls`; no finding edits an existing line.",
+    "More than one re-plan per flow: a second `PRD_REVIEW` with findings stops the flow.",
+    "Classifying `REVIEW` (PR review) findings; `REVIEW` and `FIX` jobs are dispatched exactly as in F3.",
+    "Notifications or ticket comments for a flow's completion, for a human stop and for an approval rejection.",
+    "De-duplicating a flow-stop notification against the `fleet_job_outcome` notification the failed job itself sends.",
+    "Closing or transitioning the flow's ticket; it stays in its created state.",
+    "Carrying more than 500 characters of the stop detail in the stop event: the ticket comment and the notification show the first 500; the full detail (up to 2,000) stays in `stopDetail`.",
+    "Bounding retries of a calls step that keeps failing with a transient forge error (`provider_error`, `provider_unreachable`): it retries every tick, as F3's forge preflight does.",
+    "Web rendering of the `flow_stopped` notification kind and every flow page (fleet flow F6); clients fall back to the English `title` and `body`.",
+    "GitLab repositories: flows are GitHub-only, and `putFile` exists only on the GitHub client.",
+    "Signing the calls commit or setting its author: GitHub records it as the App.",
+    "Regenerating the CLI client; `openapi.json` does not change.",
+    "Changes under `.nax/` (rules, config): none are needed; `.nax/` is read-only to the run."
+  ],
+  "routingProfile": "native-codex-ds"
+}

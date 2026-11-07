@@ -326,6 +326,43 @@ describe('GitHubAppClient', () => {
     expect(forge.requests[1].query).toBe('');
   });
 
+  describe('putFile (US-004)', () => {
+    const route = 'PUT /repos/o/r/contents/.nax/features/a/spec.md';
+    const content = Buffer.from('spec contents');
+    const input = { branch: 'feat/a', content, blobSha: 'b1', message: 'm' };
+
+    it('AC-2/11: sends one encoded-path PUT with the replacement body', async () => {
+      forge.routes.set(route, () => ({ status: 201, body: { commit: { sha: 'commit-1' } } }));
+      await client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input);
+      expect(forge.requests).toHaveLength(1);
+      expect(forge.requests[0]).toMatchObject({ method: 'PUT', path: '/repos/o/r/contents/.nax/features/a/spec.md', headers: { authorization: 'Bearer tok' }, body: { message: 'm', branch: 'feat/a', sha: 'b1', content: content.toString('base64') } });
+      forge.routes.set('PUT /repos/o/r/contents/a%20b/spec.md', () => ({ status: 201, body: { commit: { sha: 'c' } } }));
+      await client.putFile('tok', 'o', 'r', 'a b/spec.md', input);
+      expect(forge.requests.at(-1)?.path).toBe('/repos/o/r/contents/a%20b/spec.md');
+    });
+
+    it.each([200, 201])('AC-3/4: maps successful status %s to committed sha', async (status) => {
+      forge.routes.set(route, () => ({ status, body: { commit: { sha: 'commit-1' } } }));
+      await expect(client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input)).resolves.toEqual({ kind: 'committed', commitSha: 'commit-1' });
+    });
+    it('AC-5: maps 409 to conflict', async () => {
+      forge.routes.set(route, () => ({ status: 409, body: {} }));
+      await expect(client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input)).resolves.toEqual({ kind: 'conflict' });
+    });
+    it.each([[404, 'repo_not_found'], [403, 'app_permissions_insufficient'], [500, 'provider_error']] as const)('AC status mapping %s', async (status, reason) => {
+      forge.routes.set(route, () => ({ status, body: {} }));
+      await expect(client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input)).rejects.toMatchObject({ reason });
+    });
+    it('AC-8: maps 422 to refused', async () => {
+      forge.routes.set(route, () => ({ status: 422, body: {} }));
+      await expect(client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input)).resolves.toEqual({ kind: 'refused' });
+    });
+    it('AC-10: rejects malformed successful payloads', async () => {
+      forge.routes.set(route, () => ({ status: 200, body: { commit: { sha: 7 } } }));
+      await expect(client.putFile('tok', 'o', 'r', '.nax/features/a/spec.md', input)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
+
   describe('.nax reads (fleet S3 §4.1)', () => {
     const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 

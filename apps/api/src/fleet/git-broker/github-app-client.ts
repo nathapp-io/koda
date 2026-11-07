@@ -10,6 +10,8 @@ import { RepoCheckException, RepoCheckReason } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
 import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
+export type PutFileResult = { kind: 'committed'; commitSha: string } | { kind: 'conflict' } | { kind: 'refused' };
+
 export interface CanonicalRepo {
   owner: string;
   name: string;
@@ -319,6 +321,28 @@ export class GitHubAppClient {
     return sha;
   }
 
+  /**
+   * Prove that head is one direct-child, single-file commit after base. The compare endpoint's first
+   * page lists up to 300 changed files; requiring exactly one fails closed even for a truncated diff.
+   * Callers also verify the complete file bytes; commit messages/headings alone are not evidence.
+   */
+  async isSingleFileCommit(token: string, owner: string, name: string, base: string, head: string, path: string): Promise<boolean> {
+    const url = `${this.api}${this.repoPath(owner, name)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const res = await this.http.request('GET', url, this.headers(token));
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const body = obj(res.body);
+    const commits = body.commits;
+    const files = body.files;
+    if (body.status !== 'ahead' || body.total_commits !== 1 || obj(body.merge_base_commit).sha !== base
+      || !Array.isArray(commits) || commits.length !== 1 || obj(commits[0]).sha !== head
+      || !Array.isArray(files) || files.length !== 1) return false;
+    const parents = obj(commits[0]).parents;
+    return Array.isArray(parents) && parents.length === 1 && obj(parents[0]).sha === base
+      && obj(files[0]).filename === path && obj(files[0]).status === 'modified';
+  }
+
   /** Fleet S3 §4.1: a tree by commit or tree SHA. Entries other than blob/tree (submodules) are dropped. */
   async getTree(token: string, owner: string, name: string, treeish: string, recursive: boolean): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> {
     const query = recursive ? '?recursive=1' : '';
@@ -332,6 +356,31 @@ export class GitHubAppClient {
       return [{ path: e.path, type: e.type, sha: e.sha, size: typeof e.size === 'number' ? e.size : null }];
     });
     return { entries, truncated: body.truncated === true };
+  }
+
+  /** US-004: replace one file through GitHub's contents API, creating a commit on the requested branch. */
+  async putFile(
+    token: string,
+    owner: string,
+    name: string,
+    path: string,
+    input: { branch: string; content: Buffer; blobSha: string; message: string },
+  ): Promise<PutFileResult> {
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const res = await this.http.request('PUT', `${this.api}${this.repoPath(owner, name)}/contents/${encoded}`, this.headers(token), {
+      message: input.message,
+      branch: input.branch,
+      sha: input.blobSha,
+      content: input.content.toString('base64'),
+    });
+    if (res.status === 409) return { kind: 'conflict' };
+    if (res.status === 422) return { kind: 'refused' };
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (res.status !== 200 && res.status !== 201) throw new RepoCheckException('provider_error');
+    const commitSha = obj(obj(res.body).commit).sha;
+    if (typeof commitSha !== 'string') throw new RepoCheckException('provider_error');
+    return { kind: 'committed', commitSha };
   }
 
   /** Fleet S3 §4.1: one file at a ref (contents API, base64). Null when absent or not a file. */

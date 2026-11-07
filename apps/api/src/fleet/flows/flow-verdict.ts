@@ -1,8 +1,13 @@
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
 
+export type FlowFindingClass = 'answered' | 'minor' | 'ambiguous';
+
 export interface FlowFinding {
   id?: string;
+  class: FlowFindingClass;
   summary: string;
+  fix?: string;
+  question?: string;
 }
 
 export type FlowVerdict = { ok: true; findings: FlowFinding[] } | { ok: false };
@@ -30,11 +35,17 @@ export function parseFlowVerdict(output: string | null | undefined): FlowVerdict
 
   const result: FlowFinding[] = [];
   for (const finding of findings) {
-    if (typeof finding !== 'object' || finding === null || !('summary' in finding) || typeof finding.summary !== 'string') {
+    if (typeof finding !== 'object' || finding === null || !('summary' in finding) || typeof finding.summary !== 'string' || !('class' in finding)) {
       return { ok: false };
     }
+    const classification = finding.class;
+    if (classification !== 'answered' && classification !== 'minor' && classification !== 'ambiguous') return { ok: false };
+    const requiredText = classification === 'ambiguous' ? ('question' in finding ? finding.question : undefined) : ('fix' in finding ? finding.fix : undefined);
+    if (typeof requiredText !== 'string' || requiredText.trim().length === 0) return { ok: false };
     const id = 'id' in finding && typeof finding.id === 'string' ? finding.id : undefined;
-    result.push(id === undefined ? { summary: finding.summary } : { id, summary: finding.summary });
+    const fix = 'fix' in finding && typeof finding.fix === 'string' ? finding.fix : undefined;
+    const question = 'question' in finding && typeof finding.question === 'string' ? finding.question : undefined;
+    result.push({ ...(id === undefined ? {} : { id }), class: classification, summary: finding.summary, ...(fix === undefined ? {} : { fix }), ...(question === undefined ? {} : { question }) });
   }
 
   return { ok: true, findings: result };
@@ -43,7 +54,7 @@ export function parseFlowVerdict(output: string | null | undefined): FlowVerdict
 export function formatFindings(findings: readonly FlowFinding[]): string {
   const noun = findings.length === 1 ? 'finding' : 'findings';
   const entries = findings.map((finding, index) =>
-    `${index + 1}. ${finding.id === undefined ? '' : `[${finding.id}] `}${finding.summary}`,
+    `${index + 1}. ${finding.id === undefined ? '' : `[${finding.id}] `}(${finding.class}) ${finding.summary}`,
   );
   const detail = `${findings.length} ${noun}: ${entries.join(' ')}`;
   if (detail.length <= FLOW_STOP_DETAIL_MAX) return detail;

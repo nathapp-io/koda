@@ -115,6 +115,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
   'system.flow.advance': 'any',
+  'system.flow.ticket': 'any',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 

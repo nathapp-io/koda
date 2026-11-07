@@ -1,6 +1,8 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
+import { FLOW_CALLS_MAX_FINDINGS, formatQuestions } from './flow-calls';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
+import type { FlowFinding } from './flow-verdict';
 import type { FixReady } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowState } from './flow-states';
 
@@ -27,12 +29,17 @@ export interface FlowStepInput {
   prWaitMs: number;
   ingestSettled: boolean;
   featurePrNumber: number | null;
+  callsJobId: string | null;
+  planCount: number;
+  canApplyCalls: boolean;
 }
 
 export type FlowStopReason =
   | 'step_failed'
   | 'verdict_unreadable'
   | 'review_findings'
+  | 'review_ambiguous'
+  | 'calls_failed'
   | 'plan_no_result'
   | 'run_no_pr'
   | 'pr_not_ready'
@@ -46,7 +53,10 @@ export type FlowStepAction =
   | { kind: 'wait' }
   | { kind: 'complete' }
   | { kind: 'stop'; reason: FlowStopReason; detail: string }
-  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string } };
+  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string } }
+  | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] };
+
+export type ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
 
@@ -107,10 +117,21 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
           detail: `${latestJob.step} job ${latestJob.id}: no verdict JSON in the agent output`,
         };
       }
-      if (verdict.findings.length > 0) {
-        return { kind: 'stop', reason: 'review_findings', detail: formatFindings(verdict.findings) };
+      if (verdict.findings.length === 0) {
+        return dispatch(latestJob.step === 'SPEC_REVIEW' ? 'PLAN' : 'RUN');
       }
-      return dispatch(latestJob.step === 'SPEC_REVIEW' ? 'PLAN' : 'RUN');
+      const ambiguous = verdict.findings.filter((finding) => finding.class === 'ambiguous');
+      if (ambiguous.length > 0) {
+        return { kind: 'stop', reason: 'review_ambiguous', detail: formatQuestions(ambiguous) };
+      }
+      const stopFindings = (): FlowStepAction => ({
+        kind: 'stop', reason: 'review_findings', detail: formatFindings(verdict.findings),
+      });
+      if (verdict.findings.length > FLOW_CALLS_MAX_FINDINGS) return stopFindings();
+      if (!input.canApplyCalls) return stopFindings();
+      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2) return stopFindings();
+      if (input.callsJobId === latestJob.id) return dispatch('PLAN');
+      return { kind: 'apply_calls', step: latestJob.step, jobId: latestJob.id, findings: verdict.findings };
     }
 
     if (latestJob.step === 'PLAN') {

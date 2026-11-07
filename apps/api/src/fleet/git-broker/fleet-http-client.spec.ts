@@ -11,6 +11,20 @@ describe('FleetHttpClient', () => {
   });
   afterAll(() => forge.close());
 
+  it('sends PUT JSON bodies unchanged', async () => {
+    const body = { message: 'm', branch: 'feat/a', sha: 'b1', content: 'aGVsbG8=' };
+    forge.routes.set('PUT /put', () => ({ status: 200, body: {} }));
+    await client.request('PUT', `${forge.url}/put`, { authorization: 'Bearer t' }, body);
+    expect(forge.requests.at(-1)).toMatchObject({ method: 'PUT', path: '/put', headers: { authorization: 'Bearer t' }, body });
+  });
+
+  it('keeps POST JSON bodies unchanged', async () => {
+    const body = { value: 7 };
+    forge.routes.set('POST /post', () => ({ status: 200, body: {} }));
+    await client.request('POST', `${forge.url}/post`, {}, body);
+    expect(forge.requests.at(-1)).toMatchObject({ method: 'POST', path: '/post', body });
+  });
+
   it('returns status and parsed body', async () => {
     forge.routes.set('GET /ok', () => ({ status: 200, body: { a: 1 } }));
     await expect(client.request('GET', `${forge.url}/ok`, {})).resolves.toEqual({ status: 200, body: { a: 1 } });

@@ -37,11 +37,13 @@ import { TicketNotificationSubscriber } from '../notifications/ticket-notificati
 import { FleetBudgetIncidentSubscriber } from '../notifications/fleet/fleet-budget-incident.subscriber';
 import { FleetHealthAlertSubscriber } from '../notifications/fleet/fleet-health-alert.subscriber';
 import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outcome.subscriber';
+import { FleetFlowStoppedSubscriber } from '../notifications/fleet/fleet-flow-stopped.subscriber';
 import { AssistantActionOutcomeSubscriber } from '../fleet/assistant/requests/assistant-action-outcome.subscriber';
 import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { FleetFlowPublishListener } from '../fleet/flows/fleet-flow-publish.listener';
 import { FleetFlowTicker } from '../fleet/flows/fleet-flow.ticker';
+import { FleetFlowStopTicketSubscriber } from '../fleet/flows/fleet-flow-stop-ticket.subscriber';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
@@ -83,11 +85,13 @@ const writers = new Map<Function, string>([
   [FleetBudgetIncidentSubscriber, 'system.notification.fleet'],
   [FleetHealthAlertSubscriber, 'system.notification.fleet'],
   [FleetJobOutcomeSubscriber, 'system.notification.fleet'],
+  [FleetFlowStoppedSubscriber, 'system.notification.fleet'],
   [ThreadIngestHook, 'system.thread.ingest'],
   [AssistantActionOutcomeSubscriber, 'system.thread.ingest'],
   [FanOutPublisher, 'system.outbox.dispatch'],
   [FleetFlowPublishListener, 'system.flow.respec'],
   [FleetFlowTicker, 'system.flow.advance'],
+  [FleetFlowStopTicketSubscriber, 'system.flow.ticket'],
 ]);
 
 const reflector = new Reflector();
@@ -112,7 +116,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(41);
+    expect(writers).toHaveLength(43);
     expect(actual).toEqual(expected);
   });
 
