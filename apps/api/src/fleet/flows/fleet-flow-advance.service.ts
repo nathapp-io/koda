@@ -343,6 +343,9 @@ export class FleetFlowAdvanceService {
       // Only a finished RUN consults this, and it arrives with the row it belongs to.
       ingestSettled: latest?.ingestSettled ?? false,
       featurePrNumber: flow.features[0]?.prNumber ?? null,
+      callsJobId: null,
+      planCount: 0,
+      canApplyCalls: false,
     };
   }
 
