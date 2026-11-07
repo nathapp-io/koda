@@ -1,7 +1,8 @@
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
 import type { CreatorAccess, IFleetFlowStepRepository } from './domain/fleet-flow-step.domain';
-import type { FleetFlowCallsService, CallsOutcome } from './fleet-flow-calls.service';
+import { FleetFlowCallsService, type CallsOutcome } from './fleet-flow-calls.service';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
 import type { PermissionService } from '../../permissions/permission.service';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
@@ -72,6 +73,7 @@ function build(opts: Options = {}) {
       assertTx(); return { exists: true, disabled: false };
     }),
     countJobsForStepSince: vi.fn<IFleetFlowStepRepository['countJobsForStepSince']>(async () => opts.planCount ?? 0),
+    setBranch: vi.fn(async (_id: string, branch: string) => { assertTx(); row.branch = branch; }),
     recordCalls: vi.fn<IFleetFlowStepRepository['recordCalls']>(async () => { assertTx(); }),
     latestJobForStep: vi.fn(async () => job({ id: 'plan-1', command: 'PLAN', flowStep: 'PLAN', resultSha: 'plan-sha' })),
   };
@@ -102,14 +104,15 @@ function build(opts: Options = {}) {
     expect(inTransaction).toBe(false);
     return opts.outcome ?? { kind: 'committed', specSha: 's2' };
   }) };
+  const outbox = { record: vi.fn(async () => { assertTx(); }) };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never, activity as never, audit as never,
     txManager as never, jobs as never, permissions as never, flowService as never, github as never,
-    {} as never, testFleetConfig(), calls as never, { record: vi.fn() } as never,
+    {} as never, testFleetConfig(), calls as never, outbox as never,
   );
   const wrote = () => [flows.stop, steps.setSpent, steps.complete, steps.markStep, steps.recordCalls,
     audit.record, activity.record, flowService.reaskLocked].some((fn) => fn.mock.calls.length > 0);
-  return { service, row, latest, flows, steps, calls, jobs, permissions, flowService, activity, audit, github, order, wrote, txManager };
+  return { service, row, latest, flows, steps, calls, jobs, permissions, flowService, activity, audit, github, repos, outbox, order, wrote, txManager };
 }
 
 describe('FleetFlowAdvanceService.advance calls', () => {
@@ -163,6 +166,56 @@ describe('FleetFlowAdvanceService.advance calls', () => {
       kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'j1', findings: [FINDING],
     }, 'plan-sha');
   });
+  it('B2: follows a different PLAN result branch through real calls and the re-plan', async () => {
+    const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 1 });
+    h.steps.latestJobForStep.mockResolvedValue(job({ id: 'plan-1', command: 'PLAN', flowStep: 'PLAN', resultSha: 'plan-sha', resultBranch: 'prd/output' }));
+    const forge = {
+      mintInstallationToken: vi.fn(async () => ({ token: 'test-only', expiresAt: NOW })),
+      getBranchHead: vi.fn(async (_token, _owner, _name, branch) => branch === 'prd/output' ? 'plan-sha' : 's1'),
+      getFile: vi.fn(async () => ({ sha: 'blob', content: Buffer.from('# Spec\n') })),
+      putFile: vi.fn(async () => ({ kind: 'committed', commitSha: 'calls-sha' })),
+    };
+    const calls = new FleetFlowCallsService(h.repos as never, forge as never);
+    h.calls.apply.mockImplementation((...args) => calls.apply(...args));
+    await h.service.advance('flow-1', NOW);
+    expect(h.row.branch).toBe('prd/output');
+    expect(forge.putFile).toHaveBeenCalledWith('test-only', 'o', 'r', '.nax/features/f/spec.md', expect.objectContaining({ branch: 'prd/output' }));
+    expect(h.steps.recordCalls).toHaveBeenCalledWith('flow-1', 'feature-1', 'j1', 'calls-sha');
+    h.row.specSha = 'calls-sha';
+    h.row.features[0].callsJobId = 'j1';
+    h.github.getBranchHead.mockResolvedValue('calls-sha');
+    await h.service.advance('flow-1', NOW);
+    expect(h.github.getBranchHead).toHaveBeenCalledWith('test-only', 'o', 'r', 'prd/output');
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN', ref: 'prd/output' }), expect.anything());
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+  });
+
+  it('B2: a push on the PLAN output branch re-asks that persisted branch, not the original', async () => {
+    const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 1, outcome: { kind: 'stale', head: 'external' } });
+    h.steps.latestJobForStep.mockResolvedValue(job({ flowStep: 'PLAN', resultBranch: 'prd/output', resultSha: 'plan-sha' }));
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.setBranch).toHaveBeenCalledWith('flow-1', 'prd/output');
+    expect(h.flowService.reaskLocked).toHaveBeenCalledWith(expect.objectContaining({ branch: 'prd/output' }), 'external', NOW);
+    expect(h.steps.recordCalls).not.toHaveBeenCalled();
+  });
+
+  it.each(['app_not_installed', 'app_permissions_insufficient', 'repo_not_found'] as const)(
+    'B3: permanent %s reaches calls_failed and the stop outbox without dispatch preflight', async (reason) => {
+      const h = build();
+      h.github.mintReadOnlyToken.mockRejectedValue(new RepoCheckException(reason));
+      const calls = new FleetFlowCallsService(h.repos as never, {
+        mintInstallationToken: vi.fn(async () => { throw new RepoCheckException(reason); }),
+      } as never);
+      h.calls.apply.mockImplementation((...args) => calls.apply(...args));
+      await h.service.advance('flow-1', NOW);
+      expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
+      expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'calls_failed', NOW, `SPEC_REVIEW: ${reason}`);
+      expect(h.outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'fleet_flow_stopped', payload: expect.objectContaining({ stopReason: 'calls_failed', detail: `SPEC_REVIEW: ${reason}` }),
+      }));
+    },
+  );
+
   it('AC-8: a failure stops with calls_failed and the step detail', async () => {
     const h = build({ outcome: { kind: 'failed', detail: 'spec write refused' } });
     await h.service.advance('flow-1', NOW);
@@ -202,7 +255,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
   });
   it('AC-13: clean PRD_REVIEW dispatches RUN without forge reads', async () => {
-    const h = build({ latest: { flowStep: 'PRD_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}' } } });
+    const h = build({ latest: { flowStep: 'PRD_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false } } });
     await h.service.advance('flow-1', NOW);
     expect(h.github.getBranchHead).not.toHaveBeenCalled();
     expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
@@ -231,7 +284,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
     expect(h.flows.stop).not.toHaveBeenCalled();
   });
-  it.each([{ specSha: 'new-spec' }, { approvedAt: NOW }])('does not record across an approval generation change: %j', async (changed) => {
+  it.each([{ specSha: 'new-spec' }, { approvedAt: NOW }, { branch: 'other-branch' }])('does not record across an approval generation change: %j', async (changed) => {
     const h = build({ locks: [{}, changed] });
     await h.service.advance('flow-1', NOW);
     expect(h.calls.apply).toHaveBeenCalledOnce();

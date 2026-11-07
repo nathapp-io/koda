@@ -216,7 +216,7 @@ export class FleetFlowAdvanceService {
     if (!(await this.lockParent(previous))) return null;
     const current = await this.flows.lockById(previous.id);
     if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return null;
-    if (current.specSha !== previous.specSha
+    if (current.branch !== previous.branch || current.specSha !== previous.specSha
       || current.approvedAt?.getTime() !== previous.approvedAt?.getTime()) return null;
     return current;
   }
@@ -248,7 +248,7 @@ export class FleetFlowAdvanceService {
     // transient forge failure commit even a bookkeeping write. No token crosses this boundary.
     let forgeHead: string | null | undefined;
     try {
-      forgeHead = await this.readSpecHead(flow);
+      forgeHead = await this.readSpecHead(flow, now);
     } catch (error) {
       if (error instanceof RepoCheckException) return;
       throw error;
@@ -308,6 +308,16 @@ export class FleetFlowAdvanceService {
       }
       if (action.kind === 'apply_calls') {
         const plan = action.step === 'PRD_REVIEW' ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+        if (action.step === 'PRD_REVIEW') {
+          if (!plan?.resultBranch || !plan.resultSha) throw new Error('PRD_REVIEW calls require a PLAN result branch and sha');
+          // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
+          // its target under the locks so calls, re-asks and the following PLAN all use that branch.
+          if (current.branch !== plan.resultBranch) {
+            await this.steps.setBranch(current.id, plan.resultBranch);
+            await this.record(current, 'flow PLAN output branch', 'flow.branch', { branch: plan.resultBranch, jobId: plan.id });
+            current.branch = plan.resultBranch;
+          }
+        }
         return { flow: current, action, plan, remainingCapUsd: remaining };
       }
       if (action.step === 'SPEC_REVIEW' || action.step === 'PLAN') {
@@ -348,10 +358,15 @@ export class FleetFlowAdvanceService {
   }
 
   /** undefined: not a candidate; null: disconnected. Only a head SHA survives forge preflight. */
-  private async readSpecHead(flow: FleetFlowRecord): Promise<string | null | undefined> {
+  private async readSpecHead(flow: FleetFlowRecord, now: Date): Promise<string | null | undefined> {
     if (flow.threadId !== null || (flow.state !== 'APPROVED' && flow.state !== 'RUNNING')) return;
     const snapshot = await this.steps.latestJobWithIngest(flow.id);
     const latest = snapshot?.job;
+    // Calls own forge failure classification, including permanent installation failures. A dispatch
+    // preflight here would swallow them before the transactional calls_failed stop/outbox path.
+    // The locked decision still re-reads everything; an action that changes to dispatch waits a tick.
+    if (latest?.flowStep === 'SPEC_REVIEW' && latest.ref === flow.specSha
+      && decideFlowStep(await this.decisionInput(flow, snapshot, now)).kind === 'apply_calls') return;
     if (flow.state !== 'APPROVED' && latest
       && !(isTerminal(latest.state) && (latest.flowStep === 'SPEC_REVIEW'
         || (latest.flowStep === 'PRD_REVIEW' && latest.id === flow.features[0]?.callsJobId)))) return;

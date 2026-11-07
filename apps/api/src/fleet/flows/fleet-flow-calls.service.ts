@@ -40,17 +40,25 @@ export class FleetFlowCallsService {
 
     try {
       const { token } = await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
-      const file = await this.github.getFile(token, repo.owner, repo.name, feature.specPath, flow.branch);
+      const head = await this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
+      // Pin the read to the head we compare, not a moving branch name.
+      const file = await this.github.getFile(token, repo.owner, repo.name, feature.specPath, head);
       if (!file) return { kind: 'failed', detail: `spec missing on ${flow.branch}` };
 
       const built = buildFlowCalls(file.content.toString('utf8'), action);
-      // The block is already on the branch: this is the crash-recovery path, so the head is whatever the
-      // calls commit left it at and the expected head no longer applies.
       if (built.alreadyApplied) {
-        return { kind: 'committed', specSha: await this.github.getBranchHead(token, repo.owner, repo.name, flow.branch) };
+        // A heading alone is not proof of our commit: an external edit may have retained it.
+        // Recover only a single spec-only commit directly after the reviewed head, containing exactly
+        // the expected append. Any later commit (even outside the spec) must re-ask approval.
+        const base = await this.github.getFile(token, repo.owner, repo.name, feature.specPath, expectedHead);
+        const expected = base && buildFlowCalls(base.content.toString('utf8'), action);
+        if (!expected || expected.alreadyApplied || !file.content.equals(Buffer.from(expected.text, 'utf8'))
+          || !(await this.github.isSingleFileCommit(token, repo.owner, repo.name, expectedHead, head, feature.specPath))) {
+          return { kind: 'stale', head };
+        }
+        return { kind: 'committed', specSha: head };
       }
 
-      const head = await this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
       if (head !== expectedHead) return { kind: 'stale', head };
 
       const written = await this.github.putFile(token, repo.owner, repo.name, feature.specPath, {

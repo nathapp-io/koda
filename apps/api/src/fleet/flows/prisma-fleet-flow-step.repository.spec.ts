@@ -38,6 +38,13 @@ describe('PrismaFleetFlowStepRepository — latest job with its ingest status', 
     return { text: sql.strings.join('?'), values: sql.values };
   };
 
+  it('B2: persists the PLAN output branch without approving a new sha', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    (prisma.client as unknown as Record<string, unknown>).fleetFlow = { update };
+    await repo.setBranch('flow-1', 'prd/output');
+    expect(update).toHaveBeenCalledExactlyOnceWith({ where: { id: 'flow-1' }, data: { branch: 'prd/output' } });
+  });
+
   it('returns null when the flow has no job', async () => {
     await expect(repo.latestJobWithIngest('flow-1')).resolves.toBeNull();
     expect(queryRaw).toHaveBeenCalledTimes(1);

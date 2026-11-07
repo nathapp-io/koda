@@ -16,7 +16,6 @@ const OTHER_HEAD = 'b'.repeat(40);
 const COMMIT_SHA = 'c'.repeat(40);
 const TOKEN = 'test-only-token';
 const SPEC = '# Spec\n\nSome text\n';
-const APPLIED_SPEC = '# Spec\n\n### SPEC_REVIEW job j1\n';
 const BLOB_SHA = 'blob-1';
 const MOVED_BLOB_SHA = 'blob-2';
 
@@ -54,6 +53,7 @@ interface HarnessOptions {
   /** What each successive `getFile` answers (the last entry repeats once the queue is empty). */
   files?: (ForgeFile | null)[];
   head?: string;
+  singleFileCommit?: boolean;
   /** What `putFile` answers, or the error it throws. */
   put?: PutFileResult;
   putError?: Error;
@@ -74,6 +74,7 @@ function build(opts: HarnessOptions = {}) {
     }),
     getFile: vi.fn<GitHubAppClient['getFile']>(async () => nextFile()),
     getBranchHead: vi.fn<GitHubAppClient['getBranchHead']>(async () => opts.head ?? EXPECTED_HEAD),
+    isSingleFileCommit: vi.fn(async () => opts.singleFileCommit ?? true),
     putFile: vi.fn<GitHubAppClient['putFile']>(async () => {
       if (opts.putError) throw opts.putError;
       return opts.put ?? { kind: 'committed', commitSha: COMMIT_SHA };
@@ -90,14 +91,14 @@ function build(opts: HarnessOptions = {}) {
 }
 
 describe('FleetFlowCallsService.apply', () => {
-  it('AC-1: reads the spec at the feature specPath on the flow branch with an installation token', async () => {
+  it('AC-1: reads the spec at the immutable head of the flow branch with an installation token', async () => {
     const h = build();
 
     await h.service.apply(flow(), action(), EXPECTED_HEAD);
 
     expect(h.repos.findReviewRepo).toHaveBeenCalledWith('repo-1');
     expect(h.github.mintInstallationToken).toHaveBeenCalledWith(1n, 'r');
-    expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, BRANCH);
+    expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, EXPECTED_HEAD);
   });
 
   it('AC-2: writes the spec path, the flow branch and the read blob sha', async () => {
@@ -147,11 +148,25 @@ describe('FleetFlowCallsService.apply', () => {
     await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
   });
 
-  it('AC-6: a block already on the branch commits the current head without writing', async () => {
-    const h = build({ files: [file(APPLIED_SPEC)], head: OTHER_HEAD });
+  it('AC-6: recovers only the exact calls commit without writing twice', async () => {
+    const h = build({ files: [file(buildFlowCalls(SPEC, action()).text), file(SPEC)], head: COMMIT_SHA });
 
-    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: OTHER_HEAD });
-    expect(h.github.getBranchHead).toHaveBeenCalledWith(TOKEN, 'o', 'r', BRANCH);
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', specSha: COMMIT_SHA });
+    expect(h.github.isSingleFileCommit).toHaveBeenCalledWith(TOKEN, 'o', 'r', EXPECTED_HEAD, COMMIT_SHA, SPEC_PATH);
+    expect(h.github.getFile).toHaveBeenCalledWith(TOKEN, 'o', 'r', SPEC_PATH, EXPECTED_HEAD);
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  it('B1: re-asks when an external rewrite retains the calls heading', async () => {
+    const rewritten = buildFlowCalls('# External spec rewrite\n', action()).text;
+    const h = build({ files: [file(rewritten), file(SPEC)], head: OTHER_HEAD });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  it('B1: re-asks after any later commit, even when the spec is unchanged', async () => {
+    const h = build({ files: [file(buildFlowCalls(SPEC, action()).text), file(SPEC)], head: OTHER_HEAD, singleFileCommit: false });
+    await expect(h.service.apply(flow(), action(), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 

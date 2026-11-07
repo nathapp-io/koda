@@ -97,6 +97,10 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     return project?.slug ?? null;
   }
 
+  async setBranch(flowId: string, branch: string): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { branch } });
+  }
+
   async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void> {
     await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
     await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha } });
