@@ -176,8 +176,9 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     prReviewPollMs: int('FLEET_PR_REVIEW_POLL_MS', 300_000),
     reviewMintPollMs: int('FLEET_REVIEW_MINT_POLL_MS', 300_000),
     prReviewMaxDispatch: int('FLEET_PR_REVIEW_MAX_DISPATCH', 10),
-    flowTickMs: int('FLEET_FLOW_TICK_MS', 30_000),
-    flowPrWaitMs: int('FLEET_FLOW_PR_WAIT_MS', 1_800_000),
+    // Joi accepts numeric notation such as 1e3; preserve that value rather than parseInt's prefix.
+    flowTickMs: Number(process.env['FLEET_FLOW_TICK_MS'] ?? 30_000),
+    flowPrWaitMs: Number(process.env['FLEET_FLOW_PR_WAIT_MS'] ?? 1_800_000),
     flowReviewAgent: process.env['FLEET_FLOW_REVIEW_AGENT'] ?? 'Explore',
   };
 });

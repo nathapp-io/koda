@@ -116,7 +116,8 @@ const envSchema = Joi.object({
   FLEET_PR_REVIEW_MAX_DISPATCH: Joi.number().integer().min(1).max(100).optional(),
   FLEET_FLOW_TICK_MS: Joi.number().integer().min(1_000).max(3_600_000).optional(),
   FLEET_FLOW_PR_WAIT_MS: Joi.number().integer().min(60_000).max(86_400_000).optional(),
-  FLEET_FLOW_REVIEW_AGENT: Joi.string().pattern(AGENT_NAME_RE).optional(),
+  // DispatchAgentDto and normalizeDispatch also forbid '..' within an otherwise valid agent name.
+  FLEET_FLOW_REVIEW_AGENT: Joi.string().pattern(AGENT_NAME_RE).pattern(/\.\./, { invert: true }).optional(),
   FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: Joi.number().integer().min(1).max(90).optional(),
 }).unknown(true);
 

@@ -26,7 +26,23 @@ describe('fleet config', () => {
   });
 
   it.each([
+    ['FLEET_FLOW_TICK_MS', 'flowTickMs', '1e3', 1000],
+    ['FLEET_FLOW_TICK_MS', 'flowTickMs', '3.6e6', 3_600_000],
+    ['FLEET_FLOW_PR_WAIT_MS', 'flowPrWaitMs', '6e4', 60_000],
+    ['FLEET_FLOW_PR_WAIT_MS', 'flowPrWaitMs', '8.64e7', 86_400_000],
+    ['FLEET_FLOW_TICK_MS', 'flowTickMs', '1000.0', 1000],
+    ['FLEET_FLOW_PR_WAIT_MS', 'flowPrWaitMs', '60000.0', 60_000],
+  ] as const)('F1: validates %s and resolves %s from %s', (key, field, raw, expected) => {
+    process.env[key] = raw;
+    expect(validate({ ...BASE, [key]: raw })[key]).toBe(expected);
+    expect(fleetConfig()[field]).toBe(expected);
+  });
+
+  it.each([
     ['FLEET_FLOW_REVIEW_AGENT', '../x'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'review..agent'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'review...agent'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'review..'],
     ['FLEET_FLOW_REVIEW_AGENT', 'x'.repeat(129)],
     ['FLEET_FLOW_TICK_MS', '0'],
     ['FLEET_FLOW_TICK_MS', '3600001'],
@@ -42,6 +58,8 @@ describe('fleet config', () => {
     ['FLEET_FLOW_TICK_MS', '1000'], ['FLEET_FLOW_TICK_MS', '3600000'],
     ['FLEET_FLOW_PR_WAIT_MS', '60000'], ['FLEET_FLOW_PR_WAIT_MS', '86400000'],
     ['FLEET_FLOW_REVIEW_AGENT', 'plugin:reviewer'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'review.agent'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'review-agent_1'],
   ])('accepts the flow bounds %s=%s', (key, value) => {
     expect(() => validate({ ...BASE, [key]: value })).not.toThrow();
   });
