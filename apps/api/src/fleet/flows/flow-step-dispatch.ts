@@ -58,11 +58,14 @@ export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJ
         ...common, command: 'PLAN', ref: flow.branch, feature: feature.feature,
         planFrom: feature.specPath, profiles: [],
       };
-    case 'RUN':
+    case 'RUN': {
+      const ref = requirePlan(input, step).resultBranch;
+      if (!ref) throw new Error('RUN requires a PLAN result branch');
       return {
-        ...common, command: 'RUN', ref: requirePlan(input, step).resultBranch,
+        ...common, command: 'RUN', ref,
         feature: feature.feature, profiles: [],
       };
+    }
     case 'REVIEW':
     case 'FIX':
       if (!input.pr) throw new Error(`${step} requires a PR number`);

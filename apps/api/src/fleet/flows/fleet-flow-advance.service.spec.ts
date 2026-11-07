@@ -113,7 +113,7 @@ function build(opts: HarnessOptions = {}) {
     sumCost: vi.fn(async () => opts.sum ?? record.spentUsd),
     setSpent: vi.fn(async () => undefined),
     complete: vi.fn(async () => undefined),
-    markStep: vi.fn(async () => undefined),
+    markStep: vi.fn<IFleetFlowStepRepository['markStep']>(async () => undefined),
     creatorAccess: vi.fn(async () => opts.creatorAccess ?? { exists: true, disabled: false }),
     listAdvanceable: vi.fn(async () => []),
     latestJobForStep: vi.fn<IFleetFlowStepRepository['latestJobForStep']>(async () => null),
@@ -645,6 +645,50 @@ function reviewPass(over: HarnessOptions = {}) {
 }
 
 describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
+  it.each(['RUN', 'REVIEW'])('B1: recovers a linked REVIEW PR from %s progress and then dispatches FIX', async (currentStep) => {
+    const review = job({ command: 'REVIEW', flowStep: 'REVIEW', feature: 'review-pr-12', state: 'QUEUED' });
+    const h = build({
+      flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep, prNumber: null })] },
+      snapshot: { job: review, ingestSettled: false },
+    });
+    let current = h.record;
+    h.flows.findById.mockImplementation(async () => current);
+    h.flows.lockById.mockImplementation(async () => current);
+    h.steps.markStep.mockImplementation(async (_flowId, _featureId, step, data) => {
+      current = flow({ ...current, features: [feature({ state: 'RUNNING', currentStep: step, prNumber: data.prNumber ?? null })] });
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(current.features[0]).toMatchObject({ currentStep: 'REVIEW', prNumber: 12 });
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    review.state = 'COMPLETED';
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'FIX', prNumber: 12 }),
+      expect.objectContaining({ flowId: 'flow-1', flowStep: 'FIX' }));
+    expect(h.reviews.claimHead).not.toHaveBeenCalled();
+  });
+
+  it.each(['COMPLETED', 'ESCALATED'] as const)('B2: bounds the missing head wait for a %s RUN with a workflow-derived PR', async (state) => {
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: {
+      job: job({ state, resultPrUrl: RUN_PR, resultSha: null }), ingestSettled: false,
+    } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.wrote()).toBe(false);
+    h.steps.latestJobWithIngest.mockResolvedValue({
+      job: job({ state, resultPrUrl: RUN_PR, resultSha: null }), ingestSettled: true,
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', NOW, 'RUN PR has no result sha for REVIEW');
+    h.flows.stop.mockClear();
+    h.steps.latestJobWithIngest.mockResolvedValue({
+      job: job({ state, resultPrUrl: RUN_PR, resultSha: null }), ingestSettled: false,
+    });
+    const deadline = new Date(new Date('2026-11-07T12:20:00.000Z').getTime() + h.config.flowPrWaitMs);
+    await h.service.advance('flow-1', deadline);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', deadline, 'RUN PR has no result sha for REVIEW');
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.reviews.claimHead).not.toHaveBeenCalled();
+  });
+
   it.each(['QUEUED', 'COMPLETED', 'FAILED'] as const)('F1/AC-14: does not recover stale spec A inserted after spec B reapproval (%s)', async (state) => {
     const h = build();
     const specA = h.record.specSha;

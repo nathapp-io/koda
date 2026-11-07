@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatFindings } from './flow-verdict';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
-import type { FixReady } from '../jobs/domain/fleet-job.domain';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
 const input = (overrides: Partial<FlowStepInput> = {}): FlowStepInput => ({
@@ -55,7 +54,8 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'REVIEW', state: 'ESCALATED' }) }))).toMatchObject({ kind: 'stop', reason: 'step_failed' });
   });
   it('AC-12 hands an escalated RUN with a PR to REVIEW', () => {
-    expect(decideFlowStep(input({ latestJob: job({ step: 'RUN', state: 'ESCALATED', prNumber: 12 }) }))).toEqual({ kind: 'dispatch', step: 'REVIEW', pr: { number: 12 } });
+    expect(decideFlowStep(input({ latestJob: job({ step: 'RUN', state: 'ESCALATED', prNumber: 12, resultSha: 'abc1234' }) })))
+      .toEqual({ kind: 'dispatch', step: 'REVIEW', pr: { number: 12, headSha: 'abc1234' } });
   });
   it.each(['FAILED', 'CANCELLED', 'CRASHED'] as const)('AC-13 includes step, id, state and reason for %s', (state) => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', state, stateReason: null }) }))).toEqual({ kind: 'stop', reason: 'step_failed', detail: `PRD_REVIEW job j1 ${state}: no reason` });

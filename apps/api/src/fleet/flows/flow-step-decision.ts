@@ -79,17 +79,20 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
   if (state !== 'RUNNING') return { kind: 'wait' };
   if ((ACTIVE_STATES as readonly string[]).includes(latestJob.state)) return { kind: 'wait' };
   if (latestJob.step === 'RUN' && (latestJob.state === 'COMPLETED' || latestJob.state === 'ESCALATED')) {
-    if (latestJob.prNumber !== null) {
+    if (latestJob.prNumber !== null && latestJob.resultSha) {
       return {
         kind: 'dispatch',
         step: 'REVIEW',
-        pr: { number: latestJob.prNumber, ...(latestJob.resultSha ? { headSha: latestJob.resultSha } : {}) },
+        pr: { number: latestJob.prNumber, headSha: latestJob.resultSha },
       };
     }
     const timedOut = latestJob.finishedAt !== null
       && input.now.getTime() - latestJob.finishedAt.getTime() >= input.prWaitMs;
     if (input.ingestSettled || timedOut) {
-      return { kind: 'stop', reason: 'run_no_pr', detail: 'RUN ended without a PR' };
+      return {
+        kind: 'stop', reason: 'run_no_pr',
+        detail: latestJob.prNumber === null ? 'RUN ended without a PR' : 'RUN PR has no result sha for REVIEW',
+      };
     }
     return { kind: 'wait' };
   }

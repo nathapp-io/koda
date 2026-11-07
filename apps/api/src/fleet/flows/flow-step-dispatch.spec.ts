@@ -46,6 +46,10 @@ describe('buildStepDispatch', () => {
   });
   it('omits pinnedRunnerId when null', () => { expect(buildStepDispatch(baseInput('PLAN'))).not.toHaveProperty('pinnedRunnerId'); });
   it('requires the PLAN result for RUN', () => { expect(() => buildStepDispatch(baseInput('RUN'))).toThrowError(/PLAN/i); });
+  it('M2: rejects a RUN without a PLAN result branch instead of falling back to the default branch', () => {
+    expect(() => buildStepDispatch({ ...baseInput('RUN'), plan: { resultSha: 'plan-sha', resultBranch: null } }))
+      .toThrowError('RUN requires a PLAN result branch');
+  });
   it('pins both review agent bodies', () => {
     const specReview = baseInput('SPEC_REVIEW');
     const prdReview = baseInput('PRD_REVIEW');

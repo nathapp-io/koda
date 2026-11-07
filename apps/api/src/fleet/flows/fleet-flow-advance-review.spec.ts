@@ -320,13 +320,15 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
       .toBeLessThan(h.flows.stop.mock.invocationCallOrder[0]);
   });
 
-  it('claims nothing when the RUN job reported no pushed head', async () => {
+  it('stops without claiming a head when RUN ingest settled without a pushed sha', async () => {
     const h = build({ latest: job({ resultSha: null }) });
 
     await h.service.advance('flow-1', NOW);
 
     expect(h.reviews.claimHead).not.toHaveBeenCalled();
     expect(h.dispatch).not.toHaveBeenCalled();
-    expect(h.wrote()).toBe(false);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', NOW, 'RUN PR has no result sha for REVIEW');
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'flow.stopped' }));
+    expect(h.audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'system.flow.advance' }));
   });
 });

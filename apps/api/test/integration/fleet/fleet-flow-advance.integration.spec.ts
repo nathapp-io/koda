@@ -62,16 +62,13 @@ integration('fleet flow advancement through the database', () => {
       entry: 'THREAD', threadId,
       features: features.map((feature) => ({ feature, specPath: SPEC, dependsOn: [] })),
       roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: '25',
-    }, { type: 'USER', id: creatorId }, { projectId, now })).flow).then(async (flow) => {
-      return db.fleetFlow.update({ where: { id: flow.id }, data: {
-        state: 'APPROVED', approvalMode: 'human', approverId: creatorId, approvedAt: now,
-      } }).then(() => flow);
-    });
+    }, { type: 'USER', id: creatorId }, { projectId, now })).flow);
   }
 
   it('AC-1–AC-4: tick dispatches and persists a linked SPEC_REVIEW job, step and audit', async () => {
     const flow = await createFlow();
-    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'APPROVED', specSha: SHA });
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } }))
+      .toMatchObject({ state: 'APPROVED', approvalMode: 'PRE_APPROVED', approverId: creatorId, specSha: SHA });
     const advanceable = await app.get<IFleetFlowStepRepository>(FLEET_FLOW_STEP_REPOSITORY).listAdvanceable(50, null);
     expect(advanceable.map(({ id }) => id)).toContain(flow.id);
     const loggerError = vi.mocked(Logger.prototype.error);

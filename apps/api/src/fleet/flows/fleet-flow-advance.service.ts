@@ -20,6 +20,7 @@ import {
 import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
+import { prNumberOfReviewFeature } from '../common/review-jobs';
 import { remainingCapUsd } from './flow-step-dispatch';
 import { mayDispatch } from '../schedules/schedule-access';
 import { PermissionService } from '../../permissions/permission.service';
@@ -87,8 +88,8 @@ export class FleetFlowAdvanceService {
   private async advanceReview(pass: DispatchPass, now: Date): Promise<void> {
     const { flow, action } = pass;
     const pr = action.pr;
-    // No pushed head means no claim key: nothing to claim and nothing safe to dispatch. Wait for the next pass.
-    if (!pr?.headSha) return;
+    // The decision engine waits or stops on missing RUN results before selecting REVIEW.
+    if (!pr?.headSha) throw new Error('REVIEW requires a RUN result sha');
 
     const claim = await this.reviews.claimHead(flow.repoId, pr.number, pr.headSha, now);
     // A live pass owns this head but has not linked its job yet: this pass waits rather than duplicate it.
@@ -241,7 +242,8 @@ export class FleetFlowAdvanceService {
       const recoverable = current.state === 'RUNNING' || (job?.flowStep === 'SPEC_REVIEW'
         && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime());
       if (job && recoverable && (current.state === 'APPROVED'
-        || current.features[0].currentStep !== job.flowStep || current.features[0].state !== 'RUNNING')) {
+        || current.features[0].currentStep !== job.flowStep || current.features[0].state !== 'RUNNING'
+        || (job.flowStep === 'REVIEW' && current.features[0].prNumber === null && input.latestJob?.prNumber != null))) {
         await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
@@ -367,6 +369,8 @@ export class FleetFlowAdvanceService {
   }
 
   private async prNumberOf(flow: FleetFlowRecord, job: FleetJobRecord): Promise<number | null> {
+    // REVIEW inserts already carry the canonical PR feature, even if the record phase never committed.
+    if (job.flowStep === 'REVIEW') return prNumberOfReviewFeature(job.feature);
     if (job.flowStep !== 'RUN' || job.resultPrUrl === null) return null;
     const repo = await this.repos.findReviewRepo(flow.repoId);
     return repo === null
