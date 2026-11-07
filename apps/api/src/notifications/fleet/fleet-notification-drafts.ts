@@ -1,6 +1,6 @@
 import { BODY_MAX, NotificationDraft, TITLE_MAX, truncate } from '../notification.types';
 import type {
-  FleetBudgetIncidentPayload, FleetFlowStoppedPayload, FleetHealthAlertPayload, FleetJobOutcomePayload,
+  FleetBudgetIncidentPayload, FleetFlowQuestionsPayload, FleetFlowStoppedPayload, FleetHealthAlertPayload, FleetJobOutcomePayload,
 } from './fleet-notification-events';
 
 /** Fleet S4a contract "Kinds, links and params": pure builders, English fallback titles (D510: no command text). */
@@ -31,6 +31,17 @@ export function flowStoppedDraft(p: FleetFlowStoppedPayload, slug: string, userI
     title: truncate(`Flow stopped: ${p.feature}`, TITLE_MAX), body: truncate(p.detail, BODY_MAX),
     link: `/${slug}/flows/${p.flowId}`, params: { flowId: p.flowId, feature: p.feature, stopReason: p.stopReason },
     sourceType: 'fleet_flow', sourceId: p.flowId, actorId: null,
+  };
+}
+
+export function flowQuestionsDraft(p: FleetFlowQuestionsPayload, slug: string, userId: string): NotificationDraft {
+  const body = p.questions.map(({ id, question }) => `${id}. ${question}`).join(' ');
+  return {
+    userId, projectId: p.projectId, category: 'FLEET_NEEDS_YOU', kind: 'flow_questions',
+    title: truncate(`Flow needs answers: ${p.feature}`, TITLE_MAX), body: truncate(body, BODY_MAX),
+    link: `/${slug}/flows/${p.flowId}`,
+    params: { flowId: p.flowId, feature: p.feature, step: p.step, count: p.questions.length },
+    sourceType: 'fleet_flow', sourceId: `${p.flowId}:${p.jobId}`, actorId: null,
   };
 }
 
