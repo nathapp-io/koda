@@ -87,6 +87,8 @@ function build(opts: Options = {}) {
     markStep: vi.fn(async () => { order.push('markStep'); }),
     creatorAccess: vi.fn(async () => ({ exists: true, disabled: false })),
     listAdvanceable: vi.fn(async () => []),
+    countJobsForStepSince: vi.fn(async () => 0),
+    recordCalls: vi.fn(async () => undefined),
     latestJobForStep: vi.fn(async () => null),
   };
   const threads = { lockForFlowTransition: vi.fn(async () => null) };
@@ -122,7 +124,7 @@ function build(opts: Options = {}) {
     { effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch'])) } as never,
     { reaskLocked: vi.fn(async () => record) } as never,
     { mintReadOnlyToken: vi.fn(async () => ({ token: 'test-only-token', expiresAt: NOW })), getBranchHead: vi.fn(async () => record.specSha) } as never,
-    reviews as never, testFleetConfig(),
+    reviews as never, testFleetConfig(), { apply: vi.fn() } as never,
   );
   /** Every write the pass could make; each "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [

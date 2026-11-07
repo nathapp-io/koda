@@ -39,6 +39,7 @@ import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { FleetFlowTicker } from './fleet-flow.ticker';
 import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
 import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
@@ -150,6 +151,7 @@ describe('FlowsModule', () => {
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.stop', FLOW_STOP_VARIANT)).toBeDefined();
     expect(testingModule.get(FleetFlowTicker)).toBeInstanceOf(FleetFlowTicker);
     expect(testingModule.get(FleetFlowAdvanceService)).toBeInstanceOf(FleetFlowAdvanceService);
+    expect(testingModule.get(FleetFlowCallsService)).toBeInstanceOf(FleetFlowCallsService);
     expect(testingModule.get(PrismaFleetFlowStepRepository)).toBeInstanceOf(PrismaFleetFlowStepRepository);
     expect(testingModule.get(FLEET_FLOW_STEP_REPOSITORY)).toBe(testingModule.get(PrismaFleetFlowStepRepository));
   });

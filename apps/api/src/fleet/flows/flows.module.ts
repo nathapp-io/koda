@@ -25,6 +25,7 @@ import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
 import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
 import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { FleetFlowTicker } from './fleet-flow.ticker';
 
 @Module({
@@ -42,6 +43,7 @@ import { FleetFlowTicker } from './fleet-flow.ticker';
     PrismaFleetFlowStepRepository,
     { provide: FLEET_FLOW_STEP_REPOSITORY, useExisting: PrismaFleetFlowStepRepository },
     FleetFlowAdvanceService,
+    FleetFlowCallsService,
     FleetFlowTicker,
   ],
   exports: [FleetFlowsService],

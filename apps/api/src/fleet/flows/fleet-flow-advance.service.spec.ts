@@ -116,6 +116,8 @@ function build(opts: HarnessOptions = {}) {
     markStep: vi.fn<IFleetFlowStepRepository['markStep']>(async () => undefined),
     creatorAccess: vi.fn(async () => opts.creatorAccess ?? { exists: true, disabled: false }),
     listAdvanceable: vi.fn(async () => []),
+    countJobsForStepSince: vi.fn(async () => 0),
+    recordCalls: vi.fn(async () => undefined),
     latestJobForStep: vi.fn<IFleetFlowStepRepository['latestJobForStep']>(async () => null),
   };
   const threads = {
@@ -182,7 +184,7 @@ function build(opts: HarnessOptions = {}) {
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
-    flowService as never, github as never, reviews as never, config,
+    flowService as never, github as never, reviews as never, config, { apply: vi.fn() } as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
