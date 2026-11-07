@@ -17,8 +17,9 @@ import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository 
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
-import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStepInput } from './flow-step-decision';
+import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
+import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
 import { remainingCapUsd } from './flow-step-dispatch';
 import { mayDispatch } from '../schedules/schedule-access';
 import { PermissionService } from '../../permissions/permission.service';
@@ -57,12 +58,95 @@ export class FleetFlowAdvanceService {
     private readonly permissions: PermissionService,
     private readonly flowService: FleetFlowsService,
     private readonly github: GitHubAppClient,
+    private readonly reviews: FleetReviewClaimService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
     const pass = await this.decide(flowId, now);
-    // US-016 adds the head claim/adoption path here. Never dispatch an unclaimed REVIEW.
-    if (!pass || pass.action.step === 'REVIEW') return;
+    if (!pass) return;
+    if (pass.action.step === 'REVIEW') {
+      await this.advanceReview(pass, now);
+      return;
+    }
+    const { flow, action } = pass;
+    let jobId: string;
+    try {
+      jobId = await this.dispatchStep(pass);
+    } catch (error) {
+      await this.refuseDispatch(flow, action.step, error, now);
+      return;
+    }
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return; // A stop/re-ask does not cancel the dispatched job.
+      await this.recordStep(current, action.step, jobId, action.pr?.number);
+    });
+  }
+
+  /**
+   * `REVIEW` goes through the review head claim, so an auto-review of the same head is adopted instead of
+   * dispatched twice. The claim key is the head the `RUN` pushed (`resultSha`): nothing else writes the
+   * feature branch between the `RUN` and this `REVIEW`. Every claim write happens outside a transaction.
+   */
+  private async advanceReview(pass: DispatchPass, now: Date): Promise<void> {
+    const { flow, action } = pass;
+    const pr = action.pr;
+    // No pushed head means no claim key: nothing to claim and nothing safe to dispatch. Wait for the next pass.
+    if (!pr?.headSha) return;
+
+    const claim = await this.reviews.claimHead(flow.repoId, pr.number, pr.headSha, now);
+    // A live pass owns this head but has not linked its job yet: this pass waits rather than duplicate it.
+    if (claim.kind === 'busy') return;
+    if (claim.kind === 'failed') {
+      await this.writeStop(flow, 'dispatch_refused', `REVIEW: ${claim.outcome}`, now);
+      return;
+    }
+    if (claim.kind === 'owned') {
+      await this.adoptReview(pass, claim.jobId, now);
+      return;
+    }
+
+    let jobId: string;
+    try {
+      jobId = await this.dispatchStep(pass);
+    } catch (error) {
+      // The claim is ours and the dispatch failed: release it so a later pass can retry this head,
+      // then handle the error exactly as the other steps do.
+      await this.reviews.release(claim.claimId);
+      await this.refuseDispatch(flow, 'REVIEW', error, now);
+      return;
+    }
+    // Link the claim before the record phase: the job exists now, so a record that skips still leaves a
+    // head whose claim points at it, and the next pass adopts instead of dispatching again.
+    await this.reviews.markDispatched(claim.claimId, jobId);
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return;
+      await this.recordStep(current, 'REVIEW', jobId, pr.number);
+    });
+  }
+
+  /**
+   * The head already has a job (an auto-review for the same repo, PR and head). Adopt it into this flow in
+   * the record transaction, after the flow-state check; a job another flow already owns is a refusal.
+   */
+  private async adoptReview(pass: DispatchPass, jobId: string, now: Date): Promise<void> {
+    const { flow, action } = pass;
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return;
+      if (!(await this.jobs.adoptForFlow(jobId, current.id, 'REVIEW'))) {
+        await this.writeDecision(current, null, {
+          kind: 'stop', reason: 'dispatch_refused', detail: 'REVIEW: head claimed by another flow',
+        }, now);
+        return;
+      }
+      await this.recordStep(current, 'REVIEW', jobId, action.pr?.number);
+    });
+  }
+
+  /** The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction. */
+  private async dispatchStep(pass: DispatchPass): Promise<string> {
     const { flow, action, plan } = pass;
     const body = buildStepDispatch({
       flow, feature: flow.features[0], step: action.step,
@@ -70,29 +154,27 @@ export class FleetFlowAdvanceService {
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: 'Explore',
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
     });
-    let jobId: string;
-    try {
-      const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
-        flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
-      });
-      jobId = result.job.id;
-    } catch (error) {
-      if (!(error instanceof BudgetPausedException || error instanceof ConflictAppException
-        || error instanceof ValidationAppException || error instanceof NotFoundAppException
-        || error instanceof FleetDispatchException)) throw error;
-      const reason = error instanceof BudgetPausedException ? 'budget_paused' : 'dispatch_refused';
-      const detail = `${action.step}: ${dispatchRefusalReason(error)}`;
-      await this.txManager.run(async () => {
-        const current = await this.lockLive(flow);
-        if (!current) return;
-        await this.writeDecision(current, null, { kind: 'stop', reason, detail }, now);
-      });
-      return;
-    }
+    const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
+      flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
+    });
+    return result.job.id;
+  }
+
+  /** A declared dispatch refusal stops the flow; any other error propagates after the caller released its claim. */
+  private async refuseDispatch(flow: FleetFlowRecord, step: FlowStep, error: unknown, now: Date): Promise<void> {
+    if (!(error instanceof BudgetPausedException || error instanceof ConflictAppException
+      || error instanceof ValidationAppException || error instanceof NotFoundAppException
+      || error instanceof FleetDispatchException)) throw error;
+    const reason = error instanceof BudgetPausedException ? 'budget_paused' : 'dispatch_refused';
+    await this.writeStop(flow, reason, `${step}: ${dispatchRefusalReason(error)}`, now);
+  }
+
+  /** The write half of a refusal: re-read under the parent/flow locks, then stop with activity and audit. */
+  private async writeStop(flow: FleetFlowRecord, reason: FlowStopReason, detail: string, now: Date): Promise<void> {
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
-      if (!current) return; // A stop/re-ask does not cancel the dispatched job.
-      await this.recordStep(current, action.step, jobId, action.pr?.number);
+      if (!current) return;
+      await this.writeDecision(current, null, { kind: 'stop', reason, detail }, now);
     });
   }
 

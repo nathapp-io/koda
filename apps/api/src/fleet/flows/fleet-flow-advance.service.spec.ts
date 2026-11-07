@@ -18,6 +18,7 @@ import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
 import type { FleetFlowsService } from './fleet-flows.service';
 import type { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
+import type { FleetReviewClaimService, HeadClaim } from '../reviews/fleet-review-claim.service';
 
 /** Observe decision inputs while still exercising the real decision engine on every pass. */
 const decisions = vi.hoisted(() => ({ inputs: [] as FlowStepInput[] }));
@@ -84,6 +85,8 @@ interface HarnessOptions {
   publishedSha?: string;
   creatorAccess?: CreatorAccess;
   creatorKeys?: ReadonlySet<string>;
+  /** What the review head claim answers; `claimed` for `c1` unless a test says otherwise. */
+  claim?: HeadClaim;
 }
 
 function build(opts: HarnessOptions = {}) {
@@ -135,10 +138,26 @@ function build(opts: HarnessOptions = {}) {
     inTransaction = true;
     try { return await fn(); } finally { inTransaction = false; }
   }) };
-  const jobs = { dispatch: vi.fn<(...args: Parameters<FleetJobsService['dispatch']>) => Promise<{ job: { id: string } }>>(async () => {
-    expect(inTransaction).toBe(false);
-    return { job: { id: 'j1' } };
-  }), cancel: vi.fn() };
+  const adoptForFlow = vi.fn<FleetJobsService['adoptForFlow']>(async () => {
+    expect(inTransaction).toBe(true);
+    return true;
+  });
+  const jobs = {
+    dispatch: vi.fn<(...args: Parameters<FleetJobsService['dispatch']>) => Promise<{ job: { id: string } }>>(async () => {
+      expect(inTransaction).toBe(false);
+      return { job: { id: 'j1' } };
+    }),
+    adoptForFlow,
+    cancel: vi.fn(),
+  };
+  const reviews = {
+    claimHead: vi.fn<FleetReviewClaimService['claimHead']>(async () => {
+      expect(inTransaction).toBe(false);
+      return opts.claim ?? { kind: 'claimed', claimId: 'c1' };
+    }),
+    markDispatched: vi.fn<FleetReviewClaimService['markDispatched']>(async () => undefined),
+    release: vi.fn<FleetReviewClaimService['release']>(async () => undefined),
+  };
   const permissions = {
     effectiveKeys: vi.fn<PermissionService['effectiveKeys']>(async () => opts.creatorKeys ?? new Set(['fleet.job.dispatch'])),
   };
@@ -161,15 +180,15 @@ function build(opts: HarnessOptions = {}) {
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
-    flowService as never, github as never,
+    flowService as never, github as never, reviews as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
     flows.stop, steps.setSpent, steps.complete, steps.markStep, activity.record, audit.record, flowService.reaskLocked,
   ].some((fn) => fn.mock.calls.length > 0);
 
-  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, permissions, flowService, github, order, record, wrote,
-    inTransaction: () => inTransaction };
+  return { service, flows, steps, threads, repos, reviews, activity, audit, txManager, jobs, permissions, flowService, github,
+    order, record, wrote, inTransaction: () => inTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
@@ -590,6 +609,22 @@ function planPass() {
   });
 }
 
+/** The head the `RUN` pushed: the `REVIEW` claim key. */
+const REVIEW_HEAD = 'h1';
+
+/** A RUNNING flow whose `RUN` pushed PR 12 at `REVIEW_HEAD`, so the decision is `dispatch REVIEW`. */
+function reviewPass(over: HarnessOptions = {}) {
+  return build({
+    flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'RUN', prNumber: 12 })] },
+    snapshot: {
+      job: job({ id: 'j2', flowStep: 'RUN', command: 'RUN', state: 'COMPLETED', resultPrUrl: RUN_PR, resultSha: REVIEW_HEAD }),
+      ingestSettled: true,
+    },
+    reviewRepo: { id: 'repo-1', projectId: 'p1', owner: 'o', name: 'r', githubInstallationId: 1n },
+    ...over,
+  });
+}
+
 describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
   it.each(['QUEUED', 'COMPLETED', 'FAILED'] as const)('F1/AC-14: does not recover stale spec A inserted after spec B reapproval (%s)', async (state) => {
     const h = build();
@@ -678,9 +713,10 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ detail }) }));
   });
 
-  it('never dispatches an unclaimed REVIEW', async () => {
-    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ resultPrUrl: RUN_PR }), ingestSettled: true } });
+  it('never dispatches an unclaimed REVIEW: the head claim comes first', async () => {
+    const h = reviewPass({ claim: { kind: 'busy' } });
     await h.service.advance('flow-1', NOW);
+    expect(h.reviews.claimHead).toHaveBeenCalledWith('repo-1', 12, REVIEW_HEAD, NOW);
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
     expect(h.wrote()).toBe(false);
   });
