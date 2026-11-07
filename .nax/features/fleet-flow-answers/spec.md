@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Flow questions, answers and resume (fleet flow F4b)
 
 Closes: #407
@@ -94,8 +93,8 @@ The baseline below exists only to locate the code. It is never the interface to 
   arrays, `null` when the column is null.
 - `IFleetFlowStepRepository` and `PrismaFleetFlowStepRepository`.
   Target: adds `setWaiting(flowId: string, featureId: string, input: { jobId: string; questions: FlowQuestion[] }): Promise<void>`
-  (sets the feature's `questionsJobId`, `questions`, `state: 'WAITING_ANSWER'`, clears `answers`, `answeredById`
-  and `answeredAt`, and sets the flow's `state: 'WAITING_ANSWER'`).
+  (sets the feature's `questionsJobId`, `questions`, `state: 'WAITING_ANSWER'`, clears `answers` (with
+  `Prisma.DbNull`: a nullable `Json` column is not cleared by a plain `null`), `answeredById` and `answeredAt`, and sets the flow's `state: 'WAITING_ANSWER'`).
 - `FleetFlowAdvanceService` (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts`).
   Target: `decisionInput` fills `questionsJobId` and `answers` from `flow.features[0]`; `writeDecision` handles
   `wait_answer`: `setWaiting`, an audit entry `system.flow.advance` (summary `flow waiting answer <STEP>`), activity
@@ -142,7 +141,7 @@ The baseline below exists only to locate the code. It is never the interface to 
 **New symbols**
 
 - `apps/api/src/fleet/flows/flow-calls.ts`: `FlowQuestion { id: string; question: string }`,
-  `FlowAnswer { id: string; answer: string }`, `FLOW_ANSWER_MAX` (2000), `flowQuestions(findings: FlowFinding[]): FlowQuestion[]`,
+  `FlowAnswer { id: string; answer: string }` (both `type` aliases, so they are assignable to Prisma's `InputJsonValue`), `FLOW_ANSWER_MAX` (1000, equal to `FLOW_CALL_TEXT_MAX`, so an accepted answer is never cut in the calls block), `flowQuestions(findings: FlowFinding[]): FlowQuestion[]`,
   `formatQuestionsComment(input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[]; answerPath: string }): string`.
 - `apps/api/src/fleet/flows/flow-answers.ts`: `FlowAnswersInput { jobId: string; answers: FlowAnswer[] }`,
   `parseFlowAnswers(body: unknown): FlowAnswersInput`.
@@ -184,8 +183,9 @@ questions as `<id>. <question>` joined with a space and cut to `BODY_MAX`, link 
 `{ flowId, feature, step, count }`, source `fleet_flow` / `<flowId>:<jobId>` (a second wait on the same flow is a
 new notification).
 
-`parseFlowAnswers(body)` checks, in this order, and throws `ValidationAppException` with key
-`fleet.flows.answersInput` and the named `reason` on the first failure:
+`parseFlowAnswers(body)` checks `body` and `jobId`, then `answers`, then each entry in array order (shape, `id`,
+`answer`, duplicate), and throws `ValidationAppException` with key `fleet.flows.answersInput` and the named
+`reason` on the first failure. An array is not an object for these checks:
 
 - `body` not an object: `body`; `jobId` not a non-blank string: `jobId`.
 - `answers` not an array of 1 to `FLOW_CALLS_MAX_FINDINGS` entries: `answers`.
@@ -209,8 +209,10 @@ Ids and answers are kept as sent (no trimming); ids match question ids exactly.
 The route: `POST /projects/:slug/flows/:flowId/answers`, `@Requires('fleet.flow.answer')`, `@ApprovalGated()`,
 `@HttpCode(200)`. The handler refuses a non-user principal with 403 `fleet.flows.answerHumanOnly` before anything
 else, fences the flow with `get`, then calls `routeGate.run` with key `fleet.flow.answer`, variant
-`FLOW_ANSWER_VARIANT` and input `{ projectId, flowId, body }`. The route command parses `body` with
-`parseFlowAnswers`, refuses a non-user principal again (backstop), and calls `FleetFlowsService.answer`. A pending
+`FLOW_ANSWER_VARIANT` and input `{ projectId, flowId, body }`. The route command's `parse` returns
+`{ projectId, flowId, body: FlowAnswersInput }` (via `parseRouteInput` and `parseFlowAnswers`; re-parsing that
+persisted value yields the same value, as the create commands do), its `run` refuses a non-user principal again
+(backstop) and calls `FleetFlowsService.answer`. A pending
 gate returns 202 (`ApprovalPending`); success returns `FleetFlowDto`.
 
 After the answers the flow is `RUNNING`; the next tick decides rule 8 (`apply_calls`); the F4a calls path commits the
@@ -419,14 +421,14 @@ notification, the answers and the calls commit to a dispatched `PLAN`.
 - `apps/api/prisma/migrations/20261130090000_fleet_flow_answers/migration.sql` — the five `FleetFlowFeature` columns.
 
 **US-006**
-- `apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts` — the wait and answered-advance tests, on the advance-calls harness.
+- `apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts` — the wait and answered-advance tests, with a local copy of the `build()` harness from `fleet-flow-advance-calls.spec.ts` (it is file-local; never import a spec file).
 
 **US-009**
 - `apps/api/prisma/migrations/20261130100000_developer_flow_answer_key/migration.sql` — appends `fleet.flow.answer` to `developer` roles.
 - `apps/api/test/integration/permissions/developer-flow-answer-key-migration.integration.spec.ts` — the migration's tests.
 
 **US-010**
-- `apps/api/src/fleet/flows/fleet-flow-answer.spec.ts` — `FleetFlowsService.answer` tests.
+- `apps/api/src/fleet/flows/fleet-flow-answer.spec.ts` — `FleetFlowsService.answer` tests, with a local copy of the `setup()` fixture from `fleet-flow-read-stop.spec.ts`.
 
 **US-011**
 - `apps/api/test/integration/fleet-flow-answers-route.integration.spec.ts` — the route's integration tests.
@@ -445,7 +447,7 @@ notification, the answers and the calls commit to a dispatched `PLAN`.
 
 **US-004**
 - `apps/api/src/fleet/flows/flow-step-decision.spec.ts` — the `input()` fixture (line ~10) gains `questionsJobId: null, answers: null`; "US-005 AC-2 ambiguous findings precede applicable calls" (line ~161) now expects a `wait_answer` action for a nax-entry (`canApplyCalls: true`) verdict with a minor and an ambiguous finding; thread-entry ambiguous cases keep `review_ambiguous`.
-- `apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts` — `seedReview` (line ~95) hard-codes a nax entry, and two cases seed an ambiguous review that now waits instead of stopping: "AC-3–AC-9: ambiguous review stops" (line ~155) and "AC-4: failure after persisting the stop event rolls back both writes" (line ~199). Give `seedReview` an entry option and seed both cases as thread entry, which still stops `review_ambiguous`, keeping every stop, ticket, comment, notification and rollback assertion.
+- `apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts` — `seedReview` (line ~95) hard-codes a nax entry, and two cases seed an ambiguous review that now waits instead of stopping: "AC-3–AC-9: ambiguous review stops" (line ~155) and "AC-4: failure after persisting the stop event rolls back both writes" (line ~199). Give `seedReview` an entry option; for these two cases, after `FleetFlowsService.create` set the row's `entry` to `THREAD` with `db.fleetFlow.update` (leave `threadId` null: `canApplyCalls` reads only `entry`, and `lockParent` falls back to the repo lock), so they still stop `review_ambiguous`, keeping every stop, ticket, comment, notification and rollback assertion.
 
 **US-005**
 - `apps/api/prisma/schema.prisma` — `FleetFlowFeature` gains `questionsJobId String?`, `questions Json?`, `answers Json?`, `answeredById String?`, `answeredAt DateTime?`.
@@ -479,6 +481,7 @@ notification, the answers and the calls commit to a dispatched `PLAN`.
 **US-011**
 - `apps/api/src/fleet/flows/project-flows.controller.ts` — add the answers route.
 - `apps/api/src/fleet/flows/flow-route.commands.ts` — register the `fleet.flow.answer` route command and export `FLOW_ANSWER_VARIANT`.
+- `apps/api/src/fleet/flows/flow-route.commands.spec.ts` — add the answer command's parse round-trip and agent-refusal tests next to the create command's (line ~31); its registry stub keys commands by variant, so existing tests are unchanged.
 - `apps/api/src/permissions/catalog.ts` — remove `fleet.flow.answer` from `PENDING_SURFACE_KEYS` now that a route declares it (verified by the permission contract tests).
 - `apps/api/src/permissions/test-helpers/permission-contract.spec.ts` — `expectedPending` (line ~7) loses `fleet.flow.answer` again.
 - `apps/api/src/approvals/approval-openapi.contract.spec.ts` — add the post operation for /api/projects/{slug}/flows/{flowId}/answers to `gatedOperations`; the expected length (line ~289) and the two titles naming 145 (lines ~197 and ~287) become 146.
@@ -516,7 +519,7 @@ None. US-012 only creates its integration spec.
 3. [unit] `flowQuestions` collapses a question containing a newline and repeated spaces to one line.
 4. [unit] `flowQuestions` cuts a 1,500-character question to exactly `FLOW_CALL_TEXT_MAX` (1,000) characters.
 5. [unit] `flowQuestions` returns an empty array when no finding is `ambiguous`.
-6. [unit] `formatQuestionsComment({ step: 'SPEC_REVIEW', jobId: 'j1', questions: [{ id: '2', question: 'Q1' }, { id: '5', question: 'Q2' }], answerPath: '/api/projects/sandbox/flows/f1/answers' })` returns exactly the four lines `Flow needs answers (SPEC_REVIEW job j1):`, `2. Q1`, `5. Q2` and `Answer every question with POST /api/projects/sandbox/flows/f1/answers and the body {"jobId":"j1","answers":[{"id":"2","answer":"..."}]}.` joined by newlines.
+6. [unit] `formatQuestionsComment({ step: 'SPEC_REVIEW', jobId: 'j1', questions: [{ id: '2', question: 'Q1' }, { id: '5', question: 'Q2' }], answerPath: '/api/projects/sandbox/flows/f1/answers' })` returns exactly the four lines `Flow needs answers (SPEC_REVIEW job j1):`, `2. Q1`, `5. Q2` and `Answer every question with POST /api/projects/sandbox/flows/f1/answers and the body {"jobId":"j1","answers":[{"id":"2","answer":"..."}]}.` joined by newlines; the example body always uses the first question's id.
 7. [unit] `buildFlowCalls` with an `ambiguous` finding at position 1 carrying `question: "Q1"` and `answer: "Use USD"` appends the bullet `- **1** (answer): Q1 Answer: Use USD`.
 8. [unit] `buildFlowCalls` names an answered `ambiguous` finding with id `"api-shape"` as `**api-shape**`.
 9. [unit] `buildFlowCalls` appends no bullet for an `ambiguous` finding without an `answer`, while a `minor` finding in the same input keeps its bullet.
@@ -526,13 +529,13 @@ None. US-012 only creates its integration spec.
 ### US-003: Parsing answers
 
 1. [unit] `parseFlowAnswers({ jobId: 'j1', answers: [{ id: '2', answer: 'A1' }] })` returns `{ jobId: 'j1', answers: [{ id: '2', answer: 'A1' }] }`.
-2. [unit] `parseFlowAnswers('x')` throws `ValidationAppException` with key `fleet.flows.answersInput` and reason `body`.
+2. [unit] `parseFlowAnswers('x')` and `parseFlowAnswers([])` throw `ValidationAppException` with key `fleet.flows.answersInput` and reason `body`.
 3. [unit] `parseFlowAnswers` with a missing or blank `jobId` throws reason `jobId`.
 4. [unit] `parseFlowAnswers` with a missing `answers`, an empty array or 21 entries throws reason `answers`.
-5. [unit] `parseFlowAnswers` with `answers: ['x']` throws reason `answers[0]`.
+5. [unit] `parseFlowAnswers` with `answers: ['x']` or `answers: [[]]` throws reason `answers[0]`.
 6. [unit] `parseFlowAnswers` throws reason `answers[0].id` for a numeric id, a blank id and an id of 65 characters.
-7. [unit] `parseFlowAnswers` throws reason `answers[0].answer` for a numeric answer, a blank answer and an answer of 2,001 characters.
-8. [unit] `parseFlowAnswers` throws reason `answers[1].id duplicate` when two entries share id `"2"`.
+7. [unit] `parseFlowAnswers` throws reason `answers[0].answer` for a numeric answer, a blank answer and an answer of 1,001 characters.
+8. [unit] `parseFlowAnswers` throws reason `answers[1].id duplicate` when two entries share id `"2"`, and for `[{ id: '1', answer: 'a' }, { id: '1', answer: 'b' }, { id: 5 }]` (entries are checked in array order).
 9. [unit] `parseFlowAnswers` keeps an answer with surrounding spaces exactly as sent.
 
 ### US-004: The decision waits for answers
@@ -632,10 +635,12 @@ None. US-012 only creates its integration spec.
 9. [integration] Under a policy that asks, a user's POST returns 202 with an approval request and leaves the flow `WAITING_ANSWER`.
 10. [integration] Approving that request through `POST /api/approvals/:id/decisions` with `approve` leaves the flow `RUNNING` with the posted answers stored.
 11. [unit] The OpenAPI document lists `post /api/projects/{slug}/flows/{flowId}/answers` with a 202 response, among the 146 gated operations.
+12. [unit] The registered `rest:fleet-flow.answer` command's `parse` of `{ projectId, flowId, body }` returns `{ projectId, flowId, body: parseFlowAnswers(body) }`, and parsing its JSON round-trip returns an equal value.
+13. [unit] Running the registered `rest:fleet-flow.answer` command with an agent principal throws 403 `fleet.flows.answerHumanOnly` and never calls `FleetFlowsService.answer`.
 
 ### US-012: Answered flows against the database
 
-1. [integration] A nax-entry `RUNNING` flow whose `COMPLETED` `SPEC_REVIEW` job has findings `[minor, ambiguous]` is `WAITING_ANSWER` after one `FleetFlowTicker.tick`, with feature `questions` `[{ id: '2', question: <the question> }]` and `questionsJobId` the review job's id.
+1. [integration] A nax-entry `RUNNING` flow whose `COMPLETED` `SPEC_REVIEW` job has findings `[minor, ambiguous]` (the ambiguous finding seeded with no `id`, so its bullet is named by position) is `WAITING_ANSWER` after one `FleetFlowTicker.tick`, with feature `questions` `[{ id: '2', question: <the question> }]` and `questionsJobId` the review job's id.
 2. [integration] After that tick exactly one `OutboxEvent` of type `fleet_flow_questions` with event id `<flowId>:questions:<jobId>` exists, and a second tick adds none.
 3. [integration] Publishing that outbox row creates the flow's ticket with one comment equal to `formatQuestionsComment` for the flow, and one `flow_questions` notification for the approver.
 4. [integration] Publishing the same outbox row a second time adds no second comment and no second notification.
