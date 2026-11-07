@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T04:55:01.815Z",
+  "updatedAt": "2026-11-07T05:06:49.729Z",
   "userStories": [
     {
       "id": "US-001",
@@ -253,14 +253,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A small repository interface and Prisma adapter use existing scheduling query/Decimal patterns; relational eligibility, keyset paging and lease filters need focused DB tests but no cross-service orchestration."
+        "reasoning": "A small repository interface and Prisma adapter use existing scheduling query/Decimal patterns; relational eligibility, keyset paging and lease filters need focused DB tests but no cross-service orchestration.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
@@ -281,7 +284,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1d52405906f7d6b1518bb8bbed6eb412c143342d"
     },
     {
       "id": "US-006",
