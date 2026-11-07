@@ -3,7 +3,7 @@
   "feature": "fleet-flow-answers",
   "branchName": "feat/fleet-flow-answers",
   "createdAt": "2026-11-30T00:00:00.000Z",
-  "updatedAt": "2026-11-07T15:36:38.347Z",
+  "updatedAt": "2026-11-07T15:41:57.433Z",
   "userStories": [
     {
       "id": "US-001",
@@ -76,14 +76,17 @@
         "pure-functions"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Bounded additive pure helpers and formatting changes across existing calls/verdict modules, without external integration."
+        "reasoning": "Bounded additive pure helpers and formatting changes across existing calls/verdict modules, without external integration.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-calls.ts",
@@ -108,7 +111,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "225f978a0714a5b0086c371d35b06f5f6330da54"
     },
     {
       "id": "US-003",
