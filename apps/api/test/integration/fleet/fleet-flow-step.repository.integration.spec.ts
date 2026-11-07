@@ -30,6 +30,12 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     ({ projectId, repoId } = base);
     creatorId = base.adminId;
   }, 60_000);
+  afterEach(async () => {
+    const flows = await prisma.fleetFlow.findMany({ where: { projectId }, select: { id: true } });
+    const flowIds = flows.map(({ id }) => id);
+    await prisma.fleetJob.deleteMany({ where: { flowId: { in: flowIds } } });
+    await prisma.fleetFlow.deleteMany({ where: { id: { in: flowIds } } });
+  });
   afterAll(async () => { await module?.close(); });
 
   async function createFlow(state: string, featureCount = 1) {
