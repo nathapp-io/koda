@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T07:23:38.828Z",
+  "updatedAt": "2026-11-07T07:42:33.919Z",
   "userStories": [
     {
       "id": "US-001",
@@ -954,14 +954,17 @@
         "US-015",
         "US-016"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Lifecycle and paging are standard, but creator impersonation context, actor attribution and system-writer permission declaration require the security override."
+        "reasoning": "Lifecycle and paging are standard, but creator impersonation context, actor attribution and system-writer permission declaration require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/schedule-ticker.ts",
@@ -1006,7 +1009,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d0320fd43808ec9a777e523e11407e809d15dfa1"
     },
     {
       "id": "US-018",
