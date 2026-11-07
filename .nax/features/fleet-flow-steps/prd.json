@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T05:06:49.729Z",
+  "updatedAt": "2026-11-07T05:16:40.723Z",
   "userStories": [
     {
       "id": "US-001",
@@ -312,14 +312,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard repository updates, with a security override because creator existence and disabled-state lookups underpin dispatch access control."
+        "reasoning": "Standard repository updates, with a security override because creator existence and disabled-state lookups underpin dispatch access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
@@ -332,7 +335,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3c291547280f498d1042c362dbf42b78be53025c"
     },
     {
       "id": "US-007",
