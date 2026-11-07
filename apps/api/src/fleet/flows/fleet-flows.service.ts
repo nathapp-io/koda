@@ -144,30 +144,38 @@ export class FleetFlowsService {
       const publishedPaths = new Set(event.paths.map((path) => posix.normalize(path)));
       const reask = flow.state === 'PENDING' || event.previousSha !== flow.specSha ||
         flow.features.some(({ specPath }) => publishedPaths.has(posix.normalize(specPath)));
-      let changed: FleetFlowRecord;
       if (reask) {
         if (!canTransitionFlow(flow.state, 'PENDING')) return;
-        const now = new Date();
-        // close uses SKIP LOCKED. Even when a decision holds the old ask, the new request id
-        // and sha on the flow make that late decision a no-op after our transaction commits.
-        if (flow.approvalRequestId !== null) {
-          await this.asks.close(flow.approvalRequestId, { status: 'cancelled', reason: 'superseded' }, now);
-        }
-        const requestId = await this.openStartRequest({ ...flow, specSha: event.sha }, {
-          type: flow.createdByType, id: flow.createdById,
-        }, now);
-        changed = await this.flows.reask(flow.id, { specSha: event.sha, approvalRequestId: requestId });
+        await this.reaskLocked(flow, event.sha, new Date());
       } else {
-        changed = await this.flows.updateSha(flow.id, event.sha);
+        await this.recordRespec(await this.flows.updateSha(flow.id, event.sha));
       }
-      await this.audit.record({
-        key: 'system.flow.respec', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId,
-        summary: 'flow spec republished',
-      });
-      await this.activity.record({
-        actorType: 'SYSTEM', actorId: 'flow', action: 'flow.respec', entityType: 'flow',
-        entityId: flow.id, projectId: flow.projectId, payload: { flowId: flow.id, state: changed.state },
-      });
+    });
+  }
+
+  /** Caller holds parent then flow locks. Reapproval starts no more work; it never cancels a job. */
+  async reaskLocked(flow: FleetFlowRecord, specSha: string, now: Date): Promise<FleetFlowRecord> {
+    // close uses SKIP LOCKED. Even when a decision holds the old ask, the new request id
+    // and sha on the flow make that late decision a no-op after our transaction commits.
+    if (flow.approvalRequestId !== null) {
+      await this.asks.close(flow.approvalRequestId, { status: 'cancelled', reason: 'superseded' }, now);
+    }
+    const approvalRequestId = await this.openStartRequest({ ...flow, specSha }, {
+      type: flow.createdByType, id: flow.createdById,
+    }, now);
+    const changed = await this.flows.reask(flow.id, { specSha, approvalRequestId });
+    await this.recordRespec(changed);
+    return changed;
+  }
+
+  private async recordRespec(flow: FleetFlowRecord): Promise<void> {
+    await this.audit.record({
+      key: 'system.flow.respec', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId,
+      summary: 'flow spec republished',
+    });
+    await this.activity.record({
+      actorType: 'SYSTEM', actorId: 'flow', action: 'flow.respec', entityType: 'flow',
+      entityId: flow.id, projectId: flow.projectId, payload: { flowId: flow.id, state: flow.state },
     });
   }
 

@@ -137,14 +137,40 @@ describeDb('PrismaFleetFlowRepository', () => {
     const updated = await repo.updateSha(flow.id, 'sha-2');
     expect(updated).toMatchObject({ specSha: 'sha-2', state: approved.state, approvalMode: approved.approvalMode, approverId: approved.approverId, approvedAt: approved.approvedAt, approvalRequestId: approved.approvalRequestId });
   });
-  it('AC-10 stops a flow with reason and end time', async () => {
-    const flow = await createFlow(); const now = new Date();
-    expect(await repo.stop(flow.id, 'human_stop', now)).toMatchObject({ state: 'STOPPED', stopReason: 'human_stop', endedAt: now });
+  it('AC-10 stops a flow with reason, detail and end time, and stops every feature', async () => {
+    const flow = await createFlow({ features: ['a', 'b'].map((feature) => ({ feature, specPath: `${feature}/spec.md`, dependsOn: [] })) }); const now = new Date();
+    expect(await repo.stop(flow.id, 'cost_cap', now, 'spent 5 of cap 5')).toMatchObject({ state: 'STOPPED', stopReason: 'cost_cap', stopDetail: 'spent 5 of cap 5', endedAt: now });
+    const features = await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id }, orderBy: { position: 'asc' } });
+    expect(features).toHaveLength(2);
+    expect(features.map(({ state }) => state)).toEqual(['STOPPED', 'STOPPED']);
   });
-  it('AC-11 rejects stopping a terminal flow without mutation', async () => {
-    const flow = await createFlow(); const stopped = await repo.stop(flow.id, 'human_stop', new Date());
+  it('stores job flow linkage and preserves jobs when a flow is deleted', async () => {
+    const flow = await createFlow();
+    const job = await prisma.fleetJob.create({ data: { projectId, repoId, ref: 'main', command: 'PLAN', feature: 'flow', profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: 'creator', flowId: flow.id, flowStep: 'PLAN' } });
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ flowId: flow.id, flowStep: 'PLAN' });
+    await prisma.fleetFlow.delete({ where: { id: flow.id } });
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ flowId: null, flowStep: 'PLAN' });
+  });
+  it('clears stopDetail when omitted and returns persisted detail from findById', async () => {
+    const flow = await createFlow();
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { stopDetail: 'stored detail' } });
+    expect(await repo.findById(flow.id)).toMatchObject({ stopDetail: 'stored detail' });
+    expect(await repo.stop(flow.id, 'human_stop', new Date())).toMatchObject({ stopDetail: null });
+  });
+  it('resets every feature to pending with no current step on reask', async () => {
+    const flow = await createFlow({ features: [{ feature: 'a', specPath: 'a/spec.md', dependsOn: [] }] });
+    await repo.approve(flow.id, { mode: 'REQUEST', approverId: 'approver', approvedAt: new Date(), approvalRequestId: 'request' });
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { state: 'RUNNING' } });
+    await prisma.fleetFlowFeature.updateMany({ where: { flowId: flow.id }, data: { state: 'RUNNING', currentStep: 'SPEC_REVIEW' } });
+    await repo.reask(flow.id, { specSha: 'sha-new', approvalRequestId: 'new-request' });
+    expect(await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toMatchObject([{ state: 'PENDING', currentStep: null }]);
+  });
+  it.each(['STOPPED', 'COMPLETED'] as const)('AC-10 rejects stopping terminal %s without mutation', async (state) => {
+    const flow = await createFlow();
+    await prisma.fleetFlow.update({ where: { id: flow.id }, data: { state } });
+    const terminal = await repo.findById(flow.id);
     await expect(repo.stop(flow.id, 'human_stop', new Date())).rejects.toBeInstanceOf(FlowTransitionError);
-    expect(await repo.findById(flow.id)).toEqual(stopped);
+    expect(await repo.findById(flow.id)).toEqual(terminal);
   });
   it('AC-12 pages project flows newest first and filters other projects', async () => {
     const older = await createFlow(); await new Promise((resolve) => setTimeout(resolve, 5)); const newer = await createFlow();

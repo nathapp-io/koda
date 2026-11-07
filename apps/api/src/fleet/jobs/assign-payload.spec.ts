@@ -61,6 +61,26 @@ describe('buildAssignPayload', () => {
     expect(run.planFrom).toBeNull();
   });
 
+  it('US-004 AC-6: includes expectBranch for a flow PLAN job with no thread', () => {
+    const payload = buildAssignPayload({ ...job, command: 'PLAN', ref: 'feat/x', threadId: null, flowId: 'flow-1' }, repo, 'https://x/y.git', identity);
+    expect(payload).toHaveProperty('expectBranch', 'feat/x');
+  });
+
+  it('US-004 AC-7: omits expectBranch for a flow RUN job', () => {
+    const run = buildAssignPayload({ ...job, command: 'RUN', ref: 'feat/x', threadId: null, flowId: 'flow-1' }, repo, 'https://x/y.git', identity);
+    expect(run).not.toHaveProperty('expectBranch');
+  });
+
+  it('US-004 AC-8: omits expectBranch for a PLAN job with neither a thread nor a flow', () => {
+    const plan = buildAssignPayload({ ...job, command: 'PLAN', ref: 'feat/x', threadId: null, flowId: null }, repo, 'https://x/y.git', identity);
+    expect(plan).not.toHaveProperty('expectBranch');
+  });
+
+  it('US-004 AC-10: keeps expectBranch for a thread PLAN job that has no flow', () => {
+    const plan = buildAssignPayload({ ...job, command: 'PLAN', ref: 'feat/x', threadId: 't1', flowId: null }, repo, 'https://x/y.git', identity);
+    expect(plan).toHaveProperty('expectBranch', 'feat/x');
+  });
+
   it('US-006: includes the supplied THREAD assignment block', () => {
     const thread = {
       threadId: 't1', action: 'SESSION' as const, feature: 'add-auth', resume: false, instructions: 'instructions',

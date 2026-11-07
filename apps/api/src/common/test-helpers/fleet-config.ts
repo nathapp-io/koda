@@ -40,6 +40,9 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     prReviewPollMs: 300_000,
     reviewMintPollMs: 300_000,
     prReviewMaxDispatch: 10,
+    flowTickMs: 30_000,
+    flowPrWaitMs: 1_800_000,
+    flowReviewAgent: 'Explore',
     ...overrides,
   };
 }

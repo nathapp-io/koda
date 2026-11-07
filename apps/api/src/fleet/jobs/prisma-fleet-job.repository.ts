@@ -14,6 +14,7 @@ import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
 import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
+import type { FlowStep } from '../flows/flow-steps';
 import {
   ActiveJobRef, agentInputOf, agentResultOf, DuplicateActiveJobError, fixOutcomeOf, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters, FixReady,
   FleetJobPrRulings, FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetJobWorkflow, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
@@ -118,6 +119,18 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findById(id: string): Promise<FleetJobRecord | null> {
     const r = await this.db.fleetJob.findUnique({ where: { id } });
     return r ? toJob(r) : null;
+  }
+
+  /**
+   * US-004: the adoption is one UPDATE whose WHERE clause decides the race — a job another flow already owns (or a
+   * dispatch that wrote its flow fields first) does not match, so nothing is written and the caller sees `false`.
+   */
+  async adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean> {
+    const result = await this.db.fleetJob.updateMany({
+      where: { id: jobId, flowId: null },
+      data: { flowId, flowStep: step },
+    });
+    return result.count > 0;
   }
 
   async lockById(id: string, opts: { skipLocked?: boolean } = {}): Promise<FleetJobRecord | null> {

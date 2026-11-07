@@ -1116,6 +1116,8 @@ model FleetJob {
   agentInput         Json? // US-003: an AGENT job's dispatch input { name, task, model?, modelAliases?, timeoutSec? }; immutable
   agentResult        Json? // US-003: an AGENT job's latest attempt result; cleared on requeue
   threadId           String? // S5a: the ChatThread a THREAD job serves
+  flowId             String?
+  flowStep           String?
   updatedAt          DateTime  @updatedAt
 
   project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -1124,6 +1126,7 @@ model FleetJob {
   pinnedRunner        Runner?              @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
   schedule            JobSchedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   thread              ChatThread?          @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  flow                FleetFlow?           @relation(fields: [flowId], references: [id], onDelete: SetNull)
   threadTurn          FleetThreadTurn?
   threadIngestCursors ThreadIngestCursor[]
   events              FleetJobEvent[]
@@ -1152,6 +1155,7 @@ model FleetJob {
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
   @@index([threadId])
+  @@index([flowId, queuedAt])
 }
 
 /// Fleet S5b §1 (US-002): the hash-only audit of one koda tool call a THREAD session made. The input is never stored,
@@ -1237,6 +1241,7 @@ model FleetFlow {
   approvedAt        DateTime?
   approvalRequestId String?
   stopReason        String?
+  stopDetail        String?
   endedAt           DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1244,8 +1249,10 @@ model FleetFlow {
   project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   repo     FleetRepo         @relation(fields: [repoId], references: [id], onDelete: Cascade)
   features FleetFlowFeature[]
+  jobs     FleetJob[]
 
   @@index([projectId, createdAt])
+  @@index([state, id])
   @@index([threadId, state])
   @@index([repoId, branch, specSha])
   @@index([approvalRequestId])

@@ -153,6 +153,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'fleet.flow.stop': 'project',
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
+  'system.flow.advance': 'any',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);

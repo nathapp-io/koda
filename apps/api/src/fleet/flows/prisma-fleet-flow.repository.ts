@@ -58,6 +58,11 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
       if (!current) throw new FlowTransitionError(id, 'missing', target);
       if (!canTransitionFlow(current.state, target)) throw new FlowTransitionError(id, current.state, target);
       await this.prisma.client.fleetFlow.update({ where: { id }, data });
+      if (target === FleetFlowState.STOPPED) {
+        await this.prisma.client.fleetFlowFeature.updateMany({ where: { flowId: id }, data: { state: 'STOPPED' } });
+      } else if (target === FleetFlowState.PENDING) {
+        await this.prisma.client.fleetFlowFeature.updateMany({ where: { flowId: id }, data: { state: 'PENDING', currentStep: null } });
+      }
       return this.findById(id);
     });
     if (!result) throw new FlowTransitionError(id, 'missing', target);
@@ -89,7 +94,7 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
     if (!result) throw new FlowTransitionError(id, 'missing', 'same-state');
     return result;
   }
-  stop(id: string, reason: string, now: Date): Promise<FleetFlowRecord> {
-    return this.transition(id, FleetFlowState.STOPPED, { state: FleetFlowState.STOPPED, stopReason: reason, endedAt: now });
+  stop(id: string, reason: string, now: Date, detail?: string | null): Promise<FleetFlowRecord> {
+    return this.transition(id, FleetFlowState.STOPPED, { state: FleetFlowState.STOPPED, stopReason: reason, stopDetail: detail ?? null, endedAt: now });
   }
 }

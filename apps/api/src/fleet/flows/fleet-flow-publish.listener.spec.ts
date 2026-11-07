@@ -46,6 +46,52 @@ function setup(state: FleetFlowRecord['state'] = 'PENDING') {
   return { service, flows, threads, asks, audit, activity, order, row: () => row };
 }
 
+describe('FleetFlowsService shared reapproval', () => {
+  const now = new Date('2026-11-07T12:30:00Z');
+
+  it('US-015 AC-1: reaskLocked supersedes the prior request', async () => {
+    const s = setup('APPROVED');
+    await s.service.reaskLocked(s.row(), NEW, now);
+    expect(s.asks.close).toHaveBeenCalledWith('old', { status: 'cancelled', reason: 'superseded' }, now);
+  });
+
+  it('US-015 AC-2: opens the new start request and returns the repository record', async () => {
+    const s = setup('APPROVED');
+    const changed = await s.service.reaskLocked(s.row(), NEW, now);
+    expect(s.asks.open).toHaveBeenCalledWith({
+      key: 'fleet.flow.start', projectId: 'P', component: 'flow', origin: 'system',
+      onBehalfOf: { type: 'AGENT', id: 'author' }, deadline: null, input: { flowId: 'F', specSha: NEW },
+    }, now);
+    expect(s.flows.reask).toHaveBeenCalledWith('F', { specSha: NEW, approvalRequestId: 'new' });
+    expect(changed).toBe(s.row());
+    expect(s.audit.record).toHaveBeenCalledOnce();
+    expect(s.activity.record).toHaveBeenCalledOnce();
+  });
+
+  it('US-015 AC-3: respec delegates reapproval and audits exactly once', async () => {
+    const s = setup('APPROVED');
+    const reask = vi.spyOn(s.service, 'reaskLocked');
+    const previous = s.row();
+    await s.service.respec({ threadId: 'T', sha: NEW, previousSha: OLD, paths: [PATH] });
+    expect(reask).toHaveBeenCalledWith(previous, NEW, expect.any(Date));
+    expect(s.row()).toMatchObject({ state: 'PENDING', specSha: NEW });
+    expect(s.audit.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ key: 'system.flow.respec' }));
+    expect(s.activity.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'flow.respec' }));
+  });
+
+  it('US-015 AC-15: an unrelated publication carries approval forward without a new ask', async () => {
+    const s = setup('APPROVED');
+    s.row().features[0].specPath = './docs//spec.md';
+    await s.service.respec({ threadId: 'T', sha: NEW, previousSha: OLD, paths: ['./docs/other.md'] });
+    expect(s.flows.updateSha).toHaveBeenCalledWith('F', NEW);
+    expect(s.row()).toMatchObject({ state: 'APPROVED', specSha: NEW, approvalRequestId: 'old' });
+    expect(s.asks.open).not.toHaveBeenCalled();
+    expect(s.flows.reask).not.toHaveBeenCalled();
+    expect(s.audit.record).toHaveBeenCalledOnce();
+    expect(s.activity.record).toHaveBeenCalledOnce();
+  });
+});
+
 describe('FleetFlowPublishListener / respec', () => {
   // Deliberately import at call time so the pre-implementation failure names the missing listener.
   const deliver = async (s: ReturnType<typeof setup>, paths = [PATH], sha = NEW, previousSha: string | null = OLD) => {

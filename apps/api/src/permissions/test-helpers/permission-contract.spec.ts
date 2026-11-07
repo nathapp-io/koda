@@ -9,7 +9,6 @@ describe('permission contract checker', () => {
     'fleet.job.shell.escalate',
     'fleet.budget.override',
     'fleet.flow.start',
-    // Flow routes declare create/read/stop; the publish listener now declares respec.
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

@@ -32,6 +32,16 @@ import { ProjectsService } from '../../projects/projects.service';
 import { FleetFlowsController } from './fleet-flows.controller';
 import { FLOW_STOP_VARIANT, NAX_FLOW_CREATE_VARIANT } from './flow-route.commands';
 import { ProjectFlowsController } from './project-flows.controller';
+import { FLEET_CFG } from '../../config/fleet.config';
+import { testFleetConfig } from '../../common/test-helpers/fleet-config';
+import { FleetJobsModule } from '../jobs/fleet-jobs.module';
+import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { FleetReviewsModule } from '../reviews/fleet-reviews.module';
+import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
+import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { FleetFlowTicker } from './fleet-flow.ticker';
+import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
+import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
 
 @Module({
   providers: [
@@ -60,14 +70,19 @@ class StubThreadsModule {}
 class StubGitBrokerModule {}
 @Module({ providers: [{ provide: ProjectsService, useValue: {} }], exports: [ProjectsService] })
 class StubProjectsModule {}
+@Module({ providers: [{ provide: FleetJobsService, useValue: { dispatch: vi.fn() } }], exports: [FleetJobsService] })
+class StubFleetJobsModule {}
+@Module({ providers: [{ provide: FleetReviewClaimService, useValue: {} }], exports: [FleetReviewClaimService] })
+class StubFleetReviewsModule {}
 const stubTxManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
 @Module({
   providers: [
     { provide: ProjectAccessService, useValue: {} },
     { provide: ProjectMembershipGuard, useValue: {} },
     { provide: PermissionService, useValue: {} },
+    { provide: FLEET_CFG, useValue: testFleetConfig() },
   ],
-  exports: [ProjectAccessService, ProjectMembershipGuard, PermissionService],
+  exports: [ProjectAccessService, ProjectMembershipGuard, PermissionService, FLEET_CFG],
 })
 class StubProjectAccessModule {}
 @Module({
@@ -112,6 +127,8 @@ describe('FlowsModule', () => {
       .overrideModule(GitBrokerModule).useModule(StubGitBrokerModule)
       .overrideModule(ProjectsModule).useModule(StubProjectsModule)
       .overrideModule(ProjectAccessModule).useModule(StubProjectAccessModule)
+      .overrideModule(FleetJobsModule).useModule(StubFleetJobsModule)
+      .overrideModule(FleetReviewsModule).useModule(StubFleetReviewsModule)
       .overrideProvider(ProjectMembershipGuard).useValue({})
       .overrideProvider(ProjectAccessService).useValue({})
       .overrideProvider(RequiresGuard).useValue({})
@@ -131,5 +148,9 @@ describe('FlowsModule', () => {
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.create', NAX_FLOW_CREATE_VARIANT)).toBeDefined();
     expect(testingModule.get(ProjectFlowsController)).toBeInstanceOf(ProjectFlowsController);
     expect(testingModule.get(ApprovalCommandRegistry).get('fleet.flow.stop', FLOW_STOP_VARIANT)).toBeDefined();
+    expect(testingModule.get(FleetFlowTicker)).toBeInstanceOf(FleetFlowTicker);
+    expect(testingModule.get(FleetFlowAdvanceService)).toBeInstanceOf(FleetFlowAdvanceService);
+    expect(testingModule.get(PrismaFleetFlowStepRepository)).toBeInstanceOf(PrismaFleetFlowStepRepository);
+    expect(testingModule.get(FLEET_FLOW_STEP_REPOSITORY)).toBe(testingModule.get(PrismaFleetFlowStepRepository));
   });
 });

@@ -69,6 +69,14 @@ export class PrismaFleetPrReviewRepository
     await this.db.fleetPrReview.deleteMany({ where: { id } });
   }
 
+  /** Atomically deletes only a stale pending claim that has not acquired a job or settled. */
+  async removeStalePending(id: string, staleBefore: Date): Promise<boolean> {
+    const result = await this.db.fleetPrReview.deleteMany({
+      where: { id, outcome: 'pending', jobId: null, createdAt: { lt: staleBefore } },
+    });
+    return result.count === 1;
+  }
+
   /**
    * Existence only, read from the principal's own table, as `PrismaScheduleRepository.findOwnerAccess` does.
    * A disabled USER is refused; an AGENT is never disabled (status is liveness, not access). Nothing is cached.

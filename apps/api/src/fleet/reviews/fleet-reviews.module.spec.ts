@@ -12,6 +12,8 @@ import { FleetPrReviewPass } from './fleet-pr-review.pass';
 import { FleetPrReviewPoller } from './fleet-pr-review.poller';
 import { FleetReviewsModule } from './fleet-reviews.module';
 import { FixFollowUpSubscriber } from './fix-follow-up.subscriber';
+import { FleetReviewClaimService } from './fleet-review-claim.service';
+import { FleetReviewEventsService } from './fleet-review-events.service';
 import { ReviewHeadDispatcher } from './review-head-dispatcher';
 import { ReviewEventMinter } from './review-event.minter';
 import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
@@ -53,6 +55,13 @@ describe('FleetReviewsModule', () => {
     expect(module.get(ReviewEventMinter)).toBeInstanceOf(ReviewEventMinter);
     expect(module.get(ReviewDecisionWriter)).toBeInstanceOf(ReviewDecisionWriter);
     await expect(module.get(ReviewEventMinter).run()).resolves.toBeUndefined();
+  });
+
+  it('US-011 AC-10/11: exports claim service and preserves review events service', async () => {
+    module = await Test.createTestingModule({ imports: [GlobalStubsModule, FleetReviewsModule] }).compile();
+
+    expect(module.get(FleetReviewClaimService)).toBeInstanceOf(FleetReviewClaimService);
+    expect(module.get(FleetReviewEventsService)).toBeInstanceOf(FleetReviewEventsService);
   });
 
   it('AC-8: compiles with FleetPrReviewPoller resolvable', async () => {
