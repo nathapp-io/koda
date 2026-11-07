@@ -28,6 +28,7 @@ import { FleetHealthAlertSubscriber } from './fleet/fleet-health-alert.subscribe
 import { FleetHealthAlertsRepository } from './fleet/fleet-health-alerts.repository';
 import { FleetHealthDetector } from './fleet/fleet-health.detector';
 import { FleetJobOutcomeSubscriber } from './fleet/fleet-job-outcome.subscriber';
+import { FleetFlowStoppedSubscriber } from './fleet/fleet-flow-stopped.subscriber';
 import { FleetNotificationReader } from './fleet/fleet-notification.reader';
 
 /**
@@ -59,6 +60,7 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     FleetNotificationReader,
     FleetHealthAlertsRepository,
     FleetJobOutcomeSubscriber,
+    FleetFlowStoppedSubscriber,
     FleetBudgetIncidentSubscriber,
     FleetHealthDetector,
     FleetHealthAlertSubscriber,

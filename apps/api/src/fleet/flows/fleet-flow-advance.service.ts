@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -17,7 +18,8 @@ import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository 
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
-import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
+import { decideFlowStep, type ApplyCallsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
+import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
@@ -30,16 +32,17 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { isTerminal } from '../jobs/job-state';
 import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
+import { FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
-interface DispatchPass {
+interface DispatchPass<A extends DispatchAction | ApplyCallsAction = DispatchAction | ApplyCallsAction> {
   flow: FleetFlowRecord;
-  action: DispatchAction;
+  action: A;
   plan: FleetJobRecord | null;
   remainingCapUsd: string;
 }
 
-/** Decide under parent/flow locks, dispatch outside a transaction, then re-lock to record progress. */
+/** Decide under parent/flow locks, dispatch or apply calls outside a transaction, then re-lock to record progress. */
 @Injectable()
 export class FleetFlowAdvanceService {
   constructor(
@@ -56,19 +59,26 @@ export class FleetFlowAdvanceService {
     private readonly github: GitHubAppClient,
     private readonly reviews: FleetReviewClaimService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
+    private readonly calls: FleetFlowCallsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
     const pass = await this.decide(flowId, now);
     if (!pass) return;
-    if (pass.action.step === 'REVIEW') {
-      await this.advanceReview(pass, now);
+    const { flow, action } = pass;
+    if (action.kind === 'apply_calls') {
+      await this.advanceCalls(flow, action, pass.plan, now);
       return;
     }
-    const { flow, action } = pass;
+    const dispatchPass = { ...pass, action };
+    if (action.step === 'REVIEW') {
+      await this.advanceReview(dispatchPass, now);
+      return;
+    }
     let jobId: string;
     try {
-      jobId = await this.dispatchStep(pass);
+      jobId = await this.dispatchStep(dispatchPass);
     } catch (error) {
       await this.refuseDispatch(flow, action.step, error, now);
       return;
@@ -80,12 +90,38 @@ export class FleetFlowAdvanceService {
     });
   }
 
+  /** Forge writes never hold locks; their progress belongs to the approval generation that chose them. */
+  private async advanceCalls(
+    flow: FleetFlowRecord, action: ApplyCallsAction, plan: FleetJobRecord | null, now: Date,
+  ): Promise<void> {
+    const expectedHead = action.step === 'SPEC_REVIEW' ? flow.specSha : plan?.resultSha;
+    if (!expectedHead) throw new Error('PRD_REVIEW calls require a PLAN result sha');
+    const outcome = await this.calls.apply(flow, action, expectedHead);
+    if (outcome.kind === 'retry') return;
+    if (outcome.kind === 'failed') {
+      await this.writeStop(flow, 'calls_failed', `${action.step}: ${outcome.detail}`, now);
+      return;
+    }
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return;
+      if (outcome.kind === 'stale') {
+        await this.flowService.reaskLocked(current, outcome.head, now);
+        return;
+      }
+      await this.steps.recordCalls(current.id, current.features[0].id, action.jobId, outcome.specSha);
+      await this.record(current, `flow calls ${action.step}`, 'flow.calls', {
+        step: action.step, jobId: action.jobId, specSha: outcome.specSha, count: action.findings.length,
+      });
+    });
+  }
+
   /**
    * `REVIEW` goes through the review head claim, so an auto-review of the same head is adopted instead of
    * dispatched twice. The claim key is the head the `RUN` pushed (`resultSha`): nothing else writes the
    * feature branch between the `RUN` and this `REVIEW`. Every claim write happens outside a transaction.
    */
-  private async advanceReview(pass: DispatchPass, now: Date): Promise<void> {
+  private async advanceReview(pass: DispatchPass<DispatchAction>, now: Date): Promise<void> {
     const { flow, action } = pass;
     const pr = action.pr;
     // The decision engine waits or stops on missing RUN results before selecting REVIEW.
@@ -127,7 +163,7 @@ export class FleetFlowAdvanceService {
    * The head already has a job (an auto-review for the same repo, PR and head). Adopt it into this flow in
    * the record transaction, after the flow-state check; a job another flow already owns is a refusal.
    */
-  private async adoptReview(pass: DispatchPass, jobId: string, now: Date): Promise<void> {
+  private async adoptReview(pass: DispatchPass<DispatchAction>, jobId: string, now: Date): Promise<void> {
     const { flow, action } = pass;
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
@@ -143,7 +179,7 @@ export class FleetFlowAdvanceService {
   }
 
   /** The exact body for the step the decision chose, dispatched for the flow's creator outside a transaction. */
-  private async dispatchStep(pass: DispatchPass): Promise<string> {
+  private async dispatchStep(pass: DispatchPass<DispatchAction>): Promise<string> {
     const { flow, action, plan } = pass;
     const body = buildStepDispatch({
       flow, feature: flow.features[0], step: action.step,
@@ -180,7 +216,7 @@ export class FleetFlowAdvanceService {
     if (!(await this.lockParent(previous))) return null;
     const current = await this.flows.lockById(previous.id);
     if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return null;
-    if (current.specSha !== previous.specSha
+    if (current.branch !== previous.branch || current.specSha !== previous.specSha
       || current.approvedAt?.getTime() !== previous.approvedAt?.getTime()) return null;
     return current;
   }
@@ -212,7 +248,7 @@ export class FleetFlowAdvanceService {
     // transient forge failure commit even a bookkeeping write. No token crosses this boundary.
     let forgeHead: string | null | undefined;
     try {
-      forgeHead = await this.readSpecHead(flow);
+      forgeHead = await this.readSpecHead(flow, now);
     } catch (error) {
       if (error instanceof RepoCheckException) return;
       throw error;
@@ -229,9 +265,11 @@ export class FleetFlowAdvanceService {
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
       const snapshot = await this.steps.latestJobWithIngest(current.id);
       // A dispatch can finish preflight and insert after a different spec was re-approved. queuedAt
-      // alone cannot identify that approval's review: ignore the old SHA for both decision and recovery,
-      // otherwise we would either adopt stale work or wait forever instead of reviewing the new spec.
-      const latest = snapshot?.job.flowStep === 'SPEC_REVIEW' && snapshot.job.ref !== current.specSha
+      // alone cannot identify that approval's review: ignore the old SHA for both decision and recovery.
+      // Our own calls commit is the exception: keep its review only within this approval generation.
+      const appliedReview = snapshot !== null && snapshot.job.id === current.features[0]?.callsJobId
+        && current.approvedAt !== null && snapshot.job.queuedAt.getTime() >= current.approvedAt.getTime();
+      const latest = snapshot?.job.flowStep === 'SPEC_REVIEW' && snapshot.job.ref !== current.specSha && !appliedReview
         ? null : snapshot;
       const input = await this.decisionInput(current, latest, now);
       const action = decideFlowStep(input);
@@ -247,12 +285,12 @@ export class FleetFlowAdvanceService {
         await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
-      if (action.kind !== 'dispatch') {
+      if (action.kind !== 'dispatch' && action.kind !== 'apply_calls') {
         await this.writeDecision(current, job ?? null, action, now);
         return;
       }
-      // Dispatch guards run in order, against the freshly reconciled spend and the original creator.
-      const remaining = remainingCapUsd(current.costCapUsd, spentUsd);
+      // Calls are not billed. Dispatch guards retain their order; both paths check creator access.
+      const remaining = action.kind === 'dispatch' ? remainingCapUsd(current.costCapUsd, spentUsd) : '0.0000';
       if (remaining === null) {
         await this.writeDecision(current, job ?? null, {
           kind: 'stop', reason: 'cost_cap', detail: `spent ${spentUsd} of cap ${current.costCapUsd}`,
@@ -267,6 +305,20 @@ export class FleetFlowAdvanceService {
           kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
         }, now);
         return;
+      }
+      if (action.kind === 'apply_calls') {
+        const plan = action.step === 'PRD_REVIEW' ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+        if (action.step === 'PRD_REVIEW') {
+          if (!plan?.resultBranch || !plan.resultSha) throw new Error('PRD_REVIEW calls require a PLAN result branch and sha');
+          // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
+          // its target under the locks so calls, re-asks and the following PLAN all use that branch.
+          if (current.branch !== plan.resultBranch) {
+            await this.steps.setBranch(current.id, plan.resultBranch);
+            await this.record(current, 'flow PLAN output branch', 'flow.branch', { branch: plan.resultBranch, jobId: plan.id });
+            current.branch = plan.resultBranch;
+          }
+        }
+        return { flow: current, action, plan, remainingCapUsd: remaining };
       }
       if (action.step === 'SPEC_REVIEW' || action.step === 'PLAN') {
         // A different approval/target or a newly eligible step needs its own preflight next pass.
@@ -306,12 +358,18 @@ export class FleetFlowAdvanceService {
   }
 
   /** undefined: not a candidate; null: disconnected. Only a head SHA survives forge preflight. */
-  private async readSpecHead(flow: FleetFlowRecord): Promise<string | null | undefined> {
+  private async readSpecHead(flow: FleetFlowRecord, now: Date): Promise<string | null | undefined> {
     if (flow.threadId !== null || (flow.state !== 'APPROVED' && flow.state !== 'RUNNING')) return;
     const snapshot = await this.steps.latestJobWithIngest(flow.id);
     const latest = snapshot?.job;
+    // Calls own forge failure classification, including permanent installation failures. A dispatch
+    // preflight here would swallow them before the transactional calls_failed stop/outbox path.
+    // The locked decision still re-reads everything; an action that changes to dispatch waits a tick.
+    if (latest?.flowStep === 'SPEC_REVIEW' && latest.ref === flow.specSha
+      && decideFlowStep(await this.decisionInput(flow, snapshot, now)).kind === 'apply_calls') return;
     if (flow.state !== 'APPROVED' && latest
-      && !(latest.flowStep === 'SPEC_REVIEW' && isTerminal(latest.state))) return;
+      && !(isTerminal(latest.state) && (latest.flowStep === 'SPEC_REVIEW'
+        || (latest.flowStep === 'PRD_REVIEW' && latest.id === flow.features[0]?.callsJobId)))) return;
     const repo = await this.repos.findReviewRepo(flow.repoId);
     if (!repo || repo.githubInstallationId === null) return null;
     const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
@@ -343,6 +401,9 @@ export class FleetFlowAdvanceService {
       // Only a finished RUN consults this, and it arrives with the row it belongs to.
       ingestSettled: latest?.ingestSettled ?? false,
       featurePrNumber: flow.features[0]?.prNumber ?? null,
+      callsJobId: flow.features[0]?.callsJobId ?? null,
+      planCount: await this.steps.countJobsForStepSince(flow.id, 'PLAN', flow.approvedAt ?? now),
+      canApplyCalls: flow.entry === 'NAX',
     };
   }
 
@@ -394,6 +455,15 @@ export class FleetFlowAdvanceService {
       await this.flows.stop(flow.id, action.reason, now, detail);
       await this.record(flow, 'flow stopped', 'flow.stopped', {
         flowId: flow.id, stopReason: action.reason, detail, step: job?.flowStep ?? null, jobId: job?.id ?? null,
+      });
+      await this.outbox.record({
+        type: FLEET_FLOW_STOPPED,
+        payload: {
+          flowId: flow.id, projectId: flow.projectId, feature: flow.features[0].feature,
+          stopReason: action.reason, detail: detail.slice(0, 500), approverId: flow.approverId,
+          creatorType: flow.createdByType, creatorId: flow.createdById,
+        },
+        metadata: { projectId: flow.projectId, eventId: `${flow.id}:stopped` },
       });
       return;
     }

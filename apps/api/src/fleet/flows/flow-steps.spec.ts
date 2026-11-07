@@ -22,8 +22,10 @@ describe('flow steps', () => {
     expect(buildReviewTask('SPEC_REVIEW', 'p'.repeat(400), 'a').length).toBeLessThanOrEqual(16_384);
   });
 
-  it('includes the exact empty-findings line in the verdict instruction', () => {
+  it('includes the classified schema and ends with the exact empty-findings line', () => {
+    expect(FLOW_VERDICT_INSTRUCTION).toContain('"class":"answered|minor|ambiguous"');
     expect(FLOW_VERDICT_INSTRUCTION.split('\n')).toContain('{"findings":[]}');
+    expect(FLOW_VERDICT_INSTRUCTION.endsWith('{"findings":[]}')).toBe(true);
   });
 
   it('sets the maximum flow stop detail length to 2000', () => {

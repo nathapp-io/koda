@@ -1,6 +1,6 @@
 import {
   budgetIncidentId, budgetScopeLabel, buildJobOutcomePayload, jobOutcomeOf,
-  parseBudgetIncidentPayload, parseHealthAlertPayload, parseJobOutcomePayload,
+  parseBudgetIncidentPayload, parseFlowStoppedPayload, parseHealthAlertPayload, parseJobOutcomePayload,
 } from './fleet-notification-events';
 
 describe('jobOutcomeOf (S4a §2.4)', () => {
@@ -62,6 +62,17 @@ describe('payload parsers', () => {
     const p = { incidentId: 'i', kind: 'hard_stop', scope: 'global', spentUsd: '12.5', amountUsd: '10' };
     expect(parseBudgetIncidentPayload(p)).toEqual(p);
     expect(parseBudgetIncidentPayload({ ...p, kind: 'resumed' })).toBeNull();
+  });
+
+  it('accepts a complete flow-stopped payload unchanged and rejects missing/invalid fields', () => {
+    const stopped = {
+      flowId: 'flow-1', projectId: 'p1', feature: 'f', stopReason: 'step_failed', detail: 'failed',
+      approverId: null, creatorType: 'USER', creatorId: 'u1',
+    } as const;
+    expect(parseFlowStoppedPayload(stopped)).toEqual(stopped);
+    expect(parseFlowStoppedPayload({ ...stopped, flowId: undefined })).toBeNull();
+    expect(parseFlowStoppedPayload({ ...stopped, creatorType: 'RUNNER' })).toBeNull();
+    expect(parseFlowStoppedPayload({ ...stopped, approverId: null })).toEqual(stopped);
   });
 
   it('accepts a health alert with or without provider', () => {

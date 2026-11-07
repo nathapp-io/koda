@@ -9,6 +9,7 @@ import type { BudgetScopeType } from '../../fleet/budgets/domain/budget.domain';
 export const FLEET_JOB_OUTCOME = 'fleet_job_outcome';
 export const FLEET_BUDGET_INCIDENT = 'fleet_budget_incident';
 export const FLEET_HEALTH_ALERT = 'fleet_health_alert';
+export const FLEET_FLOW_STOPPED = 'fleet_flow_stopped';
 
 export const JOB_OUTCOMES = ['escalated', 'failed', 'crashed', 'pr_opened'] as const;
 export type JobOutcome = (typeof JOB_OUTCOMES)[number];
@@ -21,6 +22,10 @@ export interface FleetJobOutcomePayload { jobId: string; leaseEpoch: number; pro
   outcome: JobOutcome; repo: string; feature: string; resultPrUrl: string | null }
 export interface FleetBudgetIncidentPayload { incidentId: string; kind: BudgetIncidentNotifyKind; scope: string; spentUsd: string; amountUsd: string }
 export interface FleetHealthAlertPayload { alertId: string; kind: HealthAlertKind; runner: string; provider: string | null; expiresAt: string | null }
+export interface FleetFlowStoppedPayload {
+  flowId: string; projectId: string; feature: string; stopReason: string; detail: string;
+  approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string;
+}
 
 const FAILURE_OUTCOME: Readonly<Record<string, JobOutcome>> = Object.freeze({
   [FleetJobState.ESCALATED]: 'escalated',
@@ -75,6 +80,16 @@ export function parseBudgetIncidentPayload(raw: unknown): FleetBudgetIncidentPay
   const { incidentId, kind, scope, spentUsd, amountUsd } = raw;
   if (!isText(incidentId) || !oneOf(BUDGET_INCIDENT_KINDS, kind) || !isText(scope) || !isText(spentUsd) || !isText(amountUsd)) return null;
   return { incidentId, kind, scope, spentUsd, amountUsd };
+}
+
+export function parseFlowStoppedPayload(raw: unknown): FleetFlowStoppedPayload | null {
+  if (!isObject(raw)) return null;
+  const { flowId, projectId, feature, stopReason, detail, approverId, creatorType, creatorId } = raw;
+  if (!isText(flowId) || !isText(projectId) || typeof feature !== 'string' || !isText(stopReason)
+    || typeof detail !== 'string' || (approverId !== null && !isText(approverId))
+    || (creatorType !== 'USER' && creatorType !== 'AGENT') || !isText(creatorId)) return null;
+  const validApproverId: string | null = typeof approverId === 'string' ? approverId : null;
+  return { flowId, projectId, feature, stopReason, detail, approverId: validApproverId, creatorType, creatorId };
 }
 
 export function parseHealthAlertPayload(raw: unknown): FleetHealthAlertPayload | null {
