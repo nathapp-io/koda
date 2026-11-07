@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T11:44:39.242Z",
+  "updatedAt": "2026-11-07T11:59:57.610Z",
   "userStories": [
     {
       "id": "US-001",
@@ -504,14 +504,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "An additive pure payload/parser and one enqueue call reuse the existing centralized stop transaction and package outbox; ordinary unit TDD covers the established producer and DI-stub patterns."
+        "reasoning": "An additive pure payload/parser and one enqueue call reuse the existing centralized stop transaction and package outbox; ordinary unit TDD covers the established producer and DI-stub patterns.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/notifications/fleet/fleet-notification-events.ts",
@@ -547,7 +550,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b241bca494ca30efce24108c3352300db5d3820"
     },
     {
       "id": "US-009",
