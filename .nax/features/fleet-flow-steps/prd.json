@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T05:16:40.723Z",
+  "updatedAt": "2026-11-07T05:26:32.173Z",
   "userStories": [
     {
       "id": "US-001",
@@ -367,14 +367,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure decision abstraction with approval-epoch and terminal-state rules; no persistence or access-control side effects."
+        "reasoning": "Pure decision abstraction with approval-epoch and terminal-state rules; no persistence or access-control side effects.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-verdict.ts",
@@ -390,7 +393,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "907997ce28e73f2b0e4e57776ab3b3430e7f5c9e"
     },
     {
       "id": "US-008",
