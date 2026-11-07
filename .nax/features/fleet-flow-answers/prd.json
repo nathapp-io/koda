@@ -1,0 +1,748 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-answers",
+  "branchName": "feat/fleet-flow-answers",
+  "createdAt": "2026-11-30T00:00:00.000Z",
+  "updatedAt": "2026-11-07T15:28:31.189Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Request phase-9-only PRD reviews",
+      "description": "**Goal** — Restrict the PRD_REVIEW task to PRD fidelity using the spec-review phase selector.\n\n**Motivation** — A re-plan cannot fix a spec opinion, so the second round stopped the flow.\n\n**Approach** — `buildReviewTask` (`apps/api/src/fleet/flows/flow-steps.ts`).\nBaseline: `PRD_REVIEW` prompt `/spec-review --spec <specPath> --prd .nax/features/<feature>/prd.json`.\nTarget: the same prompt followed by ` --phase 9`; `SPEC_REVIEW` unchanged.\n\n**The phase-9 selector is sent unconditionally.** koda does not probe the runner's installed spec-review skill; a runner whose skill predates 0.4.17 runs its full review, as today.\n\nModify flow-steps.ts and the existing PRD_REVIEW assertion in flow-steps.spec.ts: place the selector after the prd path and before the blank line and verdict instruction; preserve the existing prompt-length bound and SPEC_REVIEW assertion.\n\n**Scope** — In: review prompt construction and its direct regressions. Out: questions/decision changes (US-002/US-004). Probing whether the runner's spec-review skill supports `--phase 9`; a runner on an older skill runs its full review. The spec-review skill change itself (nathapp-io/nax-spec-kit-skills#56), which ships in that repository.\n\n**Interface**\n```typescript\nexport function buildReviewTask(step: ReviewStep, specPath: string, feature: string): string\n```",
+      "acceptanceCriteria": [
+        "[unit] buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a') starts with /spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json --phase 9, followed by a blank line and FLOW_VERDICT_INSTRUCTION.",
+        "[unit] buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a') starts with /spec-review .nax/features/a/spec.md followed by a blank line, with no --phase (a guard that already passes before this story).",
+        "[unit] When buildReviewTask('PRD_REVIEW', 'p'.repeat(20000), 'a') receives an oversized spec path, then its returned task is at most AGENT_TASK_MAX_LENGTH (16,384) characters, preserving the existing task-length bound.",
+        "[unit] When buildReviewTask('PRD_REVIEW', 'p'.repeat(20000), 'a') truncates the oversized prompt, then the returned task still ends with a blank line followed by the complete FLOW_VERDICT_INSTRUCTION, preserving the existing verdict suffix."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "review"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One prompt-construction change with existing exact-string unit regressions and no new dependency."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/flows/flow-steps.spec.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-steps.spec.ts",
+          "reason": "the PRD_REVIEW task assertion (line ~17) expects the phase 9 selector after the prd path, before the verdict instruction; the SPEC_REVIEW assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Build deterministic questions and human-answer call bullets",
+      "description": "**Goal** — Add the shared question/answer types and deterministic text builders, and render human-answered ambiguity in the existing calls block.\n\n**Motivation** — F4a (§9.172 of the fleet design doc, 2026-11-07) classifies findings and applies `answered`/`minor` ones, but an `ambiguous` finding still stops the flow (`review_ambiguous`), and a human has to start a new flow after editing the spec by hand.\n\n**Approach** — `FlowFinding` (`apps/api/src/fleet/flows/flow-verdict.ts`).\nTarget: adds optional `answer?: string`. `parseFlowVerdict` never sets it; only the decision does.\n\n`buildFlowCalls` (`apps/api/src/fleet/flows/flow-calls.ts`).\nBaseline: only `answered` and `minor` findings produce bullets.\nTarget: an `ambiguous` finding with a non-blank `answer` also produces a bullet,\n`- **<id>** (answer): <question> Answer: <answer>`, with `<id>` named as for the other bullets (reviewer id, else position) and question and answer each collapsed to one line and cut at `FLOW_CALL_TEXT_MAX`. An `ambiguous` finding without an answer still produces none.\n\n`flowQuestions(findings)`: one entry per `ambiguous` finding, in verdict order; `id` = its 1-based position in `findings` as a string; `question` = the finding's question collapsed to one line and cut at `FLOW_CALL_TEXT_MAX`.\n\n**Question ids are positions.** A question's id is the 1-based position of its finding in the verdict's `findings` list (`\"2\"`, `\"5\"`), never the reviewer's own `id`: positions are unique and short, and a reviewer id can repeat or be blank.\n\nAdd `FLOW_ANSWER_MAX` (1000, equal to `FLOW_CALL_TEXT_MAX`, so an accepted answer is never cut in the calls block). Both shared record types must be type aliases so they are assignable to Prisma's InputJsonValue.\n\n`formatQuestionsComment` (the ticket comment), for example:\n```text\nFlow needs answers (SPEC_REVIEW job cmw6hlv1x003q08quzn0wgbfw):\n2. Should clamp accept NaN bounds?\n5. Is -0 a valid upper bound?\nAnswer every question with POST /api/projects/sandbox/flows/cmw6h7jki001t08quwgb8dsiy/answers and the body {\"jobId\":\"cmw6hlv1x003q08quzn0wgbfw\",\"answers\":[{\"id\":\"2\",\"answer\":\"...\"}]}.\n```\nThe example body uses the first question's id. Preserve existing answered/minor bullet formatting, per-job heading replay behavior, limits and all existing assertions. Create flow-questions.spec.ts; extend flow-calls.spec.ts and flow-verdict.spec.ts, including the regression that a verdict's own answer is dropped.\n\n**Scope** — In: shared pure types, positional questions, comment formatting, answer bullets and verdict allowlist regression. Out: body parsing (US-003), attaching answers in decisions (US-004), persistence (US-005) and side-effect delivery (US-007/US-008). A billed supervisor job that rewrites the questions; the comment text is built by koda.\n\n**Interface**\n```typescript\nexport type FlowQuestion = { id: string; question: string };\nexport type FlowAnswer = { id: string; answer: string };\nexport const FLOW_ANSWER_MAX = 1000;\nflowQuestions(findings: FlowFinding[]): FlowQuestion[]\nformatQuestionsComment(input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[]; answerPath: string }): string\n```",
+      "acceptanceCriteria": [
+        "[unit] flowQuestions on findings [minor, ambiguous(\"Q1\"), answered, ambiguous(\"Q2\")] returns [{ id: \"2\", question: \"Q1\" }, { id: \"4\", question: \"Q2\" }].",
+        "[unit] flowQuestions gives a lone ambiguous finding whose own id is \"api-shape\" the question id \"1\".",
+        "[unit] flowQuestions collapses a question containing a newline and repeated spaces to one line.",
+        "[unit] flowQuestions cuts a 1,500-character question to exactly FLOW_CALL_TEXT_MAX (1,000) characters.",
+        "[unit] flowQuestions returns an empty array when no finding is ambiguous.",
+        "[unit] formatQuestionsComment({ step: 'SPEC_REVIEW', jobId: 'j1', questions: [{ id: '2', question: 'Q1' }, { id: '5', question: 'Q2' }], answerPath: '/api/projects/sandbox/flows/f1/answers' }) returns exactly the four lines Flow needs answers (SPEC_REVIEW job j1):, 2. Q1, 5. Q2 and Answer every question with POST /api/projects/sandbox/flows/f1/answers and the body {\"jobId\":\"j1\",\"answers\":[{\"id\":\"2\",\"answer\":\"...\"}]}. joined by newlines; the example body always uses the first question's id.",
+        "[unit] buildFlowCalls with an ambiguous finding at position 1 carrying question: \"Q1\" and answer: \"Use USD\" appends the bullet - **1** (answer): Q1 Answer: Use USD.",
+        "[unit] buildFlowCalls names an answered ambiguous finding with id \"api-shape\" as **api-shape**.",
+        "[unit] buildFlowCalls appends no bullet for an ambiguous finding without an answer, while a minor finding in the same input keeps its bullet.",
+        "[unit] buildFlowCalls cuts an answer of 1,500 characters to FLOW_CALL_TEXT_MAX characters in its bullet.",
+        "[unit] parseFlowVerdict on a verdict whose ambiguous finding includes an \"answer\" field returns that finding without an answer property (a guard that already passes before this story)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "pure-functions"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Bounded additive pure helpers and formatting changes across existing calls/verdict modules, without external integration."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-calls.spec.ts",
+        "apps/api/src/fleet/flows/flow-verdict.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-questions.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-calls.spec.ts",
+          "reason": "add the answered-ambiguous bullet tests next to the existing calls-block tests; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-verdict.spec.ts",
+          "reason": "add the test that a verdict's own answer field is dropped; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Parse complete review-bound answer batches",
+      "description": "**Goal** — Parse the human answer request into a stable JSON shape with deterministic first-failure validation.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — `parseFlowAnswers(body)` checks `body` and `jobId`, then `answers`, then each entry in array order (shape, `id`, `answer`, duplicate), and throws `ValidationAppException` with key `fleet.flows.answersInput` and the named `reason` on the first failure. An array is not an object for these checks:\n\n- `body` not an object: `body`; `jobId` not a non-blank string: `jobId`.\n- `answers` not an array of 1 to `FLOW_CALLS_MAX_FINDINGS` entries: `answers`.\n- an entry not an object: `answers[<n>]`.\n- `id` not a string, blank after trimming, or longer than `FLOW_CALL_ID_MAX`: `answers[<n>].id`.\n- `answer` not a string, blank after trimming, or longer than `FLOW_ANSWER_MAX`: `answers[<n>].answer`.\n- an `id` equal to an earlier entry's: `answers[<n>].id duplicate`.\n\nIds and answers are kept as sent (no trimming); ids match question ids exactly.\n\n**Answers name their review job.** The body is `{ jobId, answers }`; `jobId` must equal the feature's `questionsJobId`, else 409 `fleet.flows.answersStale`. Position ids repeat across reviews, so without the job id a late or approval-deferred post could answer a later wait's questions. This story parses jobId; the service comparison belongs to US-010. Mirror flow-input.ts's exception style, with FLOW_CALL_ID_MAX 64, FLOW_ANSWER_MAX 1000 and FLOW_CALLS_MAX_FINDINGS 20 from flow-calls.ts.\n\n**Scope** — In: new flow-answers.ts and its unit tests. Out: exact question-set validation and stale-job/state checks (US-010), human/permission checks and route registration (US-011), and i18n message additions (US-010/US-011). Partial answers: one call must answer every question of the waiting review.\n\n**Interface**\n```typescript\nexport interface FlowAnswersInput { jobId: string; answers: FlowAnswer[] }\nparseFlowAnswers(body: unknown): FlowAnswersInput\n```",
+      "acceptanceCriteria": [
+        "[unit] parseFlowAnswers({ jobId: 'j1', answers: [{ id: '2', answer: 'A1' }] }) returns { jobId: 'j1', answers: [{ id: '2', answer: 'A1' }] }.",
+        "[unit] parseFlowAnswers('x') and parseFlowAnswers([]) throw ValidationAppException with key fleet.flows.answersInput and reason body.",
+        "[unit] parseFlowAnswers with a missing or blank jobId throws reason jobId.",
+        "[unit] parseFlowAnswers with a missing answers, an empty array or 21 entries throws reason answers.",
+        "[unit] parseFlowAnswers with answers: ['x'] or answers: [[]] throws reason answers[0].",
+        "[unit] parseFlowAnswers throws reason answers[0].id for a numeric id, a blank id and an id of 65 characters.",
+        "[unit] parseFlowAnswers throws reason answers[0].answer for a numeric answer, a blank answer and an answer of 1,001 characters.",
+        "[unit] parseFlowAnswers throws reason answers[1].id duplicate when two entries share id \"2\", and for [{ id: '1', answer: 'a' }, { id: '1', answer: 'b' }, { id: 5 }] (entries are checked in array order).",
+        "[unit] parseFlowAnswers keeps an answer with surrounding spaces exactly as sent."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "validation"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One new pure parser source file plus colocated tests mirrors flow-input's validation style and reuses upstream limits; it makes no authorization decision."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/flows/flow-input.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-answers.ts",
+        "apps/api/src/fleet/flows/flow-answers.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Wait for ambiguous-review answers in the flow decision",
+      "description": "**Goal** — Replace nax-entry ambiguity stops with a review-bound wait and feed answered findings into the existing calls action.\n\n**Motivation** — F4a (§9.172 of the fleet design doc, 2026-11-07) classifies findings and applies `answered`/`minor` ones, but an `ambiguous` finding still stops the flow (`review_ambiguous`), and a human has to start a new flow after editing the spec by hand.\n\n**Approach** — `decideFlowStep` for a `COMPLETED` review job whose verdict parsed, in this order (the first rule that matches wins):\n\n1. No findings: `SPEC_REVIEW` continues to `PLAN`, `PRD_REVIEW` to `RUN` (unchanged).\n2. Any `ambiguous` finding and `canApplyCalls` false (thread entry): stop `review_ambiguous`, detail `formatQuestions` (unchanged, whatever the count).\n3. More than `FLOW_CALLS_MAX_FINDINGS` findings: stop `review_findings` (for a nax entry with an `ambiguous` finding this replaces F4a's `review_ambiguous`).\n4. `canApplyCalls` false: stop `review_findings` (unchanged).\n5. Any `ambiguous` finding, unless `questionsJobId` equals the job's id and `answers` is not null: `wait_answer` with the job's step and id and `flowQuestions(findings)`.\n6. `PRD_REVIEW`, `planCount` 2 or more, and no `ambiguous` finding: stop `review_findings`.\n7. `callsJobId` equals the job's id: dispatch `PLAN` (unchanged).\n8. Otherwise: `apply_calls` with the job's step and id and the findings, each `ambiguous` finding carrying the `answer` whose `id` equals its question id.\n\n**Answers are bound to the review job.** A new wait (a later review) replaces the questions and clears older answers. The stored answers apply only while the latest review job is `questionsJobId`.\n\n**An answered `PRD_REVIEW` re-plans even on the second round.** The F4a \"second `PRD_REVIEW` round stops\" rule applies only to a verdict with no `ambiguous` finding; each extra round needs a human's answers.\n\nUpdate flow-step-decision.spec.ts input() with questionsJobId: null, answers: null; its mixed minor/ambiguous nax assertion now expects wait_answer, but thread cases still stop. Preserve F4a stop integration regressions: in test/integration/fleet/fleet-flow-verdicts.integration.spec.ts give seedReview an entry option; for the ambiguous-stop and stop-event-rollback cases set the created flow row's entry to THREAD using db.fleetFlow.update, leaving threadId null (canApplyCalls reads entry; lockParent falls back to repo). Keep all their stop, ticket, comment, notification and rollback assertions unchanged.\n\n**Scope** — In: decision input/action types, exact ordered rules, answer enrichment and the intentionally affected regression fixtures. Out: storing waits (US-005/US-006), parsing/recording answer requests (US-003/US-010). Questions and answers for thread-entry flows: their branch exists only on the runner, so the api cannot commit the answers. Multi-feature flows (fleet flow F5); the decision still skips any flow with more than one feature. Reusing stored answers after a re-ask: a re-approved flow re-runs its spec review and asks again. Agent rulings on the PR's open items after `FIX` (a feature after F4b); `pr_not_ready` still stops.\n\n**Interface**\n```typescript\n// Added to FlowStepInput:\nquestionsJobId: string | null;\nanswers: FlowAnswer[] | null;\n// Added to FlowStepAction:\n{ kind: 'wait_answer'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[] }\nexport type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;\nexport function decideFlowStep(input: FlowStepInput): FlowStepAction\n```",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep for a nax-entry (canApplyCalls: true) COMPLETED SPEC_REVIEW job j1 with findings [minor, ambiguous] and questionsJobId: null returns { kind: 'wait_answer', step: 'SPEC_REVIEW', jobId: 'j1', questions: flowQuestions(findings) }.",
+        "[unit] The same input as a PRD_REVIEW returns wait_answer with step: 'PRD_REVIEW'.",
+        "[unit] A nax-entry PRD_REVIEW with an ambiguous finding, planCount: 2 and no answers returns wait_answer.",
+        "[unit] A nax-entry review with questionsJobId naming a different job and answers set returns wait_answer for the current job.",
+        "[unit] A nax-entry review whose id equals questionsJobId but with answers: null returns wait_answer.",
+        "[unit] A nax-entry SPEC_REVIEW job j1 with findings [minor, ambiguous(\"Q1\")], questionsJobId: 'j1' and answers: [{ id: '2', answer: 'A1' }] returns apply_calls whose second finding carries answer: 'A1' and whose first finding has no answer.",
+        "[unit] A nax-entry PRD_REVIEW with an ambiguous finding, planCount: 2, questionsJobId equal to its id and answers set returns apply_calls.",
+        "[unit] An answered review whose id equals callsJobId returns { kind: 'dispatch', step: 'PLAN' }.",
+        "[unit] A thread-entry (canApplyCalls: false) review with one ambiguous finding returns a review_ambiguous stop whose detail is formatQuestions of the ambiguous findings.",
+        "[unit] A thread-entry review with 21 findings, one of them ambiguous, returns a review_ambiguous stop.",
+        "[unit] A nax-entry review with 21 findings, one of them ambiguous, returns a review_findings stop.",
+        "[unit] A nax-entry PRD_REVIEW with only minor findings and planCount: 2 returns a review_findings stop.",
+        "[unit] A nax-entry completed review with more than 20 findings returns a review_findings stop for any combination of finding classes.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is a COMPLETED SPEC_REVIEW with verdict { findings: [] }, decideFlowStep returns { kind: 'dispatch', step: 'PLAN' }, unchanged from F4a.",
+        "[unit] Given a RUNNING single-feature flow whose latest job is a COMPLETED PRD_REVIEW with verdict { findings: [] }, decideFlowStep returns { kind: 'dispatch', step: 'RUN' }, unchanged from F4a."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Ordered pure decision changes and targeted regression-fixture updates; subtle ordering but no new infrastructure or access-control mechanism."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "the `input()` fixture (line ~10) gains `questionsJobId: null, answers: null`; \"US-005 AC-2 ambiguous findings precede applicable calls\" (line ~161) now expects a `wait_answer` action for a nax-entry (`canApplyCalls: true`) verdict with a minor and an ambiguous finding; thread-entry ambiguous cases keep `review_ambiguous`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts",
+          "reason": "`seedReview` (line ~95) hard-codes a nax entry, and two cases seed an ambiguous review that now waits instead of stopping: \"AC-3–AC-9: ambiguous review stops\" (line ~155) and \"AC-4: failure after persisting the stop event rolls back both writes\" (line ~199). Give `seedReview` an entry option; for these two cases, after `FleetFlowsService.create` set the row's `entry` to `THREAD` with `db.fleetFlow.update` (leave `threadId` null: `canApplyCalls` reads only `entry`, and `lockParent` falls back to the repo lock), so they still stop `review_ambiguous`, keeping every stop, ticket, comment, notification and rollback assertion."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Persist questions, answers and answer provenance",
+      "description": "**Goal** — Add nullable feature storage, repository writes and public DTO mapping for the wait/answer lifecycle.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — `FleetFlowFeatureRecord` (`apps/api/src/fleet/flows/domain/fleet-flow.domain.ts`).\nTarget: adds optional `questionsJobId?: string | null`, `questions?: FlowQuestion[] | null`, `answers?: FlowAnswer[] | null`, `answeredById?: string | null`, `answeredAt?: Date | null`.\n\n`IFleetFlowRepository` and `PrismaFleetFlowRepository`: `recordAnswers` sets the feature's `answers`, `answeredById`, `answeredAt` and `state: 'RUNNING'`, and the flow's `state: 'RUNNING'`; returns the flow with its features. The row mapper returns `questions` and `answers` as arrays, `null` when the column is null.\n\n`IFleetFlowStepRepository` and `PrismaFleetFlowStepRepository`: `setWaiting` sets the feature's `questionsJobId`, `questions`, `state: 'WAITING_ANSWER'`, clears `answers` (with `Prisma.DbNull`: a nullable `Json` column is not cleared by a plain `null`), `answeredById` and `answeredAt`, and sets the flow's `state: 'WAITING_ANSWER'`.\n\n**Answers are bound to the review job.** A new wait (a later review) replaces the questions and clears older answers. The stored answers apply only while the latest review job is `questionsJobId`.\n\nCreate prisma/migrations/20261130090000_fleet_flow_answers/migration.sql with the five nullable columns below, extend both domain repository contracts and their Prisma implementations using transaction-bound clients, and retain existing transition behavior. Extend test/integration/fleet-flow-repository.integration.spec.ts for round trips and clearing persisted answers. Exercise a missing-feature setWaiting failure inside that fixture's existing tx.run and verify caller-transaction rollback keeps the flow RUNNING; this does not require a new repository exception translation or a new transaction abstraction. Extend dto/fleet-flow.dto.spec.ts's exact mapped-flow comparison with questionsJobId: null, questions: null, answers: null, answeredAt: null for each feature. Regenerate root openapi.json via bun run api:export-spec for these four DTO fields.\n\n**Scope** — In: schema/migration, optional record fields, repository contracts/writes/mapping and four public feature DTO fields. Out: decision rules (US-004), audit/outbox orchestration (US-006), service validation/actor enforcement (US-010/US-011), permission migration (US-009), and CLI generation. Do not expose answeredById as an additional DTO requirement.\n\n**Interface**\n```typescript\nrecordAnswers(flowId: string, featureId: string, input: { answers: FlowAnswer[]; userId: string; at: Date }): Promise<FleetFlowRecord>\nsetWaiting(flowId: string, featureId: string, input: { jobId: string; questions: FlowQuestion[] }): Promise<void>\n// FleetFlowFeatureDto additions:\nquestionsJobId: string | null;\nquestions: { id: string; question: string }[] | null;\nanswers: { id: string; answer: string }[] | null;\nansweredAt: string | null; // ISO\n```\n```prisma\nquestionsJobId String?\nquestions Json?\nanswers Json?\nansweredById String?\nansweredAt DateTime?\n```",
+      "acceptanceCriteria": [
+        "[integration] A FleetFlowFeature row created without the new fields reads back questionsJobId, questions, answers, answeredById and answeredAt as null.",
+        "[integration] setWaiting(flowId, featureId, { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] }) on a RUNNING flow reads back flow state WAITING_ANSWER, feature state WAITING_ANSWER, questionsJobId j1 and questions [{ id: '2', question: 'Q1' }].",
+        "[integration] setWaiting on a feature with answers, answeredById and answeredAt set clears all three to null.",
+        "[integration] recordAnswers(flowId, featureId, { answers: [{ id: '2', answer: 'A1' }], userId: 'u1', at }) returns a record with flow state RUNNING, feature state RUNNING, answers [{ id: '2', answer: 'A1' }], answeredById u1 and answeredAt equal to at.",
+        "[integration] findById of a waiting flow returns its feature's questions as an array of { id, question } objects.",
+        "[unit] FleetFlowFeatureDto.from maps a feature's questionsJobId, questions and answers unchanged and answeredAt to its ISO string.",
+        "[unit] FleetFlowFeatureDto.from of a feature without the new fields returns questionsJobId: null, questions: null, answers: null and answeredAt: null.",
+        "[integration] When setWaiting(flowId, 'missing-feature', { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] }) is called inside tx.run on an existing RUNNING flow and rejects because the feature does not exist, then the persisted flow remains RUNNING after rollback."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "prisma",
+        "migration",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Schema migration, two repository contracts/implementations and JSON-to-domain-to-DTO mapping span persistence and public contract seams."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/dto/fleet-flow.dto.ts",
+        "apps/api/test/integration/fleet-flow-repository.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261130090000_fleet_flow_answers/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetFlowFeature` gains `questionsJobId String?`, `questions Json?`, `answers Json?`, `answeredById String?`, `answeredAt DateTime?`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+          "reason": "`FleetFlowFeatureRecord` gains the five optional fields; `IFleetFlowRepository` gains `recordAnswers`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+          "reason": "`IFleetFlowStepRepository` gains `setWaiting`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet-flow-repository.integration.spec.ts",
+          "reason": "add the `setWaiting`, `recordAnswers` and mapper round-trip tests; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/dto/fleet-flow.dto.spec.ts",
+          "reason": "its exact `toEqual` of the mapped flow (line ~47) gains `questionsJobId: null, questions: null, answers: null, answeredAt: null` on each feature."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the four new `FleetFlowFeatureDto` fields."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Atomically record flow waits and question events",
+      "description": "**Goal** — Connect wait decisions to durable state, audit/activity and one review-scoped outbox event, and supply stored answers to resumed calls.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — `FleetFlowAdvanceService` (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts`).\nTarget: `decisionInput` fills `questionsJobId` and `answers` from `flow.features[0]`; `writeDecision` handles `wait_answer`: `setWaiting`, an audit entry `system.flow.advance` (summary `flow waiting answer <STEP>`), activity `flow.waiting` `{ step, jobId, count }`, and one outbox event `fleet_flow_questions` (event id `<flowId>:questions:<jobId>`). No constructor change.\n\nThe questions event payload:\n`{ flowId, projectId, feature, step, jobId, questions: FlowQuestion[], approverId: string | null, creatorType: 'USER' | 'AGENT', creatorId }`.\n\nAdd `FLEET_FLOW_QUESTIONS` (`'fleet_flow_questions'`), `FleetFlowQuestionsPayload` and `parseFlowQuestionsPayload` in notifications/fleet/fleet-notification-events.ts. Keep the shared contract pure; validate the existing identity/creator/approver fields, the review-only step, and nonempty question array with string id/question entries, returning null for malformed data. Extend fleet-notification-events.spec.ts.\n\n**No timeout.** A flow waits until a human answers or stops it (`POST .../stop` already accepts `WAITING_ANSWER`). No job runs and no cost accrues while it waits.\n\nAfter the answers the flow is `RUNNING`; the next tick decides rule 8 (`apply_calls`); the F4a calls path commits the block and records `callsJobId`; the tick after that dispatches `PLAN`.\n\nUse existing parent-then-flow locks and one decision transaction for setWaiting, audit, activity and outbox. On a wait, return without dispatch or FleetFlowCallsService.apply. Preserve the F4a apply/record split: `FleetFlowCallsService.apply(flow, action, expectedHead)` and its `stale`/`retry`/`failed` outcomes are unchanged; it receives findings that may now carry answers. When stale, use reaskLocked with the returned head without recordCalls. Create fleet-flow-advance-answers.spec.ts with a local copy of build() from fleet-flow-advance-calls.spec.ts (it is file-local; never import a spec file).\n\n**Scope** — In: advance input/write integration, event constant/type/parser and local unit harness. Out: repository implementation (US-005), question/answer formatting (US-002), notification/ticket consumers (US-007/US-008), answer API/service (US-010/US-011), changes to calls.apply or reaskLocked. A timeout or reminder for a flow left in `WAITING_ANSWER`. Reusing stored answers after a re-ask: a re-approved flow re-runs its spec review and asks again.\n\n**Interface**\n```typescript\nexport const FLEET_FLOW_QUESTIONS = 'fleet_flow_questions';\nexport interface FleetFlowQuestionsPayload {\n  flowId: string; projectId: string; feature: string;\n  step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[];\n  approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string;\n}\nparseFlowQuestionsPayload(raw: unknown): FleetFlowQuestionsPayload | null\n```",
+      "acceptanceCriteria": [
+        "[unit] parseFlowQuestionsPayload returns the payload for a valid { flowId, projectId, feature, step, jobId, questions, approverId, creatorType, creatorId }.",
+        "[unit] parseFlowQuestionsPayload returns null when questions is empty or a question lacks a string id or question.",
+        "[unit] parseFlowQuestionsPayload returns null when step is neither SPEC_REVIEW nor PRD_REVIEW.",
+        "[unit] advance on a RUNNING nax-entry flow whose latest job is a COMPLETED SPEC_REVIEW j1 with an ambiguous finding calls setWaiting(flowId, featureId, { jobId: 'j1', questions }) with flowQuestions of the verdict.",
+        "[unit] That pass calls OutboxService.record once with type fleet_flow_questions, payload { flowId, projectId, feature, step: 'SPEC_REVIEW', jobId: 'j1', questions, approverId, creatorType, creatorId } and metadata { projectId, eventId: '<flowId>:questions:j1' }.",
+        "[unit] That pass records audit key system.flow.advance with summary flow waiting answer SPEC_REVIEW and activity flow.waiting with payload { step: 'SPEC_REVIEW', jobId: 'j1', count: 1 }.",
+        "[unit] That pass dispatches no job and never calls FleetFlowCallsService.apply.",
+        "[unit] advance on a WAITING_ANSWER flow writes and dispatches nothing.",
+        "[unit] advance on a RUNNING flow whose feature has questionsJobId: 'j1' and answers: [{ id: '2', answer: 'A1' }] calls FleetFlowCallsService.apply with findings whose ambiguous entry carries answer: 'A1'.",
+        "[unit] When that apply returns stale with head h2, advance calls reaskLocked with h2 and never calls recordCalls.",
+        "[unit] Given a RUNNING nax-entry flow with a completed SPEC_REVIEW containing only a minor finding, no callsJobId and no stored answers, advance still passes that unmodified finding to FleetFlowCallsService.apply with expectedHead equal to flow.specSha, preserving the F4a non-ambiguous calls path."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "outbox",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Reuses advance's existing transactional stop/outbox branch and calls harness for a wait branch, payload parser and two decision inputs; no new DI collaborator, locking scheme or forge behavior is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When OutboxService.record fails after the wait state is written, then the transaction leaves the flow and feature RUNNING and persists no questions event."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+          "reason": "add the `parseFlowQuestionsPayload` tests; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Notify human participants of flow questions",
+      "description": "**Goal** — Deliver a review-specific questions notification to the approver and distinct human creator through existing fan-out.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — `FleetFlowStoppedSubscriber` (`apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts`).\nTarget: `onModuleInit` registers the stop handler first, then a `fleet_flow_questions` handler that delivers `flowQuestionsDraft` to the approver and to the creator when the creator is a user other than the approver.\n\n`fleet-notification-drafts.ts`: adds `flowQuestionsDraft(payload, slug, userId)`, using `truncate`, `TITLE_MAX` and `BODY_MAX` from `apps/api/src/notifications/notification.types.ts`.\n\nThe notification: category `FLEET_NEEDS_YOU`, kind `flow_questions`, title `Flow needs answers: <feature>`, body the questions as `<id>. <question>` joined with a space and cut to `BODY_MAX`, link `/<slug>/flows/<flowId>`, params `{ flowId, feature, step, count }`, source `fleet_flow` / `<flowId>:<jobId>` (a second wait on the same flow is a new notification).\n\nResolve the project slug using FleetNotificationReader.projectSlug. On malformed fleet_flow_questions payload log a warning and skip; when project slug is gone send nothing. Preserve stopped behavior and registration order so existing stop tests using register.mock.calls[0][1] stay unchanged. Exercise the questions handler through its registered callback, assert exact drafts passed to NotificationWriter.deliver, and use a recipient Set to avoid double delivery. An unavailable ticket author does not suppress this independent notification handler. Do not insert notifications directly or depend on ticket creation succeeding. In the unit fan-out isolation case, register a stub listener that skips ticket creation because its authors are unavailable; do not require US-008's parallel implementation. Assert the call to NotificationWriter.deliver, not persisted notifications for deleted/disabled recipients: NotificationWriter retains its existing eligibility and preference filtering.\n\n**Scope** — In: pure questions draft and second registered subscriber handler with existing subscriber/draft unit tests. Out: event production/parser (US-006), ticket side effects (US-008), answer route (US-011). The web answer form, the flow page and rendering of the `flow_questions` notification kind (fleet flow F6); clients fall back to the English `title` and `body`.\n\n**Interface**\n```typescript\nflowQuestionsDraft(payload: FleetFlowQuestionsPayload, slug: string, userId: string): NotificationDraft\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowStoppedSubscriber.onModuleInit registers handlers for fleet_flow_stopped and then fleet_flow_questions.",
+        "[unit] flowQuestionsDraft(payload, 'sandbox', 'u1') has category FLEET_NEEDS_YOU, kind flow_questions, title Flow needs answers: <feature> and link /sandbox/flows/<flowId>.",
+        "[unit] flowQuestionsDraft has params { flowId, feature, step, count } and source fleet_flow / <flowId>:<jobId>.",
+        "[unit] flowQuestionsDraft body is the questions as <id>. <question> joined with a space, cut to BODY_MAX.",
+        "[unit] The questions handler passes NotificationWriter.deliver one draft for the approver and one for a user creator who is not the approver.",
+        "[unit] The questions handler delivers one draft when the creator is the approver, and only the approver's when the creator is an agent.",
+        "[unit] The questions handler delivers nothing when the project slug is gone.",
+        "[unit] The questions handler logs a warning and delivers nothing for a malformed payload.",
+        "[unit] When a separate questions fan-out listener returns without creating a ticket because both ticket authors are unavailable, publishing a valid fleet_flow_questions payload still passes the approver/human-creator drafts to NotificationWriter.deliver through the registered questions notification handler.",
+        "[unit] When the first registered fleet_flow_stopped handler receives the existing valid payload with approver u1 and distinct human creator u2, it still calls NotificationWriter.deliver with flowStoppedDraft(payload, 'sandbox', 'u1') and flowStoppedDraft(payload, 'sandbox', 'u2'), preserving stopped-notification behavior."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "notifications",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Extends an existing draft/subscriber pattern with deterministic recipients and replay-safe source identity; no new authorization rule."
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-drafts.ts",
+        "apps/api/src/notifications/notification.types.ts",
+        "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.spec.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.spec.ts",
+          "reason": "add the questions-handler tests; its stop tests read the handler at `register.mock.calls[0][1]` (line ~27), which stays the stop handler because it registers first."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Post one batched questions comment on the flow ticket",
+      "description": "**Goal** — Reuse the lazy flow-ticket path to publish the waiting review's complete question batch with answer instructions.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — `FleetFlowStopTicketSubscriber` (`apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts`).\nTarget: `onModuleInit` registers the stop handler first, then a `fleet_flow_questions` handler that runs the same lock, slug and lazy ticket create as the stop handler and then comments `formatQuestionsComment(...)`. The stop handler's behaviour is unchanged.\n\nUse parseFlowQuestionsPayload and warn/skip malformed payloads. Wrap the new handler in runAsSystem('flow', ..., { onBehalfOf: { type: creatorType, id: creatorId } }). Inside the same transaction lockById the flow, resolve the project slug, reuse an existing ticket or create a TASK titled Fleet flow: <feature> and link with setTicket. Retain the creator-first, approver-fallback ticket-author resolution. If both are unavailable, log and create no ticket; return quietly so the separate notification consumer can still run. Missing flow or slug produces no writes. Keep the flow lock through create, link and comment, including identical-body deduplication by FleetJobTicketEffects.commentOnFlowTicket. The body must be exactly formatQuestionsComment({ step, jobId, questions, answerPath: '/api/projects/<slug>/flows/<flowId>/answers' }). Database write failures propagate for outbox retry.\n\nExtend fleet-flow-stop-ticket.subscriber.spec.ts through the registered questions handler. Preserve the existing stop registration assertion and stopped-comment behavior.\n\n**Scope** — In: second ticket subscriber handler, lazy ticket reuse/creation, attribution, author fallback and formatted question comment. Out: formatting implementation (US-002), event production/parser (US-006), notifications (US-007), answer recording/route (US-010/US-011). Closing or transitioning the flow's ticket after answers; it stays in its created state.\n\n**Interface**\n```typescript\nformatQuestionsComment(input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[]; answerPath: string }): string\n// Existing side-effect seam, unchanged:\ncommentOnFlowTicket(ticketId: string, projectId: string, body: string): Promise<void>\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowStopTicketSubscriber.onModuleInit registers handlers for fleet_flow_stopped and then fleet_flow_questions.",
+        "[unit] The questions handler on a flow with no ticket creates a TASK ticket titled Fleet flow: <feature> as the creator and links it with setTicket.",
+        "[unit] The questions handler calls commentOnFlowTicket(ticketId, projectId, body) with body equal to formatQuestionsComment({ step, jobId, questions, answerPath: '/api/projects/<slug>/flows/<flowId>/answers' }).",
+        "[unit] The questions handler on a flow that already has a ticket comments on it and creates none.",
+        "[unit] The questions handler runs inside runAsSystem('flow', ..., { onBehalfOf: { type: creatorType, id: creatorId } }).",
+        "[unit] The questions handler writes nothing when the flow is gone or the project slug is null.",
+        "[unit] The questions handler uses the approver as ticket author when the creator is unavailable, and creates no ticket when both are unavailable.",
+        "[unit] The questions handler logs a warning and writes nothing for a malformed payload.",
+        "[unit] When creator and approver are both unavailable as ticket authors, then the questions handler logs the unavailable-author condition and returns without a ticket.",
+        "[unit] When the first registered fleet_flow_stopped handler receives { flowId: 'f1', projectId: 'p1', feature: 'checkout', stopReason: 'review_ambiguous', detail: 'Which currency?', approverId: 'u2', creatorType: 'AGENT', creatorId: 'a1' } for a flow already linked to ticket t1, it still calls commentOnFlowTicket('t1', 'p1', 'Flow stopped (review_ambiguous): Which currency?'), preserving the existing stop-comment body."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "tickets",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Reuses the existing transaction/lock and lazy ticket-author fallback path without changing its access-control behavior."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts",
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.spec.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.spec.ts",
+          "reason": "add the questions-handler tests; its registration test (line ~50) still holds because the stop handler is still registered once for `fleet_flow_stopped`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Grant the project-scoped flow-answer permission",
+      "description": "**Goal** — Introduce fleet.flow.answer and safely grant it to existing developer roles without overriding local denials.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — A new permission key `fleet.flow.answer`, granted to existing `developer` roles by a migration (as #402 did for the F1 keys).\n\n`NEW_KEY_SCOPES`, `PENDING_SURFACE_KEYS` (`apps/api/src/permissions/catalog.ts`): `fleet.flow.answer` (`'project'`).\n`SYSTEM_ROLES` `developer` (`apps/api/src/permissions/system-roles.ts`): adds `fleet.flow.answer`.\n\nAdd 'fleet.flow.answer': 'project' to NEW_KEY_SCOPES and temporarily add fleet.flow.answer to PENDING_SURFACE_KEYS until US-011 declares the route. Keep the new-key list in catalog.spec.ts and expectedPending in permission-contract.spec.ts synchronized. The risk is medium under the existing classification. Add the developer grant after fleet.thread.preapprove. Regenerate permissions/__snapshots__/role-matrix.json: fleet.flow.answer is granted in project scope to exactly the roles holding fleet.flow.stop; update the per-row cell count from 244 to 245.\n\nCreate prisma/migrations/20261130100000_developer_flow_answer_key/migration.sql, mirroring 20261126090000_developer_flow_keys: append a missing key to developer Role.permissions only when neither fleet.flow.answer nor !fleet.flow.answer is present; preserve local edits and non-developer roles; repeated application adds no duplicate. Create test/integration/permissions/developer-flow-answer-key-migration.integration.spec.ts for append, explicit deny, idempotence and unrelated-role cases.\n\n**Scope** — In: permission catalog, pending contract, system role, role-matrix snapshot and safe persisted-role backfill. Out: route exposure/removing pending status (US-011), answer service (US-010), and the feature-column migration (US-005).\n\n**Interface**\n```typescript\n// NEW_KEY_SCOPES addition:\n'fleet.flow.answer': 'project'\n// Temporary pending surface entry, removed by US-011:\n'fleet.flow.answer'\n```",
+      "acceptanceCriteria": [
+        "[unit] The catalog entry for fleet.flow.answer has scope project and risk medium.",
+        "[unit] The developer system role's permissions include fleet.flow.answer.",
+        "[unit] The role matrix grants fleet.flow.answer in project scope to exactly the roles that hold fleet.flow.stop.",
+        "[integration] Applying the developer_flow_answer_key migration to a developer role without the key appends fleet.flow.answer.",
+        "[integration] Applying the migration to a developer role holding !fleet.flow.answer leaves its permissions unchanged.",
+        "[integration] Applying the migration twice leaves exactly one fleet.flow.answer entry.",
+        "[integration] The migration leaves a non-developer role unchanged."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "security",
+        "permissions",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard catalog/backfill patterns, but permission grants and preservation of explicit denies are security-critical access control."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/system-roles.ts",
+        "apps/api/src/permissions/role-matrix.spec.ts",
+        "apps/api/prisma/migrations/20261126090000_developer_flow_keys/migration.sql",
+        "apps/api/test/integration/permissions/developer-flow-keys-migration.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261130100000_developer_flow_answer_key/migration.sql",
+        "apps/api/test/integration/permissions/developer-flow-answer-key-migration.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "add `'fleet.flow.answer': 'project'` to `NEW_KEY_SCOPES` and add it to `PENDING_SURFACE_KEYS`."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its own copy of the new-key list (around line 113) gains `'fleet.flow.answer': 'project'`; its derived length assertions follow from that list."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "the per-row cell count (line ~224) becomes 245 instead of 244."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`expectedPending` (line ~7) gains `fleet.flow.answer`, so \"defines exactly the pending surface keys\" (line ~63) holds."
+        },
+        {
+          "path": "apps/api/src/permissions/system-roles.ts",
+          "reason": "add `fleet.flow.answer` to the `developer` role after `fleet.thread.preapprove`."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated: `fleet.flow.answer` granted in project scope to exactly the roles that hold `fleet.flow.stop`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Record a complete human answer batch and resume the flow",
+      "description": "**Goal** — Add the transactional answer operation with project/review/state fencing, complete-set validation and human-attributed audit/activity.\n\n**Motivation** — F4a (§9.172 of the fleet design doc, 2026-11-07) classifies findings and applies `answered`/`minor` ones, but an `ambiguous` finding still stops the flow (`review_ambiguous`), and a human has to start a new flow after editing the spec by hand.\n\n**Approach** — `FleetFlowsService.answer(projectId, flowId, input, actor, now)`, one transaction:\n\n1. `get(projectId, flowId)` (404 `fleet.flows.notFound`); lock the parent (thread or repo), then `lockById` the flow.\n2. State not `WAITING_ANSWER`, or the feature's `questions` null: 409 `fleet.flows.notWaiting`.\n3. `input.jobId` not equal to the feature's `questionsJobId`: 409 `fleet.flows.answersStale`.\n4. The answer ids must equal the question ids as sets: an id with no question throws `fleet.flows.answersInput` reason `unknown question <id>`; a question with no answer throws reason `missing answer <id>`.\n5. `recordAnswers` with the answers in question order; audit `fleet.flow.answer` (resource `flow`, summary `flow answered`); activity `flow.answered` `{ flowId, jobId, count }` with the human actor.\n\nUse get only to select the parent, re-read state/project under the flow lock, and return the exact record recordAnswers returns. Preserve stop/reaskLocked/get behavior. The parser has already rejected duplicate ids; match ids exactly as sent. The service actor type is USER only; route and command human enforcement belongs to US-011.\n\n**Answers name their review job.** The body is `{ jobId, answers }`; `jobId` must equal the feature's `questionsJobId`, else 409 `fleet.flows.answersStale`. Position ids repeat across reviews, so without the job id a late or approval-deferred post could answer a later wait's questions.\n\nAdd i18n entries in src/i18n/en/fleet.json and src/i18n/zh/fleet.json: fleet.flows.notWaiting (409), fleet.flows.answersStale (409), fleet.flows.answersInput (-2, with {reason}). Validation uses ValidationAppException; wait/stale conflicts use ConflictAppException. Create fleet-flow-answer.spec.ts with a local copy of setup() from fleet-flow-read-stop.spec.ts, not a spec import. All state, audit and activity writes share the transaction. Answering resumes RUNNING; it does not synchronously apply calls or dispatch a job.\n\n**Scope** — In: FleetFlowsService.answer, precise state/job/question-set failures, ordered persistence and human audit/activity. Out: parser implementation (US-003), repository writes (US-005), permission catalog (US-009), route/principal/approval enforcement (US-011). Partial answers: one call must answer every question of the waiting review. Editing or withdrawing answers after they are recorded.\n\n**Interface**\n```typescript\nanswer(projectId: string, flowId: string, input: FlowAnswersInput, actor: { type: 'USER'; id: string }, now?: Date): Promise<FleetFlowRecord>\n```",
+      "acceptanceCriteria": [
+        "[unit] FleetFlowsService.answer on a WAITING_ANSWER flow with questionsJobId j1, questions 2 and 4, and input { jobId: 'j1', answers } covering both calls recordAnswers with the answers in question order (2 then 4), the user id and now.",
+        "[unit] answer returns the record recordAnswers returned.",
+        "[unit] answer locks the parent (repo for a nax-entry flow) before lockById of the flow.",
+        "[unit] answer records audit key fleet.flow.answer with resource flow and summary flow answered.",
+        "[unit] answer records activity flow.answered with actor USER and payload { flowId, jobId: 'j1', count: 2 }.",
+        "[unit] answer on a RUNNING flow throws a 409 ConflictAppException with key fleet.flows.notWaiting and never calls recordAnswers.",
+        "[unit] answer on a WAITING_ANSWER flow whose feature questions is null throws 409 fleet.flows.notWaiting.",
+        "[unit] answer with input jobId j0 while questionsJobId is j1 throws 409 fleet.flows.answersStale and never calls recordAnswers.",
+        "[unit] answer with an answer id 9 that matches no question throws fleet.flows.answersInput with reason unknown question 9.",
+        "[unit] answer without an answer for question 4 throws fleet.flows.answersInput with reason missing answer 4.",
+        "[unit] answer for a flow in another project throws 404 fleet.flows.notFound."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "security",
+        "transactions",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Uses established service/locking patterns, but project isolation and trusted human answer attribution are security-sensitive write checks."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts",
+        "apps/api/src/fleet/flows/flow-answers.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/i18n/en/fleet.json"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-answer.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the flow was WAITING_ANSWER before acquiring the parent lock but is STOPPED when lockById returns it, then answer throws fleet.flows.notWaiting without recording answers.",
+        "When an answer batch contains an unknown id and omits an existing question, then answer reports unknown question <id> before any missing-answer reason."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "add `fleet.flows.notWaiting` (409), `fleet.flows.answersStale` (409) and `fleet.flows.answersInput` (-2, with `{reason}`)."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "add the same three keys in Chinese."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Expose the human-only approval-gated answers endpoint",
+      "description": "**Goal** — Add the permitted human answers route and replayable approval command with generated API and permission contracts.\n\n**Motivation** — The design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Review verdicts and escalation) asks for one batch of questions per step, answered by the user, applied like `answered` findings, with no new approval.\n\n**Approach** — The route: `POST /projects/:slug/flows/:flowId/answers`, `@Requires('fleet.flow.answer')`, `@ApprovalGated()`, `@HttpCode(200)`. The handler refuses a non-user principal with 403 `fleet.flows.answerHumanOnly` before anything else, fences the flow with `get`, then calls `routeGate.run` with key `fleet.flow.answer`, variant `FLOW_ANSWER_VARIANT` and input `{ projectId, flowId, body }`. The route command's `parse` returns `{ projectId, flowId, body: FlowAnswersInput }` (via `parseRouteInput` and `parseFlowAnswers`; re-parsing that persisted value yields the same value, as the create commands do), its `run` refuses a non-user principal again (backstop) and calls `FleetFlowsService.answer`. A pending gate returns 202 (`ApprovalPending`); success returns `FleetFlowDto`.\n\n**The human check runs before the approval gate**, as the thread pre-approval routes do, so an agent never opens an approval request it could not execute; the route command repeats it as a backstop.\n\nRegister `FLOW_ANSWER_VARIANT = 'rest:fleet-flow.answer'` in flow-route.commands.ts. Use @Principal(), existing membership/permission guards, @Body() unknown, and the normal JsonResponse envelope. Pass the parsed input and { type: 'USER', id: principal.id } to answer; approval execution must re-run service state/job validation, so a deferred answer cannot target another review. Human answer resume needs no new fleet.flow.start request; a policy asking for fleet.flow.answer still yields the normal 202 approval path. Add fleet.flows.answerHumanOnly in both en/zh fleet.json (40003). Use the US-010 notWaiting/answersStale/answersInput translations for 409/400 failures, including unknown question <id> and missing answer <id>.\n\nRemove fleet.flow.answer from PENDING_SURFACE_KEYS and expectedPending now that the route declares it. Extend flow-route.commands.spec.ts with parse JSON-round-trip and agent refusal regressions; its registry is keyed by variant. Add test/integration/fleet-flow-answers-route.integration.spec.ts mirroring existing read/stop route tests; cover human success, project isolation, permissions, human-before-gate refusal, malformed body/review mismatch/state conflicts and approval then execution. In approvals/approval-openapi.contract.spec.ts add post /api/projects/{slug}/flows/{flowId}/answers to gatedOperations and update expected length and both titles from 145 to 146. Extend test/e2e/api-endpoint/endpoint.e2e.spec.ts beside flow read/stop: 200 for a waiting flow, 409 notWaiting for PENDING and 400 answersInput for an empty body using exact statuses through refusal. Regenerate root openapi.json with bun run api:export-spec.\n\n**Scope** — In: REST route/command, permission exposure, human backstops, i18n human error, approval/OpenAPI/endpoint contracts and route integration. Out: permission definition/backfill (US-009), parser/service implementation (US-003/US-010), delivery side effects (US-007/US-008), full ticker lifecycle (US-012). Answering through the CLI or an MCP tool; only a human user's call to the route records answers. The web answer form, the flow page and rendering of the `flow_questions` notification kind (fleet flow F6); clients fall back to the English `title` and `body`. Regenerating the CLI client: `apps/cli/src/generated` is not committed, so only `openapi.json` is regenerated.\n\n**Interface**\n```typescript\nexport const FLOW_ANSWER_VARIANT = 'rest:fleet-flow.answer';\n// Route command parse result:\n{ projectId: string; flowId: string; body: FlowAnswersInput }\n// Existing service entry invoked by the command:\nanswer(projectId: string, flowId: string, input: FlowAnswersInput, actor: { type: 'USER'; id: string }, now?: Date): Promise<FleetFlowRecord>\n```",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/flows/:flowId/answers by a user holding fleet.flow.answer on a WAITING_ANSWER flow returns 200 with the FleetFlowDto in state RUNNING and the feature's answers.",
+        "[integration] The POST by an agent principal holding fleet.flow.answer returns 403 fleet.flows.answerHumanOnly and leaves the flow WAITING_ANSWER.",
+        "[integration] The same agent POST under an approval policy that asks for fleet.flow.answer returns 403 and opens no approval request.",
+        "[integration] The POST by a user without fleet.flow.answer returns 403.",
+        "[integration] The POST on a PENDING flow returns 409 with the English message for fleet.flows.notWaiting.",
+        "[integration] The POST with a jobId other than the feature's questionsJobId returns 409 with the English message for fleet.flows.answersStale.",
+        "[integration] The POST with body {} returns 400 with the English message for fleet.flows.answersInput naming reason jobId.",
+        "[integration] The POST for a flow id in another project returns 404 fleet.flows.notFound.",
+        "[integration] Under a policy that asks, a user's POST returns 202 with an approval request and leaves the flow WAITING_ANSWER.",
+        "[integration] Approving that request through POST /api/approvals/:id/decisions with approve leaves the flow RUNNING with the posted answers stored.",
+        "[unit] The OpenAPI document lists post /api/projects/{slug}/flows/{flowId}/answers with a 202 response, among the 146 gated operations.",
+        "[unit] The registered rest:fleet-flow.answer command's parse of { projectId, flowId, body } returns { projectId, flowId, body: parseFlowAnswers(body) }, and parsing its JSON round-trip returns an equal value.",
+        "[unit] Running the registered rest:fleet-flow.answer command with an agent principal throws 403 fleet.flows.answerHumanOnly and never calls FleetFlowsService.answer.",
+        "[integration] The POST with an answer id 9 that has no matching question returns 400 fleet.flows.answersInput with reason unknown question 9, and the POST omitting an answer for question 4 returns 400 fleet.flows.answersInput with reason missing answer 4.",
+        "[integration] When a permitted user POSTs a valid body to /api/projects/:slug/flows/:flowId/answers without an asking policy, the registered route command calls FleetFlowsService.answer(projectId, flowId, parseFlowAnswers(body), { type: 'USER', id: userId })."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "security",
+        "permissions",
+        "approvals",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-009",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Human-only access checks must precede approval creation and repeat on replay; route, permission and generated contract seams require strict security-test isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/project-flows.controller.ts",
+        "apps/api/src/fleet/flows/flow-route.commands.ts",
+        "apps/api/src/fleet/flows/thread-preapproval.controller.ts",
+        "apps/api/test/integration/fleet-flow-read-stop.integration.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet-flow-answers-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an answer approval for job j1 executes after the flow is waiting for job j2, then execution returns fleet.flows.answersStale and leaves job j2's questions unanswered."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/project-flows.controller.ts",
+          "reason": "add the answers route."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-route.commands.ts",
+          "reason": "register the `fleet.flow.answer` route command and export `FLOW_ANSWER_VARIANT`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-route.commands.spec.ts",
+          "reason": "add the answer command's parse round-trip and agent-refusal tests next to the create command's (line ~31); its registry stub keys commands by variant, so existing tests are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "remove `fleet.flow.answer` from `PENDING_SURFACE_KEYS` now that a route declares it (verified by the permission contract tests)."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`expectedPending` (line ~7) loses `fleet.flow.answer` again."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-openapi.contract.spec.ts",
+          "reason": "add the post operation for /api/projects/{slug}/flows/{flowId}/answers to `gatedOperations`; the expected length (line ~289) and the two titles naming 145 (lines ~197 and ~287) become 146."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "add the answers route next to the read/stop flow cases: a 200 on a waiting flow, a 409 `fleet.flows.notWaiting` on a `PENDING` flow and a 400 `fleet.flows.answersInput` on an empty body, with exact status codes through the `refusal` helper."
+        },
+        {
+          "path": "apps/api/src/i18n/en/fleet.json",
+          "reason": "add `fleet.flows.answerHumanOnly` (40003)."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/fleet.json",
+          "reason": "add `fleet.flows.answerHumanOnly` in Chinese."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new route."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Exercise answered flows through the database and ticker",
+      "description": "**Goal** — Add the binding database integration story that proves the implemented wait, fan-out, answer and resume seams operate together.\n\n**Motivation** — F4a (§9.172 of the fleet design doc, 2026-11-07) classifies findings and applies `answered`/`minor` ones, but an `ambiguous` finding still stops the flow (`review_ambiguous`), and a human has to start a new flow after editing the spec by hand.\n\n**Approach** — An integration spec driving a nax-entry flow from an ambiguous review through the wait, the questions comment and notification, the answers and the calls commit to a dispatched `PLAN`.\n\nAfter the answers the flow is `RUNNING`; the next tick decides rule 8 (`apply_calls`); the F4a calls path commits the block and records `callsJobId`; the tick after that dispatches `PLAN`.\n\nCreate only test/integration/fleet/fleet-flow-answers.integration.spec.ts. Mirror the F4a fleet-flow-verdicts.integration.spec.ts setup: real Postgres app fixture, seeded completed review, explicit FleetFlowTicker.tick, mocked GitHubAppClient and actual outbox publish through FanOutPublisher. Disable background sweep/relay for deterministic explicit operations. Seed findings [minor, ambiguous] with no reviewer id on the ambiguous finding so its calls bullet must be position 2. Read and publish the actual stored event, publish it again to prove comment/notification replay safety, call FleetFlowsService.answer as a human, then tick for the spec commit and again for the linked PLAN. Update the mocked forge head to the committed sha before the PLAN tick, as the F4a fixture does. Keep forge I/O outside application transactions; never wrap tick in a test transaction. Verify the existing stop path from WAITING_ANSWER without changing its production implementation. In a separate waiting-flow case, call answer with an older jobId and assert the persisted service path rejects with answersStale; do not add HTTP or approval-policy cases to this story.\n\nUse canRunDbTests() and the shared KODA_DB_TESTS/NAX_SANDBOXED gate. Run the scoped integration suite against real test Postgres outside the sandbox; a skipped suite is not verification. This story is explicitly declared by the binding spec and remains separate despite the generic prohibition on test-only stories.\n\n**Scope** — In: the new real-database cross-seam spec and its fixture-local setup. Out: production changes, existing test rewrites, parser/decision unit behavior already owned upstream, HTTP approval/security behavior (US-011), CLI/web surfaces and new ticket-state transitions.\n\n**Interface**\n```typescript\n// Existing entry points exercised, not changed:\nFleetFlowTicker.tick(now: Date): Promise<void>\nFleetFlowsService.answer(projectId: string, flowId: string, input: FlowAnswersInput, actor: { type: 'USER'; id: string }, now?: Date): Promise<FleetFlowRecord>\nFleetFlowsService.stop(projectId: string, id: string, actor: FlowCreator, now?: Date): Promise<FleetFlowRecord>\n```",
+      "acceptanceCriteria": [
+        "[integration] A nax-entry RUNNING flow whose COMPLETED SPEC_REVIEW job has findings [minor, ambiguous] (the ambiguous finding seeded with no id, so its bullet is named by position) is WAITING_ANSWER after one FleetFlowTicker.tick, with feature questions [{ id: '2', question: <the question> }] and questionsJobId the review job's id.",
+        "[integration] After that tick exactly one OutboxEvent of type fleet_flow_questions with event id <flowId>:questions:<jobId> exists, and a second tick adds none.",
+        "[integration] Publishing that outbox row creates the flow's ticket with one comment equal to formatQuestionsComment for the flow, and one flow_questions notification for the approver.",
+        "[integration] Publishing the same outbox row a second time adds no second comment and no second notification.",
+        "[integration] FleetFlowsService.answer with { jobId: <the review job>, answers: [{ id: '2', answer: 'Use USD' }] } moves the flow to RUNNING with the answer stored.",
+        "[integration] The next tick calls the mocked GitHubAppClient.putFile once with spec content containing ### SPEC_REVIEW job <jobId>, the minor finding's bullet and - **2** (answer): <the question> Answer: Use USD.",
+        "[integration] The tick after that dispatches exactly one PLAN job linked to the flow.",
+        "[integration] FleetFlowsService.stop on a WAITING_ANSWER flow moves it to STOPPED with reason human_stop.",
+        "[integration] Given a persisted WAITING_ANSWER flow bound to review j1, FleetFlowsService.answer with { jobId: 'j0', answers: [{ id: '2', answer: 'Use USD' }] } rejects with a 409 ConflictAppException keyed fleet.flows.answersStale."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "flows",
+        "integration",
+        "database"
+      ],
+      "dependencies": [
+        "US-006",
+        "US-007",
+        "US-008",
+        "US-011"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The binding integration-only story adds one database spec by mirroring the existing F4a fixture and explicit tick/publish/forge mocks; upstream stories own production behavior and authorization enforcement."
+      },
+      "contextFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/src/fleet/flows/fleet-flows.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-answers.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository investigation: this is an enhancement to the existing F4a flow implementation, not a new subsystem. Codebase-memory MCP is unavailable in this session, so discovery used direct reads, Glob and Grep. No application code was changed or tests executed while drafting. The API context is authoritative over the supplied detected-framework labels: apps/api uses NestJS 12/Fastify, Prisma 7, Nathapp transaction/audit/approval patterns and Vitest, not an Express application (.nax/mono/apps/api/context.md:21; apps/api/package.json:47). The web is a Nuxt client per repository guidance, not the detected Next.js label, and no web changes belong here. Before implementation, read the nathapp-nestjs-patterns skill; it was not exposed among this session's tools or found by repository glob. All 12 story ids, workdirs and dependency lists are binding, including the database-only US-012 and the apps/api workdir for stories regenerating root openapi.json. The only requested .nax write is this PRD artifact; do not modify .nax rules, configuration or generated acceptance material during implementation.\n\nGoal and completion: nax-entry SPEC_REVIEW/PRD_REVIEW ambiguity with at most 20 findings becomes a durable WAITING_ANSWER state, one review-scoped questions event, a lazy flow ticket/comment and deduplicated notifications. A permitted human supplies all answers together, tied to questionsJobId; the flow resumes RUNNING, the next tick commits human answers alongside answered/minor calls, and a subsequent tick dispatches PLAN. PRD review prompts unconditionally request phase 9 only. No fresh flow-start approval is required for resume, although the new answer action remains subject to the normal approval policy. Thread-entry ambiguity must retain its stop behavior.\n\nPure logic and consumers: buildReviewTask currently constructs PRD_REVIEW without --phase 9 (apps/api/src/fleet/flows/flow-steps.ts:16); flow-step-dispatch calls it for review tasks (apps/api/src/fleet/flows/flow-step-dispatch.ts:51), and flow-steps.spec.ts:16 contains the exact task regression. buildFlowCalls currently accepts only answered/minor bullets, bounds ids/text and uses an exact per-job heading for replay protection (apps/api/src/fleet/flows/flow-calls.ts:27). Preserve existing block formatting and unchanged assertions in flow-calls.spec.ts while adding positional questions, deterministic comment formatting and answered-ambiguous bullets. FlowFinding and parseFlowVerdict are in apps/api/src/fleet/flows/flow-verdict.ts:5 and :15; the parser reconstructs an allowlisted object at :48, so reviewer-provided answer must remain discarded. Only the decision attaches trusted human answers. Reviewer ids name calls bullets, whereas question ids are positions in the full findings list: these deliberately differ. flow-input.ts:26 provides the validation exception/reason and non-array record pattern to mirror in the new parser. Raw answer/id strings are preserved, validation checks trimmed nonblank values without normalizing them, lengths are checked against raw strings, and exact ids determine correspondence. Sequential per-entry validation must catch a duplicate before examining a later malformed entry.\n\nDecision behavior: apps/api/src/fleet/flows/flow-step-decision.ts:72 currently stops every ambiguous verdict before the finding-count rule. Replace only its parsed-completed-review branch using the specified eight-rule order. Empty verdict behavior is unchanged. A thread ambiguity stops before the size check; a nax verdict over 20 stops review_findings before a wait. Job identity and non-null answers are both required to bypass wait. The second PRD_REVIEW limit applies only without ambiguity, so human-answered later rounds re-plan. callsJobId still dispatches PLAN after a successful calls commit. flow-step-decision.spec.ts:162 contains the nax mixed-finding assertion that must intentionally change; its input fixture gains null question/answer fields. Affected call sites include both advance's locked decision and its unlocked readSpecHead preflight (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:275, :369). Do not change multi-feature skip behavior or RUN/REVIEW/FIX transitions.\n\nPersistence and migration: WAITING_ANSWER and its resume/re-ask/stop transitions already exist (apps/api/src/fleet/flows/flow-states.ts:13), so do not introduce new state enums. FleetFlowFeature currently ends its workflow fields with callsJobId (apps/api/prisma/schema.prisma:1264). US-005 adds five nullable columns with no backfill or foreign-key requirement, optional domain fields for backward-compatible in-memory fixtures (apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:11), repository contracts in the two domain files, setWaiting in PrismaFleetFlowStepRepository, recordAnswers in PrismaFleetFlowRepository and explicit JSON array/null mapping. The current toDomain spreads feature rows and sorts by position (apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:19); Prisma JsonValue must be mapped to the concrete FlowQuestion/FlowAnswer arrays. PrismaFleetFlowStepRepository.recordCalls is the nearby write pattern (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:103). setWaiting clears answers with Prisma.DbNull, not plain null, and clears answeredById/answeredAt; a later wait replaces the old review binding. recordAnswers updates both feature and flow to RUNNING and returns a freshly mapped flow with features. Preserve transaction-bound prisma.client usage and import Prisma only from the generated client. FleetFlowFeatureDto.from currently maps six public fields (apps/api/src/fleet/flows/dto/fleet-flow.dto.ts:55); expose questionsJobId/questions/answers/answeredAt with explicit null defaults and ISO time, not answeredById. Extend its exact DTO comparison and repository integration round trips, then regenerate openapi.json.\n\nTransaction/advance seam: FleetFlowAdvanceService already separates locked decision, forge I/O and re-locked progress recording (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:44, :94, :240). decisionInput at :393 supplies callsJobId/planCount/canApplyCalls; add the review binding and answers there. writeDecision at :445 currently records stop/completion with audit/activity/outbox; add wait_answer here using existing constructor collaborators, never a new supervisor job. Wait persistence, system.flow.advance audit, flow.waiting activity and fleet_flow_questions enqueue commit atomically under parent then flow locks. Its event id is flowId:questions:jobId, not the stopped event id. The wait writeDecision branch must not dispatch or perform forge I/O. Existing unlocked readSpecHead preflight may already have read the branch head before the locked decision chooses wait_answer; do not add a no-preflight-I/O requirement or rewrite that F4a preflight. listAdvanceable already selects only APPROVED/RUNNING single-feature rows (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:42), and tick wraps each pass in runAsSystem and isolates per-flow errors (apps/api/src/fleet/flows/fleet-flow.ticker.ts:49); waiting flows naturally accrue no new job cost and have no timeout. FleetFlowCallsService.apply is read-only for this feature (apps/api/src/fleet/flows/fleet-flow-calls.service.ts:33). It appends with GitHub outside transactions, compares expected head, checks exact replay recovery and returns committed/stale/retry/failed. Existing advanceCalls invokes reaskLocked on stale without recordCalls (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:109). Keep this approval-generation protection: old stored answers must not apply to a newly reviewed/re-approved job. PRD calls still use latest PLAN's result sha/branch.\n\nEvents and side effects: fleet-notification-events.ts:12 is the shared, pure fleet/outbox contract and must remain free of Nest/module-cycle dependencies; extend it with FLEET_FLOW_QUESTIONS, the specified payload and defensive parser. Existing FleetFlowStoppedSubscriber registers its stop handler at apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts:20 and resolves a slug plus deduplicated recipient Set at :24. Register questions second, retain stopped registration order and behavior, and deliver only through NotificationWriter. flowStoppedDraft at apps/api/src/notifications/fleet/fleet-notification-drafts.ts:28 shows title/body truncation and source conventions; questions need sourceId flowId:jobId so later reviews produce distinct notifications. FleetFlowStopTicketSubscriber currently locks the flow, resolves slug, creates/links one TASK ticket lazily and comments inside one transaction (apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts:30, :45). Its author fallback at :72 tries creator then approver. Reuse that behavior for questions without changing stop semantics, preserve runAsSystem/onBehalfOf attribution, and register questions second. commentOnFlowTicket already deduplicates identical bodies under the caller's lock (apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:82). A missing flow/slug or unavailable authors is not an outbox failure; malformed payloads warn and return. A ticket author failure must not suppress the independent notification subscriber. Database failures still propagate for retry. Existing subscriber/events/draft specs are present and should be extended through registered handlers, not private-method tests.\n\nAnswer service and route: FleetFlowsService.get fences project ownership (apps/api/src/fleet/flows/fleet-flows.service.ts:97) and stop demonstrates one transaction with unlocked parent selection, parent lock, flow lock, recheck, audit and actor activity (:103). answer must follow that order and re-read after lock; check wait/questions before job identity, then unknown ids before missing ids; store answers in question order. The raw parser rejects duplicates before service entry. Do not mutate state or audit on refusals. Existing stop/reaskLocked/get are read-only symbols for F4b; use them, do not rewrite them. ProjectFlowsController already has membership/permission guards and stop's fence-before-gate/envelope pattern (apps/api/src/fleet/flows/project-flows.controller.ts:23, :47). Add POST :flowId/answers with human assertion as the first handler action, before get and the gate. thread-preapproval.controller.ts:41 supplies the pre-gate human-check pattern. FlowRouteCommands registers serializable route variants and reloads principals via routeCommand (apps/api/src/fleet/flows/flow-route.commands.ts:35); add rest:fleet-flow.answer with idempotent parseRouteInput/parseFlowAnswers and an independent human backstop using answerHumanOnly, not the older preapproval humanOnly message. Approval-persisted input must survive JSON round-trip unchanged; a late approval must be rejected if its review job is stale. Integration tests must prove agent requests cannot open approval asks, user policies return 202 then persist answers on approval, project fences yield 404, and validation/conflicts yield exact translated statuses. Add en/zh messages near apps/api/src/i18n/en/fleet.json:37; use 409 notWaiting/answersStale, -2 answersInput with {reason}, and 40003 answerHumanOnly.\n\nPermission rollout: add fleet.flow.answer to NEW_KEY_SCOPES beside existing flow keys (apps/api/src/permissions/catalog.ts:150); classifyRisk defaults this write to medium (:446). Add it to developer after fleet.thread.preapprove (apps/api/src/permissions/system-roles.ts:76). US-009 keeps it pending until US-011 declares the route; both expectedPending and PENDING_SURFACE_KEYS must track this intermediate state. The role matrix currently expects 244 cells (apps/api/src/permissions/role-matrix.spec.ts:224), becoming 245; regenerate the snapshot with the same project-role grants as fleet.flow.stop. Mirror the existing append-and-skip-denied developer migration (apps/api/prisma/migrations/20261126090000_developer_flow_keys/migration.sql:3). The new migration must respect !fleet.flow.answer, append only missing grants, be idempotent and leave other roles unchanged. Deploy nullable schema migration and permission backfill with application code; existing rows naturally remain null. Never overwrite local role edits or existing migration files.\n\nTests and regressions: use Vitest vi mocks, hoisted factories as needed, and local harness copies rather than importing spec files. The F4a advance build harness is file-local (apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts:52); copy it for US-006. stop's setup is file-local (apps/api/src/fleet/flows/fleet-flow-read-stop.spec.ts:18); copy it for US-010. Add new pure parser/questions tests, preserve existing calls/verdict assertions and DTO defaults. The real-DB F4a fixture hardcodes NAX (apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts:95); its ambiguous-stop case at :155 and stop-event rollback at :199 must explicitly set the created row to THREAD while keeping threadId null, preserving all existing ticket/comment/notification/rollback checks. Do not weaken these tests into wait assertions. US-012 mirrors that fixture but uses an id-less ambiguous finding, explicit tick/publish control and mocked GitHub calls, verifies actual outbox rows and replay deduplication, answers, commit contents, PLAN linkage and waiting stop. DB-backed specs require canRunDbTests/KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; skips are not verification. Scoped integration runs must actually pass outside the sandbox, and parallel DB runs cannot share the force-reset database. Pure DI wiring remains unit-level without a DB.\n\nContract impacts: add the four feature DTO fields and answers operation to generated root openapi.json using bun run api:export-spec, not hand edits. apps/api/src/approvals/approval-openapi.contract.spec.ts:197, :287, :289 currently enumerates exactly 145 gated operations, becoming 146 with the new POST/202 entry. Update endpoint.e2e.spec.ts next to flow read/stop with exact 200/409/400 statuses through refusal. No downstream client generation or manual generated code edits are part of this feature. US-005 and US-011 both regenerate the spec at their respective stages. No new module is needed: the existing providers/subscribers are extended without constructor changes to advance. Security-critical US-009/US-010/US-011 use three-session-tdd because permission grants, human/project checks and approval execution are access-control paths. Other story routing follows change complexity, not acceptance-criterion counts. US-012 remains an explicitly bound integration-only story despite the generic test-only-story prohibition.\n\nRefine-pass audit: enumerated all 106 numbered spec acceptance criteria in spec.md:511-650 and matched each to the same story's initial acceptanceCriteria positions: US-001 1-2, US-002 1-11, US-003 1-9, US-004 1-12, US-005 1-7, US-006 1-10, US-007 1-8, US-008 1-8, US-009 1-7, US-010 1-11, US-011 1-13, US-012 1-8. None were dropped, reassigned or stripped of qualifiers: the two already-passing guards, parser array-order precedence, DTO unchanged mapping, unchanged role permissions and id-less integration finding anchor remain. All 17 failure-table rows are represented, including logged unavailable-author skips and independent notification delivery. Added explicit oversized-prompt, missing-feature transaction-rollback and persisted stale-review negative paths where the initial draft lacked an unmistakable failure case; added clean-review, minor-call, stopped-notification, stopped-comment and agent-create regressions. Existing spec criteria remain first and additions are appended. All 15 feature exclusions remain verbatim; all 12 binding dependency arrays and apps/api workdirs remain unchanged. US-011 now includes every one of its five spec-recommended context files, including endpoint.e2e.spec.ts; approval-openapi.contract.spec.ts remains an explicitly named modification, not a dropped deliverable.\n\nRefine-pass codebase-fit corrections: routeCommand exposes execute(), which reloads the requester then calls its internal run callback (apps/api/src/approvals/route/route-command.ts:49); the HTTP-to-service seam must be tested through POST, not merely command invocation. Existing NAX creation still accepts agents; keep the new human-only assertion specific to answers. NotificationWriter.deliver filters eligibility and preferences before insertion (apps/api/src/notifications/notification-writer.ts:40), so the unavailable-ticket-author failure case asserts independent fan-out and deliver() calls, never guaranteed insertion for ineligible/deleted users. Simulate the no-ticket listener in US-007's unit case so it does not gain an undeclared dependency on parallel US-008. FanOutPublisher already invokes independent handlers and records aggregate failures (apps/api/src/outbox/fan-out-publisher.ts:70). The repository fixture already provides tx.run and rollback assertions (apps/api/test/integration/fleet-flow-repository.integration.spec.ts:71), so the added missing-feature test needs no new helper or exception interface. Lightened US-003 to simple and US-006/US-012 to medium with tdd-simple because they reuse established parser, transactional stop/outbox and F4a integration-fixture patterns; security-critical US-009/US-010/US-011 retain three-session-tdd. US-005 stays complex for its schema, domain, repository and DTO changes. This audit changed only the PRD artifact; it did not execute application tests.",
+  "outOfScope": [
+    "The web answer form, the flow page and rendering of the `flow_questions` notification kind (fleet flow F6); clients fall back to the English `title` and `body`.",
+    "Answering through the CLI or an MCP tool; only a human user's call to the route records answers.",
+    "A billed supervisor job that rewrites the questions; the comment text is built by koda.",
+    "Partial answers: one call must answer every question of the waiting review.",
+    "Editing or withdrawing answers after they are recorded.",
+    "A timeout or reminder for a flow left in `WAITING_ANSWER`.",
+    "Questions and answers for thread-entry flows: their branch exists only on the runner, so the api cannot commit the answers.",
+    "Reusing stored answers after a re-ask: a re-approved flow re-runs its spec review and asks again.",
+    "Agent rulings on the PR's open items after `FIX` (a feature after F4b); `pr_not_ready` still stops.",
+    "Multi-feature flows (fleet flow F5); the decision still skips any flow with more than one feature.",
+    "Probing whether the runner's spec-review skill supports `--phase 9`; a runner on an older skill runs its full review.",
+    "The spec-review skill change itself (nathapp-io/nax-spec-kit-skills#56), which ships in that repository.",
+    "Closing or transitioning the flow's ticket after answers; it stays in its created state.",
+    "Regenerating the CLI client: `apps/cli/src/generated` is not committed, so only `openapi.json` is regenerated.",
+    "Changes under `.nax/` (rules, config): none are needed; `.nax/` is read-only to the run."
+  ],
+  "routingProfile": "native-codex-m3-flash"
+}
