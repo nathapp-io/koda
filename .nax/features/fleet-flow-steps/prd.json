@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T05:37:42.485Z",
+  "updatedAt": "2026-11-07T05:43:51.035Z",
   "userStories": [
     {
       "id": "US-001",
@@ -528,14 +528,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Deterministic DTO construction and exact Decimal arithmetic with established dispatch shapes."
+        "reasoning": "Deterministic DTO construction and exact Decimal arithmetic with established dispatch shapes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-steps.ts",
@@ -555,7 +558,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ff5526027ec225cdb522455567550de5b282a543"
     },
     {
       "id": "US-011",
