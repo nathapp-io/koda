@@ -16,9 +16,21 @@ export function callsOutcomeForForgeError(reason: string): 'failed' | 'retry' {
     : 'retry';
 }
 
+/**
+ * Cut a text to `max` UTF-16 code units without splitting a surrogate pair. A cut between the two
+ * halves of an astral character leaves a lone high surrogate, which PostgreSQL JSONB rejects, so
+ * the text stops before the pair instead.
+ */
+export function truncateFlowText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 export function flowQuestions(findings: FlowFinding[]): FlowQuestion[] {
   return findings.flatMap((finding, index) => finding.class === 'ambiguous'
-    ? [{ id: String(index + 1), question: oneLine(finding.question ?? '').slice(0, FLOW_CALL_TEXT_MAX) }]
+    ? [{ id: String(index + 1), question: truncateFlowText(oneLine(finding.question ?? ''), FLOW_CALL_TEXT_MAX) }]
     : []);
 }
 
@@ -46,7 +58,7 @@ export function formatQuestions(findings: readonly FlowFinding[]): string {
   });
   const result = `${ambiguous.length} ${noun}: ${entries.join(' ')}`;
   if (result.length <= FLOW_QUESTIONS_MAX) return result;
-  return `${result.slice(0, FLOW_QUESTIONS_MAX - 1)}…`;
+  return `${truncateFlowText(result, FLOW_QUESTIONS_MAX - 1)}…`;
 }
 
 export function buildFlowCalls(
@@ -59,15 +71,15 @@ export function buildFlowCalls(
   const bullets = input.findings
     .slice(0, FLOW_CALLS_MAX_FINDINGS)
     .flatMap((finding, index) => {
-      const id = oneLine(finding.id ?? String(index + 1)).slice(0, FLOW_CALL_ID_MAX);
+      const id = truncateFlowText(oneLine(finding.id ?? String(index + 1)), FLOW_CALL_ID_MAX);
       if (finding.class === 'ambiguous') {
         if (typeof finding.answer !== 'string' || oneLine(finding.answer).length === 0) return [];
-        const question = oneLine(finding.question ?? '').slice(0, FLOW_CALL_TEXT_MAX);
-        const answer = oneLine(finding.answer).slice(0, FLOW_CALL_TEXT_MAX);
+        const question = truncateFlowText(oneLine(finding.question ?? ''), FLOW_CALL_TEXT_MAX);
+        const answer = truncateFlowText(oneLine(finding.answer), FLOW_CALL_TEXT_MAX);
         return [`- **${id}** (answer): ${question} Answer: ${answer}`];
       }
-      const summary = oneLine(finding.summary).slice(0, FLOW_CALL_TEXT_MAX);
-      const fix = oneLine(finding.fix ?? '').slice(0, FLOW_CALL_TEXT_MAX);
+      const summary = truncateFlowText(oneLine(finding.summary), FLOW_CALL_TEXT_MAX);
+      const fix = truncateFlowText(oneLine(finding.fix ?? ''), FLOW_CALL_TEXT_MAX);
       return [`- **${id}** (${finding.class}): ${summary} Call: ${fix}`];
     });
 

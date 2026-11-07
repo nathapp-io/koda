@@ -9,6 +9,7 @@ import { seedFleetBase } from '../helpers/fleet-fixtures';
 import { PrismaFleetFlowRepository } from '../../src/fleet/flows/prisma-fleet-flow.repository';
 import { PrismaFleetFlowStepRepository } from '../../src/fleet/flows/prisma-fleet-flow-step.repository';
 import { FlowTransitionError } from '../../src/fleet/flows/domain/fleet-flow.domain';
+import { FLOW_CALL_TEXT_MAX, flowQuestions } from '../../src/fleet/flows/flow-calls';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
 
@@ -259,5 +260,23 @@ describeDb('PrismaFleetFlowRepository', () => {
       await steps.setWaiting(flow.id, 'missing-feature', { jobId: 'j1', questions: [{ id: '2', question: 'Q1' }] });
     })).rejects.toThrow(/not found/i);
     expect((await repo.findById(flow.id))?.state).toBe('RUNNING');
+  });
+
+  it('AC-2 stores a question whose text is cut inside a surrogate pair', async () => {
+    const flow = await createRunningFlow();
+    // The cut lands between the halves of the emoji, so the stored question keeps only whole
+    // characters: PostgreSQL JSONB rejects a lone surrogate.
+    const [question] = flowQuestions([{
+      class: 'ambiguous', summary: 's', question: 'a'.repeat(FLOW_CALL_TEXT_MAX - 1) + '😀',
+    }]);
+    await steps.setWaiting(flow.id, flow.features[0].id, { jobId: 'j1', questions: [question] });
+    const stored = await repo.findById(flow.id);
+    expect(stored?.state).toBe('WAITING_ANSWER');
+    expect(stored?.features[0]).toMatchObject({
+      state: 'WAITING_ANSWER', questionsJobId: 'j1', questions: [question],
+    });
+    const [row] = await prisma.$queryRaw<Array<{ questions: string }>>`
+      SELECT "questions"::text AS questions FROM "FleetFlowFeature" WHERE "id" = ${flow.features[0].id}`;
+    expect(row?.questions).not.toContain('\\ud83d');
   });
 });

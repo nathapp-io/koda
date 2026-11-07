@@ -4,7 +4,7 @@ import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-d
 import type { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { FleetFlowsService } from '../../../src/fleet/flows/fleet-flows.service';
 import { FleetFlowTicker } from '../../../src/fleet/flows/fleet-flow.ticker';
-import { formatQuestionsComment } from '../../../src/fleet/flows/flow-calls';
+import { formatQuestionsComment, FLOW_CALL_TEXT_MAX } from '../../../src/fleet/flows/flow-calls';
 import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -167,6 +167,24 @@ integration('answered fleet flows through tick and outbox (PG)', () => {
     expect(forgeCallsOutsideTransaction.length).toBeGreaterThan(0);
     expect(forgeCallsOutsideTransaction.every(Boolean)).toBe(true);
     expect(Logger.prototype.error).not.toHaveBeenCalled();
+  });
+
+  it('AC-1 (surrogate boundary): a question cut inside a surrogate pair still waits and publishes its questions', async () => {
+    // The question is cut between the halves of the emoji, so the stored question keeps only whole
+    // characters: a lone surrogate would make the JSONB write fail and roll the wait back.
+    const question = 'a'.repeat(FLOW_CALL_TEXT_MAX - 1) + '😀';
+    const { flow, job } = await seedReview([{ class: 'ambiguous', summary: 'Currency is undecided', question }]);
+    await ticker.tick(now);
+
+    const waiting = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id }, include: { features: true } });
+    expect(waiting.state).toBe('WAITING_ANSWER');
+    expect(waiting.features[0]).toMatchObject({
+      state: 'WAITING_ANSWER', questionsJobId: job.id,
+      questions: [{ id: '1', question: 'a'.repeat(FLOW_CALL_TEXT_MAX - 1) }],
+    });
+    expect(await db.outboxEvent.count({
+      where: { projectId, type: 'fleet_flow_questions', eventId: `${flow.id}:questions:${job.id}` },
+    })).toBe(1);
   });
 
   it('AC-8: human stop moves a WAITING_ANSWER flow to STOPPED with human_stop', async () => {
