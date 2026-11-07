@@ -181,10 +181,11 @@ function build(opts: HarnessOptions = {}) {
     }),
   };
   const config = testFleetConfig();
+  const outbox = { record: vi.fn(async () => undefined) };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
-    flowService as never, github as never, reviews as never, config, { apply: vi.fn() } as never,
+    flowService as never, github as never, reviews as never, config, { apply: vi.fn() } as never, outbox as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
@@ -192,7 +193,7 @@ function build(opts: HarnessOptions = {}) {
   ].some((fn) => fn.mock.calls.length > 0);
 
   return { service, flows, steps, threads, repos, reviews, activity, audit, txManager, jobs, permissions, flowService, github,
-    order, record, wrote, config, inTransaction: () => inTransaction };
+    order, record, wrote, config, outbox, inTransaction: () => inTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
@@ -367,6 +368,12 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     await h.service.advance('flow-1', NOW);
 
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'step_failed', NOW, 'PLAN job job-1 FAILED: checkout failed');
+    expect(h.outbox.record).toHaveBeenCalledExactlyOnceWith({
+      type: 'fleet_flow_stopped',
+      payload: { flowId: 'flow-1', projectId: 'p1', feature: 'f', stopReason: 'step_failed',
+        detail: 'PLAN job job-1 FAILED: checkout failed', approverId: 'u1', creatorType: 'USER', creatorId: 'u1' },
+      metadata: { projectId: 'p1', eventId: 'flow-1:stopped' },
+    });
     expect(h.activity.record).toHaveBeenCalledWith({
       actorType: 'SYSTEM', actorId: 'flow', action: 'flow.stopped', entityType: 'flow', entityId: 'flow-1',
       projectId: 'p1',
@@ -395,6 +402,8 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 
     const detail: string = h.flows.stop.mock.calls[0][3] as string;
     expect(detail).toHaveLength(FLOW_STOP_DETAIL_MAX);
+    const event = h.outbox.record.mock.calls[0][0];
+    expect((event.payload as { detail: string }).detail).toHaveLength(500);
   });
 
   it('AC-12/AC-13: a complete decision completes the flow with its activity and audit entry', async () => {

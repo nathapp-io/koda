@@ -105,7 +105,7 @@ function build(opts: Options = {}) {
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never, activity as never, audit as never,
     txManager as never, jobs as never, permissions as never, flowService as never, github as never,
-    {} as never, testFleetConfig(), calls as never,
+    {} as never, testFleetConfig(), calls as never, { record: vi.fn() } as never,
   );
   const wrote = () => [flows.stop, steps.setSpent, steps.complete, steps.markStep, steps.recordCalls,
     audit.record, activity.record, flowService.reaskLocked].some((fn) => fn.mock.calls.length > 0);

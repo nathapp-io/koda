@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -43,6 +44,10 @@ import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { FleetFlowTicker } from './fleet-flow.ticker';
 import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
 import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
+
+@Global()
+@Module({ providers: [{ provide: OutboxService, useValue: { record: vi.fn() } }], exports: [OutboxService] })
+class StubOutboxModule {}
 
 @Module({
   providers: [
@@ -119,7 +124,7 @@ describe('FlowsModule', () => {
   });
 
   it('compiles the real module without a database and registers the command through its repository token', async () => {
-    testingModule = await Test.createTestingModule({ imports: [FlowsModule] })
+    testingModule = await Test.createTestingModule({ imports: [StubOutboxModule, FlowsModule] })
       .overrideModule(ApprovalEngineModule).useModule(StubApprovalEngineModule)
       .overrideModule(AuditLogModule).useModule(StubAuditLogModule)
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)

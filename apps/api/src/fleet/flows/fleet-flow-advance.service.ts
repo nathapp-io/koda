@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -31,6 +32,7 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { isTerminal } from '../jobs/job-state';
 import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
+import { FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
 interface DispatchPass<A extends DispatchAction | ApplyCallsAction = DispatchAction | ApplyCallsAction> {
@@ -58,6 +60,7 @@ export class FleetFlowAdvanceService {
     private readonly reviews: FleetReviewClaimService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
     private readonly calls: FleetFlowCallsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
@@ -437,6 +440,15 @@ export class FleetFlowAdvanceService {
       await this.flows.stop(flow.id, action.reason, now, detail);
       await this.record(flow, 'flow stopped', 'flow.stopped', {
         flowId: flow.id, stopReason: action.reason, detail, step: job?.flowStep ?? null, jobId: job?.id ?? null,
+      });
+      await this.outbox.record({
+        type: FLEET_FLOW_STOPPED,
+        payload: {
+          flowId: flow.id, projectId: flow.projectId, feature: flow.features[0].feature,
+          stopReason: action.reason, detail: detail.slice(0, 500), approverId: flow.approverId,
+          creatorType: flow.createdByType, creatorId: flow.createdById,
+        },
+        metadata: { projectId: flow.projectId, eventId: `${flow.id}:stopped` },
       });
       return;
     }

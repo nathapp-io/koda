@@ -124,7 +124,7 @@ function build(opts: Options = {}) {
     { effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch'])) } as never,
     { reaskLocked: vi.fn(async () => record) } as never,
     { mintReadOnlyToken: vi.fn(async () => ({ token: 'test-only-token', expiresAt: NOW })), getBranchHead: vi.fn(async () => record.specSha) } as never,
-    reviews as never, testFleetConfig(), { apply: vi.fn() } as never,
+    reviews as never, testFleetConfig(), { apply: vi.fn() } as never, { record: vi.fn() } as never,
   );
   /** Every write the pass could make; each "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
