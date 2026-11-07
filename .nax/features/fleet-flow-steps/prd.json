@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T05:43:51.035Z",
+  "updatedAt": "2026-11-07T05:54:25.089Z",
   "userStories": [
     {
       "id": "US-001",
@@ -585,14 +585,17 @@
         "concurrency"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The claim service wraps the existing unique-head repository and stale-claim algorithm in four production/test files; mocked race outcomes and DB-free module tests suffice without redesigning claim persistence."
+        "reasoning": "The claim service wraps the existing unique-head repository and stale-claim algorithm in four production/test files; mocked race outcomes and DB-free module tests suffice without redesigning claim persistence.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/review-head-dispatcher.ts",
@@ -619,7 +622,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f5c322f398a4b621d32569b4c28df22d6be3f8e5"
     },
     {
       "id": "US-012",
