@@ -62,6 +62,8 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     } : {}),
     ...(thread ? { thread } : {}),
     ...(isAgent ? { agent: { ...agentInput } } : {}),
-    ...(job.command === 'PLAN' && job.threadId ? { expectBranch: job.ref } : {}),
+    // US-004: a flow PLAN job has no thread but does know the branch it must write, so it gets the same
+    // expectation a thread PLAN sends; every other command never does.
+    ...(job.command === 'PLAN' && (job.threadId || job.flowId) ? { expectBranch: job.ref } : {}),
   };
 }

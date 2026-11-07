@@ -23,6 +23,7 @@ import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { isThreadKind } from '../common/thread-jobs';
+import type { FlowStep } from '../flows/flow-steps';
 import { canTransition, isTerminal } from './job-state';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { RunnerNotifier } from './runner-notifier';
@@ -93,7 +94,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; flowId?: string; flowStep?: FlowStep; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch' | 'system.pr-review.dispatch' | 'system.pr-fix.follow-up' | 'system.flow.advance' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     if ((dto.command === FleetJobKind.REVIEW || dto.command === FleetJobKind.FIX || dto.command === FleetJobKind.AGENT) && repo.provider !== 'github') {
@@ -140,6 +141,10 @@ export class FleetJobsService {
           ...input, projectId, requestedById: actorId, requestedByType: actorTypeFor(actorId),
           ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
           ...(opts.threadId ? { threadId: opts.threadId } : {}),
+          // US-004: a flow step's link is written by the same insert, so the next tick finds this job even if
+          // the process dies before the bookkeeping that follows the dispatch.
+          ...(opts.flowId ? { flowId: opts.flowId } : {}),
+          ...(opts.flowId && opts.flowStep ? { flowStep: opts.flowStep } : {}),
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
@@ -177,6 +182,16 @@ export class FleetJobsService {
       }),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
+  }
+
+  /**
+   * US-004: links an already-created job to a flow step, for a job dispatched before its flow was known.
+   * The repository's conditional update is the whole rule: a job whose `flowId` is already set — by this flow's own
+   * dispatch, or by another flow — is left untouched and the answer is `false`. Call inside the caller's
+   * transaction (US-016 records the adoption there).
+   */
+  async adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean> {
+    return await this.repo.adoptForFlow(jobId, flowId, step);
   }
 
   async list(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobDto>> {

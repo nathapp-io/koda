@@ -114,6 +114,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.flow.stop': 'project',
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
+  'system.flow.advance': 'any',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 
@@ -337,6 +338,11 @@ describe('PERMISSION_CATALOG', () => {
       expect(findCatalogEntry(key)).toMatchObject({ scope: 'project', principals: ['user', 'agent'] });
     }
     expect(findCatalogEntry('system.flow.respec')).toMatchObject({ access: 'system' });
+  });
+
+  it('US-004 AC-9: system.flow.advance is a system key, pending until the flow ticker declares it', () => {
+    expect(findCatalogEntry('system.flow.advance')).toMatchObject({ access: 'system', scope: 'any' });
+    expect(PENDING_SURFACE_KEYS.has('system.flow.advance')).toBe(true);
   });
 
   it('US-001 AC-13: the four surviving agent-management keys are scoped globally', () => {

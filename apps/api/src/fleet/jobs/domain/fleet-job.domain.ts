@@ -8,6 +8,7 @@ import type { PlacementRunner } from '../placement-rules';
 import type { ThreadAssign } from '../../common/thread-jobs';
 import type { ConfigJobResult } from '../../common/config-jobs';
 import type { AgentDeniedAsk, AgentJobInput, AgentJobResult } from '../../common/agent-jobs';
+import type { FlowStep } from '../../flows/flow-steps';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 
@@ -215,6 +216,12 @@ export interface FleetJobRecord {
   /** US-003: an AGENT job's immutable dispatch input, and the latest attempt's result (cleared on requeue). */
   agentInput?: AgentJobInput | null;
   agentResult?: AgentJobResult | null;
+  /**
+   * US-004: the flow this job runs and the step it is, written in the same insert that creates it (or, for a job
+   * adopted afterwards, by `adoptForFlow`). Both are null for a job no flow owns.
+   */
+  flowId?: string | null;
+  flowStep?: string | null;
   threadId: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
@@ -243,6 +250,9 @@ export interface NewFleetJob {
   threadId?: string | null;
   scheduleId?: string | null;
   agentInput?: AgentJobInput | null;
+  /** US-004: a flow step's job carries the flow and its step from the insert, so a tick after a crash still sees it. */
+  flowId?: string | null;
+  flowStep?: string | null;
 }
 
 type Mutable =
@@ -354,6 +364,11 @@ export interface IFleetJobRepository {
   /** Lock a thread row and return whether it has no active jobs; call inside the dispatch transaction. */
   lockIdleThread(threadId: string): Promise<boolean>;
   findById(id: string): Promise<FleetJobRecord | null>;
+  /**
+   * US-004: links an existing job to a flow step — one conditional UPDATE that only matches a job whose `flowId`
+   * is still null, so a job another flow already owns is left untouched. True when this call set the fields.
+   */
+  adoptForFlow(jobId: string, flowId: string, step: FlowStep): Promise<boolean>;
   /** SELECT … FOR UPDATE (inside txManager.run). With skipLocked, null when another transaction holds the row. */
   lockById(id: string, opts?: { skipLocked?: boolean }): Promise<FleetJobRecord | null>;
   findPage(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobRecord>>;

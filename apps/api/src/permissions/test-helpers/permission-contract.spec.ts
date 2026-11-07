@@ -9,7 +9,9 @@ describe('permission contract checker', () => {
     'fleet.job.shell.escalate',
     'fleet.budget.override',
     'fleet.flow.start',
-    // Flow routes declare create/read/stop; the publish listener now declares respec.
+    // Flow routes declare create/read/stop; the publish listener now declares respec. US-004's
+    // system.flow.advance waits for the flow ticker that writes it (US-017).
+    'system.flow.advance',
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,
