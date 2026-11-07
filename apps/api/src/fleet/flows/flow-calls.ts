@@ -17,13 +17,55 @@ export function callsOutcomeForForgeError(reason: string): 'failed' | 'retry' {
 }
 
 /**
+ * True when every surrogate in the text belongs to a pair. A lone surrogate cannot be stored in a
+ * PostgreSQL JSON column: `JSON.stringify` writes it as an unpaired `\udXXX` escape and the JSONB
+ * parser rejects it.
+ */
+export function isWellFormedFlowText(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : Number.NaN;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Replace every lone surrogate with U+FFFD so the text stays storable in a JSON column. */
+export function sanitizeFlowText(value: string): string {
+  if (isWellFormedFlowText(value)) return value;
+  let result = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : Number.NaN;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        result += value[index] + value[index + 1];
+        index += 1;
+      } else {
+        result += '\uFFFD';
+      }
+      continue;
+    }
+    result += code >= 0xdc00 && code <= 0xdfff ? '\uFFFD' : value[index];
+  }
+  return result;
+}
+
+/**
  * Cut a text to `max` UTF-16 code units without splitting a surrogate pair. A cut between the two
  * halves of an astral character leaves a lone high surrogate, which PostgreSQL JSONB rejects, so
- * the text stops before the pair instead.
+ * the text stops before the pair instead. A lone surrogate already in the text is replaced with
+ * U+FFFD, because the text is persisted in a JSON column.
  */
 export function truncateFlowText(value: string, max: number): string {
-  if (value.length <= max) return value;
-  const cut = value.slice(0, max);
+  const safe = sanitizeFlowText(value);
+  if (safe.length <= max) return safe;
+  const cut = safe.slice(0, max);
   const last = cut.charCodeAt(cut.length - 1);
   return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 }

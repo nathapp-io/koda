@@ -7,8 +7,8 @@ function isWellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return false;
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : Number.NaN;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       return false;
@@ -63,6 +63,19 @@ describe('flowQuestions', () => {
     expect(question).toBe('a'.repeat(FLOW_CALL_TEXT_MAX - 2) + emoji);
     expect(isWellFormed(question)).toBe(true);
   });
+
+  it('replaces a lone surrogate that is already in the question text', () => {
+    // A reviewer output can carry an unpaired escape; PostgreSQL JSONB rejects the stored value.
+    const question = flowQuestions([{ class: 'ambiguous', summary: 's', question: 'a\ud83db' }])[0]?.question ?? '';
+    expect(question).toBe('a\uFFFDb');
+    expect(isWellFormed(question)).toBe(true);
+  });
+});
+
+describe('isWellFormed', () => {
+  it('rejects a trailing lone high surrogate', () => {
+    expect(isWellFormed('\ud83d')).toBe(false);
+  });
 });
 
 describe('truncateFlowText', () => {
@@ -71,6 +84,11 @@ describe('truncateFlowText', () => {
     expect(truncateFlowText('a'.repeat(3) + '😀', 4)).toBe('aaa');
     expect(truncateFlowText('a'.repeat(2) + '😀', 4)).toBe('aa😀');
     expect(truncateFlowText('short', 100)).toBe('short');
+  });
+
+  it('replaces a lone surrogate that is already in the text', () => {
+    expect(truncateFlowText('a\ud83db', 10)).toBe('a\uFFFDb');
+    expect(truncateFlowText('\ud83d', 10)).toBe('\uFFFD');
   });
 });
 

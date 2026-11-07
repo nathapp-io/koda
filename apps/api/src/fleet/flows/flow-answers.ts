@@ -1,5 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import { FLOW_ANSWER_MAX, FLOW_CALL_ID_MAX, FLOW_CALLS_MAX_FINDINGS } from './flow-calls';
+import { FLOW_ANSWER_MAX, FLOW_CALL_ID_MAX, FLOW_CALLS_MAX_FINDINGS, isWellFormedFlowText } from './flow-calls';
 import type { FlowAnswer } from './flow-calls';
 
 export interface FlowAnswersInput {
@@ -28,6 +28,8 @@ export function parseFlowAnswers(body: unknown): FlowAnswersInput {
     if (!isRecord(value)) fail(prefix);
     if (typeof value.id !== 'string' || value.id.trim().length === 0 || value.id.length > FLOW_CALL_ID_MAX) fail(`${prefix}.id`);
     if (typeof value.answer !== 'string' || value.answer.trim().length === 0 || value.answer.length > FLOW_ANSWER_MAX) fail(`${prefix}.answer`);
+    // The answers are stored in a JSON column, which cannot hold a lone surrogate.
+    if (!isWellFormedFlowText(value.answer)) fail(`${prefix}.answer`);
     if (seen.has(value.id)) fail(`${prefix}.id duplicate`);
     seen.add(value.id);
     answers.push({ id: value.id, answer: value.answer });

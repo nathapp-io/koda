@@ -57,4 +57,10 @@ describe('parseFlowAnswers', () => {
   it('AC-9 preserves answer whitespace', () => {
     expect(parseFlowAnswers({ jobId: 'j1', answers: [{ id: '2', answer: '  A1  ' }] }).answers[0].answer).toBe('  A1  ');
   });
+
+  it('rejects an answer that cannot be stored in a JSON column', () => {
+    // PostgreSQL JSONB rejects an unpaired surrogate escape, so the answer is refused at the
+    // boundary instead of failing the write with a server error.
+    expect(failure({ jobId: 'j1', answers: [{ id: '2', answer: 'a\ud83db' }] }).reason).toBe('answers[0].answer');
+  });
 });
