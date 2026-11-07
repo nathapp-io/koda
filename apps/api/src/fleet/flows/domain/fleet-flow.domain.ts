@@ -41,6 +41,7 @@ export interface FleetFlowRecord {
   approvedAt: Date | null;
   approvalRequestId: string | null;
   stopReason: string | null;
+  stopDetail?: string | null;
   endedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -87,5 +88,5 @@ export interface IFleetFlowRepository {
   setApprovalRequestId(id: string, approvalRequestId: string): Promise<FleetFlowRecord>;
   reask(id: string, data: { specSha: string; approvalRequestId: string }): Promise<FleetFlowRecord>;
   updateSha(id: string, specSha: string): Promise<FleetFlowRecord>;
-  stop(id: string, reason: string, now: Date): Promise<FleetFlowRecord>;
+  stop(id: string, reason: string, now: Date, detail?: string | null): Promise<FleetFlowRecord>;
 }
