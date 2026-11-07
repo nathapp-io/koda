@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T03:59:23.006Z",
+  "updatedAt": "2026-11-07T04:10:25.131Z",
   "userStories": [
     {
       "id": "US-001",
@@ -127,14 +127,17 @@
         "migration"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Five-file additive migration/domain/repository change follows existing transition and nested-write patterns; scratch-schema and repository DB tests cover SetNull and feature resets without a new orchestration abstraction."
+        "reasoning": "Five-file additive migration/domain/repository change follows existing transition and nested-write patterns; scratch-schema and repository DB tests cover SetNull and feature resets without a new orchestration abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -151,7 +154,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a83557b31eb2e706de3f924b0745f8ab48ec5dec"
     },
     {
       "id": "US-004",
