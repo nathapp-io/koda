@@ -1,9 +1,11 @@
-import { Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { Principal } from '@nathapp/nestjs-auth';
 import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
 import { ApprovalPending } from '../../approvals/route/approval-pending';
 import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { KodaPageQuery, parseQuery, remapPage, toPageResult } from '../../common/dto/koda-page.query';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
@@ -13,7 +15,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { FleetFlowRecord } from './domain/fleet-flow.domain';
 import { FleetFlowDto, FleetFlowPageDto } from './dto/fleet-flow.dto';
 import { FleetFlowsService } from './fleet-flows.service';
-import { FLOW_STOP_VARIANT } from './flow-route.commands';
+import { FLOW_ANSWER_VARIANT, FLOW_STOP_VARIANT } from './flow-route.commands';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
@@ -64,4 +66,47 @@ export class ProjectFlowsController {
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(FleetFlowDto.from(outcome.result, ctx.project.slug));
   }
+
+  @Post(':flowId/answers')
+  @HttpCode(200)
+  @Requires('fleet.flow.answer')
+  @ApprovalGated()
+  @ApiOperation({ summary: 'Answer a fleet flow review (fleet.flow.answer)' })
+  @ApiBody({ schema: { type: 'object', required: ['jobId', 'answers'], properties: {
+    jobId: { type: 'string', description: 'The review job the questions belong to' },
+    answers: { type: 'array', description: 'One answer per question of that review',
+      items: { type: 'object', required: ['id', 'answer'], properties: { id: { type: 'string' }, answer: { type: 'string' } } } },
+  } } })
+  @ApiResponse({ status: 200, type: FleetFlowDto })
+  @ApiResponse({ status: 202, description: 'Approval request for fleet.flow.answer' })
+  @ApiResponse({ status: 400, description: 'fleet.flows.answersInput' })
+  @ApiResponse({ status: 403, description: 'Only a USER may answer, or fleet.flow.answer is missing' })
+  @ApiResponse({ status: 404, description: 'fleet.flows.notFound' })
+  @ApiResponse({ status: 409, description: 'fleet.flows.notWaiting or fleet.flows.answersStale' })
+  async answer(
+    @Param('flowId') flowId: string,
+    @Body() body: unknown,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    // The human check runs before the approval gate: an agent never opens an approval request it
+    // could not execute, and the route command repeats the check as its backstop.
+    assertHuman(principal);
+    // Existence/project fence also applies when a policy asks instead of executing immediately.
+    await this.flows.get(ctx.project.id, flowId);
+    const outcome = await this.routeGate.run<FleetFlowRecord>({
+      key: 'fleet.flow.answer', variant: FLOW_ANSWER_VARIANT, projectId: ctx.project.id,
+      input: { projectId: ctx.project.id, flowId, body },
+      // The answers resume the flow, so a policy that asks for them opens a request even for the
+      // human who asked: the policy decides whether the answers may be recorded at all.
+      askEvenForHumans: true,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(FleetFlowDto.from(outcome.result, ctx.project.slug));
+  }
+}
+
+/** Only a user answers a flow's questions; an agent is refused before the gate. */
+function assertHuman(principal: KodaPrincipal): void {
+  if (principal.actorType !== 'user') throw new ForbiddenAppException({}, 'fleet.flows.answerHumanOnly');
 }

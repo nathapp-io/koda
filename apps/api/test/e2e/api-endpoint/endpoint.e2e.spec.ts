@@ -4979,6 +4979,17 @@ describeIntegration('API Integration Tests', () => {
           features: { create: [{ position: 0, feature: 'read-stop', specPath: 'docs/read-stop.md', dependsOn: [] }] },
         } });
       }
+      /** A flow a review left waiting for the answers of one job. */
+      async function seedWaitingFlow() {
+        return db().fleetFlow.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, entry: 'NAX', createdByType: 'USER', createdById: world.ids.dev,
+          branch: `feat/answers-e2e-${++sequence}`, specSha: 'a'.repeat(40), reviewerRole: 'reviewer', supervisorRole: 'supervisor', costCapUsd: '25',
+          state: 'WAITING_ANSWER',
+          features: { create: [{ position: 0, feature: 'answers', specPath: 'docs/answers.md', dependsOn: [],
+            state: 'WAITING_ANSWER', questionsJobId: 'job-1', questions: [{ id: '2', question: 'Clamp the bound?' }] }] },
+        } });
+      }
+      const answerBody = { jobId: 'job-1', answers: [{ id: '2', answer: 'Clamp it' }] };
       it('GET /projects/:slug/flows returns 200 with records and total', async () => {
         const flow = await seedFlow();
         const page = body<{ records: { id: string }[]; total: number }>(await request(httpServer).get(flowsUrl()).set(flowAuth()).expect(200));
@@ -5015,6 +5026,25 @@ describeIntegration('API Integration Tests', () => {
         const flow = await seedFlow();
         await db().fleetFlow.update({ where: { id: flow.id }, data: { state: 'COMPLETED' } });
         refusal(await request(httpServer).post(`${flowsUrl()}/${flow.id}/stop`).set(flowAuth()).expect(409), 'fleet.flows.notStoppable.409');
+      });
+      it('POST /projects/:slug/flows/:flowId/answers returns 200 and resumes a waiting flow', async () => {
+        const flow = await seedWaitingFlow();
+        const answered = body<{ id: string; state: string; features: { answers: unknown }[] }>(
+          await request(httpServer).post(`${flowsUrl()}/${flow.id}/answers`).set(flowAuth()).send(answerBody).expect(200),
+        );
+        expect(answered).toMatchObject({ id: flow.id, state: 'RUNNING' });
+        expect(answered.features[0]?.answers).toEqual([{ id: '2', answer: 'Clamp it' }]);
+        expect(await db().fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING' });
+      });
+      it('POST /projects/:slug/flows/:flowId/answers returns fleet.flows.notWaiting 409 for a PENDING flow', async () => {
+        const flow = await seedFlow();
+        refusal(await request(httpServer).post(`${flowsUrl()}/${flow.id}/answers`).set(flowAuth()).send(answerBody).expect(409),
+          'fleet.flows.notWaiting.409');
+      });
+      it('POST /projects/:slug/flows/:flowId/answers returns fleet.flows.answersInput 400 for an empty body', async () => {
+        const flow = await seedWaitingFlow();
+        refusal(await request(httpServer).post(`${flowsUrl()}/${flow.id}/answers`).set(flowAuth()).send({}).expect(400),
+          'fleet.flows.answersInput.-2', { reason: 'jobId' });
       });
     });
 

@@ -14615,6 +14615,119 @@
         ]
       }
     },
+    "/api/projects/{slug}/flows/{flowId}/answers": {
+      "post": {
+        "operationId": "ProjectFlowsController_answer",
+        "parameters": [
+          {
+            "name": "flowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jobId",
+                  "answers"
+                ],
+                "properties": {
+                  "jobId": {
+                    "type": "string",
+                    "description": "The review job the questions belong to"
+                  },
+                  "answers": {
+                    "type": "array",
+                    "description": "One answer per question of that review",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "answer"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "answer": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetFlowDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Approval request for fleet.flow.answer\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.flows.answersInput"
+          },
+          "403": {
+            "description": "Only a USER may answer, or fleet.flow.answer is missing"
+          },
+          "404": {
+            "description": "fleet.flows.notFound"
+          },
+          "409": {
+            "description": "fleet.flows.notWaiting or fleet.flows.answersStale"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Answer a fleet flow review (fleet.flow.answer)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/audit": {
       "get": {
         "operationId": "AuditController_list",

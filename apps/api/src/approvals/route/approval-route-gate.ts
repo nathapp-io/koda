@@ -31,6 +31,11 @@ export interface RouteGateCall {
   alsoKeys?: readonly string[];
   /** Contextual minimum approval mode for this route call. */
   minMode?: ApprovalMode;
+  /**
+   * Whether a policy that asks opens an approval request even when the caller is a human.
+   * Defaults to false: a human acting directly satisfies any mode (P3 design §4, decision 8).
+   */
+  askEvenForHumans?: boolean;
 }
 
 /**
@@ -57,7 +62,7 @@ export class ApprovalRouteGate {
   ) {}
 
   async run<TResult>(call: RouteGateCall): Promise<GateOutcome<TResult>> {
-    const { key, variant, projectId, input, keyCheck = true, redeem, alsoKeys, minMode } = call;
+    const { key, variant, projectId, input, keyCheck = true, redeem, alsoKeys, minMode, askEvenForHumans } = call;
     const actor = currentContext()?.actor;
     if (actor === undefined) throw new Error('approval route gate needs a principal actor');
     if (actor.type === 'RUNNER') throw new ForbiddenAppException({}, 'permissions');
@@ -91,6 +96,7 @@ export class ApprovalRouteGate {
         variant,
         ...(alsoKeys === undefined ? {} : { alsoKeys }),
         ...(minMode === undefined ? {} : { minMode }),
+        ...(askEvenForHumans === undefined ? {} : { askEvenForHumans }),
       });
     } catch (error) {
       throw unavailableActorAsAuth(error);

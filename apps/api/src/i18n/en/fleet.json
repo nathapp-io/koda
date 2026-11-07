@@ -44,6 +44,7 @@
     "specShaNotHead": { "409": "The spec commit is not the head of the branch" },
     "specMissing": { "422": "A spec file is missing at this commit: {path}" },
     "humanOnly": { "40003": "Only a human can set or clear a thread pre-approval" },
+    "answerHumanOnly": { "40003": "Only a human can answer a flow's questions" },
     "notStoppable": { "409": "This flow can no longer be stopped" },
     "notWaiting": { "409": "This flow is not waiting for answers" },
     "answersStale": { "409": "These answers belong to a different review" },
