@@ -20,6 +20,15 @@ describe('decideFlowStep', () => {
   it('AC-3 does not adopt a pre-approval PLAN job', () => {
     expect(decideFlowStep(input({ state: 'APPROVED', latestJob: job({ step: 'PLAN', queuedAt: new Date(approvedAt.getTime() - 1) }) }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
   });
+  it.each(['FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] as const)(
+    'AC-3 dispatches SPEC_REVIEW instead of stopping for pre-approval PLAN job in %s',
+    (state) => {
+      expect(decideFlowStep(input({
+        state: 'APPROVED',
+        latestJob: job({ step: 'PLAN', state, queuedAt: new Date(approvedAt.getTime() - 1) }),
+      }))).toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+    },
+  );
   it('AC-4 waits for a spec review queued at the approval epoch', () => {
     expect(decideFlowStep(input({ state: 'APPROVED', latestJob: job({ step: 'SPEC_REVIEW', state: 'RUNNING', queuedAt: approvedAt }) }))).toEqual({ kind: 'wait' });
   });

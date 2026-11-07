@@ -54,17 +54,16 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
   const { state, latestJob } = input;
   if (!latestJob) return state === 'APPROVED' || state === 'RUNNING' ? dispatch('SPEC_REVIEW') : { kind: 'wait' };
 
+  const adoptedSpecReview = latestJob.step === 'SPEC_REVIEW'
+    && latestJob.queuedAt.getTime() >= input.approvedAt.getTime();
+  if (state === 'APPROVED' && !adoptedSpecReview) return dispatch('SPEC_REVIEW');
+
   if (latestJob.state === 'FAILED' || latestJob.state === 'CANCELLED' || latestJob.state === 'CRASHED') {
     return failed(latestJob);
   }
   if (latestJob.state === 'ESCALATED' && latestJob.step !== 'RUN') return failed(latestJob);
 
-  if (state === 'APPROVED') {
-    const adoptedSpecReview = latestJob.step === 'SPEC_REVIEW'
-      && latestJob.queuedAt.getTime() >= input.approvedAt.getTime();
-    if (!adoptedSpecReview) return dispatch('SPEC_REVIEW');
-    return { kind: 'wait' };
-  }
+  if (state === 'APPROVED') return { kind: 'wait' };
 
   if (state !== 'RUNNING') return { kind: 'wait' };
   if ((ACTIVE_STATES as readonly string[]).includes(latestJob.state)) return { kind: 'wait' };
