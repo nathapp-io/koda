@@ -22,6 +22,7 @@ export const BOOKKEEPING_REASONS = {
   'fleet.analytics-progress': 'The activity row reporting analytics deletion counts, including a deletion that found no rows.',
   'fleet.schedule-bookkeeping': "A schedule's fire claim, a skip or coalesce activity row, and the last dispatched job link.",
   'fleet.pr-review-bookkeeping': "A PR review head's claim, dispatched link, failure mark or stale-claim removal; the dispatch it follows records `system.pr-review.dispatch`.",
+  'fleet.flow-bookkeeping': "A flow's recomputed spend total, written only when it differs from the sum of the flow's job costs; a stop or completion of the same pass records `system.flow.advance`.",
   'fleet.review-event-bookkeeping': 'A review event marked minted or skipped, or its failed mint attempt count incremented; the decision records system.review.decision itself.',
   'assistant.tool-call-ledger': 'The tool-call ledger row every assistant tool call stores, read or write.',
   'assistant.action-request-link': "The thread link of a waiting assistant write: its thread, job, tool call, tool and preview; the request is `approval.request-open`.",
