@@ -1,10 +1,12 @@
+import { Logger } from '@nestjs/common';
 import { canRunDbTests } from '../../helpers/test-environment';
 import { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { FleetFlowTicker } from '../../../src/fleet/flows/fleet-flow.ticker';
+import { FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository } from '../../../src/fleet/flows/domain/fleet-flow-step.domain';
 import { FleetFlowsService } from '../../../src/fleet/flows/fleet-flows.service';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
-import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -42,11 +44,7 @@ integration('fleet flow advancement through the database', () => {
     await db.fleetFlow.deleteMany();
     await db.fleetJob.deleteMany({ where: { projectId } });
     await db.chatThread.deleteMany({ where: { projectId } });
-    const runner = await db.runner.create({ data: {
-      name: `flow-runner-${Date.now()}`, apiKeyHash: `flow-hash-${Date.now()}`, os: 'linux', arch: 'x64',
-      labels: [], capacity: 1, capabilities: {}, daemonVersion: '0.1.0', protocolVersion: 1,
-      bootId: 'flow-boot', enabled: true, lastSeenAt: now, createdById: creatorId,
-    } });
+    const runner = await insertRunner(db, { name: `flow-runner-${Date.now()}`, createdById: creatorId });
     runnerId = runner.id;
     const thread = await db.chatThread.create({ data: {
       projectId, repoId, title: 'flow integration', createdById: creatorId,
@@ -73,7 +71,15 @@ integration('fleet flow advancement through the database', () => {
 
   it('AC-1–AC-4: tick dispatches and persists a linked SPEC_REVIEW job, step and audit', async () => {
     const flow = await createFlow();
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'APPROVED', specSha: SHA });
+    const advanceable = await app.get<IFleetFlowStepRepository>(FLEET_FLOW_STEP_REPOSITORY).listAdvanceable(50, null);
+    expect(advanceable.map(({ id }) => id)).toContain(flow.id);
+    const loggerError = vi.mocked(Logger.prototype.error);
+    loggerError.mockClear();
     await ticker.tick(now);
+    expect(loggerError.mock.calls).toEqual([]);
+    const afterTick = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
+    expect(afterTick).toMatchObject({ state: 'RUNNING', stopReason: null, stopDetail: null });
     const jobs = await db.fleetJob.findMany({ where: { flowId: flow.id } });
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ flowId: flow.id, flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: SHA });
