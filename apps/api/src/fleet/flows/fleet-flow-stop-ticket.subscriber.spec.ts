@@ -3,7 +3,8 @@ import { currentContext } from '../../action-context/action-context';
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
-import { FLEET_FLOW_STOPPED, type FleetFlowStoppedPayload } from '../../notifications/fleet/fleet-notification-events';
+import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED, type FleetFlowQuestionsPayload, type FleetFlowStoppedPayload } from '../../notifications/fleet/fleet-notification-events';
+import { formatQuestionsComment } from './flow-calls';
 // Load lazily so each criterion reports its own failure while the subscriber is not yet implemented.
 let FleetFlowStopTicketSubscriber: typeof import('./fleet-flow-stop-ticket.subscriber').FleetFlowStopTicketSubscriber;
 beforeEach(async () => { ({ FleetFlowStopTicketSubscriber } = await import('./fleet-flow-stop-ticket.subscriber')); });
@@ -11,6 +12,10 @@ beforeEach(async () => { ({ FleetFlowStopTicketSubscriber } = await import('./fl
 const payload: FleetFlowStoppedPayload = {
   flowId: 'f1', projectId: 'p1', feature: 'checkout', stopReason: 'review_ambiguous',
   detail: 'Which currency?', approverId: 'u2', creatorType: 'AGENT', creatorId: 'a1',
+};
+const questionsPayload: FleetFlowQuestionsPayload = {
+  flowId: 'f1', projectId: 'p1', feature: 'checkout', step: 'SPEC_REVIEW', jobId: 'j1',
+  questions: [{ id: '2', question: 'Which currency?' }], approverId: 'u2', creatorType: 'AGENT', creatorId: 'a1',
 };
 const creator = { actorType: 'agent', id: 'a1' };
 const approver = { actorType: 'user', id: 'u2' };
@@ -43,7 +48,8 @@ function fixture() {
   const subscriber = new FleetFlowStopTicketSubscriber(registry, flows as never, steps as never, actors as never, tickets as never, effects as never, tx as never);
   subscriber.onModuleInit();
   const handle = (p: unknown = payload) => registry.getHandlers(FLEET_FLOW_STOPPED)[0](p);
-  return { flows, flow, steps, actors, tickets, effects, tx, registry, register, subscriber, handle, order };
+  const handleQuestions = (p: unknown = questionsPayload) => registry.getHandlers(FLEET_FLOW_QUESTIONS)[0](p);
+  return { flows, flow, steps, actors, tickets, effects, tx, registry, register, subscriber, handle, handleQuestions, order };
 }
 
 describe('FleetFlowStopTicketSubscriber', () => {
@@ -190,5 +196,78 @@ describe('FleetFlowStopTicketSubscriber', () => {
     expect(f.tickets.create).toHaveBeenCalledTimes(1);
     expect(f.steps.setTicket).toHaveBeenCalledTimes(1);
     expect(f.effects.commentOnFlowTicket).toHaveBeenCalledTimes(2);
+  });
+
+  it('AC-1: registers stop before questions handlers', () => {
+    const f = fixture();
+    expect(f.register.mock.calls.map(([event]) => event)).toEqual([FLEET_FLOW_STOPPED, FLEET_FLOW_QUESTIONS]);
+  });
+
+  it('AC-2/3/5: creates and links a creator-authored task, then posts the formatted questions under system context', async () => {
+    const f = fixture();
+    await f.handleQuestions();
+    expect(f.tickets.create).toHaveBeenCalledWith('shop', {
+      type: 'TASK', title: 'Fleet flow: checkout', description: 'Flow f1 on feat/checkout',
+    }, creator);
+    expect(f.steps.setTicket).toHaveBeenCalledWith('f1', 't1');
+    expect(f.effects.commentOnFlowTicket).toHaveBeenCalledWith('t1', 'p1', formatQuestionsComment({
+      step: 'SPEC_REVIEW', jobId: 'j1', questions: questionsPayload.questions,
+      answerPath: '/api/projects/shop/flows/f1/answers',
+    }));
+    expect(f.tx.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-4: reuses an existing ticket for the questions comment', async () => {
+    const f = fixture();
+    f.flow.ticketId = 'existing';
+    await f.handleQuestions();
+    expect(f.tickets.create).not.toHaveBeenCalled();
+    expect(f.steps.setTicket).not.toHaveBeenCalled();
+    expect(f.effects.commentOnFlowTicket).toHaveBeenCalledWith('existing', 'p1', expect.any(String));
+  });
+
+  it('AC-6: missing flow or slug writes nothing', async () => {
+    const missing = fixture();
+    missing.flows.lockById.mockResolvedValue(null as never);
+    await missing.handleQuestions();
+    const noSlug = fixture();
+    noSlug.steps.projectSlug.mockResolvedValue(null as never);
+    await noSlug.handleQuestions();
+    for (const f of [missing, noSlug]) {
+      expect(f.tickets.create).not.toHaveBeenCalled();
+      expect(f.steps.setTicket).not.toHaveBeenCalled();
+      expect(f.effects.commentOnFlowTicket).not.toHaveBeenCalled();
+    }
+  });
+
+  it('AC-7/9: falls back to approver; when both authors are unavailable it warns and writes nothing', async () => {
+    const fallback = fixture();
+    fallback.actors.load.mockRejectedValueOnce(new ActorUnavailableError(null)).mockResolvedValueOnce(approver);
+    await fallback.handleQuestions();
+    expect(fallback.tickets.create).toHaveBeenCalledWith('shop', expect.any(Object), approver);
+    const unavailable = fixture();
+    unavailable.actors.load.mockRejectedValue(new ActorUnavailableError(null));
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockClear();
+    await unavailable.handleQuestions();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/f1.*author unavailable/));
+    expect(unavailable.tickets.create).not.toHaveBeenCalled();
+    expect(unavailable.effects.commentOnFlowTicket).not.toHaveBeenCalled();
+  });
+
+  it('AC-8: malformed questions payload warns and skips all writes', async () => {
+    const f = fixture();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockClear();
+    await f.handleQuestions({ ...questionsPayload, questions: [] });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/fleet_flow_questions.*malformed/));
+    expect(f.tx.run).not.toHaveBeenCalled();
+    expect(f.tickets.create).not.toHaveBeenCalled();
+    expect(f.effects.commentOnFlowTicket).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: preserves the original stopped comment through the first registered handler', async () => {
+    const f = fixture();
+    f.flow.ticketId = 't1';
+    await f.handle();
+    expect(f.effects.commentOnFlowTicket).toHaveBeenCalledExactlyOnceWith('t1', 'p1', 'Flow stopped (review_ambiguous): Which currency?');
   });
 });
