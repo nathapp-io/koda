@@ -54,6 +54,26 @@ describe('FleetFlowStoppedSubscriber', () => {
     expect(draft.body).toHaveLength(BODY_MAX);
     expect(draft.body?.endsWith('…')).toBe(true);
   });
+  it('delivers despite a separate questions listener skipping unavailable ticket authors', async () => {
+    const publisher = new FanOutPublisher({ recordLastError: vi.fn() } as never);
+    const ticketListener = vi.fn(async () => {
+      const ticketAuthorsAvailable = { approver: false, creator: false };
+      if (!ticketAuthorsAvailable.approver && !ticketAuthorsAvailable.creator) return;
+    });
+    publisher.register(FLEET_FLOW_QUESTIONS, ticketListener);
+    const independentSubscriber = new FleetFlowStoppedSubscriber(publisher,
+      { projectSlug } as unknown as FleetNotificationReader, { deliver } as unknown as NotificationWriter);
+    independentSubscriber.onModuleInit();
+
+    await publisher.publish({
+      id: 'event-1', type: FLEET_FLOW_QUESTIONS, payload: questionsPayload(),
+    } as Parameters<FanOutPublisher['publish']>[0]);
+
+    expect(ticketListener).toHaveBeenCalledWith(questionsPayload());
+    expect(deliver).toHaveBeenCalledWith([
+      flowQuestionsDraft(questionsPayload(), 'sandbox', 'u1'), flowQuestionsDraft(questionsPayload(), 'sandbox', 'u2'),
+    ]);
+  });
   it('delivers questions to approver and distinct human creator', async () => {
     await questionsHandler(questionsPayload());
     expect(deliver).toHaveBeenCalledWith([
