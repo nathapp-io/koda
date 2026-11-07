@@ -415,6 +415,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     await h.service.advance('flow-1', NOW);
 
     expect(h.steps.complete).toHaveBeenCalledWith('flow-1', NOW);
+    expect(h.outbox.record).not.toHaveBeenCalled();
     expect(h.activity.record).toHaveBeenCalledWith({
       actorType: 'SYSTEM', actorId: 'flow', action: 'flow.completed', entityType: 'flow', entityId: 'flow-1',
       projectId: 'p1', payload: { flowId: 'flow-1', step: 'FIX', jobId: 'job-1' },
@@ -861,8 +862,31 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
       flow: h.record, feature: h.record.features[0], step: 'PLAN', remainingCapUsd: '10.0000', reviewAgent: 'Explore',
     }), { flowId: 'flow-1', flowStep: 'PLAN', auditKey: 'system.flow.advance' });
+    expect(h.outbox.record).not.toHaveBeenCalled();
     expect(h.activity.record.mock.calls.map(([entry]) => entry.action)).toEqual(['flow.step']);
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: { step: 'PLAN', jobId: 'j1' } }));
+  });
+
+  it('dispatch AC-8: records budget_paused in the same transaction as the stop', async () => {
+    const h = planPass();
+    const error = new BudgetPausedException({ id: 'b1', scopeType: 'GLOBAL', scopeId: null, scopeKey: 'global' });
+    h.jobs.dispatch.mockRejectedValue(error);
+    h.flows.stop.mockImplementation(async () => {
+      expect(h.inTransaction()).toBe(true);
+      return h.record;
+    });
+    h.outbox.record.mockImplementation(async () => {
+      expect(h.inTransaction()).toBe(true);
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'budget_paused', NOW, 'PLAN: BudgetPausedException');
+    expect(h.outbox.record).toHaveBeenCalledExactlyOnceWith({
+      type: 'fleet_flow_stopped',
+      payload: expect.objectContaining({ flowId: 'flow-1', stopReason: 'budget_paused' }),
+      metadata: { projectId: 'p1', eventId: 'flow-1:stopped' },
+    });
   });
 
   it.each([
