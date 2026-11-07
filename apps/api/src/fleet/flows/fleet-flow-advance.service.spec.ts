@@ -9,7 +9,9 @@ import type { FleetJobsService } from '../jobs/fleet-jobs.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { FleetFlowFeatureRecord, FleetFlowRecord, IFleetFlowRepository } from './domain/fleet-flow.domain';
-import type { IFleetFlowStepRepository, LatestFlowJob } from './domain/fleet-flow-step.domain';
+import type { CreatorAccess, IFleetFlowStepRepository, LatestFlowJob } from './domain/fleet-flow-step.domain';
+import type { PermissionService } from '../../permissions/permission.service';
+import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
@@ -76,6 +78,8 @@ interface HarnessOptions {
   threadMissing?: boolean;
   repoMissing?: boolean;
   reviewRepo?: { owner: string; name: string } | null;
+  creatorAccess?: CreatorAccess;
+  creatorKeys?: ReadonlySet<string>;
 }
 
 function build(opts: HarnessOptions = {}) {
@@ -102,7 +106,7 @@ function build(opts: HarnessOptions = {}) {
     setSpent: vi.fn(async () => undefined),
     complete: vi.fn(async () => undefined),
     markStep: vi.fn(async () => undefined),
-    creatorAccess: vi.fn(),
+    creatorAccess: vi.fn(async () => opts.creatorAccess ?? { exists: true, disabled: false }),
     listAdvanceable: vi.fn(async () => []),
     latestJobForStep: vi.fn<IFleetFlowStepRepository['latestJobForStep']>(async () => null),
   };
@@ -131,16 +135,19 @@ function build(opts: HarnessOptions = {}) {
     expect(inTransaction).toBe(false);
     return { job: { id: 'j1' } };
   }), cancel: vi.fn() };
+  const permissions = {
+    effectiveKeys: vi.fn<PermissionService['effectiveKeys']>(async () => opts.creatorKeys ?? new Set(['fleet.job.dispatch'])),
+  };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
-    activity as never, audit as never, txManager as never, jobs as never,
+    activity as never, audit as never, txManager as never, jobs as never, permissions as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
     flows.stop, steps.setSpent, steps.complete, steps.markStep, activity.record, audit.record,
   ].some((fn) => fn.mock.calls.length > 0);
 
-  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, order, record, wrote,
+  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, permissions, order, record, wrote,
     inTransaction: () => inTransaction };
 }
 
@@ -670,5 +677,44 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     }), { flowId: 'flow-1', flowStep: step, auditKey: 'system.flow.advance' });
     expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', step,
       { flowState: 'RUNNING', ...(step === 'FIX' ? { prNumber: 12 } : {}) });
+  });
+
+  it('US-014 AC-1/AC-2: stops at an exhausted cap without dispatching', async () => {
+    const h = build({ flow: { costCapUsd: '5.0000', spentUsd: '0.0000' }, sum: '5.0000' });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'cost_cap', NOW, 'spent 5.0000 of cap 5.0000');
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-014 AC-3: dispatches with the freshly recomputed remaining cap', async () => {
+    const h = build({ flow: { costCapUsd: '5' }, sum: '3.5000' });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch.mock.calls[0]?.[2].maxCostUsd).toBe(1.5);
+  });
+
+  it.each([
+    ['disabled creator', { exists: true, disabled: true }],
+    ['missing creator', { exists: false, disabled: false }],
+  ] as const)('US-014 %s: stops without dispatch', async (_label, creatorAccess) => {
+    const h = build({ creatorAccess });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'creator_lost_access', NOW, expect.any(String));
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-014 AC-6/AC-7: stops when the creator lacks the project dispatch key', async () => {
+    const h = build({ creatorKeys: new Set(['project.read']) });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'creator_lost_access', NOW, expect.any(String));
+    expect(h.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, { projectId: 'p1' });
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-014 AC-8: checks cap before creator access', async () => {
+    const h = build({ flow: { costCapUsd: '5.0000' }, sum: '5.0000', creatorAccess: { exists: true, disabled: true } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'cost_cap', NOW, 'spent 5.0000 of cap 5.0000');
+    expect(h.steps.creatorAccess).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
 });

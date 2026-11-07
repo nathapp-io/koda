@@ -19,6 +19,10 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
+import { remainingCapUsd } from './flow-step-dispatch';
+import { mayDispatch } from '../schedules/schedule-access';
+import { PermissionService } from '../../permissions/permission.service';
+import type { PrincipalRef } from '../../permissions/permissions.types';
 
 /**
  * `FLEET_FLOW_PR_WAIT_MS`'s default (design, "`RUN` waits for its PR"). US-017 moves it onto
@@ -31,6 +35,7 @@ interface DispatchPass {
   flow: FleetFlowRecord;
   action: DispatchAction;
   plan: FleetJobRecord | null;
+  remainingCapUsd: string;
 }
 
 /** Decide under parent/flow locks, dispatch outside a transaction, then re-lock to record progress. */
@@ -45,6 +50,7 @@ export class FleetFlowAdvanceService {
     private readonly audit: AuditRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly jobs: FleetJobsService,
+    private readonly permissions: PermissionService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
@@ -55,7 +61,7 @@ export class FleetFlowAdvanceService {
     const body = buildStepDispatch({
       flow, feature: flow.features[0], step: action.step,
       // US-014 supplies the guarded remaining cap; US-017 moves the agent default into FLEET_CFG.
-      remainingCapUsd: flow.costCapUsd, reviewAgent: 'Explore',
+      remainingCapUsd: pass.remainingCapUsd, reviewAgent: 'Explore',
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
     });
     let jobId: string;
@@ -122,7 +128,7 @@ export class FleetFlowAdvanceService {
       const current = await this.flows.lockById(flow.id);
       if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return;
 
-      await this.refreshSpent(current);
+      const spentUsd = await this.refreshSpent(current);
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
       const snapshot = await this.steps.latestJobWithIngest(current.id);
@@ -144,12 +150,31 @@ export class FleetFlowAdvanceService {
         await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
-      await this.writeDecision(current, job ?? null, action, now);
-      if (action.kind !== 'dispatch') return;
-      // Guard seams: cap/creator checks (US-014), then the pre-push SHA/re-ask check (US-015).
+      if (action.kind !== 'dispatch') {
+        await this.writeDecision(current, job ?? null, action, now);
+        return;
+      }
+      // Dispatch guards run in order, against the freshly reconciled spend and the original creator.
+      const remaining = remainingCapUsd(current.costCapUsd, spentUsd);
+      if (remaining === null) {
+        await this.writeDecision(current, job ?? null, {
+          kind: 'stop', reason: 'cost_cap', detail: `spent ${spentUsd} of cap ${current.costCapUsd}`,
+        }, now);
+        return;
+      }
+      const creatorRef: PrincipalRef = { type: current.createdByType, id: current.createdById };
+      const access = await this.steps.creatorAccess(creatorRef);
+      const keys = await this.permissions.effectiveKeys(creatorRef, { projectId: current.projectId });
+      if (!mayDispatch(access, keys)) {
+        await this.writeDecision(current, job ?? null, {
+          kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
+        }, now);
+        return;
+      }
+      // US-015 adds the pre-push SHA/re-ask check after cap and creator guards.
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
         ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
-      return { flow: current, action, plan };
+      return { flow: current, action, plan, remainingCapUsd: remaining };
     });
   }
 
@@ -170,10 +195,12 @@ export class FleetFlowAdvanceService {
    * when it moved (a late ingest raises a job's cost). Both sides are 4-place decimal strings, so they
    * compare exactly — never as floats.
    */
-  private async refreshSpent(flow: FleetFlowRecord): Promise<void> {
+  private async refreshSpent(flow: FleetFlowRecord): Promise<string> {
     const sum = await this.steps.sumCost(flow.id);
-    if (sum === flow.spentUsd) return;
-    await bookkeeping('fleet.flow-bookkeeping', () => this.steps.setSpent(flow.id, sum));
+    if (sum !== flow.spentUsd) {
+      await bookkeeping('fleet.flow-bookkeeping', () => this.steps.setSpent(flow.id, sum));
+    }
+    return sum;
   }
 
   private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
