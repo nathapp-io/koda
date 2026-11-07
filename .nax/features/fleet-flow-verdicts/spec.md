@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Classified review verdicts, flow calls and stop notices (fleet flow F4a)
 
 ## Summary
@@ -51,6 +50,13 @@ escalate only genuine ambiguity, and tell the user when a flow stops. F3 left st
   the branch head is recorded instead.
 - **The calls step is not billed** and runs no cap guard; it does run the creator-access guard (it writes to the
   repository on the creator's behalf).
+- **A push between the review and the calls re-asks.** Before writing, `apply` compares the branch head with the
+  head the review saw (`expectedHead`: `flow.specSha` for `SPEC_REVIEW`, the latest `PLAN` job's `resultSha` for
+  `PRD_REVIEW`). A different head returns `stale`, and `advance` re-asks through `FleetFlowsService.reaskLocked`
+  with that head, exactly as the F3 spec-sha check does before `PLAN`. The check runs only when the calls block is
+  not on the branch yet, so the crash-recovery path (block present, head = the calls commit) never trips it.
+- **Write refusals.** A `422` from the contents write (a branch rule or an invalid request) is a refusal, not a
+  transient error: the flow stops as `calls_failed`.
 - **Write conflicts.** A `409` from the contents write re-reads the file: if its blob sha is unchanged, the write was
   refused for another reason (a branch rule) and the flow stops as `calls_failed`; if it moved, this pass ends and
   the next tick retries against the new file.
@@ -93,7 +99,8 @@ The baseline below exists only to locate the code. It is never the interface to 
   action only; the constructor ends with the `FLEET_CFG` config.
   Target: `DispatchPass.action` is `DispatchAction | ApplyCallsAction`; for `apply_calls`, `decide` runs only the
   creator-access guard (inside its transaction, as for a dispatch; no cap or spec-sha guard) and returns the pass;
-  `advance` then calls `FleetFlowCallsService.apply` outside a transaction and records under the locks. `decide`
+  `advance` then calls `FleetFlowCallsService.apply` outside a transaction, with `expectedHead` = `flow.specSha` for
+  `SPEC_REVIEW` or the latest `PLAN` job's `resultSha` for `PRD_REVIEW`, and records under the locks. `decide`
   keeps a `SPEC_REVIEW` latest job whose id is the feature's `callsJobId` and whose `queuedAt` is at or after
   `approvedAt`, even though its `ref` is no longer `specSha`. `readSpecHead` also reads the forge head when the
   latest job is a terminal `PRD_REVIEW` whose id is the feature's `callsJobId` (a re-plan follows). `decisionInput`
@@ -112,7 +119,8 @@ The baseline below exists only to locate the code. It is never the interface to 
   (sets `ticketId` only where it is null; true when it set it).
 - `GitHubAppClient` (`apps/api/src/fleet/git-broker/github-app-client.ts`).
   Target: adds `putFile(token, owner, name, path, input: { branch: string; content: Buffer; blobSha: string; message: string }): Promise<PutFileResult>`
-  with `PutFileResult = { kind: 'committed'; commitSha: string } | { kind: 'conflict' }`.
+  with `PutFileResult = { kind: 'committed'; commitSha: string } | { kind: 'conflict' } | { kind: 'refused' }`
+  (`409` is `conflict`, `422` is `refused`).
 - `FleetHttpClient.request` (`apps/api/src/fleet/git-broker/fleet-http-client.ts`).
   Baseline: `method: 'GET' | 'POST'`.
   Target: `method: 'GET' | 'POST' | 'PUT'`; a `PUT` sends its JSON body like a `POST`.
@@ -158,8 +166,8 @@ The baseline below exists only to locate the code. It is never the interface to 
   `FLOW_CALLS_MAX_FINDINGS` (20), `FLOW_CALL_TEXT_MAX` (1000), `FLOW_CALL_ID_MAX` (64), `formatQuestions(findings)`,
   `callsOutcomeForForgeError(reason: string): 'failed' | 'retry'`,
   `buildFlowCalls(specText: string, input: { step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }): { text: string; alreadyApplied: boolean }`.
-- `apps/api/src/fleet/flows/fleet-flow-calls.service.ts`: `FleetFlowCallsService.apply(flow: FleetFlowRecord, action: ApplyCallsAction): Promise<CallsOutcome>`
-  with `CallsOutcome = { kind: 'committed'; specSha: string } | { kind: 'retry' } | { kind: 'failed'; detail: string }`
+- `apps/api/src/fleet/flows/fleet-flow-calls.service.ts`: `FleetFlowCallsService.apply(flow: FleetFlowRecord, action: ApplyCallsAction, expectedHead: string): Promise<CallsOutcome>`
+  with `CallsOutcome = { kind: 'committed'; specSha: string } | { kind: 'stale'; head: string } | { kind: 'retry' } | { kind: 'failed'; detail: string }`
   and `ApplyCallsAction` from `flow-step-decision.ts`.
 - `apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts`: `FleetFlowStopTicketSubscriber`
   (`@SystemWriter('system.flow.ticket')`, registers on `fleet_flow_stopped`; runs each event inside
@@ -198,6 +206,8 @@ the pass; `advance` calls `FleetFlowCallsService.apply` with no transaction open
 - `committed`: one transaction locks parent and flow (`lockLive`); if still live, `recordCalls(flowId, featureId,
   jobId, specSha)`, an audit entry `system.flow.advance` (summary `flow calls <STEP>`) and activity `flow.calls`
   `{ step, jobId, specSha, count }`. The next tick dispatches `PLAN`.
+- `stale`: one transaction locks parent and flow; if still live, `reaskLocked(flow, head, now)` (the flow returns to
+  `PENDING` with the new sha).
 - `retry`: nothing is written.
 - `failed`: stop `calls_failed`, detail `<STEP>: <detail>`.
 
@@ -206,9 +216,10 @@ the pass; `advance` calls `FleetFlowCallsService.apply` with no transaction open
 1. `findReviewRepo(flow.repoId)`; missing or no installation: `failed` `repo not connected`.
 2. `mintInstallationToken`, then `getFile(spec path, flow.branch)`; null: `failed` `spec missing on <branch>`.
 3. `buildFlowCalls(file text, action)`; `alreadyApplied`: `committed` with `getBranchHead(flow.branch)`.
+   Otherwise `getBranchHead(flow.branch)` must equal `expectedHead`, else `stale` with that head.
 4. `putFile` with the file's blob sha and message `docs(<feature>): flow calls from <STEP> job <jobId>`;
-   `committed`: `committed` with its commit sha; `conflict`: `getFile` again, same blob sha: `failed`
-   `spec write refused`, different: `retry`.
+   `committed`: `committed` with its commit sha; `refused`: `failed` `spec write refused`; `conflict`: `getFile`
+   again, same blob sha: `failed` `spec write refused`, different: `retry`.
 5. A `RepoCheckException`: `callsOutcomeForForgeError(reason)` is `failed` (detail = the reason) for
    `app_not_installed`, `app_permissions_insufficient` and `repo_not_found`, `retry` for any other reason. Any other
    error propagates.
@@ -255,6 +266,8 @@ ticket titled `Fleet flow: <feature>` with description `Flow <flowId> on <branch
 | Spec file missing on the flow branch | stop `calls_failed`, `<STEP>: spec missing on <branch>` |
 | Contents write `409`, blob sha unchanged on re-read | stop `calls_failed`, `<STEP>: spec write refused` |
 | Contents write `409`, blob sha moved | nothing written; next tick retries |
+| Contents write `422` | stop `calls_failed`, `<STEP>: spec write refused` |
+| Branch head differs from the head the review saw | `reaskLocked` → `PENDING` with that head |
 | Forge reason `app_not_installed`, `app_permissions_insufficient`, `repo_not_found` | stop `calls_failed` with the reason |
 | Forge reason `provider_unreachable`, `provider_error` or another | nothing written; next tick retries |
 | Calls block already on the branch (crash after commit) | no second commit; branch head recorded as `specSha` |
@@ -274,6 +287,8 @@ ticket titled `Fleet flow: <feature>` with description `Flow <flowId> on <branch
 - Notifications or ticket comments for a flow's completion, for a human stop and for an approval rejection.
 - De-duplicating a flow-stop notification against the `fleet_job_outcome` notification the failed job itself sends.
 - Closing or transitioning the flow's ticket; it stays in its created state.
+- Carrying more than 500 characters of the stop detail in the stop event: the ticket comment and the notification show the first 500; the full detail (up to 2,000) stays in `stopDetail`.
+- Bounding retries of a calls step that keeps failing with a transient forge error (`provider_error`, `provider_unreachable`): it retries every tick, as F3's forge preflight does.
 - Web rendering of the `flow_stopped` notification kind and every flow page (fleet flow F6); clients fall back to the English `title` and `body`.
 - GitLab repositories: flows are GitHub-only, and `putFile` exists only on the GitHub client.
 - Signing the calls commit or setting its author: GitHub records it as the App.
@@ -307,7 +322,8 @@ branch.
 ### US-005: Step decision for classified verdicts
 
 Workdir: `apps/api`. Depends on US-001, US-002. `decideFlowStep` applies the seven verdict rules in the Approach, with the
-new inputs, action and stop reasons.
+new inputs, action and stop reasons. So that `apps/api` still type-checks, `FleetFlowAdvanceService.decisionInput`
+supplies `callsJobId: null`, `planCount: 0` and `canApplyCalls: false` until US-007 fills them.
 
 ### US-006: The calls service
 
@@ -358,7 +374,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - `apps/api/src/fleet/flows/domain/fleet-flow.domain.ts` — `FleetFlowFeatureRecord`, `FleetFlowRecord`
 - `apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts` — `IFleetFlowStepRepository`
 - `apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts` — the repository this story extends
-- `apps/api/test/integration/fleet/fleet-flow-steps-migration.integration.spec.ts` — migration test pattern
+- `apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts` — `toDomain`, which carries the new columns
 
 **US-004**
 
@@ -370,6 +386,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 
 - `apps/api/src/fleet/flows/flow-step-decision.ts` — `decideFlowStep`
 - `apps/api/src/fleet/flows/flow-calls.ts` — created by US-002; `FLOW_CALLS_MAX_FINDINGS`, `formatQuestions`
+- `apps/api/src/fleet/flows/fleet-flow-advance.service.ts` — `decisionInput`, which gains the three placeholder inputs
 
 **US-006**
 
@@ -463,6 +480,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 **US-004**
 
 - `apps/api/src/fleet/git-broker/fleet-http-client.spec.ts` — gains a case for a `PUT` with a JSON body; no existing expectation changes.
+- `apps/api/src/fleet/git-broker/github-app-client.spec.ts` — gains the `putFile` cases against the fake forge; no existing expectation changes.
 
 **US-005**
 
@@ -478,7 +496,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 
 - `apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts` — the positional constructor gains an `OutboxService` stub (its `record` a spy) after the `FleetFlowCallsService` argument; no existing expectation changes.
 - `apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts` — the same `OutboxService` stub; no existing expectation changes.
-- `apps/api/src/fleet/flows/flows.module.spec.ts` — stub `OutboxService` for the advance service's new dependency.
+- `apps/api/src/fleet/flows/flows.module.spec.ts` — `OutboxService` comes from a global package module that this test does not compile; add a test-only global module that provides an `OutboxService` stub, so the advance service resolves.
 - `apps/api/src/notifications/fleet/fleet-notification-events.spec.ts` — gains the `parseFlowStoppedPayload` cases; no existing expectation changes.
 
 **US-009**
@@ -491,7 +509,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - `apps/api/src/permissions/catalog.spec.ts` — its mirrored `NEW_KEY_SCOPES` table ends at `system.flow.advance`; append `system.flow.ticket: 'any'` after it so the table still equals the catalog's, in the same order.
 - `apps/api/src/permissions/__snapshots__/role-matrix.json` — every role's map gains `"system.flow.ticket": ["non-role-key","non-role-key"]` right after `system.flow.advance`, the same value that key has; no other entry changes.
 - `apps/api/src/permissions/system-writer.decorator.spec.ts` — the writer list gains `[FleetFlowStopTicketSubscriber, 'system.flow.ticket']` and `toHaveLength(42)` becomes `toHaveLength(43)`.
-- `apps/api/src/fleet/flows/flows.module.spec.ts` — `FlowsModule` now imports `OutboxModule`, the tickets modules and the module exporting `ActorPrincipalLoader`; stub them with `overrideModule` (or their exported providers: `FanOutPublisher`, `FleetJobTicketEffects`, `TicketsService`, `ActorPrincipalLoader`) and expect `FleetFlowStopTicketSubscriber` among the providers.
+- `apps/api/src/fleet/flows/flows.module.spec.ts` — `FlowsModule` now imports `OutboxModule`, the tickets modules and the module exporting `ActorPrincipalLoader`; stub them with `overrideModule` (or their exported providers: `FanOutPublisher`, `FleetJobTicketEffects`, `TicketsService`, `ActorPrincipalLoader`; `FanOutPublisher` through the same test-only global module US-008 adds) and expect `FleetFlowStopTicketSubscriber` among the providers.
 
 ### Seams
 
@@ -522,19 +540,19 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 ### US-002: The calls block
 
 - [unit] `buildFlowCalls('# Spec\n', { step: 'SPEC_REVIEW', jobId: 'j1', findings: [{ id: 'a', class: 'minor', summary: 'S', fix: 'F' }] })` returns `alreadyApplied` false.
-- [unit] For that call, `text` starts with `# Spec\n` and ends with the lines `## Flow's calls`, a blank line, `### SPEC_REVIEW job j1`, a blank line and `- **a** (minor): S Call: F`.
+- [unit] For that call, the returned `text` ends with the seven lines: blank, `## Flow's calls`, blank, `### SPEC_REVIEW job j1`, blank, `- **a** (minor): S Call: F` and a final empty line, after the unchanged `# Spec\n`.
 - [unit] `buildFlowCalls` of a spec that already contains the line `## Flow's calls` adds only the `### <STEP> job <jobId>` block at the end of the file, so `## Flow's calls` appears once in the returned `text`.
 - [unit] `buildFlowCalls` of a spec that already contains the line `### PRD_REVIEW job j2`, called with `step: 'PRD_REVIEW'` and `jobId: 'j2'`, returns `alreadyApplied` true and the spec text unchanged.
 - [unit] `buildFlowCalls` with a finding that has no `id` names it by its 1-based position in the findings list (`- **2** (answered): ...` for the second finding).
 - [unit] `buildFlowCalls` with an `id` of `x\n### SPEC_REVIEW job j9` writes the id on one line inside the bullet, so the returned `text` has no line equal to `### SPEC_REVIEW job j9`.
 - [unit] `buildFlowCalls` with a finding of class `ambiguous` among `minor` ones leaves the ambiguous finding out of the block.
 - [unit] `buildFlowCalls` with a `summary` containing a newline writes the summary on one line, the newline replaced by a space.
-- [unit] `buildFlowCalls` with a 3,000-character `fix` writes at most `FLOW_CALL_TEXT_MAX` (1000) characters of it.
+- [unit] `buildFlowCalls` with a 3,000-character `fix` writes a bullet whose text after `Call: ` is 1,000 (`FLOW_CALL_TEXT_MAX`) characters long.
+- [unit] `buildFlowCalls` with a 100-character `id` writes a bullet whose bold id is 64 (`FLOW_CALL_ID_MAX`) characters long.
 - [unit] `formatQuestions([{ id: 'q1', class: 'ambiguous', summary: 's', question: 'Which DB?' }])` returns `1 question: 1. [q1] Which DB?`.
 - [unit] `formatQuestions` of two ambiguous findings returns a text starting with `2 questions: `.
 - [unit] `formatQuestions` of questions whose joined text exceeds 2,000 characters returns at most 2,000 characters ending in `…`.
 - [unit] `callsOutcomeForForgeError('app_permissions_insufficient')` returns `failed`.
-- [unit] `callsOutcomeForForgeError('repo_not_found')` returns `failed`.
 - [unit] `callsOutcomeForForgeError('provider_error')` returns `retry`.
 
 ### US-003: Calls and ticket columns
@@ -562,7 +580,8 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - [unit] `putFile` returns `{ kind: 'conflict' }` when GitHub answers `409`.
 - [unit] `putFile` throws `RepoCheckException` with reason `repo_not_found` when GitHub answers `404`.
 - [unit] `putFile` throws `RepoCheckException` with reason `app_permissions_insufficient` when GitHub answers `403`.
-- [unit] `putFile` throws `RepoCheckException` with reason `provider_error` when GitHub answers `422` or `500`.
+- [unit] `putFile` returns `{ kind: 'refused' }` when GitHub answers `422`.
+- [unit] `putFile` throws `RepoCheckException` with reason `provider_error` when GitHub answers `500`.
 - [unit] `putFile` throws `RepoCheckException` with reason `provider_error` when a `200` response has no string `commit.sha`.
 - [unit] `putFile` with a path segment containing a space sends the segment URL-encoded.
 
@@ -583,8 +602,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 
 ### US-006: The calls service
 
-- [unit] `apply` for a nax-entry flow mints an installation token for the flow repo's installation and name.
-- [unit] `apply` reads the spec file at the feature's `specPath` on `flow.branch` with that token.
+- [unit] `apply` reads the spec file at the feature's `specPath` on `flow.branch` with a token `mintInstallationToken` minted for the flow repo's installation and name.
 - [unit] `apply` calls `putFile` with the spec path, `flow.branch` and the read file's blob sha.
 - [unit] `apply` passes `putFile` the text `buildFlowCalls` returns for the read file and the action.
 - [unit] `apply` passes `putFile` the message `docs(<feature>): flow calls from <STEP> job <jobId>`.
@@ -597,7 +615,8 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - [unit] `apply` when `putFile` returns `conflict` and a second `getFile` returns a different blob sha returns `{ kind: 'retry' }`.
 - [unit] `apply` when the token mint throws `RepoCheckException('app_not_installed')` returns `failed` with detail `app_not_installed`.
 - [unit] `apply` when `putFile` throws `RepoCheckException('provider_unreachable')` returns `{ kind: 'retry' }`.
-- [unit] `apply` when `putFile` throws a plain `Error` rethrows it.
+- [unit] `apply` when `putFile` returns `refused` returns `failed` with detail `spec write refused`.
+- [unit] `apply` when the block is not on the branch and `getBranchHead(flow.branch)` differs from `expectedHead` returns `{ kind: 'stale', head }` with that head and calls no `putFile`.
 
 ### US-007: Advance applies calls
 
@@ -606,11 +625,13 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - [unit] After `apply` returns `committed` with sha `s2`, `advance` records activity `flow.calls` with `{ step: 'SPEC_REVIEW', jobId, specSha: 's2', count: 1 }`.
 - [unit] After `apply` returns `committed`, `advance` records an `AuditRecorder` entry with key `system.flow.advance` and summary `flow calls SPEC_REVIEW`.
 - [unit] When `apply` returns `retry`, `advance` writes nothing: no `recordCalls`, no stop, no activity.
+- [unit] When `apply` returns `stale` with head `h9`, `advance` calls `FleetFlowsService.reaskLocked` with the flow and `h9`.
+- [unit] For a `PRD_REVIEW` `apply_calls`, `advance` passes `apply` the latest `PLAN` job's `resultSha` as `expectedHead`.
 - [unit] When `apply` returns `failed` with detail `spec write refused`, `advance` stops the flow as `calls_failed` with detail `SPEC_REVIEW: spec write refused`.
 - [unit] When the creator no longer holds `fleet.job.dispatch`, `advance` stops the flow as `creator_lost_access` and calls no `apply`.
 - [unit] When the flow left `RUNNING` between the decision and the record, `advance` calls no `recordCalls` after a `committed` outcome.
 - [unit] For a flow whose feature's `callsJobId` is the latest `SPEC_REVIEW` job's id and whose `specSha` is that job's calls commit (not the job's `ref`), `advance` dispatches `PLAN` instead of a new `SPEC_REVIEW`.
-- [unit] For a `RUNNING` nax-entry flow whose latest job is a `COMPLETED` `PRD_REVIEW` with calls already recorded (`callsJobId` = its id), `advance` reads the forge head of `flow.branch` and, when it equals `specSha`, dispatches `PLAN`.
+- [unit] For a `RUNNING` nax-entry flow whose latest job is a `COMPLETED` `PRD_REVIEW` with calls already recorded (`callsJobId` = its id) and a forge head equal to `specSha`, `advance` dispatches `PLAN`.
 - [unit] For a `RUNNING` nax-entry flow whose latest job is a `COMPLETED` `PRD_REVIEW` with no findings, `advance` reads no forge head and dispatches `RUN`.
 - [unit] `advance` passes `planCount` from `countJobsForStepSince(flowId, 'PLAN', approvedAt)` to the decision, so a `PRD_REVIEW` with a `minor` finding on a flow with two `PLAN` jobs since approval stops as `review_findings`.
 - [unit] `advance` for a thread-entry flow whose latest `SPEC_REVIEW` has one `minor` finding stops it as `review_findings` and calls no `apply`.
@@ -621,7 +642,7 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - [unit] `parseFlowStoppedPayload` of a payload without `flowId` returns null.
 - [unit] `parseFlowStoppedPayload` of a payload whose `creatorType` is `RUNNER` returns null.
 - [unit] When `advance` stops a flow as `step_failed`, it calls `OutboxService.record` once with type `fleet_flow_stopped` and metadata `{ projectId, eventId: '<flowId>:stopped' }`.
-- [unit] That event's payload carries the flow id, project id, feature, `stopReason` `step_failed`, approver id, creator type and creator id.
+- [unit] That event's payload equals `{ flowId, projectId, feature, stopReason: 'step_failed', detail, approverId, creatorType, creatorId }` for the stopped flow.
 - [unit] The event's `detail` is the stop detail cut to its first 500 characters.
 - [unit] When `advance` dispatches a step or completes a flow, it records no `fleet_flow_stopped` event.
 - [unit] When `advance` stops a flow as `budget_paused` after a dispatch refusal, it records the event with `stopReason` `budget_paused` inside the transaction that writes the stop.
@@ -655,7 +676,6 @@ flows and jobs with a stubbed GitHub client, and the stop handlers over a real o
 - [unit] The handler skips a malformed payload without creating a ticket.
 - [unit] `commentOnFlowTicket` on a ticket that already has a comment with the same body creates no comment.
 - [unit] `commentOnFlowTicket` on a ticket without that comment creates one system comment and records an audit entry with key `comment.create` and the given project id.
-- [unit] `NEW_KEY_SCOPES` maps `system.flow.ticket` to `'any'`, and `FleetFlowStopTicketSubscriber` is declared with `@SystemWriter('system.flow.ticket')`.
 
 ### US-011: Classified flows against the database
 
