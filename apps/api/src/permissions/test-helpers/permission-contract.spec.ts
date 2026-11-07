@@ -9,6 +9,7 @@ describe('permission contract checker', () => {
     'fleet.job.shell.escalate',
     'fleet.budget.override',
     'fleet.flow.start',
+    'fleet.flow.answer',
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

@@ -66,6 +66,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'fleet.job.shell.escalate',
   'fleet.budget.override',
   'fleet.flow.start',
+  'fleet.flow.answer',
   // C10 US-004 declared the two GLOBAL credential update and delete routes, so
   // `fleet.credential.update` and `fleet.credential.delete` left this list; US-005's project routes
   // declare `project.credential.*` from the start, so no credential key waits for a surface.
@@ -151,6 +152,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'fleet.flow.create': 'project',
   'fleet.flow.start': 'project',
   'fleet.flow.stop': 'project',
+  'fleet.flow.answer': 'project',
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
   'system.flow.advance': 'any',
