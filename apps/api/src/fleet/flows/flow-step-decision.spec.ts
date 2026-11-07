@@ -71,14 +71,14 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[]}' }) }))).toEqual({ kind: 'dispatch', step: 'RUN' });
   });
   it('US-008 AC-3 stops on SPEC_REVIEW findings', () => {
-    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","summary":"Missing AC"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
   it('US-008 AC-4 formats findings with formatFindings', () => {
-    const findings = [{ id: 'F1', summary: 'Missing AC' }];
-    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","summary":"Missing AC"}]}' }) }))).toEqual({ kind: 'stop', reason: 'review_findings', detail: formatFindings(findings) });
+    const findings = [{ id: 'F1', class: 'minor' as const, summary: 'Missing AC', fix: 'add it' }];
+    expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"id":"F1","class":"minor","summary":"Missing AC","fix":"add it"}]}' }) }))).toEqual({ kind: 'stop', reason: 'review_findings', detail: formatFindings(findings) });
   });
   it('US-008 AC-5 stops on PRD_REVIEW findings', () => {
-    expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[{"summary":"Update plan"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+    expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[{"class":"minor","summary":"Update plan","fix":"update it"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
   it('US-008 AC-6 reports an unreadable null SPEC_REVIEW output', () => {
     expect(decideFlowStep(input({ latestJob: job({ id: 'j2', step: 'SPEC_REVIEW', agentOutput: null }) }))).toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'SPEC_REVIEW job j2: no verdict JSON in the agent output' });

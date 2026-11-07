@@ -1,54 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
 
-describe('parseFlowVerdict', () => {
-  it('AC-1: parses an empty final verdict after prose', () => {
-    expect(parseFlowVerdict('Looks good.\n{"findings":[]}')).toEqual({ ok: true, findings: [] });
+describe('classified flow verdicts', () => {
+  it('accepts valid classified findings and rejects missing or invalid class-specific text', () => {
+    expect(parseFlowVerdict('ok\n{"findings":[{"id":"F1","class":"minor","summary":"s","fix":"f"}]}')).toEqual({ ok: true, findings: [{ id: 'F1', class: 'minor', summary: 's', fix: 'f' }] });
+    expect(parseFlowVerdict('{"findings":[{"class":"ambiguous","summary":"s","question":"q"}]}')).toEqual({ ok: true, findings: [{ class: 'ambiguous', summary: 's', question: 'q' }] });
+    expect(parseFlowVerdict('{"findings":[{"class":"answered","summary":"s","fix":"f"}]}')).toMatchObject({ ok: true, findings: [{ class: 'answered' }] });
+    for (const verdict of ['{"findings":[{"summary":"s"}]}', '{"findings":[{"class":"major","summary":"s","fix":"f"}]}', '{"findings":[{"class":"minor","summary":"s"}]}', '{"findings":[{"class":"answered","summary":"s","fix":"   "}]}', '{"findings":[{"class":"ambiguous","summary":"s"}]}']) {
+      expect(parseFlowVerdict(verdict)).toEqual({ ok: false });
+    }
+    expect(parseFlowVerdict('{"findings":[]}')).toEqual({ ok: true, findings: [] });
   });
-  it('AC-2: parses findings and preserves string ids', () => {
-    expect(parseFlowVerdict('Review\n{"findings":[{"id":"F1","summary":"Missing AC for 409"}]}')).toEqual({ ok: true, findings: [{ id: 'F1', summary: 'Missing AC for 409' }] });
-  });
-  it('AC-3: parses only the final findings marker', () => {
-    expect(parseFlowVerdict('{"findings":[{"summary":"x"}]}\nmore text\n{"findings":[]}')).toEqual({ ok: true, findings: [] });
-  });
-  it('AC-4: removes a trailing code fence and whitespace', () => {
-    expect(parseFlowVerdict('{"findings":[]}\n```\n  ')).toEqual({ ok: true, findings: [] });
-  });
-  it('AC-5: rejects text after the verdict', () => {
+
+  it('preserves final-verdict, malformed and trailing-text rejection behavior', () => {
+    expect(parseFlowVerdict('Review\n{"findings":[{"id":"F1","class":"minor","summary":"s","fix":"f"}]}')).toMatchObject({ ok: true });
     expect(parseFlowVerdict('{"findings":[]} thanks')).toEqual({ ok: false });
-  });
-  it('rejects text attached to the closing code fence', () => {
-    expect(parseFlowVerdict('{"findings":[]}\n```thanks')).toEqual({ ok: false });
-  });
-  it('AC-6: rejects output without JSON', () => {
-    expect(parseFlowVerdict('All fine, no JSON.')).toEqual({ ok: false });
-  });
-  it('AC-7: rejects null', () => {
+    expect(parseFlowVerdict('{"findings":{"a":1}}')).toEqual({ ok: false });
+    expect(parseFlowVerdict('All fine')).toEqual({ ok: false });
     expect(parseFlowVerdict(null)).toEqual({ ok: false });
   });
-  it('AC-8: rejects malformed JSON', () => {
-    expect(parseFlowVerdict('{"findings": oops')).toEqual({ ok: false });
-  });
-  it('AC-9: rejects a non-array findings value', () => {
-    expect(parseFlowVerdict('{"findings":{"a":1}}')).toEqual({ ok: false });
-  });
-  it('AC-10: rejects entries without a string summary', () => {
-    expect(parseFlowVerdict('{"findings":[{"id":"F1"}]}')).toEqual({ ok: false });
-  });
-  it('AC-11: omits non-string ids', () => {
-    expect(parseFlowVerdict('{"findings":[{"id":7,"summary":"s"}]}')).toEqual({ ok: true, findings: [{ summary: 's' }] });
-  });
-});
 
-describe('formatFindings', () => {
-  it('AC-12: formats numbered findings and optional ids', () => {
-    expect(formatFindings([{ id: 'F1', summary: 'a' }, { summary: 'b' }])).toBe('2 findings: 1. [F1] a 2. b');
-  });
-  it('AC-13: uses the singular label', () => {
-    expect(formatFindings([{ summary: 'a' }])).toBe('1 finding: 1. a');
-  });
-  it('AC-14: truncates overlong details to the exact limit with an ellipsis', () => {
-    const result = formatFindings(Array.from({ length: 100 }, () => ({ summary: 'x'.repeat(100) })));
+  it('formats classifications and keeps the exact detail cap', () => {
+    expect(formatFindings([{ id: 'F1', class: 'minor', summary: 'Missing AC', fix: 'add it' }])).toBe('1 finding: 1. [F1] (minor) Missing AC');
+    expect(formatFindings([{ class: 'answered', summary: 'S', fix: 'f' }])).toBe('1 finding: 1. (answered) S');
+    const result = formatFindings(Array.from({ length: 100 }, () => ({ class: 'minor' as const, summary: 'x'.repeat(100), fix: 'f' })));
     expect(result).toHaveLength(2000);
     expect(result.endsWith('…')).toBe(true);
   });

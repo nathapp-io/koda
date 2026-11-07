@@ -129,7 +129,7 @@ integration('fleet flow advancement through the database', () => {
   it('AC-10: a SPEC_REVIEW finding stops the flow', async () => {
     const flow = await createFlow();
     await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', {
-      agentResult: { status: 'completed', output: '{"findings":[{"id":"F1","summary":"A finding"}]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
+      agentResult: { status: 'completed', output: '{"findings":[{"id":"F1","class":"minor","summary":"A finding","fix":"f"}]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
     });
     await ticker.tick(now);
     expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED', stopReason: 'review_findings' });
