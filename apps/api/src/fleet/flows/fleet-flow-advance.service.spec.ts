@@ -4,6 +4,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import { buildStepDispatch } from './flow-step-dispatch';
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
+import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { FleetJobsService } from '../jobs/fleet-jobs.service';
 import type { FleetActivityService } from '../activity/fleet-activity.service';
@@ -177,10 +178,11 @@ function build(opts: HarnessOptions = {}) {
       return record.specSha;
     }),
   };
+  const config = testFleetConfig();
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
-    flowService as never, github as never, reviews as never,
+    flowService as never, github as never, reviews as never, config,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
@@ -188,12 +190,29 @@ function build(opts: HarnessOptions = {}) {
   ].some((fn) => fn.mock.calls.length > 0);
 
   return { service, flows, steps, threads, repos, reviews, activity, audit, txManager, jobs, permissions, flowService, github,
-    order, record, wrote, inTransaction: () => inTransaction };
+    order, record, wrote, config, inTransaction: () => inTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
   beforeEach(() => {
     decisions.inputs.length = 0;
+  });
+
+  it('uses the configured PR wait duration in the decision engine', async () => {
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job(), ingestSettled: false } });
+    h.config.flowPrWaitMs = 60_000;
+    await h.service.advance('flow-1', NOW);
+    expect(decisions.inputs.at(-1)?.prWaitMs).toBe(60_000);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', NOW, expect.any(String));
+  });
+
+  it('dispatches review steps with the configured review agent', async () => {
+    const h = build();
+    h.config.flowReviewAgent = 'plugin:reviewer';
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({
+      agent: expect.objectContaining({ name: 'plugin:reviewer' }),
+    }), expect.any(Object));
   });
 
   it('AC-1: writes nothing for a PENDING flow', async () => {

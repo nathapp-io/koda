@@ -68,6 +68,9 @@ export interface IFleetConfig {
   prReviewPollMs: number;
   reviewMintPollMs: number;
   prReviewMaxDispatch: number;
+  flowTickMs: number;
+  flowPrWaitMs: number;
+  flowReviewAgent: string;
 }
 
 export class FleetConfigSchema {
@@ -108,6 +111,9 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_PR_REVIEW_POLL_MS: string;
   @IsOptional() @IsString() FLEET_REVIEW_MINT_POLL_MS: string;
   @IsOptional() @IsString() FLEET_PR_REVIEW_MAX_DISPATCH: string;
+  @IsOptional() @IsString() FLEET_FLOW_TICK_MS: string;
+  @IsOptional() @IsString() FLEET_FLOW_PR_WAIT_MS: string;
+  @IsOptional() @IsString() FLEET_FLOW_REVIEW_AGENT: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -170,6 +176,9 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     prReviewPollMs: int('FLEET_PR_REVIEW_POLL_MS', 300_000),
     reviewMintPollMs: int('FLEET_REVIEW_MINT_POLL_MS', 300_000),
     prReviewMaxDispatch: int('FLEET_PR_REVIEW_MAX_DISPATCH', 10),
+    flowTickMs: int('FLEET_FLOW_TICK_MS', 30_000),
+    flowPrWaitMs: int('FLEET_FLOW_PR_WAIT_MS', 1_800_000),
+    flowReviewAgent: process.env['FLEET_FLOW_REVIEW_AGENT'] ?? 'Explore',
   };
 });
 

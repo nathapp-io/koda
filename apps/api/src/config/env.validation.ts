@@ -1,6 +1,7 @@
 import * as Joi from 'joi';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { parseAllowedHosts } from './webhook.config';
+import { AGENT_NAME_RE } from '../fleet/common/agent-jobs';
 
 // Review E/SEC-3: the shipped examples carry `change-me...` secrets. Outside production they are fine
 // (dev compose defaults); in a production image (ENV_NAME, set by the Dockerfile) or NODE_ENV=production
@@ -113,6 +114,9 @@ const envSchema = Joi.object({
   FLEET_PR_REVIEW_ENABLED: Joi.string().pattern(/^(true|false)$/i).optional(),
   FLEET_PR_REVIEW_POLL_MS: Joi.number().integer().min(60_000).max(86_400_000).optional(),
   FLEET_PR_REVIEW_MAX_DISPATCH: Joi.number().integer().min(1).max(100).optional(),
+  FLEET_FLOW_TICK_MS: Joi.number().integer().min(1_000).max(3_600_000).optional(),
+  FLEET_FLOW_PR_WAIT_MS: Joi.number().integer().min(60_000).max(86_400_000).optional(),
+  FLEET_FLOW_REVIEW_AGENT: Joi.string().pattern(AGENT_NAME_RE).optional(),
   FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: Joi.number().integer().min(1).max(90).optional(),
 }).unknown(true);
 

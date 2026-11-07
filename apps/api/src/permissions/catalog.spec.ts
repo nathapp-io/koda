@@ -340,9 +340,9 @@ describe('PERMISSION_CATALOG', () => {
     expect(findCatalogEntry('system.flow.respec')).toMatchObject({ access: 'system' });
   });
 
-  it('US-004 AC-9: system.flow.advance is a system key, pending until the flow ticker declares it', () => {
+  it('system.flow.advance is a live system key declared by the flow ticker', () => {
     expect(findCatalogEntry('system.flow.advance')).toMatchObject({ access: 'system', scope: 'any' });
-    expect(PENDING_SURFACE_KEYS.has('system.flow.advance')).toBe(true);
+    expect(PENDING_SURFACE_KEYS.has('system.flow.advance')).toBe(false);
   });
 
   it('US-001 AC-13: the four surviving agent-management keys are scoped globally', () => {

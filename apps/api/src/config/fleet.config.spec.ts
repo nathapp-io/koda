@@ -11,6 +11,41 @@ describe('fleet config', () => {
     process.env = { ...saved };
   });
 
+  it('flow AC-1: defaults the flow ticker, PR wait and review agent', () => {
+    delete process.env.FLEET_FLOW_TICK_MS;
+    delete process.env.FLEET_FLOW_PR_WAIT_MS;
+    delete process.env.FLEET_FLOW_REVIEW_AGENT;
+    expect(fleetConfig()).toMatchObject({ flowTickMs: 30_000, flowPrWaitMs: 1_800_000, flowReviewAgent: 'Explore' });
+  });
+
+  it('flow AC-2: reads flow overrides including a plugin review agent', () => {
+    process.env.FLEET_FLOW_TICK_MS = '1000';
+    process.env.FLEET_FLOW_PR_WAIT_MS = '60000';
+    process.env.FLEET_FLOW_REVIEW_AGENT = 'plugin:reviewer';
+    expect(fleetConfig()).toMatchObject({ flowTickMs: 1000, flowPrWaitMs: 60000, flowReviewAgent: 'plugin:reviewer' });
+  });
+
+  it.each([
+    ['FLEET_FLOW_REVIEW_AGENT', '../x'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'x'.repeat(129)],
+    ['FLEET_FLOW_TICK_MS', '0'],
+    ['FLEET_FLOW_TICK_MS', '3600001'],
+    ['FLEET_FLOW_TICK_MS', '1.5'],
+    ['FLEET_FLOW_PR_WAIT_MS', '59999'],
+    ['FLEET_FLOW_PR_WAIT_MS', '86400001'],
+    ['FLEET_FLOW_PR_WAIT_MS', 'abc'],
+  ])('flow AC-3/4: refuses boot on %s=%s', (key, value) => {
+    expect(() => validate({ ...BASE, [key]: value })).toThrow();
+  });
+
+  it.each([
+    ['FLEET_FLOW_TICK_MS', '1000'], ['FLEET_FLOW_TICK_MS', '3600000'],
+    ['FLEET_FLOW_PR_WAIT_MS', '60000'], ['FLEET_FLOW_PR_WAIT_MS', '86400000'],
+    ['FLEET_FLOW_REVIEW_AGENT', 'plugin:reviewer'],
+  ])('accepts the flow bounds %s=%s', (key, value) => {
+    expect(() => validate({ ...BASE, [key]: value })).not.toThrow();
+  });
+
   it('AC-7/8: defaults and reads review event mint polling interval', () => {
     delete process.env.FLEET_REVIEW_MINT_POLL_MS;
     expect(fleetConfig().reviewMintPollMs).toBe(300_000);

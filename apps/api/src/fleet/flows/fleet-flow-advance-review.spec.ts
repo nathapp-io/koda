@@ -7,6 +7,7 @@ import type { HeadClaim } from '../reviews/fleet-review-claim.service';
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
 import { buildStepDispatch } from './flow-step-dispatch';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 /**
  * US-016: the `REVIEW` step reaches the head claim before it dispatches, adopts a head that already
@@ -121,7 +122,7 @@ function build(opts: Options = {}) {
     { effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch'])) } as never,
     { reaskLocked: vi.fn(async () => record) } as never,
     { mintReadOnlyToken: vi.fn(async () => ({ token: 'test-only-token', expiresAt: NOW })), getBranchHead: vi.fn(async () => record.specSha) } as never,
-    reviews as never,
+    reviews as never, testFleetConfig(),
   );
   /** Every write the pass could make; each "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [

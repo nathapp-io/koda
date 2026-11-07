@@ -28,12 +28,7 @@ import { FleetFlowsService } from './fleet-flows.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { isTerminal } from '../jobs/job-state';
-
-/**
- * `FLEET_FLOW_PR_WAIT_MS`'s default (design, "`RUN` waits for its PR"). US-017 moves it onto
- * `IFleetConfig.flowPrWaitMs`; until then this pass uses the documented default.
- */
-const FLOW_PR_WAIT_MS = 1_800_000;
+import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
 interface DispatchPass {
@@ -59,6 +54,7 @@ export class FleetFlowAdvanceService {
     private readonly flowService: FleetFlowsService,
     private readonly github: GitHubAppClient,
     private readonly reviews: FleetReviewClaimService,
+    @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
@@ -150,8 +146,8 @@ export class FleetFlowAdvanceService {
     const { flow, action, plan } = pass;
     const body = buildStepDispatch({
       flow, feature: flow.features[0], step: action.step,
-      // US-014 supplies the guarded remaining cap; US-017 moves the agent default into FLEET_CFG.
-      remainingCapUsd: pass.remainingCapUsd, reviewAgent: 'Explore',
+      // The dispatch guard supplies the remaining cap; the API config selects the review agent.
+      remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
@@ -341,7 +337,7 @@ export class FleetFlowAdvanceService {
       approvedAt: flow.approvedAt ?? now,
       latestJob: latest === null ? null : await this.jobView(flow, latest.job),
       now,
-      prWaitMs: FLOW_PR_WAIT_MS,
+      prWaitMs: this.config.flowPrWaitMs,
       // Only a finished RUN consults this, and it arrives with the row it belongs to.
       ingestSettled: latest?.ingestSettled ?? false,
       featurePrNumber: flow.features[0]?.prNumber ?? null,
