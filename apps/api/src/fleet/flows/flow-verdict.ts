@@ -15,7 +15,7 @@ export function parseFlowVerdict(output: string | null | undefined): FlowVerdict
   if (start < 0) return { ok: false };
 
   let candidate = output.slice(start).trim();
-  candidate = candidate.replace(/\s*```(?:[a-zA-Z0-9_-]+)?\s*$/, '').trim();
+  candidate = candidate.replace(/\s*```\s*$/, '').trim();
 
   let parsed: unknown;
   try {

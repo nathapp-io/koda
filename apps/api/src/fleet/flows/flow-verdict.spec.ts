@@ -17,6 +17,9 @@ describe('parseFlowVerdict', () => {
   it('AC-5: rejects text after the verdict', () => {
     expect(parseFlowVerdict('{"findings":[]} thanks')).toEqual({ ok: false });
   });
+  it('rejects text attached to the closing code fence', () => {
+    expect(parseFlowVerdict('{"findings":[]}\n```thanks')).toEqual({ ok: false });
+  });
   it('AC-6: rejects output without JSON', () => {
     expect(parseFlowVerdict('All fine, no JSON.')).toEqual({ ok: false });
   });
