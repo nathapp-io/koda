@@ -32,7 +32,7 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { isTerminal } from '../jobs/job-state';
 import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
-import { FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
+import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
 interface DispatchPass<A extends DispatchAction | ApplyCallsAction = DispatchAction | ApplyCallsAction> {
@@ -404,8 +404,8 @@ export class FleetFlowAdvanceService {
       callsJobId: flow.features[0]?.callsJobId ?? null,
       planCount: await this.steps.countJobsForStepSince(flow.id, 'PLAN', flow.approvedAt ?? now),
       canApplyCalls: flow.entry === 'NAX',
-      questionsJobId: null,
-      answers: null,
+      questionsJobId: flow.features[0]?.questionsJobId ?? null,
+      answers: flow.features[0]?.answers ?? null,
     };
   }
 
@@ -466,6 +466,28 @@ export class FleetFlowAdvanceService {
           creatorType: flow.createdByType, creatorId: flow.createdById,
         },
         metadata: { projectId: flow.projectId, eventId: `${flow.id}:stopped` },
+      });
+      return;
+    }
+    if (action.kind === 'wait_answer') {
+      const feature = flow.features[0];
+      await this.steps.setWaiting(flow.id, feature.id, { jobId: action.jobId, questions: action.questions });
+      await this.audit.record({
+        key: 'system.flow.advance', resourceType: 'flow', resourceId: flow.id, projectId: flow.projectId,
+        summary: `flow waiting answer ${action.step}`,
+      });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: 'flow', action: 'flow.waiting', entityType: 'flow', entityId: flow.id,
+        projectId: flow.projectId, payload: { step: action.step, jobId: action.jobId, count: action.questions.length },
+      });
+      await this.outbox.record({
+        type: FLEET_FLOW_QUESTIONS,
+        payload: {
+          flowId: flow.id, projectId: flow.projectId, feature: feature.feature, step: action.step,
+          jobId: action.jobId, questions: action.questions, approverId: flow.approverId,
+          creatorType: flow.createdByType, creatorId: flow.createdById,
+        },
+        metadata: { projectId: flow.projectId, eventId: `${flow.id}:questions:${action.jobId}` },
       });
       return;
     }
