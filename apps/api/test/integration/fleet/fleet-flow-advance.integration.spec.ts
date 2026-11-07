@@ -144,7 +144,9 @@ integration('fleet flow advancement through the database', () => {
     await seedTerminalStep(flow.id, 'RUN', 'RUN', { resultPrUrl: `https://github.com/acme/${repo.name}/pull/12`, resultSha: 'h1' });
     await ticker.tick(now);
     const claim = await db.fleetPrReview.findUniqueOrThrow({ where: { repoId_prNumber_headSha: { repoId, prNumber: 12, headSha: 'h1' } } });
-    const review = await db.fleetJob.findUniqueOrThrow({ where: { id: claim.jobId! } });
+    const claimJobId = claim.jobId;
+    if (claimJobId === null) throw new Error(`dispatched review claim ${claim.id} has no job`);
+    const review = await db.fleetJob.findUniqueOrThrow({ where: { id: claimJobId } });
     expect(claim).toMatchObject({ outcome: 'dispatched', prNumber: 12, headSha: 'h1' });
     expect(review).toMatchObject({ command: 'REVIEW', flowId: flow.id, flowStep: 'REVIEW' });
   });
