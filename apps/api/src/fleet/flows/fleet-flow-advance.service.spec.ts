@@ -416,11 +416,62 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 function planPass() {
   return build({
     flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW' })] },
-    snapshot: { job: job({ flowStep: 'SPEC_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}' } }), ingestSettled: false },
+    snapshot: { job: job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), agentResult: { status: 'completed', output: '{"findings":[]}' } }), ingestSettled: false },
   });
 }
 
 describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
+  it.each(['QUEUED', 'COMPLETED', 'FAILED'] as const)('F1/AC-14: does not recover stale spec A inserted after spec B reapproval (%s)', async (state) => {
+    const h = build();
+    const specA = h.record.specSha;
+    const specB = 'd'.repeat(40);
+    let current = h.record;
+    let latest: LatestFlowJob | null = null;
+    h.flows.findById.mockImplementation(async () => current);
+    h.flows.lockById.mockImplementation(async () => current);
+    h.steps.latestJobWithIngest.mockImplementation(async () => latest);
+    h.steps.markStep.mockImplementation(async () => {
+      current = flow({ ...current, state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW' })] });
+    });
+    h.jobs.dispatch.mockImplementation(async (_actor, _project, body) => {
+      expect(h.inTransaction()).toBe(false);
+      if (body.ref === specA) {
+        // Re-ask and approval happen during A's preflight, before its durable insert.
+        current = flow({ specSha: specB, approvedAt: NOW });
+        latest = { job: job({
+          id: 'jA', command: 'AGENT', flowStep: 'SPEC_REVIEW', ref: specA,
+          queuedAt: new Date(NOW.getTime() + 1), state,
+          agentResult: { status: 'completed', output: '{"findings":[]}' },
+        }), ingestSettled: false };
+        return { job: { id: 'jA' } };
+      }
+      latest = { job: job({
+        id: 'jB', command: 'AGENT', flowStep: 'SPEC_REVIEW', ref: specB,
+        queuedAt: new Date(NOW.getTime() + 2), state: 'QUEUED',
+      }), ingestSettled: false };
+      return { job: { id: 'jB' } };
+    });
+
+    await h.service.advance('flow-1', NOW);
+    expect(current).toMatchObject({ state: 'APPROVED', specSha: specB });
+    expect(h.wrote()).toBe(false); // A's record phase must skip the new approval.
+
+    await h.service.advance('flow-1', new Date(NOW.getTime() + 3));
+    expect(h.jobs.dispatch.mock.calls.map(([, , body]) => body.ref)).toEqual([specA, specB]);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.step', payload: { step: 'SPEC_REVIEW', jobId: 'jB' },
+    }));
+    expect(h.activity.record).not.toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.step', payload: { step: 'SPEC_REVIEW', jobId: 'jA' },
+    }));
+    expect(h.flows.stop).not.toHaveBeenCalled();
+    expect(h.jobs.cancel).not.toHaveBeenCalled();
+
+    // Even A's successful verdict must not start PLAN while B's review remains queued.
+    await h.service.advance('flow-1', new Date(NOW.getTime() + 4));
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['STOPPED', 'PENDING'] as const)('does not overwrite a concurrent %s when dispatch refuses', async (state) => {
     const h = planPass();
     h.jobs.dispatch.mockImplementation(async () => {
@@ -576,7 +627,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
   });
 
   it.each(['QUEUED', 'COMPLETED'] as const)('recovers an APPROVED SPEC_REVIEW at approvedAt (%s) without redispatch', async (state) => {
-    const h = build({ snapshot: { job: job({ id: 'j1', flowStep: 'SPEC_REVIEW', queuedAt: APPROVED_AT, state }), ingestSettled: false } });
+    const h = build({ snapshot: { job: job({ id: 'j1', flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), queuedAt: APPROVED_AT, state }), ingestSettled: false } });
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
     expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', { flowState: 'RUNNING' });
@@ -586,7 +637,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
   });
 
   it('does not adopt a SPEC_REVIEW from an earlier approval', async () => {
-    const h = build({ snapshot: { job: job({ flowStep: 'SPEC_REVIEW', queuedAt: new Date(APPROVED_AT.getTime() - 1) }), ingestSettled: false } });
+    const h = build({ snapshot: { job: job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), queuedAt: new Date(APPROVED_AT.getTime() - 1) }), ingestSettled: false } });
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
   });

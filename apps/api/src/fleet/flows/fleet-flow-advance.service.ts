@@ -125,7 +125,12 @@ export class FleetFlowAdvanceService {
       await this.refreshSpent(current);
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
-      const latest = await this.steps.latestJobWithIngest(current.id);
+      const snapshot = await this.steps.latestJobWithIngest(current.id);
+      // A dispatch can finish preflight and insert after a different spec was re-approved. queuedAt
+      // alone cannot identify that approval's review: ignore the old SHA for both decision and recovery,
+      // otherwise we would either adopt stale work or wait forever instead of reviewing the new spec.
+      const latest = snapshot?.job.flowStep === 'SPEC_REVIEW' && snapshot.job.ref !== current.specSha
+        ? null : snapshot;
       const input = await this.decisionInput(current, latest, now);
       const action = decideFlowStep(input);
       if (current.features.length !== 1) return;
