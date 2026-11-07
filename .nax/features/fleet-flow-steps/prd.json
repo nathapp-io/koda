@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T05:54:25.089Z",
+  "updatedAt": "2026-11-07T06:22:29.882Z",
   "userStories": [
     {
       "id": "US-001",
@@ -658,14 +658,17 @@
         "US-009",
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "The new advance service composes existing parent locks, transaction manager, repositories and audit/activity services; cross-module atomicity merits isolated sessions, but existing F1/scheduler patterns avoid an expert-level redesign."
+        "reasoning": "The new advance service composes existing parent locks, transaction manager, repositories and audit/activity services; cross-module atomicity merits isolated sessions, but existing F1/scheduler patterns avoid an expert-level redesign.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.service.ts",
@@ -688,7 +691,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "53616c9c3f508b218746e86bda3835d96b25fde2"
     },
     {
       "id": "US-013",
