@@ -3,7 +3,7 @@
   "feature": "fleet-flow-answers",
   "branchName": "feat/fleet-flow-answers",
   "createdAt": "2026-11-30T00:00:00.000Z",
-  "updatedAt": "2026-11-07T15:41:57.433Z",
+  "updatedAt": "2026-11-07T15:50:24.186Z",
   "userStories": [
     {
       "id": "US-001",
@@ -138,14 +138,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "One new pure parser source file plus colocated tests mirrors flow-input's validation style and reuses upstream limits; it makes no authorization decision."
+        "reasoning": "One new pure parser source file plus colocated tests mirrors flow-input's validation style and reuses upstream limits; it makes no authorization decision.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-input.ts",
@@ -160,7 +163,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "446caa0969131d1e8202399938838a02972d8827"
     },
     {
       "id": "US-004",
