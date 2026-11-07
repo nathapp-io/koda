@@ -137,9 +137,11 @@ function build(opts: HarnessOptions = {}) {
   const activity = { record: vi.fn<FleetActivityService['record']>(async () => undefined) };
   const audit = { record: vi.fn<AuditRecorder['record']>(async () => undefined) };
   let inTransaction = false;
+  let activeTransaction: object | null = null;
   const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => {
     inTransaction = true;
-    try { return await fn(); } finally { inTransaction = false; }
+    activeTransaction = {};
+    try { return await fn(); } finally { inTransaction = false; activeTransaction = null; }
   }) };
   const adoptForFlow = vi.fn<FleetJobsService['adoptForFlow']>(async () => {
     expect(inTransaction).toBe(true);
@@ -193,7 +195,7 @@ function build(opts: HarnessOptions = {}) {
   ].some((fn) => fn.mock.calls.length > 0);
 
   return { service, flows, steps, threads, repos, reviews, activity, audit, txManager, jobs, permissions, flowService, github,
-    order, record, wrote, config, outbox, inTransaction: () => inTransaction };
+    order, record, wrote, config, outbox, inTransaction: () => inTransaction, transactionIdentity: () => activeTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
@@ -871,16 +873,22 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     const h = planPass();
     const error = new BudgetPausedException({ id: 'b1', scopeType: 'GLOBAL', scopeId: null, scopeKey: 'global' });
     h.jobs.dispatch.mockRejectedValue(error);
+    let stopTransaction: object | null = null;
+    let outboxTransaction: object | null = null;
     h.flows.stop.mockImplementation(async () => {
       expect(h.inTransaction()).toBe(true);
+      stopTransaction = h.transactionIdentity();
       return h.record;
     });
     h.outbox.record.mockImplementation(async () => {
       expect(h.inTransaction()).toBe(true);
+      outboxTransaction = h.transactionIdentity();
     });
 
     await h.service.advance('flow-1', NOW);
 
+    expect(stopTransaction).not.toBeNull();
+    expect(outboxTransaction).toBe(stopTransaction);
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'budget_paused', NOW, 'PLAN: BudgetPausedException');
     expect(h.outbox.record).toHaveBeenCalledExactlyOnceWith({
       type: 'fleet_flow_stopped',
