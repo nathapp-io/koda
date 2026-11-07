@@ -3,7 +3,7 @@
   "feature": "fleet-flow-answers",
   "branchName": "feat/fleet-flow-answers",
   "createdAt": "2026-11-30T00:00:00.000Z",
-  "updatedAt": "2026-11-07T16:42:39.784Z",
+  "updatedAt": "2026-11-07T16:50:24.245Z",
   "userStories": [
     {
       "id": "US-001",
@@ -601,14 +601,17 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Uses established service/locking patterns, but project isolation and trusted human answer attribution are security-sensitive write checks."
+        "reasoning": "Uses established service/locking patterns, but project isolation and trusted human answer attribution are security-sensitive write checks.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.service.ts",
@@ -638,7 +641,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e98324b5e1cf03eda2cd01e53eb5fd3120f8e2f8"
     },
     {
       "id": "US-011",
