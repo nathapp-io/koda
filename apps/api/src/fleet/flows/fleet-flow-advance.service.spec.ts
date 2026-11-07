@@ -1,16 +1,20 @@
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { BudgetPausedException } from '../budgets/budget.exceptions';
+import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
+import { buildStepDispatch } from './flow-step-dispatch';
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
-import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
-import type { LatestFlowJob } from './domain/fleet-flow-step.domain';
+import type { FleetJobsService } from '../jobs/fleet-jobs.service';
+import type { FleetActivityService } from '../activity/fleet-activity.service';
+import type { AuditRecorder } from '../../audit/audit-recorder.service';
+import type { FleetFlowFeatureRecord, FleetFlowRecord, IFleetFlowRepository } from './domain/fleet-flow.domain';
+import type { IFleetFlowStepRepository, LatestFlowJob } from './domain/fleet-flow-step.domain';
 import type { FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
 
-/**
- * The decide phase's boundary is `decideFlowStep`, so the pass's input is what these tests can check
- * for the parts a decision does not write (US-012 writes stops and completions only). The wrapper
- * records the input and delegates, so every other assertion still runs the real decision engine.
- */
+/** Observe decision inputs while still exercising the real decision engine on every pass. */
 const decisions = vi.hoisted(() => ({ inputs: [] as FlowStepInput[] }));
 vi.mock('./flow-step-decision', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./flow-step-decision')>();
@@ -75,16 +79,20 @@ interface HarnessOptions {
 }
 
 function build(opts: HarnessOptions = {}) {
-  const record = flow(opts.flow);
+  const row = flow(opts.flow);
+  // Existing RUNNING fixtures represent already-recorded jobs unless a test supplies feature progress.
+  const record = opts.flow?.state === 'RUNNING' && opts.flow.features === undefined && opts.snapshot
+    ? flow({ ...opts.flow, features: [feature({ state: 'RUNNING', currentStep: opts.snapshot.job.flowStep ?? null })] })
+    : row;
   const order: string[] = [];
   const staleRows = [...(opts.staleRows ?? [])];
   const flows = {
-    findById: vi.fn(async () => record),
-    lockById: vi.fn(async () => {
+    findById: vi.fn<IFleetFlowRepository['findById']>(async () => record),
+    lockById: vi.fn<IFleetFlowRepository['lockById']>(async () => {
       order.push('flow');
-      return opts.locked === null ? null : flow({ ...opts.flow, ...opts.locked });
+      return opts.locked === null ? null : flow({ ...record, ...opts.locked });
     }),
-    stop: vi.fn(async () => record),
+    stop: vi.fn<IFleetFlowRepository['stop']>(async () => record),
   };
   const steps = {
     latestJobWithIngest: vi.fn(async () => opts.snapshot ?? null),
@@ -96,7 +104,7 @@ function build(opts: HarnessOptions = {}) {
     markStep: vi.fn(async () => undefined),
     creatorAccess: vi.fn(),
     listAdvanceable: vi.fn(async () => []),
-    latestJobForStep: vi.fn(async () => null),
+    latestJobForStep: vi.fn<IFleetFlowStepRepository['latestJobForStep']>(async () => null),
   };
   const threads = {
     lockForFlowTransition: vi.fn(async () => {
@@ -112,19 +120,28 @@ function build(opts: HarnessOptions = {}) {
     findReviewRepo: vi.fn(async () =>
       opts.reviewRepo === undefined ? { id: 'repo-1', projectId: 'p1', owner: 'o', name: 'r', githubInstallationId: 1n } : opts.reviewRepo),
   };
-  const activity = { record: vi.fn(async () => undefined) };
-  const audit = { record: vi.fn(async () => undefined) };
-  const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
+  const activity = { record: vi.fn<FleetActivityService['record']>(async () => undefined) };
+  const audit = { record: vi.fn<AuditRecorder['record']>(async () => undefined) };
+  let inTransaction = false;
+  const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => {
+    inTransaction = true;
+    try { return await fn(); } finally { inTransaction = false; }
+  }) };
+  const jobs = { dispatch: vi.fn<(...args: Parameters<FleetJobsService['dispatch']>) => Promise<{ job: { id: string } }>>(async () => {
+    expect(inTransaction).toBe(false);
+    return { job: { id: 'j1' } };
+  }), cancel: vi.fn() };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
-    activity as never, audit as never, txManager as never,
+    activity as never, audit as never, txManager as never, jobs as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
     flows.stop, steps.setSpent, steps.complete, steps.markStep, activity.record, audit.record,
   ].some((fn) => fn.mock.calls.length > 0);
 
-  return { service, flows, steps, threads, repos, activity, audit, txManager, order, record, wrote };
+  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, order, record, wrote,
+    inTransaction: () => inTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
@@ -155,7 +172,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 
     await h.service.advance('flow-1', NOW);
 
-    expect(h.order).toEqual(['thread', 'flow']);
+    expect(h.order.slice(0, 2)).toEqual(['thread', 'flow']);
     expect(h.threads.lockForFlowTransition).toHaveBeenCalledWith('p1', 'thread-1');
     expect(h.repos.lockById).not.toHaveBeenCalled();
   });
@@ -165,7 +182,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 
     await h.service.advance('flow-1', NOW);
 
-    expect(h.order).toEqual(['repo', 'flow']);
+    expect(h.order.slice(0, 2)).toEqual(['repo', 'flow']);
     expect(h.repos.lockById).toHaveBeenCalledWith('repo-1');
     expect(h.threads.lockForFlowTransition).not.toHaveBeenCalled();
   });
@@ -393,5 +410,214 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     });
     expect(decisions.inputs.at(-1)?.prWaitMs).toBeGreaterThan(0);
     expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+  });
+});
+
+function planPass() {
+  return build({
+    flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW' })] },
+    snapshot: { job: job({ flowStep: 'SPEC_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}' } }), ingestSettled: false },
+  });
+}
+
+describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
+  it.each(['STOPPED', 'PENDING'] as const)('does not overwrite a concurrent %s when dispatch refuses', async (state) => {
+    const h = planPass();
+    h.jobs.dispatch.mockImplementation(async () => {
+      h.flows.lockById.mockResolvedValue(flow({ state }));
+      throw new ConflictAppException({}, 'fleet.jobs');
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.wrote()).toBe(false);
+  });
+
+  it.each(['missing parent', 'missing flow', 'new approval', 'new sha'] as const)('skips record for a %s', async (change) => {
+    const h = build();
+    h.jobs.dispatch.mockImplementation(async () => {
+      if (change === 'missing parent') h.repos.lockById.mockResolvedValue(null);
+      if (change === 'missing flow') h.flows.lockById.mockResolvedValue(null);
+      if (change === 'new approval') h.flows.lockById.mockResolvedValue(flow({ approvedAt: NOW }));
+      if (change === 'new sha') h.flows.lockById.mockResolvedValue(flow({ specSha: 'd'.repeat(40) }));
+      return { job: { id: 'j1' } };
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.wrote()).toBe(false);
+    expect(h.jobs.cancel).not.toHaveBeenCalled();
+  });
+
+  it('bounds a dispatch refusal in both the row and activity', async () => {
+    const h = planPass();
+    h.jobs.dispatch.mockRejectedValue(new ValidationAppException({ reason: 'x'.repeat(3000) }, 'fleet'));
+    await h.service.advance('flow-1', NOW);
+    const detail = `PLAN: ${'x'.repeat(3000)}`.slice(0, FLOW_STOP_DETAIL_MAX);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'dispatch_refused', NOW, detail);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ detail }) }));
+  });
+
+  it('never dispatches an unclaimed REVIEW', async () => {
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ resultPrUrl: RUN_PR }), ingestSettled: true } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.wrote()).toBe(false);
+  });
+
+  it('leaves multi-feature flows alone', async () => {
+    const h = build({ flow: { features: [feature(), feature({ id: 'feature-2', position: 1 })] } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.wrote()).toBe(false);
+  });
+
+  it('dispatch AC-1: sends exactly buildStepDispatch output on behalf of the creator outside a transaction', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
+      flow: h.record, feature: h.record.features[0], step: 'SPEC_REVIEW',
+      remainingCapUsd: '10.0000', reviewAgent: 'Explore',
+    }), expect.any(Object));
+  });
+
+  it('dispatch AC-2: supplies the durable flow link and system audit key', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch.mock.calls[0]?.[3]).toEqual({
+      flowId: 'flow-1', flowStep: 'SPEC_REVIEW', auditKey: 'system.flow.advance',
+    });
+  });
+
+  it('dispatch AC-3: marks SPEC_REVIEW RUNNING inside the record transaction', async () => {
+    const h = build();
+    h.steps.markStep.mockImplementation(async () => { expect(h.inTransaction()).toBe(true); });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', { flowState: 'RUNNING' });
+    expect(h.order).toEqual(['repo', 'flow', 'repo', 'flow']);
+  });
+
+  it('dispatch AC-4: records flow.started with approval attribution as SYSTEM flow', async () => {
+    const h = build();
+    await h.service.advance('flow-1', NOW);
+    expect(h.activity.record).toHaveBeenCalledWith({
+      actorType: 'SYSTEM', actorId: 'flow', action: 'flow.started', entityType: 'flow', entityId: 'flow-1',
+      projectId: 'p1', payload: { approvalMode: 'REQUEST', approverId: 'u1' },
+    });
+  });
+
+  it('dispatch AC-5: records the exact flow.step payload in the transaction', async () => {
+    const h = build();
+    h.activity.record.mockImplementation(async () => { expect(h.inTransaction()).toBe(true); });
+    await h.service.advance('flow-1', NOW);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      actorType: 'SYSTEM', actorId: 'flow', action: 'flow.step', payload: { step: 'SPEC_REVIEW', jobId: 'j1' },
+    }));
+  });
+
+  it('dispatch AC-6: audits the flow write in the record transaction', async () => {
+    const h = build();
+    h.audit.record.mockImplementation(async () => { expect(h.inTransaction()).toBe(true); });
+    await h.service.advance('flow-1', NOW);
+    expect(h.audit.record).toHaveBeenCalledWith({
+      key: 'system.flow.advance', resourceType: 'flow', resourceId: 'flow-1', projectId: 'p1', summary: expect.any(String),
+    });
+  });
+
+  it('dispatch AC-7: a RUNNING flow dispatches PLAN and records only flow.step', async () => {
+    const h = planPass();
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
+      flow: h.record, feature: h.record.features[0], step: 'PLAN', remainingCapUsd: '10.0000', reviewAgent: 'Explore',
+    }), { flowId: 'flow-1', flowStep: 'PLAN', auditKey: 'system.flow.advance' });
+    expect(h.activity.record.mock.calls.map(([entry]) => entry.action)).toEqual(['flow.step']);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ payload: { step: 'PLAN', jobId: 'j1' } }));
+  });
+
+  it.each([
+    ['AC-8', new BudgetPausedException({ id: 'b1', scopeType: 'GLOBAL', scopeId: null, scopeKey: 'global' }), 'budget_paused', 'PLAN: BudgetPausedException'],
+    ['AC-9', new ValidationAppException({ reason: 'specMissing' }, 'fleet'), 'dispatch_refused', 'PLAN: specMissing'],
+    ['AC-10', new FleetDispatchException('tools'), 'dispatch_refused', 'PLAN: FleetDispatchException'],
+    ['AC-11', new ConflictAppException({}, 'fleet.jobs'), 'dispatch_refused', 'PLAN: ConflictAppException'],
+    ['AC-15 not-found', new NotFoundAppException({}, 'fleet.repos'), 'dispatch_refused', 'PLAN: NotFoundAppException'],
+    ['AC-15 no reason', new ValidationAppException({}, 'fleet'), 'dispatch_refused', 'PLAN: ValidationAppException'],
+    ['AC-15 non-string reason', new ValidationAppException({ reason: 42 }, 'fleet'), 'dispatch_refused', 'PLAN: ValidationAppException'],
+  ])('dispatch %s: stops a known refusal with bounded detail', async (_ac, error, reason, detail) => {
+    const h = planPass();
+    h.jobs.dispatch.mockRejectedValue(error);
+    h.flows.stop.mockImplementation(async () => { expect(h.inTransaction()).toBe(true); return h.record; });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', reason, NOW, detail);
+    expect(h.steps.markStep).not.toHaveBeenCalled();
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'flow.stopped' }));
+    expect(h.audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'system.flow.advance', resourceType: 'flow' }));
+  });
+
+  it('dispatch AC-12/AC-13: propagates unexpected errors without stopping', async () => {
+    const h = planPass();
+    const error = new Error('unavailable');
+    h.jobs.dispatch.mockRejectedValue(error);
+    await expect(h.service.advance('flow-1', NOW)).rejects.toBe(error);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.flows.stop).not.toHaveBeenCalled();
+    expect(h.wrote()).toBe(false);
+  });
+
+  it.each(['STOPPED', 'PENDING'] as const)('dispatch AC-14: leaves the job running when record sees %s', async (state) => {
+    const h = build();
+    h.jobs.dispatch.mockImplementation(async () => {
+      h.flows.lockById.mockResolvedValue(flow({ state }));
+      return { job: { id: 'j1' } };
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.flows.lockById).toHaveBeenCalledTimes(2);
+    expect(h.wrote()).toBe(false);
+    expect(h.jobs.cancel).not.toHaveBeenCalled();
+  });
+
+  it.each(['QUEUED', 'COMPLETED'] as const)('recovers an APPROVED SPEC_REVIEW at approvedAt (%s) without redispatch', async (state) => {
+    const h = build({ snapshot: { job: job({ id: 'j1', flowStep: 'SPEC_REVIEW', queuedAt: APPROVED_AT, state }), ingestSettled: false } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'SPEC_REVIEW', { flowState: 'RUNNING' });
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'flow.started' }));
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'flow.step', payload: { step: 'SPEC_REVIEW', jobId: 'j1' } }));
+    expect(h.audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'system.flow.advance', resourceType: 'flow' }));
+  });
+
+  it('does not adopt a SPEC_REVIEW from an earlier approval', async () => {
+    const h = build({ snapshot: { job: job({ flowStep: 'SPEC_REVIEW', queuedAt: new Date(APPROVED_AT.getTime() - 1) }), ingestSettled: false } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers missing RUNNING progress and does not duplicate the recovered activity on the next pass', async () => {
+    const h = build({ flow: { state: 'RUNNING', features: [feature()] }, snapshot: { job: job({ id: 'j1', flowStep: 'PLAN', state: 'QUEUED' }), ingestSettled: false } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', 'PLAN', { flowState: 'RUNNING' });
+    h.flows.lockById.mockResolvedValue(flow({ state: 'RUNNING', features: [feature({ currentStep: 'PLAN', state: 'RUNNING' })] }));
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.markStep).toHaveBeenCalledTimes(1);
+    expect(h.activity.record.mock.calls.map(([entry]) => entry.action)).toEqual(['flow.step']);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(['PRD_REVIEW', 'RUN', 'FIX'] as const)('dispatches the exact %s body using durable PLAN/feature data', async (step) => {
+    const plan = job({ flowStep: 'PLAN', resultBranch: 'plan/branch', resultSha: 'c'.repeat(40) });
+    const previous = step === 'PRD_REVIEW' ? plan : step === 'RUN'
+      ? job({ flowStep: 'PRD_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}' } })
+      : job({ flowStep: 'REVIEW' });
+    const h = build({
+      flow: { state: 'RUNNING', pinnedRunnerId: 'pinned', features: [feature({ state: 'RUNNING', currentStep: previous.flowStep ?? null, prNumber: 12 })] },
+      snapshot: { job: previous, ingestSettled: false },
+    });
+    h.steps.latestJobForStep.mockResolvedValue(plan);
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', buildStepDispatch({
+      flow: h.record, feature: h.record.features[0], step, remainingCapUsd: '10.0000', reviewAgent: 'Explore',
+      plan, ...(step === 'FIX' ? { pr: { number: 12 } } : {}),
+    }), { flowId: 'flow-1', flowStep: step, auditKey: 'system.flow.advance' });
+    expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', step,
+      { flowState: 'RUNNING', ...(step === 'FIX' ? { prNumber: 12 } : {}) });
   });
 });

@@ -1,5 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { BudgetPausedException } from '../budgets/budget.exceptions';
+import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
+import { FleetJobsService } from '../jobs/fleet-jobs.service';
+import { buildStepDispatch } from './flow-step-dispatch';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
@@ -20,19 +26,14 @@ import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
  */
 const FLOW_PR_WAIT_MS = 1_800_000;
 
-/**
- * Fleet flow F3 (US-012): one pass of the advancement engine's decide phase.
- *
- * A pass reads the flow unlocked — only to select the parent lock — then locks the parent (thread or
- * repo) and the flow, re-reads the authoritative state, refreshes `spentUsd` when the sum of the flow's
- * job costs changed, and reads the flow's latest job together with its ingest status. Everything the
- * decision acts on comes from under those locks or from that one statement, so a job an ingest finished
- * meanwhile cannot be judged by facts gathered before it did. Stops and completions are written inside
- * that transaction, each with its `system.flow.advance` audit entry and its activity row.
- *
- * A `dispatch` decision ends this pass with nothing written: the dispatch phase (US-013) and its
- * guards (US-014, US-015) come later.
- */
+type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
+interface DispatchPass {
+  flow: FleetFlowRecord;
+  action: DispatchAction;
+  plan: FleetJobRecord | null;
+}
+
+/** Decide under parent/flow locks, dispatch outside a transaction, then re-lock to record progress. */
 @Injectable()
 export class FleetFlowAdvanceService {
   constructor(
@@ -43,12 +44,68 @@ export class FleetFlowAdvanceService {
     private readonly activity: FleetActivityService,
     private readonly audit: AuditRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly jobs: FleetJobsService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
-    // This story builds the pass up to the decision: the dispatch phase (no transaction held) and the
-    // record phase are US-013, and the guards before a dispatch are US-014 and US-015.
-    await this.decide(flowId, now);
+    const pass = await this.decide(flowId, now);
+    // US-016 adds the head claim/adoption path here. Never dispatch an unclaimed REVIEW.
+    if (!pass || pass.action.step === 'REVIEW') return;
+    const { flow, action, plan } = pass;
+    const body = buildStepDispatch({
+      flow, feature: flow.features[0], step: action.step,
+      // US-014 supplies the guarded remaining cap; US-017 moves the agent default into FLEET_CFG.
+      remainingCapUsd: flow.costCapUsd, reviewAgent: 'Explore',
+      ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
+    });
+    let jobId: string;
+    try {
+      const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
+        flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
+      });
+      jobId = result.job.id;
+    } catch (error) {
+      if (!(error instanceof BudgetPausedException || error instanceof ConflictAppException
+        || error instanceof ValidationAppException || error instanceof NotFoundAppException
+        || error instanceof FleetDispatchException)) throw error;
+      const reason = error instanceof BudgetPausedException ? 'budget_paused' : 'dispatch_refused';
+      const detail = `${action.step}: ${dispatchRefusalReason(error)}`;
+      await this.txManager.run(async () => {
+        const current = await this.lockLive(flow);
+        if (!current) return;
+        await this.writeDecision(current, null, { kind: 'stop', reason, detail }, now);
+      });
+      return;
+    }
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return; // A stop/re-ask does not cancel the dispatched job.
+      await this.recordStep(current, action.step, jobId, action.pr?.number);
+    });
+  }
+
+  /** Recheck the approval generation as well as state: a re-ask may already have been approved again. */
+  private async lockLive(previous: FleetFlowRecord): Promise<FleetFlowRecord | null> {
+    if (!(await this.lockParent(previous))) return null;
+    const current = await this.flows.lockById(previous.id);
+    if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return null;
+    if (current.specSha !== previous.specSha
+      || current.approvedAt?.getTime() !== previous.approvedAt?.getTime()) return null;
+    return current;
+  }
+
+  /** Called only with the parent and flow locked, including crash recovery in the decide transaction. */
+  private async recordStep(flow: FleetFlowRecord, step: FlowStep, jobId: string, prNumber?: number): Promise<void> {
+    const feature = flow.features[0];
+    await this.steps.markStep(flow.id, feature.id, step, {
+      flowState: 'RUNNING', ...(prNumber !== undefined ? { prNumber } : {}),
+    });
+    if (flow.state === 'APPROVED') {
+      await this.record(flow, 'flow started', 'flow.started', {
+        approvalMode: flow.approvalMode, approverId: flow.approverId,
+      });
+    }
+    await this.record(flow, `flow step ${step}`, 'flow.step', { step, jobId });
   }
 
   /**
@@ -56,11 +113,11 @@ export class FleetFlowAdvanceService {
    * job are read again under the locks, so a stop, a re-ask or a dispatch another pass made in between
    * is what this pass acts on.
    */
-  private async decide(flowId: string, now: Date): Promise<void> {
+  private async decide(flowId: string, now: Date): Promise<DispatchPass | undefined> {
     const flow = await this.flows.findById(flowId);
     if (!flow) return;
 
-    await this.txManager.run(async () => {
+    return this.txManager.run(async () => {
       if (!(await this.lockParent(flow))) return;
       const current = await this.flows.lockById(flow.id);
       if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return;
@@ -69,8 +126,25 @@ export class FleetFlowAdvanceService {
       // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
       // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
       const latest = await this.steps.latestJobWithIngest(current.id);
-      const action = decideFlowStep(await this.decisionInput(current, latest, now));
-      await this.writeDecision(current, latest?.job ?? null, action, now);
+      const input = await this.decisionInput(current, latest, now);
+      const action = decideFlowStep(input);
+      if (current.features.length !== 1) return;
+      // The insert carries the flow link even if dispatch/record crashed. Reconcile once, then let the
+      // next tick decide from RUNNING. An older approval's job must never be mistaken for this start.
+      const job = latest?.job;
+      const recoverable = current.state === 'RUNNING' || (job?.flowStep === 'SPEC_REVIEW'
+        && current.approvedAt !== null && job.queuedAt.getTime() >= current.approvedAt.getTime());
+      if (job && recoverable && (current.state === 'APPROVED'
+        || current.features[0].currentStep !== job.flowStep || current.features[0].state !== 'RUNNING')) {
+        await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
+        return;
+      }
+      await this.writeDecision(current, job ?? null, action, now);
+      if (action.kind !== 'dispatch') return;
+      // Guard seams: cap/creator checks (US-014), then the pre-push SHA/re-ask check (US-015).
+      const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
+        ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+      return { flow: current, action, plan };
     });
   }
 
@@ -183,4 +257,18 @@ export class FleetFlowAdvanceService {
       projectId: flow.projectId, payload,
     });
   }
+}
+
+/** Match ReviewHeadDispatcher: only a string validation reason is safe to expose as the detail. */
+function dispatchRefusalReason(error: Error): string {
+  if (error instanceof ValidationAppException) {
+    const response: unknown = error.getResponse();
+    if (typeof response === 'object' && response !== null && 'args' in response) {
+      const args = response.args;
+      if (typeof args === 'object' && args !== null && 'reason' in args && typeof args.reason === 'string') {
+        return args.reason;
+      }
+    }
+  }
+  return error.constructor.name;
 }
