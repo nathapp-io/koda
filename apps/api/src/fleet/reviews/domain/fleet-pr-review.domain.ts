@@ -32,6 +32,8 @@ export interface IFleetPrReviewRepository {
   markDispatched(id: string, jobId: string): Promise<void>;
   markFailed(id: string, outcome: string): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Atomically removes only an old, unowned pending claim. */
+  removeStalePending(id: string, staleBefore: Date): Promise<boolean>;
   /**
    * The rules `PrismaScheduleRepository.findOwnerAccess` applies: a USER exists when its `User` row does
    * and is disabled when `User.disabled`; an AGENT exists when its `Agent` row does and is never disabled.

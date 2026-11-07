@@ -25,7 +25,14 @@ export class FleetReviewClaimService {
     if (existing.outcome.startsWith('failed:')) return { kind: 'failed', outcome: existing.outcome };
     if (existing.outcome !== 'pending') return { kind: 'busy' };
     if (existing.createdAt.getTime() >= now.getTime() - this.config.prReviewPollMs) return { kind: 'busy' };
-    await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.remove(existing.id));
+    const staleBefore = new Date(now.getTime() - this.config.prReviewPollMs);
+    const removed = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.removeStalePending(existing.id, staleBefore));
+    if (!removed) {
+      const settled = await this.reviews.findHead(repoId, prNumber, headSha);
+      if (settled?.jobId !== null && settled?.jobId !== undefined) return { kind: 'owned', jobId: settled.jobId };
+      if (settled?.outcome.startsWith('failed:')) return { kind: 'failed', outcome: settled.outcome };
+      return { kind: 'busy' };
+    }
     const retried = await bookkeeping('fleet.pr-review-bookkeeping', () => this.reviews.insertPending(repoId, prNumber, headSha));
     return retried === null ? { kind: 'busy' } : { kind: 'claimed', claimId: retried.id };
   }

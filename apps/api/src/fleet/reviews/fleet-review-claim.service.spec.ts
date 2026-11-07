@@ -16,7 +16,7 @@ describe('FleetReviewClaimService', () => {
     repository = {
       findHead: vi.fn().mockResolvedValue(null), insertPending: vi.fn().mockResolvedValue(row()),
       markDispatched: vi.fn().mockResolvedValue(undefined), markFailed: vi.fn(), remove: vi.fn().mockResolvedValue(undefined),
-      findPrincipalAccess: vi.fn(),
+      removeStalePending: vi.fn().mockResolvedValue(true), findPrincipalAccess: vi.fn(),
     };
     service = new FleetReviewClaimService(repository, { prReviewPollMs: 60_000 });
   });
@@ -38,8 +38,20 @@ describe('FleetReviewClaimService', () => {
     vi.mocked(repository.insertPending).mockResolvedValueOnce(null).mockResolvedValueOnce(row({ id: 'claim-2' }));
     vi.mocked(repository.findHead).mockResolvedValue(row({ createdAt: new Date(now.getTime() - 60_001) }));
     await service.claimHead('repo-1', 12, 'h1', now);
-    expect(repository.remove).toHaveBeenCalledWith('claim-1');
+    expect(repository.removeStalePending).toHaveBeenCalledWith('claim-1', new Date(now.getTime() - 60_000));
   });
+  it('does not reclaim a stale row concurrently settled before conditional removal', async () => {
+    vi.mocked(repository.insertPending).mockResolvedValue(null);
+    vi.mocked(repository.findHead)
+      .mockResolvedValueOnce(row({ createdAt: new Date(now.getTime() - 60_001) }))
+      .mockResolvedValueOnce(row({ jobId: 'j9', outcome: 'dispatched' }));
+    vi.mocked(repository.removeStalePending).mockResolvedValue(false);
+
+    await expect(service.claimHead('repo-1', 12, 'h1', now)).resolves.toEqual({ kind: 'owned', jobId: 'j9' });
+    expect(repository.removeStalePending).toHaveBeenCalledWith('claim-1', new Date(now.getTime() - 60_000));
+    expect(repository.insertPending).toHaveBeenCalledTimes(1);
+  });
+
   it('AC-5: retries insertion after stale removal', async () => {
     vi.mocked(repository.insertPending).mockResolvedValueOnce(null).mockResolvedValueOnce(row({ id: 'claim-2' }));
     vi.mocked(repository.findHead).mockResolvedValue(row({ createdAt: new Date(now.getTime() - 60_001) }));
