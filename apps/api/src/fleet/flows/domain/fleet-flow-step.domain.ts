@@ -16,6 +16,17 @@ export interface CreatorAccess {
   disabled: boolean;
 }
 
+/**
+ * A flow's latest job together with the ingest status of that job's own lease, read in one statement.
+ * A RUN's `resultPrUrl` and the settled mark of its attempt commit in the same transaction
+ * (`BundleIngestService.write`), so the two facts have to come from one snapshot: read separately, the
+ * decision can pair an old row with a new status and stop a flow whose PR was just recorded.
+ */
+export interface LatestFlowJob {
+  job: FleetJobRecord;
+  ingestSettled: boolean;
+}
+
 export interface MarkFlowStepData {
   flowState: string;
   prNumber?: number;
@@ -28,6 +39,8 @@ export interface IFleetFlowStepRepository {
   complete(flowId: string, now: Date): Promise<void>;
   listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]>;
   latestJob(flowId: string): Promise<FleetJobRecord | null>;
+  /** The flow's latest job and the ingest status of its own lease, from one statement (see `LatestFlowJob`). */
+  latestJobWithIngest(flowId: string): Promise<LatestFlowJob | null>;
   latestJobForStep(flowId: string, step: FlowStep): Promise<FleetJobRecord | null>;
   sumCost(flowId: string): Promise<string>;
   ingestSettled(jobId: string, leaseEpoch: number): Promise<boolean>;

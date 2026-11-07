@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, PrismaClient } from '../../generated/prisma/client';
+import { Prisma, PrismaClient, type FleetJob as FleetJobRow } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStep } from './flow-steps';
-import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, MarkFlowStepData } from './domain/fleet-flow-step.domain';
+import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, LatestFlowJob, MarkFlowStepData } from './domain/fleet-flow-step.domain';
 
 @Injectable()
 export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
@@ -56,6 +56,31 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
   async latestJob(flowId: string): Promise<FleetJobRecord | null> {
     const row = await this.db.fleetJob.findFirst({ where: { flowId }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
     return row ? this.toJob(row) : null;
+  }
+
+  /**
+   * One statement, so the row and the status belong to the same snapshot: an ingest that fills a RUN's
+   * `resultPrUrl` also marks its attempt settled, in one transaction, and reading the two apart could
+   * pair a row from before that commit with a status from after it.
+   */
+  async latestJobWithIngest(flowId: string): Promise<LatestFlowJob | null> {
+    const rows = await this.db.$queryRaw<Array<FleetJobRow & { ingestSettled: boolean }>>(Prisma.sql`
+      SELECT job.*, EXISTS (
+               SELECT 1
+                 FROM "FleetBundleIngest" AS ingest
+                WHERE ingest."jobId" = job."id"
+                  AND ingest."leaseEpoch" = job."leaseEpoch"
+                  AND ingest."status" IN ('done', 'partial', 'failed')
+             ) AS "ingestSettled"
+        FROM "FleetJob" AS job
+       WHERE job."flowId" = ${flowId}
+       ORDER BY job."queuedAt" DESC, job."id" DESC
+       LIMIT 1
+    `);
+    const row = rows[0];
+    if (!row) return null;
+    const { ingestSettled, ...job } = row;
+    return { job: this.toJob(job), ingestSettled };
   }
 
   async latestJobForStep(flowId: string, step: FlowStep): Promise<FleetJobRecord | null> {

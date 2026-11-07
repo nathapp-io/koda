@@ -1,6 +1,7 @@
 import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flow.domain';
+import type { LatestFlowJob } from './domain/fleet-flow-step.domain';
 import type { FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
@@ -24,6 +25,7 @@ vi.mock('./flow-step-decision', async (importOriginal) => {
 
 const NOW = new Date('2026-11-07T12:30:00.000Z');
 const APPROVED_AT = new Date('2026-11-07T12:00:00.000Z');
+const RUN_PR = 'https://github.com/o/r/pull/12';
 
 const feature = (over: Partial<FleetFlowFeatureRecord> = {}): FleetFlowFeatureRecord => ({
   id: 'feature-1', flowId: 'flow-1', position: 0, feature: 'f', specPath: '.nax/features/f/spec.md',
@@ -60,9 +62,13 @@ interface HarnessOptions {
   flow?: Partial<FleetFlowRecord>;
   /** The row the flow lock returns; the unlocked row when absent, null for a flow deleted meanwhile. */
   locked?: Partial<FleetFlowRecord> | null;
-  latest?: FleetJobRecord | null;
+  /** The pair the decide phase reads: the flow's latest job with the ingest status of its own lease. */
+  snapshot?: LatestFlowJob | null;
+  /** Rows a separate, unlocked job read would return — the stale snapshots the regression probes model. */
+  staleRows?: FleetJobRecord[];
+  /** What a separate ingest-status read would answer. */
+  settledApart?: boolean;
   sum?: string;
-  ingestSettled?: boolean;
   threadMissing?: boolean;
   repoMissing?: boolean;
   reviewRepo?: { owner: string; name: string } | null;
@@ -71,6 +77,7 @@ interface HarnessOptions {
 function build(opts: HarnessOptions = {}) {
   const record = flow(opts.flow);
   const order: string[] = [];
+  const staleRows = [...(opts.staleRows ?? [])];
   const flows = {
     findById: vi.fn(async () => record),
     lockById: vi.fn(async () => {
@@ -80,10 +87,11 @@ function build(opts: HarnessOptions = {}) {
     stop: vi.fn(async () => record),
   };
   const steps = {
-    latestJob: vi.fn(async () => opts.latest ?? null),
+    latestJobWithIngest: vi.fn(async () => opts.snapshot ?? null),
+    latestJob: vi.fn(async () => staleRows.shift() ?? opts.snapshot?.job ?? null),
+    ingestSettled: vi.fn(async () => opts.settledApart ?? opts.snapshot?.ingestSettled ?? false),
     sumCost: vi.fn(async () => opts.sum ?? record.spentUsd),
     setSpent: vi.fn(async () => undefined),
-    ingestSettled: vi.fn(async () => opts.ingestSettled ?? false),
     complete: vi.fn(async () => undefined),
     markStep: vi.fn(async () => undefined),
     creatorAccess: vi.fn(),
@@ -173,7 +181,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 
   it('AC-6: stores a changed spend total inside fleet.flow-bookkeeping', async () => {
     const reasons: Array<string | undefined> = [];
-    const h = build({ flow: { state: 'RUNNING' }, sum: '3.7500', latest: job({ state: 'RUNNING' }) });
+    const h = build({ flow: { state: 'RUNNING' }, sum: '3.7500', snapshot: { job: job({ state: 'RUNNING' }), ingestSettled: false } });
     h.steps.setSpent.mockImplementation(async () => {
       reasons.push(currentBookkeepingReason());
     });
@@ -185,7 +193,10 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   });
 
   it('AC-7: leaves an unchanged spend total alone', async () => {
-    const h = build({ flow: { state: 'RUNNING', spentUsd: '3.7500' }, sum: '3.7500', latest: job({ state: 'RUNNING' }) });
+    const h = build({
+      flow: { state: 'RUNNING', spentUsd: '3.7500' }, sum: '3.7500',
+      snapshot: { job: job({ state: 'RUNNING' }), ingestSettled: false },
+    });
 
     await h.service.advance('flow-1', NOW);
 
@@ -196,7 +207,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   it('AC-8: reads the repo and hands the PR number of a RUN result to the decision', async () => {
     const h = build({
       flow: { state: 'RUNNING' },
-      latest: job({ resultPrUrl: 'https://github.com/o/r/pull/12' }),
+      snapshot: { job: job({ resultPrUrl: RUN_PR }), ingestSettled: false },
       reviewRepo: { owner: 'o', name: 'r' },
     });
 
@@ -209,9 +220,8 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   it('AC-8: a RUN whose PR number cannot be read still stops once its ingest settles', async () => {
     const h = build({
       flow: { state: 'RUNNING' },
-      latest: job({ resultPrUrl: 'https://github.com/other/repo/pull/12' }),
+      snapshot: { job: job({ resultPrUrl: 'https://github.com/other/repo/pull/12' }), ingestSettled: true },
       reviewRepo: { owner: 'o', name: 'r' },
-      ingestSettled: true,
     });
 
     await h.service.advance('flow-1', NOW);
@@ -220,10 +230,53 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', NOW, 'RUN ended without a PR');
   });
 
+  it('F1: reads the repo for the authoritative RUN row, not for an unlocked snapshot', async () => {
+    const withPr = job({ resultPrUrl: RUN_PR });
+    // The interleaving the finding describes: an unlocked read before ingest filled the URL, an
+    // authoritative read after it. Only the latter may drive the decision.
+    const h = build({
+      flow: { state: 'RUNNING' },
+      staleRows: [job({ resultPrUrl: null })],
+      snapshot: { job: withPr, ingestSettled: true },
+      reviewRepo: { owner: 'o', name: 'r' },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.steps.latestJob).not.toHaveBeenCalled();
+    expect(h.repos.findReviewRepo).toHaveBeenCalledWith('repo-1');
+    expect(decisions.inputs.at(-1)?.latestJob?.prNumber).toBe(12);
+    expect(h.flows.stop).not.toHaveBeenCalled();
+  });
+
+  it('F2: pairs the ingest status with a job row read in the same statement', async () => {
+    const withPr = job({ resultPrUrl: RUN_PR });
+    // A separate status read would answer "settled" while a separate row read still lacks the URL —
+    // the pair that stopped a flow whose PR had just been recorded.
+    const h = build({
+      flow: { state: 'RUNNING' },
+      staleRows: [job({ resultPrUrl: null })],
+      settledApart: true,
+      snapshot: { job: withPr, ingestSettled: true },
+      reviewRepo: { owner: 'o', name: 'r' },
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.steps.ingestSettled).not.toHaveBeenCalled();
+    expect(h.steps.latestJob).not.toHaveBeenCalled();
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledTimes(1);
+    expect(decisions.inputs.at(-1)).toMatchObject({ ingestSettled: true, latestJob: { prNumber: 12 } });
+    expect(h.flows.stop).not.toHaveBeenCalled();
+  });
+
   it('AC-9/AC-10/AC-11: a stop decision writes the stop, its activity and its audit entry', async () => {
     const h = build({
       flow: { state: 'RUNNING' },
-      latest: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED', stateReason: 'checkout failed' }),
+      snapshot: {
+        job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED', stateReason: 'checkout failed' }),
+        ingestSettled: false,
+      },
     });
 
     await h.service.advance('flow-1', NOW);
@@ -247,7 +300,10 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   it('AC-9: keeps a stop detail within FLOW_STOP_DETAIL_MAX', async () => {
     const h = build({
       flow: { state: 'RUNNING' },
-      latest: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED', stateReason: 'x'.repeat(FLOW_STOP_DETAIL_MAX + 500) }),
+      snapshot: {
+        job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED', stateReason: 'x'.repeat(FLOW_STOP_DETAIL_MAX + 500) }),
+        ingestSettled: false,
+      },
     });
 
     await h.service.advance('flow-1', NOW);
@@ -259,7 +315,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   it('AC-12/AC-13: a complete decision completes the flow with its activity and audit entry', async () => {
     const h = build({
       flow: { state: 'RUNNING' },
-      latest: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }),
+      snapshot: { job: job({ flowStep: 'FIX', command: 'FIX', fixReady: { markedReady: true } }), ingestSettled: false },
     });
 
     await h.service.advance('flow-1', NOW);
@@ -277,7 +333,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   });
 
   it('AC-14: a wait decision writes no step, stop or audit entry', async () => {
-    const h = build({ flow: { state: 'RUNNING' }, latest: job({ state: 'RUNNING' }) });
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job({ state: 'RUNNING' }), ingestSettled: false } });
 
     await h.service.advance('flow-1', NOW);
 
@@ -305,7 +361,10 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   });
 
   it('re-reads the state under the flow lock and stops writing when the flow left the live states', async () => {
-    const h = build({ latest: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED' }), locked: { state: 'STOPPED' } });
+    const h = build({
+      snapshot: { job: job({ flowStep: 'PLAN', command: 'PLAN', state: 'FAILED' }), ingestSettled: false },
+      locked: { state: 'STOPPED' },
+    });
 
     await h.service.advance('flow-1', NOW);
 
@@ -316,20 +375,23 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   it('builds the decision input from the locked flow and its latest job', async () => {
     const h = build({
       flow: { state: 'RUNNING', features: [feature({ prNumber: 7 })] },
-      latest: job({ flowStep: 'RUN', state: 'COMPLETED', resultPrUrl: 'https://github.com/o/r/pull/12', resultSha: 'c'.repeat(40) }),
+      snapshot: {
+        job: job({ flowStep: 'RUN', state: 'COMPLETED', resultPrUrl: RUN_PR, resultSha: 'c'.repeat(40) }),
+        ingestSettled: true,
+      },
       reviewRepo: { owner: 'o', name: 'r' },
     });
 
     await h.service.advance('flow-1', NOW);
 
     expect(decisions.inputs.at(-1)).toMatchObject({
-      state: 'RUNNING', featureCount: 1, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7,
+      state: 'RUNNING', featureCount: 1, approvedAt: APPROVED_AT, now: NOW, featurePrNumber: 7, ingestSettled: true,
       latestJob: {
         id: 'job-1', step: 'RUN', state: 'COMPLETED', prNumber: 12, resultSha: 'c'.repeat(40),
         stateReason: null, agentOutput: null, fixReady: null,
       },
     });
     expect(decisions.inputs.at(-1)?.prWaitMs).toBeGreaterThan(0);
-    expect(h.steps.ingestSettled).toHaveBeenCalledWith('job-1', 2);
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
   });
 });

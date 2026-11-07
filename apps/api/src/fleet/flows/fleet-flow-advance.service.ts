@@ -8,7 +8,9 @@ import { FleetReposService } from '../repos/fleet-repos.service';
 import { prNumberFor } from '../sync/pr-attribution.service';
 import { ThreadsService } from '../threads/threads.service';
 import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
-import { FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository } from './domain/fleet-flow-step.domain';
+import {
+  FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
+} from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type FlowJobView, type FlowStepAction, type FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 
@@ -18,17 +20,15 @@ import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
  */
 const FLOW_PR_WAIT_MS = 1_800_000;
 
-/** The repo facts `prNumberFor` needs; `FleetReposService.findReviewRepo` returns them. */
-type ReviewRepo = { owner: string; name: string };
-
 /**
  * Fleet flow F3 (US-012): one pass of the advancement engine's decide phase.
  *
- * A pass reads the flow and its latest job unlocked — only to select the parent lock and to read the
- * forge/PR facts before any transaction opens — then locks the parent (thread or repo) and the flow,
- * re-reads the authoritative state and job under those locks, refreshes `spentUsd` when the sum of the
- * flow's job costs changed, and asks `decideFlowStep` what to do. Stops and completions are written
- * here, inside that transaction, each with its `system.flow.advance` audit entry and its activity row.
+ * A pass reads the flow unlocked — only to select the parent lock — then locks the parent (thread or
+ * repo) and the flow, re-reads the authoritative state, refreshes `spentUsd` when the sum of the flow's
+ * job costs changed, and reads the flow's latest job together with its ingest status. Everything the
+ * decision acts on comes from under those locks or from that one statement, so a job an ingest finished
+ * meanwhile cannot be judged by facts gathered before it did. Stops and completions are written inside
+ * that transaction, each with its `system.flow.advance` audit entry and its activity row.
  *
  * A `dispatch` decision ends this pass with nothing written: the dispatch phase (US-013) and its
  * guards (US-014, US-015) come later.
@@ -52,20 +52,13 @@ export class FleetFlowAdvanceService {
   }
 
   /**
-   * Decide (one transaction). The unlocked read and the forge reads it enables are discarded for the
-   * decision itself: state, features and the latest job are read again under the locks, so a stop, a
-   * re-ask or a dispatch another pass made in between is what this pass acts on.
+   * Decide (one transaction). The unlocked read only selects the parent lock: state, features and the
+   * job are read again under the locks, so a stop, a re-ask or a dispatch another pass made in between
+   * is what this pass acts on.
    */
   private async decide(flowId: string, now: Date): Promise<void> {
     const flow = await this.flows.findById(flowId);
     if (!flow) return;
-
-    // The PR number of a RUN that ended is read before the transaction: an HTTP-forge read never runs
-    // with a lock or a transaction open.
-    const latest = await this.steps.latestJob(flow.id);
-    const reviewRepo = latest !== null && latest.flowStep === 'RUN' && latest.resultPrUrl !== null
-      ? await this.repos.findReviewRepo(flow.repoId)
-      : null;
 
     await this.txManager.run(async () => {
       if (!(await this.lockParent(flow))) return;
@@ -73,9 +66,11 @@ export class FleetFlowAdvanceService {
       if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return;
 
       await this.refreshSpent(current);
-      const job = await this.steps.latestJob(current.id);
-      const action = decideFlowStep(await this.decisionInput(current, job, reviewRepo, now));
-      await this.writeDecision(current, job, action, now);
+      // One statement pairs the job with the ingest status of its own lease: a RUN's `resultPrUrl` and
+      // that mark commit together, so read apart they could stop a flow whose PR had just been recorded.
+      const latest = await this.steps.latestJobWithIngest(current.id);
+      const action = decideFlowStep(await this.decisionInput(current, latest, now));
+      await this.writeDecision(current, latest?.job ?? null, action, now);
     });
   }
 
@@ -102,33 +97,28 @@ export class FleetFlowAdvanceService {
     await bookkeeping('fleet.flow-bookkeeping', () => this.steps.setSpent(flow.id, sum));
   }
 
-  private async decisionInput(
-    flow: FleetFlowRecord,
-    job: FleetJobRecord | null,
-    reviewRepo: ReviewRepo | null,
-    now: Date,
-  ): Promise<FlowStepInput> {
+  private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
     return {
       state: flow.state,
       featureCount: flow.features.length,
       // An APPROVED or RUNNING flow was approved before it became live; the fallback only widens the type.
       approvedAt: flow.approvedAt ?? now,
-      latestJob: job === null ? null : this.jobView(job, reviewRepo),
+      latestJob: latest === null ? null : await this.jobView(flow, latest.job),
       now,
       prWaitMs: FLOW_PR_WAIT_MS,
-      // Only a finished RUN needs the ingest's verdict on its PR; every other step ignores the flag.
-      ingestSettled: job !== null && job.flowStep === 'RUN'
-        ? await this.steps.ingestSettled(job.id, job.leaseEpoch)
-        : false,
+      // Only a finished RUN consults this, and it arrives with the row it belongs to.
+      ingestSettled: latest?.ingestSettled ?? false,
       featurePrNumber: flow.features[0]?.prNumber ?? null,
     };
   }
 
   /**
-   * The job as the decision reads it. The PR number comes from `resultPrUrl` — bundle ingest fills that
-   * URL after the job ends, not a column of its own — and only when it names this flow's repo.
+   * The job as the decision reads it. A RUN's PR number comes from `resultPrUrl` — bundle ingest fills
+   * that URL after the job ends, there is no PR column — and only when it names this flow's repo. The
+   * repo row is a plain database read (no forge call), so it is resolved here against the row this pass
+   * already read, never from an earlier snapshot a concurrent ingest may have moved past.
    */
-  private jobView(job: FleetJobRecord, reviewRepo: ReviewRepo | null): FlowJobView {
+  private async jobView(flow: FleetFlowRecord, job: FleetJobRecord): Promise<FlowJobView> {
     return {
       id: job.id,
       step: job.flowStep as FlowStep,
@@ -136,14 +126,20 @@ export class FleetFlowAdvanceService {
       stateReason: job.stateReason,
       queuedAt: job.queuedAt,
       finishedAt: job.finishedAt,
-      prNumber: job.flowStep === 'RUN' && job.resultPrUrl !== null && reviewRepo !== null
-        ? prNumberFor({ provider: 'github', owner: reviewRepo.owner, name: reviewRepo.name }, job.resultPrUrl)
-        : null,
+      prNumber: await this.prNumberOf(flow, job),
       agentOutput: job.agentResult?.output ?? null,
       resultBranch: job.resultBranch,
       resultSha: job.resultSha,
       fixReady: job.fixReady ?? null,
     };
+  }
+
+  private async prNumberOf(flow: FleetFlowRecord, job: FleetJobRecord): Promise<number | null> {
+    if (job.flowStep !== 'RUN' || job.resultPrUrl === null) return null;
+    const repo = await this.repos.findReviewRepo(flow.repoId);
+    return repo === null
+      ? null
+      : prNumberFor({ provider: 'github', owner: repo.owner, name: repo.name }, job.resultPrUrl);
   }
 
   /**
