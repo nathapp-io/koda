@@ -2,11 +2,12 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { describe, expect, it } from 'vitest';
 import { parseFlowAnswers } from './flow-answers';
 
-function failure(body: unknown): { error: unknown; reason: unknown } {
+function failure(body: unknown): { error: unknown; reason: unknown; prefix: unknown } {
   try {
     parseFlowAnswers(body);
   } catch (error) {
-    return { error, reason: (error as { args: { reason: string } }).args.reason };
+    const validationError = error as ValidationAppException & { args: { reason: string } };
+    return { error, reason: validationError.args.reason, prefix: validationError.prefix };
   }
   throw new Error('Expected validation failure');
 }
@@ -20,6 +21,7 @@ describe('parseFlowAnswers', () => {
     for (const body of ['x', []]) {
       const result = failure(body);
       expect(result.error).toBeInstanceOf(ValidationAppException);
+      expect(result.prefix).toBe('fleet.flows.answersInput');
       expect(result.reason).toBe('body');
     }
   });
