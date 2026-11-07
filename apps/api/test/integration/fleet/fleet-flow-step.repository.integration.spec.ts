@@ -103,6 +103,44 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(await repo.ingestSettled(job.id, 3)).toBe(status === 'done' || status === 'failed');
   });
 
+  it('AC-15 stores the flow spend total', async () => {
+    const flow = await createFlow('RUNNING');
+    await repo.setSpent(flow.id, '3.7500');
+    expect((await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).spentUsd.toFixed(4)).toBe('3.7500');
+  });
+
+  it('AC-16/17 resolves user creator existence and disabled status', async () => {
+    const disabled = await prisma.user.create({ data: { email: `disabled-${crypto.randomUUID()}@example.com`, passwordHash: 'hash', disabled: true } });
+    expect(await repo.creatorAccess({ type: 'USER', id: disabled.id })).toEqual({ exists: true, disabled: true });
+    expect(await repo.creatorAccess({ type: 'USER', id: crypto.randomUUID() })).toEqual({ exists: false, disabled: false });
+  });
+
+  it('AC-18/19 resolves agent creator existence without treating liveness as disabled', async () => {
+    const slug = `agent-${crypto.randomUUID()}`;
+    const agent = await prisma.agent.create({ data: { name: slug, slug, apiKeyHash: crypto.randomUUID() } });
+    expect(await repo.creatorAccess({ type: 'AGENT', id: agent.id })).toEqual({ exists: true, disabled: false });
+    expect(await repo.creatorAccess({ type: 'AGENT', id: crypto.randomUUID() })).toEqual({ exists: false, disabled: false });
+  });
+
+  it('AC-20/21 marks flow and feature progress and preserves an omitted PR number', async () => {
+    const flow = await createFlow('RUNNING');
+    const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
+    await repo.markStep(flow.id, feature.id, 'REVIEW', { flowState: 'RUNNING', prNumber: 7 });
+    expect((await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).state).toBe('RUNNING');
+    expect(await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).toMatchObject({ state: 'RUNNING', currentStep: 'REVIEW', prNumber: 7 });
+    await repo.markStep(flow.id, feature.id, 'PLAN', { flowState: 'RUNNING' });
+    expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).prNumber).toBe(7);
+  });
+
+  it('AC-22/23 completes flow and feature with the supplied time', async () => {
+    const flow = await createFlow('RUNNING');
+    const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
+    const now = new Date('2026-11-04T12:34:56.000Z');
+    await repo.complete(flow.id, now);
+    expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'COMPLETED', endedAt: now });
+    expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).state).toBe('COMPLETED');
+  });
+
   it('AC-14 does not settle an ingest from a different lease', async () => {
     const job = await createJob((await createFlow('RUNNING')).id);
     const artifact = await prisma.fleetJobArtifact.create({ data: { jobId: job.id, leaseEpoch: 4, kind: 'bundle', storageKey: `key-${job.id}`, sizeBytes: 0n, sha256: 'sha' } });

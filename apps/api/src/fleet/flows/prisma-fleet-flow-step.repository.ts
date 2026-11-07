@@ -2,8 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { agentInputOf, agentResultOf, fixOutcomeOf, type FleetJobRecord } from '../jobs/domain/fleet-job.domain';
+import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStep } from './flow-steps';
-import type { AdvanceableFlow, IFleetFlowStepRepository } from './domain/fleet-flow-step.domain';
+import type { AdvanceableFlow, CreatorAccess, IFleetFlowStepRepository, MarkFlowStepData } from './domain/fleet-flow-step.domain';
 
 @Injectable()
 export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
@@ -11,6 +12,32 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
 
   private get db() {
     return this.prisma.client;
+  }
+
+  async setSpent(flowId: string, spentUsd: string): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { spentUsd: new Prisma.Decimal(spentUsd) } });
+  }
+
+  async creatorAccess(ref: PrincipalRef): Promise<CreatorAccess> {
+    if (ref.type === 'AGENT') {
+      const agent = await this.db.agent.findUnique({ where: { id: ref.id }, select: { id: true } });
+      return { exists: agent !== null, disabled: false };
+    }
+    const user = await this.db.user.findUnique({ where: { id: ref.id }, select: { disabled: true } });
+    return user === null ? { exists: false, disabled: false } : { exists: true, disabled: user.disabled };
+  }
+
+  async markStep(flowId: string, featureId: string, step: FlowStep, data: MarkFlowStepData): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { state: data.flowState } });
+    await this.db.fleetFlowFeature.update({
+      where: { id: featureId },
+      data: { state: 'RUNNING', currentStep: step, ...(data.prNumber !== undefined ? { prNumber: data.prNumber } : {}) },
+    });
+  }
+
+  async complete(flowId: string, now: Date): Promise<void> {
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { state: 'COMPLETED', endedAt: now } });
+    await this.db.fleetFlowFeature.updateMany({ where: { flowId }, data: { state: 'COMPLETED' } });
   }
 
   async listAdvanceable(limit: number, afterId: string | null): Promise<AdvanceableFlow[]> {
