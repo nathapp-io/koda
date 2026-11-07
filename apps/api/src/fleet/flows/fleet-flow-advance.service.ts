@@ -23,6 +23,10 @@ import { remainingCapUsd } from './flow-step-dispatch';
 import { mayDispatch } from '../schedules/schedule-access';
 import { PermissionService } from '../../permissions/permission.service';
 import type { PrincipalRef } from '../../permissions/permissions.types';
+import { FleetFlowsService } from './fleet-flows.service';
+import { GitHubAppClient } from '../git-broker/github-app-client';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
+import { isTerminal } from '../jobs/job-state';
 
 /**
  * `FLEET_FLOW_PR_WAIT_MS`'s default (design, "`RUN` waits for its PR"). US-017 moves it onto
@@ -51,6 +55,8 @@ export class FleetFlowAdvanceService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly jobs: FleetJobsService,
     private readonly permissions: PermissionService,
+    private readonly flowService: FleetFlowsService,
+    private readonly github: GitHubAppClient,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
@@ -123,8 +129,19 @@ export class FleetFlowAdvanceService {
     const flow = await this.flows.findById(flowId);
     if (!flow) return;
 
+    // Forge I/O is only a preflight hint. Re-read state/jobs under locks below, and never let a
+    // transient forge failure commit even a bookkeeping write. No token crosses this boundary.
+    let forgeHead: string | null | undefined;
+    try {
+      forgeHead = await this.readSpecHead(flow);
+    } catch (error) {
+      if (error instanceof RepoCheckException) return;
+      throw error;
+    }
+
     return this.txManager.run(async () => {
-      if (!(await this.lockParent(flow))) return;
+      const parent = await this.lockParent(flow);
+      if (!parent) return;
       const current = await this.flows.lockById(flow.id);
       if (!current || (current.state !== 'APPROVED' && current.state !== 'RUNNING')) return;
 
@@ -171,7 +188,25 @@ export class FleetFlowAdvanceService {
         }, now);
         return;
       }
-      // US-015 adds the pre-push SHA/re-ask check after cap and creator guards.
+      if (action.step === 'SPEC_REVIEW' || action.step === 'PLAN') {
+        // A different approval/target or a newly eligible step needs its own preflight next pass.
+        // In particular, never re-ask a freshly approved spec using an older generation's head.
+        if (current.threadId === null && (forgeHead === undefined
+          || current.repoId !== flow.repoId || current.branch !== flow.branch || current.specSha !== flow.specSha
+          || current.approvedAt?.getTime() !== flow.approvedAt?.getTime())) return;
+        if (current.threadId === null && forgeHead === null) {
+          await this.writeDecision(current, job ?? null, {
+            kind: 'stop', reason: 'dispatch_refused', detail: `${action.step}: repo not connected`,
+          }, now);
+          return;
+        }
+        const specSha = current.threadId !== null ? parent.publishedSha : forgeHead;
+        if (specSha == null) return;
+        if (specSha !== current.specSha) {
+          await this.flowService.reaskLocked(current, specSha, now);
+          return;
+        }
+      }
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
         ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
       return { flow: current, action, plan, remainingCapUsd: remaining };
@@ -183,11 +218,24 @@ export class FleetFlowAdvanceService {
    * a nax-entry flow takes its repo row. A parent row deleted meanwhile ends the pass: nothing below it
    * can be decided.
    */
-  private async lockParent(flow: FleetFlowRecord): Promise<boolean> {
-    const parent = flow.threadId !== null
-      ? await this.threads.lockForFlowTransition(flow.projectId, flow.threadId)
-      : await this.repos.lockById(flow.repoId);
-    return parent !== null;
+  private async lockParent(flow: FleetFlowRecord): Promise<{ publishedSha?: string | null } | null> {
+    if (flow.threadId !== null) {
+      return this.threads.lockForFlowTransition(flow.projectId, flow.threadId);
+    }
+    return (await this.repos.lockById(flow.repoId)) === null ? null : {};
+  }
+
+  /** undefined: not a candidate; null: disconnected. Only a head SHA survives forge preflight. */
+  private async readSpecHead(flow: FleetFlowRecord): Promise<string | null | undefined> {
+    if (flow.threadId !== null || (flow.state !== 'APPROVED' && flow.state !== 'RUNNING')) return;
+    const snapshot = await this.steps.latestJobWithIngest(flow.id);
+    const latest = snapshot?.job;
+    if (flow.state !== 'APPROVED' && latest
+      && !(latest.flowStep === 'SPEC_REVIEW' && isTerminal(latest.state))) return;
+    const repo = await this.repos.findReviewRepo(flow.repoId);
+    if (!repo || repo.githubInstallationId === null) return null;
+    const { token } = await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name);
+    return this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
   }
 
   /**

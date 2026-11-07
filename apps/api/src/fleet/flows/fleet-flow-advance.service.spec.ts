@@ -15,6 +15,9 @@ import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { FlowStepInput } from './flow-step-decision';
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import type { FleetFlowsService } from './fleet-flows.service';
+import type { GitHubAppClient } from '../git-broker/github-app-client';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
 
 /** Observe decision inputs while still exercising the real decision engine on every pass. */
 const decisions = vi.hoisted(() => ({ inputs: [] as FlowStepInput[] }));
@@ -77,7 +80,8 @@ interface HarnessOptions {
   sum?: string;
   threadMissing?: boolean;
   repoMissing?: boolean;
-  reviewRepo?: { owner: string; name: string } | null;
+  reviewRepo?: { owner: string; name: string; githubInstallationId?: bigint | null } | null;
+  publishedSha?: string;
   creatorAccess?: CreatorAccess;
   creatorKeys?: ReadonlySet<string>;
 }
@@ -113,7 +117,7 @@ function build(opts: HarnessOptions = {}) {
   const threads = {
     lockForFlowTransition: vi.fn(async () => {
       order.push('thread');
-      return opts.threadMissing === true ? null : { id: 'thread-1', projectId: 'p1' };
+      return opts.threadMissing === true ? null : { id: 'thread-1', projectId: 'p1', publishedSha: opts.publishedSha ?? record.specSha };
     }),
   };
   const repos = {
@@ -138,16 +142,33 @@ function build(opts: HarnessOptions = {}) {
   const permissions = {
     effectiveKeys: vi.fn<PermissionService['effectiveKeys']>(async () => opts.creatorKeys ?? new Set(['fleet.job.dispatch'])),
   };
+  const flowService = {
+    reaskLocked: vi.fn<FleetFlowsService['reaskLocked']>(async () => {
+      expect(inTransaction).toBe(true);
+      return record;
+    }),
+  };
+  const github = {
+    mintReadOnlyToken: vi.fn<GitHubAppClient['mintReadOnlyToken']>(async () => {
+      expect(inTransaction).toBe(false);
+      return { token: 'test-only-token', expiresAt: NOW };
+    }),
+    getBranchHead: vi.fn<GitHubAppClient['getBranchHead']>(async () => {
+      expect(inTransaction).toBe(false);
+      return record.specSha;
+    }),
+  };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
+    flowService as never, github as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
-    flows.stop, steps.setSpent, steps.complete, steps.markStep, activity.record, audit.record,
+    flows.stop, steps.setSpent, steps.complete, steps.markStep, activity.record, audit.record, flowService.reaskLocked,
   ].some((fn) => fn.mock.calls.length > 0);
 
-  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, permissions, order, record, wrote,
+  return { service, flows, steps, threads, repos, activity, audit, txManager, jobs, permissions, flowService, github, order, record, wrote,
     inTransaction: () => inTransaction };
 }
 
@@ -289,7 +310,7 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
 
     expect(h.steps.ingestSettled).not.toHaveBeenCalled();
     expect(h.steps.latestJob).not.toHaveBeenCalled();
-    expect(h.steps.latestJobWithIngest).toHaveBeenCalledTimes(1);
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledTimes(2); // Unlocked candidate, then authoritative pair under locks.
     expect(decisions.inputs.at(-1)).toMatchObject({ ingestSettled: true, latestJob: { prNumber: 12 } });
     expect(h.flows.stop).not.toHaveBeenCalled();
   });
@@ -420,6 +441,148 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
   });
 });
 
+describe('FleetFlowAdvanceService pre-push spec guard (US-015)', () => {
+  const newSha = 'd'.repeat(40);
+  const review = () => job({ flowStep: 'SPEC_REVIEW', ref: 'a'.repeat(40), agentResult: { status: 'completed', output: '{"findings":[]}' } });
+
+  it.each(['SPEC_REVIEW', 'PLAN'] as const)('AC-4/AC-5: thread %s re-asks from the locked publication', async (step) => {
+    const h = build({
+      flow: { entry: 'THREAD', threadId: 'thread-1', ...(step === 'PLAN' ? { state: 'RUNNING' } : {}) },
+      publishedSha: newSha,
+      snapshot: step === 'PLAN' ? { job: review(), ingestSettled: false } : null,
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.flowService.reaskLocked).toHaveBeenCalledWith(h.record, newSha, NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.jobs.cancel).not.toHaveBeenCalled();
+    expect(h.github.getBranchHead).not.toHaveBeenCalled();
+    expect(h.repos.findReviewRepo).not.toHaveBeenCalled(); // Local-only thread branches need no forge.
+  });
+
+  it('AC-6: RUN ignores a changed thread publication', async () => {
+    const h = build({
+      flow: { entry: 'THREAD', threadId: 'thread-1', state: 'RUNNING' }, publishedSha: newSha,
+      snapshot: { job: job({ flowStep: 'PRD_REVIEW', agentResult: { status: 'completed', output: '{"findings":[]}' } }), ingestSettled: false },
+    });
+    h.steps.latestJobForStep.mockResolvedValue(job({ flowStep: 'PLAN' }));
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.any(Object), expect.objectContaining({ flowStep: 'RUN' }));
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+    expect(h.github.getBranchHead).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: a nax first review checks head using a read-only token outside the transaction', async () => {
+    const h = build();
+    h.repos.findReviewRepo.mockImplementation(async () => {
+      expect(h.inTransaction()).toBe(false);
+      return { id: 'repo-1', projectId: 'p1', owner: 'o', name: 'r', githubInstallationId: 1n };
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.github.mintReadOnlyToken).toHaveBeenCalledWith(1n, 'r');
+    expect(h.github.getBranchHead).toHaveBeenCalledWith('test-only-token', 'o', 'r', 'feat/f');
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.any(Object), expect.objectContaining({ flowStep: 'SPEC_REVIEW' }));
+  });
+
+  it.each(['SPEC_REVIEW', 'PLAN'] as const)('AC-8: changed nax head re-asks before %s', async (step) => {
+    const h = step === 'PLAN' ? planPass() : build();
+    h.github.getBranchHead.mockResolvedValue(newSha);
+    await h.service.advance('flow-1', NOW);
+    expect(h.flowService.reaskLocked).toHaveBeenCalledWith(h.record, newSha, NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(['getBranchHead', 'mintReadOnlyToken'] as const)('AC-9/AC-10: a RepoCheckException from %s resolves without writes', async (method) => {
+    const h = build({ sum: '3.7500' }); // Even spend bookkeeping must not be written on forge failure.
+    h.github[method].mockRejectedValue(new RepoCheckException('provider_unreachable'));
+    await expect(h.service.advance('flow-1', NOW)).resolves.toBeUndefined();
+    expect(h.github[method]).toHaveBeenCalledOnce();
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.wrote()).toBe(false);
+    expect(h.txManager.run).not.toHaveBeenCalled();
+  });
+
+  it.each(['SPEC_REVIEW', 'PLAN'] as const)('AC-11/AC-14: missing connection refuses %s only with a lockable parent', async (step) => {
+    for (const reviewRepo of [null, { owner: 'o', name: 'r', githubInstallationId: null }]) {
+      const h = build({
+        reviewRepo,
+        ...(step === 'PLAN' ? { flow: { state: 'RUNNING' }, snapshot: { job: review(), ingestSettled: false } } : {}),
+      });
+      await h.service.advance('flow-1', NOW);
+      expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'dispatch_refused', NOW, `${step}: repo not connected`);
+      expect(h.jobs.dispatch).not.toHaveBeenCalled();
+      expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
+      expect(h.github.getBranchHead).not.toHaveBeenCalled();
+
+      const gone = build({
+        reviewRepo, repoMissing: true,
+        ...(step === 'PLAN' ? { flow: { state: 'RUNNING' }, snapshot: { job: review(), ingestSettled: false } } : {}),
+      });
+      await gone.service.advance('flow-1', NOW);
+      expect(gone.wrote()).toBe(false);
+    }
+  });
+
+  it.each([
+    ['AC-12', job({ flowStep: 'RUN', state: 'COMPLETED' })],
+    ['AC-13', job({ flowStep: 'SPEC_REVIEW', state: 'RUNNING', ref: 'a'.repeat(40) })],
+  ] as const)('%s: does not read forge head for a post-push or active job', async (_ac, latest) => {
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: latest, ingestSettled: false } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.steps.latestJobWithIngest).toHaveBeenCalledWith('flow-1');
+    expect(h.github.getBranchHead).not.toHaveBeenCalled();
+    expect(h.github.mintReadOnlyToken).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not read forge head for a still-running review of an older spec', async () => {
+    const h = build({
+      flow: { state: 'RUNNING' },
+      snapshot: { job: job({ flowStep: 'SPEC_REVIEW', state: 'RUNNING', ref: newSha }), ingestSettled: false },
+    });
+    await h.service.advance('flow-1', NOW);
+    expect(h.github.getBranchHead).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+  });
+
+  it('does not use a forge snapshot for a different approval generation', async () => {
+    const h = build({ locked: { specSha: newSha, approvedAt: NOW } });
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+  });
+
+  it('defers a pre-push step that became eligible after the unlocked candidate read', async () => {
+    const h = build({ flow: { state: 'RUNNING' }, snapshot: { job: job(), ingestSettled: false } });
+    h.steps.latestJobWithIngest
+      .mockResolvedValueOnce({ job: job(), ingestSettled: false })
+      .mockResolvedValueOnce({ job: review(), ingestSettled: false });
+    h.flows.lockById.mockResolvedValue(flow({ state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW' })] }));
+    await h.service.advance('flow-1', NOW);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.github.getBranchHead).not.toHaveBeenCalled();
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+  });
+
+  it('propagates an unexpected forge error without any writes', async () => {
+    const h = build();
+    const error = new Error('unexpected');
+    h.github.getBranchHead.mockRejectedValue(error);
+    await expect(h.service.advance('flow-1', NOW)).rejects.toBe(error);
+    expect(h.wrote()).toBe(false);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(['cap', 'creator'] as const)('applies the %s guard before reapproval', async (guard) => {
+    const h = build(guard === 'cap' ? { sum: '10.0000' } : { creatorKeys: new Set() });
+    h.github.getBranchHead.mockResolvedValue(newSha);
+    await h.service.advance('flow-1', NOW);
+    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', guard === 'cap' ? 'cost_cap' : 'creator_lost_access', NOW, expect.any(String));
+    expect(h.flowService.reaskLocked).not.toHaveBeenCalled();
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+  });
+});
+
 function planPass() {
   return build({
     flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'SPEC_REVIEW' })] },
@@ -435,6 +598,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
     let current = h.record;
     let latest: LatestFlowJob | null = null;
     h.flows.findById.mockImplementation(async () => current);
+    h.github.getBranchHead.mockImplementation(async () => current.specSha);
     h.flows.lockById.mockImplementation(async () => current);
     h.steps.latestJobWithIngest.mockImplementation(async () => latest);
     h.steps.markStep.mockImplementation(async () => {
