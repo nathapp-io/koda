@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T10:35:46.988Z",
+  "updatedAt": "2026-11-07T10:41:55.878Z",
   "userStories": [
     {
       "id": "US-001",
@@ -107,14 +107,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "A single additive pure source module formats bounded text and detects exact headings; co-located TDD needs neither I/O fixtures nor new infrastructure."
+        "reasoning": "A single additive pure source module formats bounded text and detects exact headings; co-located TDD needs neither I/O fixtures nor new infrastructure.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-verdict.ts",
@@ -128,7 +131,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b4edde112fcfc7255e419758a07c7846422063cd"
     },
     {
       "id": "US-003",
