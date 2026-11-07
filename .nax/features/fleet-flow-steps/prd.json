@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T06:22:29.882Z",
+  "updatedAt": "2026-11-07T06:40:52.390Z",
   "userStories": [
     {
       "id": "US-001",
@@ -724,14 +724,17 @@
       "dependencies": [
         "US-012"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Dispatch/record orchestration adds crash-recovery and concurrent-state checks across existing transaction boundaries; the scheduler and review dispatcher already supply the required patterns, so expert routing is unnecessary."
+        "reasoning": "Dispatch/record orchestration adds crash-recovery and concurrent-state checks across existing transaction boundaries; the scheduler and review dispatcher already supply the required patterns, so expert routing is unnecessary.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -748,7 +751,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ef3885fe3a276fb24073c8661e8557d0cfc12ee4"
     },
     {
       "id": "US-014",
