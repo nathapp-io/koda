@@ -95,6 +95,75 @@ integration('fleet flow advancement through the database', () => {
     expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(1);
   });
 
+  async function seedTerminalStep(flowId: string, step: string, command: string, data: Record<string, unknown> = {}) {
+    const flow = await db.fleetFlow.findUniqueOrThrow({ where: { id: flowId }, include: { features: true } });
+    await db.fleetFlow.update({ where: { id: flowId }, data: { state: 'RUNNING' } });
+    await db.fleetFlowFeature.updateMany({ where: { flowId }, data: { state: 'RUNNING', currentStep: step } });
+    return db.fleetJob.create({ data: {
+      projectId, repoId, ref: step === 'SPEC_REVIEW' ? SHA : 'main', command, feature: flow.features[0].feature,
+      profiles: [], maxCostUsd: '10', selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId,
+      state: 'COMPLETED', queuedAt: new Date(now.getTime() - 60_000), finishedAt: new Date(now.getTime() - 30_000),
+      flowId, flowStep: step, ...data,
+    } });
+  }
+
+  it('AC-8: a failed SPEC_REVIEW stops with exact detail and audit through tick', async () => {
+    const flow = await createFlow();
+    const job = await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', { state: 'FAILED', stateReason: 'checkout: ref not found' });
+    const loggerError = vi.mocked(Logger.prototype.error);
+    loggerError.mockClear();
+    await ticker.tick(now);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({
+      state: 'STOPPED', stopReason: 'step_failed', stopDetail: `SPEC_REVIEW job ${job.id} FAILED: checkout: ref not found`,
+    });
+    expect(await db.auditEntry.count({ where: { key: 'system.flow.advance', resourceType: 'flow', resourceId: flow.id } })).toBeGreaterThan(0);
+    expect(loggerError.mock.calls).toEqual([]);
+  });
+
+  it('AC-9: an empty SPEC_REVIEW verdict dispatches a linked PLAN job', async () => {
+    const flow = await createFlow();
+    await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', {
+      agentResult: { status: 'completed', output: 'Looks good. {"findings":[]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
+    });
+    await ticker.tick(now);
+    expect(await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'PLAN' } })).toHaveLength(1);
+  });
+
+  it('AC-10: a SPEC_REVIEW finding stops the flow', async () => {
+    const flow = await createFlow();
+    await seedTerminalStep(flow.id, 'SPEC_REVIEW', 'AGENT', {
+      agentResult: { status: 'completed', output: '{"findings":[{"id":"F1","summary":"A finding"}]}', truncated: false, deniedAsks: [], deniedAsksTruncated: false },
+    });
+    await ticker.tick(now);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'STOPPED', stopReason: 'review_findings' });
+  });
+
+  it('AC-11: RUN creates a review claim linked to its new REVIEW job', async () => {
+    const flow = await createFlow();
+    const repo = await db.fleetRepo.findUniqueOrThrow({ where: { id: repoId } });
+    await seedTerminalStep(flow.id, 'RUN', 'RUN', { resultPrUrl: `https://github.com/acme/${repo.name}/pull/12`, resultSha: 'h1' });
+    await ticker.tick(now);
+    const claim = await db.fleetPrReview.findUniqueOrThrow({ where: { repoId_prNumber_headSha: { repoId, prNumber: 12, headSha: 'h1' } } });
+    const review = await db.fleetJob.findUniqueOrThrow({ where: { id: claim.jobId! } });
+    expect(claim).toMatchObject({ outcome: 'dispatched', prNumber: 12, headSha: 'h1' });
+    expect(review).toMatchObject({ command: 'REVIEW', flowId: flow.id, flowStep: 'REVIEW' });
+  });
+
+  it('AC-12–AC-14: an existing auto-review job is adopted and the PR recorded without dispatching another job', async () => {
+    const flow = await createFlow();
+    const repo = await db.fleetRepo.findUniqueOrThrow({ where: { id: repoId } });
+    await seedTerminalStep(flow.id, 'RUN', 'RUN', { resultPrUrl: `https://github.com/acme/${repo.name}/pull/12`, resultSha: 'h1' });
+    const autoReview = await db.fleetJob.create({ data: {
+      projectId, repoId, ref: 'h1', command: 'REVIEW', feature: 'review-pr-12', profiles: [], maxCostUsd: '10',
+      selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId, state: 'QUEUED',
+    } });
+    await db.fleetPrReview.create({ data: { repoId, prNumber: 12, headSha: 'h1', jobId: autoReview.id, outcome: 'dispatched' } });
+    await ticker.tick(now);
+    expect(await db.fleetJob.count({ where: { repoId, command: 'REVIEW' } })).toBe(1);
+    expect(await db.fleetJob.findUniqueOrThrow({ where: { id: autoReview.id } })).toMatchObject({ flowId: flow.id, flowStep: 'REVIEW' });
+    expect(await db.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toMatchObject([{ prNumber: 12, currentStep: 'REVIEW' }]);
+  });
+
   it('AC-6/7: multiple features remain approved and do not dispatch', async () => {
     const flow = await createFlow(['flow', 'other']);
     await ticker.tick(now);
