@@ -51,8 +51,11 @@ const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
 } as FleetJobRecord);
 
 interface Options {
-  /** The row the flow lock returns, layered over the unlocked row. */
-  locked?: Partial<FleetFlowRecord>;
+  /**
+   * The row each successive flow lock returns, layered over the unlocked row: index 0 is the decide-phase
+   * lock, index 1 the record-phase lock. Missing indexes fall back to the unlocked row.
+   */
+  locks?: ReadonlyArray<Partial<FleetFlowRecord>>;
   /** The latest job with the ingest status of its own lease. */
   latest?: FleetJobRecord;
   /** What the head claim answers. */
@@ -64,10 +67,15 @@ function build(opts: Options = {}) {
   const record = flow();
   const latest = opts.latest ?? job();
   let inTransaction = false;
+  let lockCount = 0;
   const order: string[] = [];
   const flows = {
     findById: vi.fn(async () => record),
-    lockById: vi.fn(async () => flow({ ...record, ...opts.locked })),
+    lockById: vi.fn(async () => {
+      const over = opts.locks?.[lockCount] ?? {};
+      lockCount += 1;
+      return flow({ ...record, ...over });
+    }),
     stop: vi.fn(async () => record),
   };
   const steps = {
@@ -206,11 +214,16 @@ describe('FleetFlowAdvanceService.advance, REVIEW through the head claim', () =>
   });
 
   it('AC-7: an owned head does not adopt when the flow stopped before the record phase', async () => {
-    const h = build({ claim: { kind: 'owned', jobId: 'j9' }, locked: { state: 'STOPPED' } });
+    // The decide-phase lock still sees the live flow (so the head is claimed); the record-phase lock sees the stop.
+    const h = build({ claim: { kind: 'owned', jobId: 'j9' }, locks: [{}, { state: 'STOPPED' }] });
 
     await h.service.advance('flow-1', NOW);
 
+    expect(h.reviews.claimHead).toHaveBeenCalledWith('repo-1', 12, REVIEW_HEAD, NOW);
+    expect(h.flows.lockById).toHaveBeenCalledTimes(2); // The decide lock, then the record lock.
     expect(h.adoptForFlow).not.toHaveBeenCalled();
+    expect(h.steps.markStep).not.toHaveBeenCalled();
+    expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.wrote()).toBe(false);
   });
 
