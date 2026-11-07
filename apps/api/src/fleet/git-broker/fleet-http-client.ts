@@ -11,7 +11,7 @@ export class FleetHttpClient {
   constructor(@Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'httpTimeoutMs'>) {}
 
   async request(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     url: string,
     headers: Record<string, string>,
     body?: unknown,
