@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T11:02:06.324Z",
+  "updatedAt": "2026-11-07T11:33:05.670Z",
   "userStories": [
     {
       "id": "US-001",
@@ -363,14 +363,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New external-write orchestration with blob/head concurrency, crash idempotency and permanent/transient failure mapping; installation-token handling triggers the security override."
+        "reasoning": "New external-write orchestration with blob/head concurrency, crash idempotency and permanent/transient failure mapping; installation-token handling triggers the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-calls.ts",
@@ -391,7 +394,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "57180d0667f864e4ebe97dc94915052e324c604d"
     },
     {
       "id": "US-007",
