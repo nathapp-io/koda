@@ -44,10 +44,32 @@ import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { FleetFlowTicker } from './fleet-flow.ticker';
 import { PrismaFleetFlowStepRepository } from './prisma-fleet-flow-step.repository';
 import { FLEET_FLOW_STEP_REPOSITORY } from './domain/fleet-flow-step.domain';
+import { FanOutPublisher } from '../../outbox/fan-out-publisher';
+import { OutboxModule } from '../../outbox/outbox.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { ActorPrincipalLoader } from '../../auth/principal/actor-principal.loader';
+import { FleetTicketsModule } from '../tickets/fleet-tickets.module';
+import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
+import { TicketsModule } from '../../tickets/tickets.module';
+import { TicketsService } from '../../tickets/tickets.service';
+import { FleetFlowStopTicketSubscriber } from './fleet-flow-stop-ticket.subscriber';
 
+const stubPublisher = { register: vi.fn() };
 @Global()
-@Module({ providers: [{ provide: OutboxService, useValue: { record: vi.fn() } }], exports: [OutboxService] })
+@Module({
+  providers: [
+    { provide: OutboxService, useValue: { record: vi.fn() } },
+    { provide: FanOutPublisher, useValue: stubPublisher },
+  ],
+  exports: [OutboxService, FanOutPublisher],
+})
 class StubOutboxModule {}
+@Module({ providers: [{ provide: ActorPrincipalLoader, useValue: { load: vi.fn() } }], exports: [ActorPrincipalLoader] })
+class StubAuthRepositoryModule {}
+@Module({ providers: [{ provide: FleetJobTicketEffects, useValue: { commentOnFlowTicket: vi.fn() } }], exports: [FleetJobTicketEffects] })
+class StubFleetTicketsModule {}
+@Module({ providers: [{ provide: TicketsService, useValue: { create: vi.fn() } }], exports: [TicketsService] })
+class StubTicketsModule {}
 
 @Module({
   providers: [
@@ -124,7 +146,12 @@ describe('FlowsModule', () => {
   });
 
   it('compiles the real module without a database and registers the command through its repository token', async () => {
+    stubPublisher.register.mockClear();
     testingModule = await Test.createTestingModule({ imports: [StubOutboxModule, FlowsModule] })
+      .overrideModule(OutboxModule).useModule(StubOutboxModule)
+      .overrideModule(AuthRepositoryModule).useModule(StubAuthRepositoryModule)
+      .overrideModule(FleetTicketsModule).useModule(StubFleetTicketsModule)
+      .overrideModule(TicketsModule).useModule(StubTicketsModule)
       .overrideModule(ApprovalEngineModule).useModule(StubApprovalEngineModule)
       .overrideModule(AuditLogModule).useModule(StubAuditLogModule)
       .overrideModule(FleetActivityModule).useModule(StubFleetActivityModule)
@@ -157,6 +184,8 @@ describe('FlowsModule', () => {
     expect(testingModule.get(FleetFlowTicker)).toBeInstanceOf(FleetFlowTicker);
     expect(testingModule.get(FleetFlowAdvanceService)).toBeInstanceOf(FleetFlowAdvanceService);
     expect(testingModule.get(FleetFlowCallsService)).toBeInstanceOf(FleetFlowCallsService);
+    expect(testingModule.get(FleetFlowStopTicketSubscriber)).toBeInstanceOf(FleetFlowStopTicketSubscriber);
+    expect(stubPublisher.register).toHaveBeenCalledWith('fleet_flow_stopped', expect.any(Function));
     expect(testingModule.get(PrismaFleetFlowStepRepository)).toBeInstanceOf(PrismaFleetFlowStepRepository);
     expect(testingModule.get(FLEET_FLOW_STEP_REPOSITORY)).toBe(testingModule.get(PrismaFleetFlowStepRepository));
   });

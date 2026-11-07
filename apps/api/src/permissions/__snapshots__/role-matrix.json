@@ -242,7 +242,8 @@
     "fleet.flow.stop": ["no-project","granted"],
     "fleet.thread.preapprove": ["no-project","granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "admin": {
     "agent.create": ["granted","granted"],
@@ -487,7 +488,8 @@
     "fleet.flow.stop": ["no-project","granted"],
     "fleet.thread.preapprove": ["no-project","granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "member": {
     "agent.create": ["not-granted","not-granted"],
@@ -732,7 +734,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "agent": {
     "agent.create": ["not-granted","not-granted"],
@@ -977,7 +980,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "project-admin": {
     "agent.create": ["not-granted","not-granted"],
@@ -1222,7 +1226,8 @@
     "fleet.flow.stop": ["no-project","granted"],
     "fleet.thread.preapprove": ["no-project","granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "developer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1467,7 +1472,8 @@
     "fleet.flow.stop": ["no-project","granted"],
     "fleet.thread.preapprove": ["no-project","granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "reviewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1712,7 +1718,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "verifier": {
     "agent.create": ["not-granted","not-granted"],
@@ -1957,7 +1964,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "triager": {
     "agent.create": ["not-granted","not-granted"],
@@ -2202,7 +2210,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "approver": {
     "agent.create": ["not-granted","not-granted"],
@@ -2447,7 +2456,8 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   },
   "viewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -2692,6 +2702,7 @@
     "fleet.flow.stop": ["no-project","not-granted"],
     "fleet.thread.preapprove": ["no-project","not-granted"],
     "system.flow.respec": ["non-role-key","non-role-key"],
-    "system.flow.advance": ["non-role-key","non-role-key"]
+    "system.flow.advance": ["non-role-key","non-role-key"],
+    "system.flow.ticket": ["non-role-key","non-role-key"]
   }
 }

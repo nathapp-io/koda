@@ -43,6 +43,7 @@ import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { FleetFlowPublishListener } from '../fleet/flows/fleet-flow-publish.listener';
 import { FleetFlowTicker } from '../fleet/flows/fleet-flow.ticker';
+import { FleetFlowStopTicketSubscriber } from '../fleet/flows/fleet-flow-stop-ticket.subscriber';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
@@ -90,6 +91,7 @@ const writers = new Map<Function, string>([
   [FanOutPublisher, 'system.outbox.dispatch'],
   [FleetFlowPublishListener, 'system.flow.respec'],
   [FleetFlowTicker, 'system.flow.advance'],
+  [FleetFlowStopTicketSubscriber, 'system.flow.ticket'],
 ]);
 
 const reflector = new Reflector();
@@ -114,7 +116,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(42);
+    expect(writers).toHaveLength(43);
     expect(actual).toEqual(expected);
   });
 

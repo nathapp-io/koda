@@ -7,6 +7,66 @@ import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository'
 
 const auditRecord = mockAuditRecorder.record as unknown as Mock;
 
+describe('FleetJobTicketEffects flow and ready comments', () => {
+  let repo: { hasCommentBody: Mock; createSystemComment: Mock; findJobForEffects: Mock; findTicketsForJob: Mock };
+  let effects: FleetJobTicketEffects;
+  beforeEach(() => {
+    auditRecord.mockReset();
+    auditRecord.mockResolvedValue(undefined);
+    repo = {
+      hasCommentBody: vi.fn().mockResolvedValue(false),
+      createSystemComment: vi.fn().mockResolvedValue({ id: 'c1' }),
+      findJobForEffects: vi.fn().mockResolvedValue({ projectId: 'p1' }),
+      findTicketsForJob: vi.fn().mockResolvedValue([{ ticketId: 't1', ref: 'SHOP-1' }]),
+    };
+    effects = new FleetJobTicketEffects({} as never, repo as never, {} as never, {} as never, mockAuditRecorder, new AfterCommitService(), {} as never, {} as never);
+  });
+
+  it('AC-12: skips a flow comment with the exact same body and records no audit', async () => {
+    repo.hasCommentBody.mockResolvedValue(true);
+    await effects.commentOnFlowTicket('t1', 'p1', 'Flow stopped (step_failed): failure');
+    expect(repo.hasCommentBody).toHaveBeenCalledExactlyOnceWith('t1', 'Flow stopped (step_failed): failure');
+    expect(repo.createSystemComment).not.toHaveBeenCalled();
+    expect(auditRecord).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: creates one GENERAL system flow comment and audits comment.create in its project', async () => {
+    await effects.commentOnFlowTicket('t1', 'p1', 'Flow stopped (step_failed): failure');
+    expect(repo.createSystemComment).toHaveBeenCalledExactlyOnceWith('t1', 'Flow stopped (step_failed): failure', 'GENERAL');
+    expect(auditRecord).toHaveBeenCalledExactlyOnceWith({
+      key: 'comment.create', resourceType: 'comment', resourceId: 'c1', projectId: 'p1', summary: 'on t1',
+    });
+  });
+
+  it('replayed flow bodies deduplicate exactly, while a different body still writes', async () => {
+    const bodies = new Set<string>();
+    repo.hasCommentBody.mockImplementation(async (_id: string, body: string) => bodies.has(body));
+    repo.createSystemComment.mockImplementation(async (_id: string, body: string) => { bodies.add(body); return { id: 'c1' }; });
+    await effects.commentOnFlowTicket('t1', 'p1', 'same');
+    await effects.commentOnFlowTicket('t1', 'p1', 'same');
+    await effects.commentOnFlowTicket('t1', 'p1', 'same ');
+    expect(repo.createSystemComment.mock.calls).toEqual([['t1', 'same', 'GENERAL'], ['t1', 'same ', 'GENERAL']]);
+    expect(auditRecord).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['hasCommentBody', 'createSystemComment', 'audit'])('propagates flow %s failures for retry', async (stage) => {
+    const error = new Error('db failure');
+    if (stage === 'audit') auditRecord.mockRejectedValue(error);
+    else repo[stage as 'hasCommentBody' | 'createSystemComment'].mockRejectedValue(error);
+    await expect(effects.commentOnFlowTicket('t1', 'p1', 'body')).rejects.toBe(error);
+  });
+
+  it('preserves commentOnReady exact-body deduplication and GENERAL type', async () => {
+    repo.hasCommentBody.mockImplementation(async (_id: string, body: string) => body === 'ready');
+    await effects.commentOnReady('j1', 'ready');
+    expect(repo.hasCommentBody).toHaveBeenCalledWith('t1', 'ready');
+    expect(repo.createSystemComment).not.toHaveBeenCalled();
+    await effects.commentOnReady('j1', 'ready ');
+    expect(repo.createSystemComment).toHaveBeenCalledExactlyOnceWith('t1', 'ready ', 'GENERAL');
+    expect(auditRecord).toHaveBeenCalledWith({ key: 'comment.create', resourceType: 'comment', resourceId: 'c1', projectId: 'p1', summary: 'on SHOP-1' });
+  });
+});
+
 describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
   const principal = { actorType: 'user', id: 'u1', role: 'MEMBER', email: 'u@koda.test' } as never;
   const actor = { principal, projectSlug: 'web' };

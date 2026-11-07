@@ -78,6 +78,15 @@ export class FleetJobTicketEffects {
     return this.commentOnFinish(runId, body, CommentType.GENERAL);
   }
 
+  /** Caller holds the flow lock and transaction; failures must reach the outbox for retry. */
+  async commentOnFlowTicket(ticketId: string, projectId: string, body: string): Promise<void> {
+    if (await this.repo.hasCommentBody(ticketId, body)) return;
+    const comment = await this.repo.createSystemComment(ticketId, body, CommentType.GENERAL);
+    await this.audit.record({
+      key: 'comment.create', resourceType: 'comment', resourceId: comment.id, projectId, summary: `on ${ticketId}`,
+    });
+  }
+
   /** Called inside FIX ingest's transaction and job lock, never via the failure notifiedEpoch claim. */
   private async commentOnFinish(runId: string, body: string, type: CommentType): Promise<void> {
     const job = await this.repo.findJobForEffects(runId);
