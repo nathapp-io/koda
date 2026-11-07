@@ -3,7 +3,7 @@
   "feature": "fleet-flow-answers",
   "branchName": "feat/fleet-flow-answers",
   "createdAt": "2026-11-30T00:00:00.000Z",
-  "updatedAt": "2026-11-07T16:18:52.496Z",
+  "updatedAt": "2026-11-07T16:26:53.647Z",
   "userStories": [
     {
       "id": "US-001",
@@ -404,14 +404,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends an existing draft/subscriber pattern with deterministic recipients and replay-safe source identity; no new authorization rule."
+        "reasoning": "Extends an existing draft/subscriber pattern with deterministic recipients and replay-safe source identity; no new authorization rule.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/notifications/fleet/fleet-flow-stopped.subscriber.ts",
@@ -430,7 +433,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "eaa309ad892f71cea35c3b5794f1c3160bedb736"
     },
     {
       "id": "US-008",
