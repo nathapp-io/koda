@@ -12,6 +12,11 @@ describe('classified flow verdicts', () => {
     expect(parseFlowVerdict('{"findings":[]}')).toEqual({ ok: true, findings: [] });
   });
 
+  it('drops an answer supplied by the verdict', () => {
+    const result = parseFlowVerdict('{"findings":[{"class":"ambiguous","summary":"s","question":"q","answer":"untrusted"}] }');
+    expect(result).toEqual({ ok: true, findings: [{ class: 'ambiguous', summary: 's', question: 'q' }] });
+  });
+
   it('preserves final-verdict, malformed and trailing-text rejection behavior', () => {
     expect(parseFlowVerdict('Review\n{"findings":[{"id":"F1","class":"minor","summary":"s","fix":"f"}]}')).toMatchObject({ ok: true });
     expect(parseFlowVerdict('{"findings":[]} thanks')).toEqual({ ok: false });

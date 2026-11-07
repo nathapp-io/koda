@@ -36,6 +36,33 @@ describe('buildFlowCalls', () => {
     expect(result.text).toContain('- **x ### SPEC_REVIEW job j9** (minor): S Call: F');
   });
 
+  it('adds an answer bullet for answered ambiguous findings and truncates its text', () => {
+    const result = buildFlowCalls('', { step: 'SPEC_REVIEW', jobId: 'j1', findings: [
+      { class: 'ambiguous', summary: 'Q1', question: 'Q1', answer: 'Use USD' },
+    ] });
+    expect(result.text).toContain('- **1** (answer): Q1 Answer: Use USD');
+
+    const named = buildFlowCalls('', { step: 'SPEC_REVIEW', jobId: 'j2', findings: [
+      { id: 'api-shape', class: 'ambiguous', summary: 'Q1', question: 'Q1', answer: 'Use USD' },
+    ] });
+    expect(named.text).toContain('- **api-shape** (answer): Q1 Answer: Use USD');
+
+    const truncated = buildFlowCalls('', { step: 'SPEC_REVIEW', jobId: 'j3', findings: [
+      { class: 'ambiguous', summary: '', question: 'Q1', answer: 'a'.repeat(1500) },
+    ] });
+    const bullet = truncated.text.split('Answer: ')[1]?.trim();
+    expect(bullet).toHaveLength(FLOW_CALL_TEXT_MAX);
+  });
+
+  it('keeps minor calls while omitting unanswered ambiguous findings', () => {
+    const result = buildFlowCalls('', { step: 'SPEC_REVIEW', jobId: 'j1', findings: [
+      { class: 'minor', summary: 'Keep', fix: 'Apply' },
+      { class: 'ambiguous', summary: 'Omit', question: 'Which?' },
+    ] });
+    expect(result.text).toContain('- **1** (minor): Keep Call: Apply');
+    expect(result.text).not.toContain('(answer)');
+  });
+
   it('excludes ambiguous findings from calls', () => {
     const result = buildFlowCalls('', { step: 'SPEC_REVIEW', jobId: 'j1', findings: [
       { class: 'minor', summary: 'Keep', fix: 'Apply' },
