@@ -404,6 +404,8 @@ export class FleetFlowAdvanceService {
       callsJobId: flow.features[0]?.callsJobId ?? null,
       planCount: await this.steps.countJobsForStepSince(flow.id, 'PLAN', flow.approvedAt ?? now),
       canApplyCalls: flow.entry === 'NAX',
+      questionsJobId: null,
+      answers: null,
     };
   }
 

@@ -1,6 +1,6 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
-import { FLOW_CALLS_MAX_FINDINGS, formatQuestions } from './flow-calls';
+import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
 import type { FlowFinding } from './flow-verdict';
 import type { FixReady } from '../jobs/domain/fleet-job.domain';
@@ -32,6 +32,8 @@ export interface FlowStepInput {
   callsJobId: string | null;
   planCount: number;
   canApplyCalls: boolean;
+  questionsJobId: string | null;
+  answers: FlowAnswer[] | null;
 }
 
 export type FlowStopReason =
@@ -54,9 +56,11 @@ export type FlowStepAction =
   | { kind: 'complete' }
   | { kind: 'stop'; reason: FlowStopReason; detail: string }
   | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string } }
-  | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] };
+  | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }
+  | { kind: 'wait_answer'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[] };
 
 export type ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>;
+export type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
 
@@ -121,17 +125,27 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
         return dispatch(latestJob.step === 'SPEC_REVIEW' ? 'PLAN' : 'RUN');
       }
       const ambiguous = verdict.findings.filter((finding) => finding.class === 'ambiguous');
-      if (ambiguous.length > 0) {
-        return { kind: 'stop', reason: 'review_ambiguous', detail: formatQuestions(ambiguous) };
-      }
       const stopFindings = (): FlowStepAction => ({
         kind: 'stop', reason: 'review_findings', detail: formatFindings(verdict.findings),
       });
+      if (ambiguous.length > 0 && !input.canApplyCalls) {
+        return { kind: 'stop', reason: 'review_ambiguous', detail: formatQuestions(ambiguous) };
+      }
       if (verdict.findings.length > FLOW_CALLS_MAX_FINDINGS) return stopFindings();
       if (!input.canApplyCalls) return stopFindings();
-      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2) return stopFindings();
+      const hasCurrentAnswers = input.questionsJobId === latestJob.id && input.answers !== null;
+      if (ambiguous.length > 0 && !hasCurrentAnswers) {
+        return { kind: 'wait_answer', step: latestJob.step, jobId: latestJob.id, questions: flowQuestions(verdict.findings) };
+      }
+      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2 && ambiguous.length === 0) return stopFindings();
       if (input.callsJobId === latestJob.id) return dispatch('PLAN');
-      return { kind: 'apply_calls', step: latestJob.step, jobId: latestJob.id, findings: verdict.findings };
+      const findings = hasCurrentAnswers
+        ? verdict.findings.map((finding, index) => finding.class !== 'ambiguous'
+          ? finding
+          : { ...finding, ...(input.answers?.find((answer) => answer.id === String(index + 1))?.answer === undefined
+            ? {} : { answer: input.answers.find((answer) => answer.id === String(index + 1))?.answer }) })
+        : verdict.findings;
+      return { kind: 'apply_calls', step: latestJob.step, jobId: latestJob.id, findings };
     }
 
     if (latestJob.step === 'PLAN') {

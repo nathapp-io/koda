@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FLOW_CALLS_MAX_FINDINGS, formatQuestions } from './flow-calls';
+import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswer } from './flow-calls';
 import { formatFindings } from './flow-verdict';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
 
@@ -7,7 +7,7 @@ const approvedAt = new Date('2026-11-07T12:00:00.000Z');
 const input = (overrides: Partial<FlowStepInput> = {}): FlowStepInput => ({
   state: 'RUNNING', featureCount: 1, approvedAt, latestJob: null, now: new Date(10_000),
   prWaitMs: 5_000, ingestSettled: false, featurePrNumber: null,
-  callsJobId: null, planCount: 0, canApplyCalls: false, ...overrides,
+  callsJobId: null, planCount: 0, canApplyCalls: false, questionsJobId: null, answers: null, ...overrides,
 });
 const job = (overrides: Partial<FlowJobView> = {}): FlowJobView => ({
   id: 'j1', step: 'PLAN', state: 'COMPLETED', stateReason: null,
@@ -158,10 +158,63 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: classifiedReview('SPEC_REVIEW', [ambiguous]) })))
       .toEqual({ kind: 'stop', reason: 'review_ambiguous', detail: formatQuestions([ambiguous]) });
   });
-  it('US-005 AC-2 ambiguous findings precede applicable calls', () => {
-    expect(decideFlowStep(input({ canApplyCalls: true,
-      latestJob: classifiedReview('SPEC_REVIEW', [minor, ambiguous]) })))
+  it('US-005 AC-2 ambiguous findings wait for answers when calls can be applied', () => {
+    const findings = [minor, ambiguous];
+    const review = classifiedReview('SPEC_REVIEW', findings);
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: review })))
+      .toEqual({ kind: 'wait_answer', step: 'SPEC_REVIEW', jobId: 'j1', questions: flowQuestions(findings) });
+  });
+
+  it('US-004 AC-2 waits on a PRD_REVIEW ambiguity', () => {
+    const findings = [minor, ambiguous];
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('PRD_REVIEW', findings) })))
+      .toEqual({ kind: 'wait_answer', step: 'PRD_REVIEW', jobId: 'j1', questions: flowQuestions(findings) });
+  });
+  it('US-004 AC-3 waits before the second-round PRD findings stop', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
+      latestJob: classifiedReview('PRD_REVIEW', [ambiguous]) }))).toMatchObject({ kind: 'wait_answer' });
+  });
+  it.each([
+    { questionsJobId: 'older', answers: [{ id: '2', answer: 'A1' }] as FlowAnswer[] },
+    { questionsJobId: 'j1', answers: null },
+  ])('US-004 AC-4/5 waits unless current review has bound answers', (answerState) => {
+    expect(decideFlowStep(input({ canApplyCalls: true, ...answerState,
+      latestJob: classifiedReview('SPEC_REVIEW', [ambiguous]) }))).toMatchObject({ kind: 'wait_answer', jobId: 'j1' });
+  });
+  it('US-004 AC-6 enriches ambiguous findings by question position', () => {
+    const findings = [minor, ambiguous];
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'j1',
+      answers: [{ id: '2', answer: 'A1' }], latestJob: classifiedReview('SPEC_REVIEW', findings) })))
+      .toEqual({ kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'j1', findings: [minor, { ...ambiguous, answer: 'A1' }] });
+  });
+  it('US-004 AC-7 applies answered second-round PRD ambiguity', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2, questionsJobId: 'j1',
+      answers: [{ id: '1', answer: 'A1' }], latestJob: classifiedReview('PRD_REVIEW', [ambiguous]) })))
+      .toMatchObject({ kind: 'apply_calls' });
+  });
+  it('US-004 AC-8 dispatches PLAN after already-recorded answered review', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, callsJobId: 'j1', questionsJobId: 'j1',
+      answers: [{ id: '1', answer: 'A1' }], latestJob: classifiedReview('SPEC_REVIEW', [ambiguous]) })))
+      .toEqual({ kind: 'dispatch', step: 'PLAN' });
+  });
+  it('US-004 AC-10 preserves thread-entry ambiguity stop above the findings cap', () => {
+    const findings = Array.from({ length: 21 }, (_, i) => i === 0 ? ambiguous : { ...minor, id: `m${i}` });
+    expect(decideFlowStep(input({ canApplyCalls: false, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
       .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+  });
+  it('US-004 AC-11 enforces finding cap before waiting', () => {
+    const findings = Array.from({ length: 21 }, (_, i) => i === 0 ? ambiguous : { ...minor, id: `m${i}` });
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_findings' });
+  });
+  it('US-004 AC-12 keeps second-round minor PRD stop', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
+      latestJob: classifiedReview('PRD_REVIEW', [minor]) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+  });
+  it('US-004 AC-13 stops over-limit findings regardless of class', () => {
+    const findings = Array.from({ length: 21 }, (_, i) => ({ ...minor, id: `m${i}` }));
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
   it('US-005 AC-3 stops findings above the calls limit', () => {
     const findings = Array.from({ length: FLOW_CALLS_MAX_FINDINGS + 1 }, (_, index) => ({ ...minor, id: `m${index}` }));
