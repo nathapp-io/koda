@@ -1,6 +1,6 @@
-import { NotificationDraft, TITLE_MAX, truncate } from '../notification.types';
+import { BODY_MAX, NotificationDraft, TITLE_MAX, truncate } from '../notification.types';
 import type {
-  FleetBudgetIncidentPayload, FleetHealthAlertPayload, FleetJobOutcomePayload,
+  FleetBudgetIncidentPayload, FleetFlowStoppedPayload, FleetHealthAlertPayload, FleetJobOutcomePayload,
 } from './fleet-notification-events';
 
 /** Fleet S4a contract "Kinds, links and params": pure builders, English fallback titles (D510: no command text). */
@@ -23,6 +23,15 @@ export function jobOutcomeDraft(p: FleetJobOutcomePayload, slug: string): Notifi
     params: pr ? { repo: p.repo, feature: p.feature, prUrl: p.resultPrUrl ?? '' } : { repo: p.repo, feature: p.feature, state: p.outcome },
     sourceType: 'fleet_job', sourceId: `${p.jobId}:${p.leaseEpoch}`,
   });
+}
+
+export function flowStoppedDraft(p: FleetFlowStoppedPayload, slug: string, userId: string): NotificationDraft {
+  return {
+    userId, projectId: p.projectId, category: 'FLEET_NEEDS_YOU', kind: 'flow_stopped',
+    title: truncate(`Flow stopped: ${p.feature}`, TITLE_MAX), body: truncate(p.detail, BODY_MAX),
+    link: `/${slug}/flows/${p.flowId}`, params: { flowId: p.flowId, feature: p.feature, stopReason: p.stopReason },
+    sourceType: 'fleet_flow', sourceId: p.flowId, actorId: null,
+  };
 }
 
 export function budgetDrafts(adminIds: readonly string[], p: FleetBudgetIncidentPayload): NotificationDraft[] {
