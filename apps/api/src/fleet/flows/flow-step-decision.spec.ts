@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { formatFindings } from './flow-verdict';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
+import type { FixReady } from '../jobs/domain/fleet-job.domain';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
 const input = (overrides: Partial<FlowStepInput> = {}): FlowStepInput => ({
-  state: 'RUNNING', featureCount: 1, approvedAt, latestJob: null, ...overrides,
+  state: 'RUNNING', featureCount: 1, approvedAt, latestJob: null, now: new Date(10_000),
+  prWaitMs: 5_000, ingestSettled: false, featurePrNumber: null, ...overrides,
 });
 const job = (overrides: Partial<FlowJobView> = {}): FlowJobView => ({
   id: 'j1', step: 'PLAN', state: 'COMPLETED', stateReason: null,
-  queuedAt: new Date('2026-11-07T12:01:00.000Z'), prNumber: null,
-  agentOutput: null, resultBranch: null, resultSha: null, ...overrides,
+  queuedAt: new Date('2026-11-07T12:01:00.000Z'), finishedAt: new Date(6_000), prNumber: null,
+  agentOutput: null, resultBranch: null, resultSha: null, fixReady: null, ...overrides,
 });
 
 describe('decideFlowStep', () => {
@@ -95,5 +97,53 @@ describe('decideFlowStep', () => {
   });
   it('US-008 AC-11 waits while SPEC_REVIEW is active even if its output has a verdict', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'SPEC_REVIEW', state: 'RUNNING', agentOutput: '{"findings":[]}' }) }))).toEqual({ kind: 'wait' });
+  });
+
+  it('US-009 AC-1 dispatches REVIEW with the RUN PR number and result sha', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'RUN', prNumber: 12, resultSha: 'abc1234' }) })))
+      .toEqual({ kind: 'dispatch', step: 'REVIEW', pr: { number: 12, headSha: 'abc1234' } });
+  });
+  it('US-009 AC-2 waits for RUN ingest while within the PR wait window', () => {
+    expect(decideFlowStep(input({ now: new Date(10_000), prWaitMs: 5_000, ingestSettled: false,
+      latestJob: job({ step: 'RUN', finishedAt: new Date(6_000) }) }))).toEqual({ kind: 'wait' });
+  });
+  it('US-009 AC-3 stops a RUN without a PR after ingest settles', () => {
+    expect(decideFlowStep(input({ ingestSettled: true, latestJob: job({ step: 'RUN', finishedAt: new Date(6_000) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'run_no_pr' });
+  });
+  it('US-009 AC-4 stops a RUN without a PR at the wait boundary', () => {
+    expect(decideFlowStep(input({ now: new Date(11_000), prWaitMs: 5_000, ingestSettled: false,
+      latestJob: job({ step: 'RUN', finishedAt: new Date(6_000) }) }))).toMatchObject({ kind: 'stop', reason: 'run_no_pr' });
+  });
+  it('US-009 AC-5 dispatches FIX after REVIEW using the feature PR number', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-009 AC-6 completes after FIX marks the PR ready', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: true } }) }))).toEqual({ kind: 'complete' });
+  });
+  it('US-009 AC-7 stops after FIX is held not ready with the hold detail', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld: 'no CI' } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'no CI' });
+  });
+  it('US-009 AC-8 stops after FIX ends without a ready result', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: null }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });
+  });
+  it('US-009 AC-9 waits on an escalated RUN until ingest or timeout', () => {
+    expect(decideFlowStep(input({ now: new Date(10_000), prWaitMs: 5_000, ingestSettled: false,
+      latestJob: job({ step: 'RUN', state: 'ESCALATED', finishedAt: new Date(6_000) }) }))).toEqual({ kind: 'wait' });
+  });
+  it.each([
+    { ingestSettled: true, now: new Date(10_000) },
+    { ingestSettled: false, now: new Date(11_000) },
+  ])('US-009 AC-10 stops an escalated RUN without a PR when settled or timed out', (wait) => {
+    expect(decideFlowStep(input({ ...wait, prWaitMs: 5_000,
+      latestJob: job({ step: 'RUN', state: 'ESCALATED', finishedAt: new Date(6_000) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'run_no_pr' });
+  });
+  it('US-009 AC-11 preserves generic failure precedence for RUN despite its PR', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'RUN', state: 'FAILED', prNumber: 12 }) })))
+      .toMatchObject({ kind: 'stop', reason: 'step_failed' });
   });
 });

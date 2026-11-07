@@ -1,6 +1,7 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
+import type { FixReady } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowState } from './flow-states';
 
 export interface FlowJobView {
@@ -9,10 +10,12 @@ export interface FlowJobView {
   state: string;
   stateReason: string | null;
   queuedAt: Date;
+  finishedAt: Date | null;
   prNumber: number | null;
   agentOutput: string | null;
   resultBranch: string | null;
   resultSha: string | null;
+  fixReady: FixReady | null;
 }
 
 export interface FlowStepInput {
@@ -20,6 +23,10 @@ export interface FlowStepInput {
   featureCount: number;
   approvedAt: Date;
   latestJob: FlowJobView | null;
+  now: Date;
+  prWaitMs: number;
+  ingestSettled: boolean;
+  featurePrNumber: number | null;
 }
 
 export type FlowStopReason =
@@ -71,8 +78,20 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
 
   if (state !== 'RUNNING') return { kind: 'wait' };
   if ((ACTIVE_STATES as readonly string[]).includes(latestJob.state)) return { kind: 'wait' };
-  if (latestJob.step === 'RUN' && latestJob.state === 'ESCALATED' && latestJob.prNumber !== null) {
-    return { kind: 'dispatch', step: 'REVIEW', pr: { number: latestJob.prNumber } };
+  if (latestJob.step === 'RUN' && (latestJob.state === 'COMPLETED' || latestJob.state === 'ESCALATED')) {
+    if (latestJob.prNumber !== null) {
+      return {
+        kind: 'dispatch',
+        step: 'REVIEW',
+        pr: { number: latestJob.prNumber, ...(latestJob.resultSha ? { headSha: latestJob.resultSha } : {}) },
+      };
+    }
+    const timedOut = latestJob.finishedAt !== null
+      && input.now.getTime() - latestJob.finishedAt.getTime() >= input.prWaitMs;
+    if (input.ingestSettled || timedOut) {
+      return { kind: 'stop', reason: 'run_no_pr', detail: 'RUN ended without a PR' };
+    }
+    return { kind: 'wait' };
   }
 
   if (latestJob.state === 'COMPLETED') {
@@ -97,8 +116,22 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
       }
       return dispatch('PRD_REVIEW');
     }
+
+    if (latestJob.step === 'REVIEW') {
+      return input.featurePrNumber === null
+        ? { kind: 'wait' }
+        : { kind: 'dispatch', step: 'FIX', pr: { number: input.featurePrNumber } };
+    }
+
+    if (latestJob.step === 'FIX') {
+      if (latestJob.fixReady?.markedReady === true) return { kind: 'complete' };
+      return {
+        kind: 'stop',
+        reason: 'pr_not_ready',
+        detail: latestJob.fixReady?.readyHeld ?? 'FIX ended without a ready result',
+      };
+    }
   }
 
-  // Remaining completed-step progression is owned by the next flow-step story.
   return { kind: 'wait' };
 }
