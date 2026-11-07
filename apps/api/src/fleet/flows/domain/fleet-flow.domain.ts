@@ -18,6 +18,7 @@ export interface FleetFlowFeatureRecord {
   state: string;
   currentStep: string | null;
   prNumber: number | null;
+  callsJobId?: string | null;
 }
 
 export interface FleetFlowRecord {
@@ -42,6 +43,7 @@ export interface FleetFlowRecord {
   approvalRequestId: string | null;
   stopReason: string | null;
   stopDetail?: string | null;
+  ticketId?: string | null;
   endedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

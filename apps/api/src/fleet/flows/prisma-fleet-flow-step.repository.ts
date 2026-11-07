@@ -88,6 +88,25 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     return row ? this.toJob(row) : null;
   }
 
+  async countJobsForStepSince(flowId: string, step: FlowStep, since: Date): Promise<number> {
+    return this.db.fleetJob.count({ where: { flowId, flowStep: step, queuedAt: { gte: since } } });
+  }
+
+  async projectSlug(projectId: string): Promise<string | null> {
+    const project = await this.db.project.findFirst({ where: { id: projectId, deletedAt: null }, select: { slug: true } });
+    return project?.slug ?? null;
+  }
+
+  async recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void> {
+    await this.db.fleetFlowFeature.update({ where: { id: featureId }, data: { callsJobId: jobId } });
+    await this.db.fleetFlow.update({ where: { id: flowId }, data: { specSha } });
+  }
+
+  async setTicket(flowId: string, ticketId: string): Promise<boolean> {
+    const result = await this.db.fleetFlow.updateMany({ where: { id: flowId, ticketId: null }, data: { ticketId } });
+    return result.count === 1;
+  }
+
   async sumCost(flowId: string): Promise<string> {
     const totals = await this.db.fleetJob.aggregate({ where: { flowId }, _sum: { costSpentUsd: true, costCarriedUsd: true } });
     return new Prisma.Decimal(totals._sum.costSpentUsd ?? 0)
