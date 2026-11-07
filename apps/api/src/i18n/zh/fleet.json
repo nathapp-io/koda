@@ -45,6 +45,9 @@
     "specMissing": { "422": "该提交中缺少规格文件：{path}" },
     "humanOnly": { "40003": "只有人类可以设置或清除线程预授权" },
     "notStoppable": { "409": "此流程已无法停止" },
+    "notWaiting": { "409": "此流程当前未等待回答" },
+    "answersStale": { "409": "这些回答属于其他审查" },
+    "answersInput": { "-2": "流程回答无效：{reason}" },
     "notFound": { "404": "未找到流程" }
   },
   "sync": { "-2": "无效的同步请求：{reason}" },

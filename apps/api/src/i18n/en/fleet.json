@@ -45,6 +45,9 @@
     "specMissing": { "422": "A spec file is missing at this commit: {path}" },
     "humanOnly": { "40003": "Only a human can set or clear a thread pre-approval" },
     "notStoppable": { "409": "This flow can no longer be stopped" },
+    "notWaiting": { "409": "This flow is not waiting for answers" },
+    "answersStale": { "409": "These answers belong to a different review" },
+    "answersInput": { "-2": "Invalid flow answers: {reason}" },
     "notFound": { "404": "Flow not found" }
   },
   "sync": { "-2": "Invalid sync request: {reason}" },
