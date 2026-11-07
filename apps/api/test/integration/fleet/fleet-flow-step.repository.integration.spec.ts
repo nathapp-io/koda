@@ -122,6 +122,13 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect(await repo.creatorAccess({ type: 'AGENT', id: crypto.randomUUID() })).toEqual({ exists: false, disabled: false });
   });
 
+  it('AC-20 verifies markStep transitions an APPROVED flow to RUNNING', async () => {
+    const flow = await createFlow('APPROVED');
+    const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
+    await repo.markStep(flow.id, feature.id, 'REVIEW', { flowState: 'RUNNING', prNumber: 7 });
+    expect((await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).state).toBe('RUNNING');
+  });
+
   it('AC-20/21 marks flow and feature progress and preserves an omitted PR number', async () => {
     const flow = await createFlow('RUNNING');
     const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
