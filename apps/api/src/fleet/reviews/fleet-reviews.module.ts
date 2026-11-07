@@ -16,6 +16,7 @@ import { FleetReviewEventsService } from './fleet-review-events.service';
 import { FleetReviewEventRepository } from './fleet-review-event.repository';
 import { FLEET_REVIEW_EVENT_REPOSITORY } from './domain/fleet-review-event.domain';
 import { FixFollowUpSubscriber } from './fix-follow-up.subscriber';
+import { FleetReviewClaimService } from './fleet-review-claim.service';
 
 /**
  * Fleet auto-review (spec §"The pass and the poller"): the polling pass, the enabler gate, the
@@ -40,7 +41,8 @@ import { FixFollowUpSubscriber } from './fix-follow-up.subscriber';
     ReviewEventMinter,
     ReviewEventMintPoller,
     FixFollowUpSubscriber,
+    FleetReviewClaimService,
   ],
-  exports: [FleetReviewEventsService],
+  exports: [FleetReviewEventsService, FleetReviewClaimService],
 })
 export class FleetReviewsModule {}
