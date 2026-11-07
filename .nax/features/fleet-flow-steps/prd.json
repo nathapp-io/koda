@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T04:10:25.131Z",
+  "updatedAt": "2026-11-07T04:55:01.815Z",
   "userStories": [
     {
       "id": "US-001",
@@ -183,14 +183,17 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module job persistence and adoption plus security-sensitive system-key/catalog and role snapshot changes require strict isolated TDD."
+        "reasoning": "Cross-module job persistence and adoption plus security-sensitive system-key/catalog and role snapshot changes require strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -217,7 +220,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "384ef237378cb18bedd23b9dbc1a130a7748b2fe"
     },
     {
       "id": "US-005",
