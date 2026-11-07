@@ -1,5 +1,6 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
+import { formatFindings, parseFlowVerdict } from './flow-verdict';
 import type { FleetFlowState } from './flow-states';
 
 export interface FlowJobView {
@@ -9,6 +10,9 @@ export interface FlowJobView {
   stateReason: string | null;
   queuedAt: Date;
   prNumber: number | null;
+  agentOutput: string | null;
+  resultBranch: string | null;
+  resultSha: string | null;
 }
 
 export interface FlowStepInput {
@@ -71,6 +75,30 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
     return { kind: 'dispatch', step: 'REVIEW', pr: { number: latestJob.prNumber } };
   }
 
-  // Completed-step progression is deliberately owned by the next flow-step story.
+  if (latestJob.state === 'COMPLETED') {
+    if (latestJob.step === 'SPEC_REVIEW' || latestJob.step === 'PRD_REVIEW') {
+      const verdict = parseFlowVerdict(latestJob.agentOutput);
+      if (!verdict.ok) {
+        return {
+          kind: 'stop',
+          reason: 'verdict_unreadable',
+          detail: `${latestJob.step} job ${latestJob.id}: no verdict JSON in the agent output`,
+        };
+      }
+      if (verdict.findings.length > 0) {
+        return { kind: 'stop', reason: 'review_findings', detail: formatFindings(verdict.findings) };
+      }
+      return dispatch(latestJob.step === 'SPEC_REVIEW' ? 'PLAN' : 'RUN');
+    }
+
+    if (latestJob.step === 'PLAN') {
+      if (!latestJob.resultBranch || !latestJob.resultSha) {
+        return { kind: 'stop', reason: 'plan_no_result', detail: 'PLAN job has no result branch or sha' };
+      }
+      return dispatch('PRD_REVIEW');
+    }
+  }
+
+  // Remaining completed-step progression is owned by the next flow-step story.
   return { kind: 'wait' };
 }
