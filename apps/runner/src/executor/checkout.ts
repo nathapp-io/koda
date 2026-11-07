@@ -39,7 +39,9 @@ export async function prepareCheckout(input: CheckoutInput): Promise<CheckoutRes
     await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
     return { ok: true, branch: null, refSha };
   }
-  if (assign.command === 'REVIEW' || assign.command === 'FIX') {
+  // fleet-agent-job US-007: an AGENT reviews nothing and produces no PRD — it runs against the ref itself, detached,
+  // exactly like REVIEW and FIX, so no prd.json is read (and none is required at the ref).
+  if (assign.command === 'REVIEW' || assign.command === 'FIX' || assign.command === 'AGENT') {
     await git.ok(['checkout', '--detach', refSha], { cwd: repoDir });
     return { ok: true, branch: null, refSha };
   }

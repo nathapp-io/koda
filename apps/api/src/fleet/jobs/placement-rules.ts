@@ -10,7 +10,7 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'thread_modes' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'agents_run' | 'trust_domain' | 'thread_capacity' | 'thread_backend' | 'thread_modes' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -126,6 +126,9 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
   if (job.command === 'FIX' && caps.botFix !== true) return 'bot_fix';
   // Recoverable: a runner upgrade can add ruling support. Never refuse the pre-snapshot pin check.
   if (job.needsBotRulings && caps.botRulings !== true) return 'bot_rulings';
+  // US-005: an AGENT job runs `nax agents run`, so only a runner advertising it can host one. Recoverable (a
+  // runner upgrade clears it), so an unfit runner leaves the job QUEUED — never a terminal refusal.
+  if (job.command === 'AGENT' && caps.agentsRun !== true) return 'agents_run';
   // Fleet S3 D470: a config job runs no agent, so only the S3 capability and the forge tools matter.
   if (isConfigKind(job.command)) return caps.configJobs === true ? toolsMisfit(job, caps) : 'config_jobs';
   // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.

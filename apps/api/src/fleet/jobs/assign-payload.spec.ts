@@ -113,3 +113,35 @@ describe('review decision snapshot wire', () => {
     expect(buildAssignPayload({ ...job, command: 'REVIEW', feature: 'review-pr-42', reviewDecisions }, repo, 'https://x/y.git', identity).review).not.toHaveProperty('decisions');
   });
 });
+
+/**
+ * US-005: an AGENT assignment carries the dispatch input as its `agent` block, and never a `review` block —
+ * the runner runs the named agent instead of a PR review, so a review block on an AGENT payload would make it
+ * look like a REVIEW job.
+ */
+describe('AGENT assign payload (US-005)', () => {
+  const agentInput = { name: 'spec-reviewer', task: 'x', modelAliases: { reviewer: 'acp:claude' } };
+
+  it('AC-4: carries the agent block and no review block for an AGENT job', () => {
+    const payload = buildAssignPayload({ ...job, command: 'AGENT', agentInput }, repo, 'https://x/y.git', identity);
+    expect(payload.agent).toEqual(agentInput);
+    expect(payload).not.toHaveProperty('review');
+  });
+
+  it('AC-4: an AGENT job whose feature looks like a review feature still gets no review block', () => {
+    const payload = buildAssignPayload({ ...job, command: 'AGENT', feature: 'review-pr-7', agentInput }, repo, 'https://x/y.git', identity);
+    expect(payload.agent).toEqual(agentInput);
+    expect(payload).not.toHaveProperty('review');
+  });
+
+  it('AC-5: a RUN job carries no agent key, even with an agent block on the record', () => {
+    const run = buildAssignPayload(job, repo, 'https://x/y.git', identity);
+    expect(run).not.toHaveProperty('agent');
+    // A record that (wrongly) holds an agent block must not leak it onto a non-AGENT payload either.
+    expect(buildAssignPayload({ ...job, agentInput }, repo, 'https://x/y.git', identity)).not.toHaveProperty('agent');
+  });
+
+  it('refuses to build an AGENT payload with no dispatch input instead of sending an unusable ASSIGN', () => {
+    expect(() => buildAssignPayload({ ...job, command: 'AGENT' }, repo, 'https://x/y.git', identity)).toThrow('invalid agent input');
+  });
+});

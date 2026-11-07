@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES, FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
+import { AGENT_RESULT_LIMITS, APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES, FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
 import { APPROVAL_TEXT_MAX_BYTES, DEFAULT_APPROVAL_TIMEOUT_SEC, SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
+import { AGENT_RESULT_LIMITS as API_AGENT_RESULT_LIMITS } from './agent-jobs';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -16,6 +17,12 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe('fleet protocol', () => {
+  it('pins the API agent result limits to the protocol package', () => {
+    const expected = { budgetBytes: 12_288, maxOutputBytes: 8_192, maxDeniedAsks: 10, maxAskChars: 500, maxToolChars: 128, maxModelChars: 200 };
+    expect(AGENT_RESULT_LIMITS).toEqual(expected);
+    expect(API_AGENT_RESULT_LIMITS).toEqual(AGENT_RESULT_LIMITS);
+  });
+
   it('supports the package protocol version', () => {
     expect(SUPPORTED_FLEET_PROTOCOL_VERSIONS).toContain(FLEET_PROTOCOL_VERSION);
   });
@@ -47,7 +54,7 @@ describe('API enums match the protocol unions', () => {
     QUEUED: true, ASSIGNED: true, RUNNING: true, UPLOADING: true, COMPLETED: true,
     FAILED: true, ESCALATED: true, CRASHED: true, CANCELLED: true,
   };
-  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true, CONFIG_EDIT: true, CONFIG_DRIFT: true, THREAD: true, REVIEW: true, FIX: true };
+  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true, CONFIG_EDIT: true, CONFIG_DRIFT: true, THREAD: true, REVIEW: true, FIX: true, AGENT: true };
   const commands: Record<FleetCommandTypeName, true> = {
     ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true, APPROVAL_ANSWER: true,
     THREAD_INPUT: true, THREAD_ANSWER: true, THREAD_STOP_TURN: true, THREAD_CLOSE: true, THREAD_PUBLISH: true,

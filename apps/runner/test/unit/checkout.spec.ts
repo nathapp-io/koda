@@ -162,6 +162,38 @@ describe('prepareCheckout FIX (US-006)', () => {
   });
 });
 
+describe('prepareCheckout AGENT (fleet-agent-job US-007)', () => {
+  const agent = { name: 'spec-reviewer', task: 'Review' };
+
+  test('AC-8: detaches at the ref sha and reads no prd.json', async () => {
+    const { repoDir } = await setup({ 'README.md': 'agent target' });
+    const sha = await sh(repoDir, 'rev-parse', 'origin/main');
+    // The ref has no prd.json at all, so a RUN-style checkout would have failed with 'no prd.json at ref'.
+    expect((await g.run(['cat-file', '-e', `${sha}:.nax/features/f/prd.json`], { cwd: repoDir })).code).not.toBe(0);
+    const result = await prepareCheckout({ git: g, repoDir, assign: assign({ command: 'AGENT', ref: 'main', agent }) });
+    expect(result).toEqual({ ok: true, branch: null, refSha: sha });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(await head(repoDir)).toBe(sha);
+  });
+
+  test('AC-9: an unresolved ref is the fixed not-found reason', async () => {
+    const { repoDir } = await setup();
+    expect(await prepareCheckout({ git: g, repoDir, assign: assign({ command: 'AGENT', ref: 'no-such-branch', agent }) })).toEqual({ ok: false, reason: 'checkout: ref not found' });
+  });
+
+  test('AC-14: REVIEW and FIX still detach at the resolved ref sha', async () => {
+    for (const command of ['REVIEW', 'FIX'] as const) {
+      const { repoDir } = await setup({ 'README.md': `${command} target` });
+      const sha = await sh(repoDir, 'rev-parse', 'origin/main');
+      const review = { prNumber: 42, botLogin: 'koda-fleet[bot]' };
+      const result = await prepareCheckout({ git: g, repoDir, assign: assign({ command, feature: 'review-pr-42', ref: 'main', review }) });
+      expect(result).toEqual({ ok: true, branch: null, refSha: sha });
+      expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+      expect(await head(repoDir)).toBe(sha);
+    }
+  });
+});
+
 describe('prepareCheckout PLAN', () => {
   const plan = (over: Partial<AssignPayload> = {}) => assign({ command: 'PLAN', planFrom: 'docs/spec.md', ...over });
   test('checks out the ref detached', async () => {

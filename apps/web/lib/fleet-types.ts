@@ -156,10 +156,33 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'trust_domain'
+  | 'config_jobs' | 'bot_review' | 'bot_fix' | 'bot_rulings' | 'agents_run' | 'trust_domain'
 
 /** Fleet job kinds, including config jobs and PR reviews. */
-export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
+export type FleetJobKind = 'RUN' | 'PLAN' | 'REVIEW' | 'FIX' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'AGENT'
+
+export interface AgentJobInputDto {
+  name: string
+  task: string
+  model?: string
+  modelAliases?: Record<string, string>
+  timeoutSec?: number
+}
+
+export type AgentJobDeniedAskDto =
+  | { kind: 'approval'; tool: string; summary: string }
+  | { kind: 'question'; text: string }
+
+export interface AgentJobResultDto {
+  status: 'completed' | 'failed' | 'cancelled' | 'timeout'
+  model?: string
+  output: string
+  truncated: boolean
+  deniedAsks: AgentJobDeniedAskDto[]
+  deniedAsksTruncated: boolean
+  /** USD, a four-place decimal string when priced. */
+  costUsd?: string
+}
 
 /** S3 §1: what a config job was asked to do. */
 export type ConfigEditModeDto = 'edit' | 'regenerate' | 'drift'
@@ -326,6 +349,9 @@ export interface FleetJobDto {
   tickets?: FleetJobTicketDto[] | null
   /** S3 §4.3: present on config jobs (CONFIG_EDIT, CONFIG_DRIFT); absent or null otherwise. */
   configEdit?: FleetJobConfigEditDto | null
+  /** US-011: AGENT task input and bounded result; null when not present. */
+  agent?: AgentJobInputDto | null
+  agentResult?: AgentJobResultDto | null
   /** US-006 (US-004 wire shape): the workflow result, null when the job has none. */
   workflow: FleetJobWorkflowDto | null
 }

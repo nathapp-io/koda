@@ -4,6 +4,7 @@ import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
 import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem, FixOutcome, FixReady } from '../domain/fleet-job.domain';
+import type { AgentJobInput, AgentJobResult } from '../../common/agent-jobs';
 import type { MisfitReason } from '../placement-rules';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -53,7 +54,7 @@ export class FleetJobDto {
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare ref: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD', 'REVIEW', 'FIX'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD' | 'REVIEW' | 'FIX';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD', 'REVIEW', 'FIX', 'AGENT'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD' | 'REVIEW' | 'FIX' | 'AGENT';
   @ApiProperty() declare feature: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
@@ -94,6 +95,10 @@ export class FleetJobDto {
   declare fixOutcome: FixOutcome | null;
   @ApiPropertyOptional({ type: Object, nullable: true, description: 'A FIX job’s ready result; null until reported.' })
   declare fixReady: FixReady | null;
+  @ApiPropertyOptional({ type: Object, nullable: true, description: "An AGENT job's immutable dispatch input (name, task, model?, modelAliases?, timeoutSec?). Null for every other command." })
+  declare agent: AgentJobInput | null;
+  @ApiPropertyOptional({ type: Object, nullable: true, description: "An AGENT job's latest attempt result (status, output, truncated, deniedAsks, deniedAsksTruncated, costUsd?). Null until the runner reports one, and after a requeue." })
+  declare agentResult: AgentJobResult | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
@@ -123,6 +128,8 @@ export class FleetJobDto {
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
       fixOutcome: r.fixOutcome ?? null, fixReady: r.fixReady ?? null,
+      // US-003: the AGENT input and result, as the shape guards mapped them (absent becomes null).
+      agent: r.agentInput ?? null, agentResult: r.agentResult ?? null,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });
@@ -137,7 +144,7 @@ export class FleetJobDto {
 export class PlacementMisfitDto {
   @ApiProperty() declare runnerId: string;
   @ApiProperty() declare name: string;
-  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'trust_domain', 'thread_capacity', 'thread_backend', 'thread_modes', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads', 'bot_review', 'bot_fix', 'bot_rulings'] })
+  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'trust_domain', 'thread_capacity', 'thread_backend', 'thread_modes', 'threads_disabled', 'thread_write', 'project_threads', 'workspace_threads', 'bot_review', 'bot_fix', 'bot_rulings', 'agents_run'] })
   declare reason: MisfitReason;
 }
 

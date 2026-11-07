@@ -14,6 +14,21 @@ interface Spec {
 const spec = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', 'openapi.json'), 'utf-8')) as Spec;
 
 describe('fleet OpenAPI contract', () => {
+  it('US-004 AC-8: documents AGENT dispatch input and required agent fields', () => {
+    const requestBody = spec.paths['/api/projects/{slug}/fleet/jobs']?.['post'] as {
+      requestBody?: { content?: { 'application/json'?: { schema?: { $ref?: string } } } };
+    } | undefined;
+    const requestRef = requestBody?.requestBody?.content?.['application/json']?.schema?.$ref;
+    const requestSchemaName = requestRef?.split('/').pop();
+    const dispatch = requestSchemaName ? spec.components.schemas[requestSchemaName] : undefined;
+    expect((dispatch?.properties?.['command'] as { enum?: string[] } | undefined)?.enum).toContain('AGENT');
+    const agentRef = (dispatch?.properties?.['agent'] as { $ref?: string } | undefined)?.$ref;
+    const agentSchemaName = agentRef?.split('/').pop();
+    const agent = agentSchemaName ? spec.components.schemas[agentSchemaName] : undefined;
+    expect(Object.keys(agent?.properties ?? {}).sort()).toEqual(expect.arrayContaining(['name', 'task']));
+    expect(agent?.required).toEqual(expect.arrayContaining(['name', 'task']));
+  });
+
   it('exposes the job post-run stages (S2b (j) D433, D435; US-003 workflowStep)', () => {
     expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toContain('postRun');
     expect(Object.keys(spec.components.schemas['FleetJobPostRunDto']?.properties ?? {}).sort())

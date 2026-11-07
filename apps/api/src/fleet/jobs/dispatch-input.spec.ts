@@ -1,4 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { isModelAliasTarget } from '../common/agent-jobs';
 import { GIT_REF_RE, normalizeDispatch } from './dispatch-input';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 
@@ -9,7 +10,7 @@ describe('normalizeDispatch (spec §5.1)', () => {
   it('fills defaults', () => {
     expect(normalizeDispatch(dto(), 'trunk')).toEqual({
       repoId: 'repo-1', ref: 'trunk', command: 'RUN', feature: 'auth-flow', planFrom: null, profiles: [],
-      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
+      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, agentInput: null,
     });
   });
 
@@ -84,7 +85,113 @@ describe('normalizeDispatch (spec §5.1)', () => {
   );
 });
 
-describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => {
+describe('AGENT dispatch input', () => {
+  const agent = { name: 'spec-reviewer', task: 'Review the spec' };
+  it('normalizes default ref and stores only supplied agent keys', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent }), 'main'))
+      .toEqual(expect.objectContaining({ command: 'AGENT', ref: 'main', agentInput: agent }));
+  });
+  it('preserves optional agent input keys', () => {
+    const input = { ...agent, task: 'x', model: 'reviewer', modelAliases: { reviewer: 'acp:claude' }, timeoutSec: 600 };
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', ref: 'feat/flow-a', agent: input }), 'main'))
+      .toEqual(expect.objectContaining({ ref: 'feat/flow-a', agentInput: input }));
+  });
+  it.each([
+    [{ agent: undefined }, 'agent required for AGENT'],
+    [{ agent: null as unknown as DispatchFleetJobDto['agent'] }, 'agent required for AGENT'],
+    [{ command: 'PLAN', planFrom: 'docs/a.md', agent }, 'agent is only for AGENT'],
+    [{ command: 'AGENT', agent, bashMode: 'gated' }, 'bashMode must be raw for AGENT'],
+    [{ command: 'AGENT', agent, ticketRefs: ['KD-1'] }, 'ticketRefs is not for AGENT'],
+    [{ command: 'AGENT', agent, planFrom: 'docs/a.md' }, 'planFrom is only for PLAN'],
+    [{ command: 'AGENT', agent, prNumber: 2 }, 'prNumber is only for REVIEW and FIX'],
+  ] as const)('rejects incompatible AGENT dispatch %#', (over, reason) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent, ...over }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason } }));
+  });
+  it.each(['-x', 'a b', 'a..b', 'n'.repeat(129)])('rejects invalid agent name %s', (name) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, name } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.name' } }));
+  });
+  it('accepts plugin-qualified agent names unchanged', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, name: 'plugin:spec-reviewer' } }), 'main').agentInput?.name)
+      .toBe('plugin:spec-reviewer');
+  });
+  it.each(['', '   \n', 't'.repeat(16_385), 'review\u0000this'])('rejects invalid agent task %#', (task) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.task' } }));
+  });
+  it('accepts a maximum-length task unchanged', () => {
+    const task = 't'.repeat(16_384);
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main').agentInput?.task).toBe(task);
+  });
+  it('accepts a multi-line task unchanged (only U+0000 is refused as text)', () => {
+    const task = 'Review this:\n\t1. the spec\n2. the PRD — é';
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, task } }), 'main').agentInput?.task).toBe(task);
+  });
+  it.each(['fast model', '', 'm'.repeat(201), 'model\u0000x'])('rejects invalid agent model %#', (model) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.model' } }));
+  });
+  it('accepts an ACP model unchanged', () => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, model: 'acp:claude' } }), 'main').agentInput?.model).toBe('acp:claude');
+  });
+  it('does not treat an unknown ACP provider as a generic provider/model target', () => {
+    expect(isModelAliasTarget('acp:bogus/gpt-5.4')).toBe(false);
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: 'acp:bogus/gpt-5.4' } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+  });
+  it.each(['not-a-model', 'acp:bogus', 'openai/gpt 5', 'acp:claude [high]', 'openai/gpt\u00005.4'])('rejects model alias target %s', (target) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { reviewer: target } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+  });
+  it.each(['acp:claude', 'acp:codex/gpt-5.4', 'openai/gpt-5.4[high]', 'opencode-go/deepseek-v4.1-flash'])('accepts alias target %s', (target) => {
+    const modelAliases = { reviewer: target };
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases } }), 'main').agentInput?.modelAliases).toEqual(modelAliases);
+  });
+  it('rejects invalid alias keys and more than eight aliases', () => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: { '-bad': 'acp:claude' } } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+    const nine = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`a${i}`, 'acp:claude']));
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: nine } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.modelAliases' } }));
+  });
+  it('accepts eight aliases', () => {
+    const aliases = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`a${i}`, 'acp:claude']));
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, modelAliases: aliases } }), 'main').agentInput?.modelAliases).toEqual(aliases);
+  });
+  it.each([59, 86_401, 60.5])('rejects invalid timeout %s', (timeoutSec) => {
+    expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, timeoutSec } }), 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'agent.timeoutSec' } }));
+  });
+  it.each([60, 86_400])('accepts timeout boundary %s', (timeoutSec) => {
+    expect(normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: { ...agent, timeoutSec } }), 'main').agentInput?.timeoutSec).toBe(timeoutSec);
+  });
+  it('rejects malformed agent objects and optional field types with field-specific reasons', () => {
+    for (const [agentInput, reason] of [
+      [{ name: 7, task: 'x' }, 'agent.name'],
+      [{ name: 'valid', task: 7 }, 'agent.task'],
+      [{ name: 'valid', task: 'x', model: 3 }, 'agent.model'],
+      [{ name: 'valid', task: 'x', modelAliases: ['acp:claude'] }, 'agent.modelAliases'],
+      [{ name: 'valid', task: 'x', timeoutSec: '60' }, 'agent.timeoutSec'],
+      [[], 'agent.name'],
+    ] as const) {
+      expect(() => normalizeDispatch(dto({ command: 'AGENT', feature: 'flow-a', agent: agentInput as never }), 'main'))
+        .toThrow(expect.objectContaining({ args: { reason } }));
+    }
+  });
+  it('returns null agent input for RUN', () => expect(normalizeDispatch(dto(), 'main').agentInput).toBeNull());
+  it('keeps RUN bash mode and cost unaffected by AGENT-only bounds', () => {
+    const out = normalizeDispatch(dto({ bashMode: 'gated', feature: 'legacy', maxCostUsd: 1 }), 'main');
+    expect(out).toMatchObject({ bashMode: 'gated', maxCostUsd: '1', agentInput: null });
+  });
+  it('keeps the existing PLAN dispatch shape with additive null agentInput', () => {
+    expect(normalizeDispatch(dto({ command: 'PLAN', feature: 'legacy', planFrom: 'specs/legacy.md' }), 'main')).toEqual(expect.objectContaining({
+      command: 'PLAN', feature: 'legacy', ref: 'main', planFrom: 'specs/legacy.md', bashMode: 'raw', agentInput: null,
+    }));
+  });
+});
+
+describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => { 
   const run = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
 
   it('defaults to raw and 600 s', () => {

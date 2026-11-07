@@ -107,6 +107,14 @@ describeIntegration('budget evaluator (PG)', () => {
     expect(await evaluate(policy.id)).toEqual({ warned: false, stopped: false });
   });
 
+  it('US-004 AC-7: hard stop cancels a queued AGENT job', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    const agent = await job({ command: 'AGENT', feature: 'flow-budget-agent', state: 'QUEUED', firstStartedAt: null });
+    expect((await evaluate(policy.id)).stopped).toBe(true);
+    expect(await reload(agent.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
+  });
+
   it('US-003 AC-8: hard stop cancels a queued REVIEW job', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });

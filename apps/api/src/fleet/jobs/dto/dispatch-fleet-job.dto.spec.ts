@@ -23,6 +23,41 @@ describe('DispatchFleetJobDto', () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ bashMode: 'yolo' })));
     expect(errors.map((e) => e.property)).toContain('bashMode');
   });
+  it('accepts AGENT with a valid nested agent input', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review' } })));
+    expect(errors).toEqual([]);
+  });
+  it.each(['fast model', ' fast', 'fast '])('rejects nested agent model containing whitespace: %p', async (model) => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review', model },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'model')).toBeDefined();
+  });
+  it('rejects unknown ACP providers in nested model aliases', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'acp:bogus/model' } },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'modelAliases')).toBeDefined();
+  });
+  it('reports an oversized nested agent task on agent.task', async () => {
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({
+      command: 'AGENT', agent: { name: 'spec-reviewer', task: 't'.repeat(16_385) },
+    })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === 'task')).toBeDefined();
+  });
+  it.each([
+    ['task', { name: 'spec-reviewer', task: 'review\u0000this' }, 'task'],
+    ['model', { name: 'spec-reviewer', task: 'Review', model: 'model\u0000x' }, 'model'],
+    ['model alias target', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'openai/gpt\u00005.4' } }, 'modelAliases'],
+  ] as const)('rejects a U+0000 in the nested agent %s', async (_case, agent, property) => {
+    // PostgreSQL jsonb refuses U+0000 (SQLSTATE 22P05), so the column must never be asked to store it.
+    const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'AGENT', agent })));
+    const agentError = errors.find((error) => error.property === 'agent');
+    expect(agentError?.children?.find((error) => error.property === property)).toBeDefined();
+  });
   it('accepts FIX as a command', async () => {
     const errors = await validate(plainToInstance(DispatchFleetJobDto, dto({ command: 'FIX', feature: undefined, prNumber: 7 })));
     expect(errors).toEqual([]);

@@ -150,6 +150,88 @@ describe('REVIEW decisions (US-004)', () => {
   });
 });
 
+describe('AGENT assignment (fleet-agent-job US-007)', () => {
+  const agent = { name: 'spec-reviewer', task: 'Review' };
+  const agentPayload = (over: Record<string, unknown> = {}) => ({ ...assignFor('AGENT'), agent: { ...agent }, ...over });
+
+  test('AC-3: accepts an AGENT assign and returns its agent block', () => {
+    expect(parseAssign(cmd(agentPayload()))).toEqual({ ok: true, assign: { ...assignFor('AGENT'), agent } });
+  });
+  test('AC-4: an AGENT assign without an agent block is refused', () => {
+    const { agent: _agent, ...payload } = agentPayload();
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: 'agent' });
+  });
+  test.each([
+    ['a name with ..', { name: '../x', task: 'Review' }],
+    ['a task of 16,385 characters', { name: 'spec-reviewer', task: 'x'.repeat(16_385) }],
+    ['a modelAliases value holding a space', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'acp:claude high' } }],
+    ['timeoutSec 59', { name: 'spec-reviewer', task: 'Review', timeoutSec: 59 }],
+  ])('AC-5: refuses an agent block with %s', (_label, value) => {
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
+  });
+  test('AC-6: an agent block on a RUN is refused', () => {
+    expect(parseAssign(cmd({ ...assignFor('RUN'), agent }))).toEqual({ ok: false, detail: 'agent' });
+  });
+  test('AC-7: an AGENT assign demands raw bash', () => {
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'gated' })))).toEqual({ ok: false, detail: 'bashMode' });
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'escalate' })))).toEqual({ ok: false, detail: 'bashMode' });
+  });
+  test('AC-13: an otherwise valid RUN assign carries no agent key and keeps its fields', () => {
+    const run = assignFor('RUN', { ref: 'feat/x', profiles: ['fast', 'strict'], bashMode: 'raw' });
+    const parsed = parseAssign(cmd(run));
+    expect(parsed).toEqual({ ok: true, assign: run });
+    expect(parsed.ok && Object.hasOwn(parsed.assign, 'agent')).toBe(false);
+  });
+  test('copies only the validated agent fields, at every inclusive bound', () => {
+    const full = {
+      name: 'spec-reviewer', task: 'x'.repeat(16_384), model: 'acp:claude[high]',
+      modelAliases: { reviewer: 'acp:claude', fast: 'openrouter/qwen3[low]' }, timeoutSec: 60,
+    };
+    const parsed = parseAssign(cmd(agentPayload({ agent: { ...full, extra: 'dropped' } })));
+    expect(parsed).toEqual({ ok: true, assign: { ...assignFor('AGENT'), agent: full } });
+  });
+  test.each([
+    ['a whitespace-only task', { name: 'spec-reviewer', task: ' \n\t' }],
+    ['a task with a NUL', { name: 'spec-reviewer', task: 'a\u0000b' }],
+    ['an empty name', { name: '', task: 'Review' }],
+    ['a name of 129 characters', { name: `a${'b'.repeat(128)}`, task: 'Review' }],
+    ['a name with a dot pair', { name: 'a..b', task: 'Review' }],
+    ['a model holding a space', { name: 'spec-reviewer', task: 'Review', model: 'acp: claude' }],
+    ['a model of 201 characters', { name: 'spec-reviewer', task: 'Review', model: 'm'.repeat(201) }],
+    ['nine model aliases', { name: 'spec-reviewer', task: 'Review', modelAliases: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`m${i}`, 'acp:claude'])) }],
+    ['a modelAliases key with a colon', { name: 'spec-reviewer', task: 'Review', modelAliases: { 'a:b': 'acp:claude' } }],
+    ['a modelAliases target without a provider or acp prefix', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'qwen3' } }],
+    ['an unknown acp agent', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 'acp:gemini' } }],
+    ['a modelAliases value that is not a string', { name: 'spec-reviewer', task: 'Review', modelAliases: { reviewer: 5 } }],
+    ['modelAliases that is an array', { name: 'spec-reviewer', task: 'Review', modelAliases: ['acp:claude'] }],
+    ['timeoutSec 86,401', { name: 'spec-reviewer', task: 'Review', timeoutSec: 86_401 }],
+    ['timeoutSec 60.5', { name: 'spec-reviewer', task: 'Review', timeoutSec: 60.5 }],
+    ['timeoutSec as a string', { name: 'spec-reviewer', task: 'Review', timeoutSec: '600' }],
+  ])('refuses %s', (_label, value) => {
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
+  });
+  test.each([null, 'spec-reviewer', ['spec-reviewer']])('refuses an agent block of %p', (value) => {
+    expect(parseAssign(cmd(agentPayload({ agent: value })))).toEqual({ ok: false, detail: 'agent' });
+  });
+  test('refuses an agent block on a PLAN and on a config job', () => {
+    for (const command of ['PLAN', 'CONFIG_EDIT'] as const) {
+      expect(parseAssign(cmd({ ...assignFor(command), agent }))).toEqual({ ok: false, detail: 'agent' });
+    }
+  });
+  test('the unprefixed agent/bashMode details are AGENT-only: other kinds keep their legacy details', () => {
+    expect(parseAssign(cmd(assignFor('PLAN', { bashMode: 'gated' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('CONFIG_DRIFT'), bashMode: 'gated' }))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('RUN'), bashMode: 'yolo' } as never))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd(agentPayload({ bashMode: 'yolo' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+    expect(parseAssign(cmd({ ...assignFor('RUN'), review: { prNumber: 1, botLogin: 'nope' } }))).toEqual({ ok: false, detail: 'invalid review' });
+  });
+  test('an AGENT assign still refuses a planFrom, a review block and a thread block', () => {
+    expect(parseAssign(cmd(agentPayload({ planFrom: 'docs/x.md' })))).toEqual({ ok: false, detail: 'invalid planFrom' });
+    expect(parseAssign(cmd(agentPayload({ review: { prNumber: 1, botLogin: 'koda-fleet[bot]' } })))).toEqual({ ok: false, detail: 'invalid review' });
+    expect(parseAssign(cmd(agentPayload({ thread: { threadId: 't1' } })))).toEqual({ ok: false, detail: 'invalid thread' });
+  });
+});
+
 describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
   test.each(['raw', 'gated', 'escalate'] as const)('accepts %s on RUN', (bashMode) => {
     const r = parseAssign(cmd(assignFor('RUN', { bashMode, approvalTimeoutSec: 90 })));

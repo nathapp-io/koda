@@ -1124,12 +1124,25 @@
       "unknown": "Unknown"
     },
     "command": {
+      "AGENT": "Agent task",
       "RUN": "Run",
       "PLAN": "Plan",
       "CONFIG_EDIT": "Config edit",
       "CONFIG_DRIFT": "Drift check",
       "REVIEW": "PR review",
       "FIX": "PR fix"
+    },
+    "agentResult": {
+      "title": "Agent result",
+      "pending": "Agent result is pending.",
+      "status": { "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled", "timeout": "Timed out" },
+      "model": "Model: {model}",
+      "costUnknown": "Cost unavailable",
+      "output": "Output",
+      "truncated": "Output was truncated.",
+      "deniedAsksTruncated": "Some denied requests were omitted.",
+      "approval": "Denied tool: {tool}",
+      "question": "Denied question: {text}"
     },
     "fixOutcome": {
       "pushed": "Fix pushed",
@@ -1193,6 +1206,7 @@
       "config_jobs": "Runner is too old for config jobs (upgrade the runner)",
       "bot_review": "nax on this runner cannot run PR reviews",
       "bot_fix": "nax on this runner cannot run PR fixes",
+      "agents_run": "nax on this runner cannot run agent tasks",
       "trust_domain": "Runner holds another project's job (isolation)"
     },
     "repoReason": {

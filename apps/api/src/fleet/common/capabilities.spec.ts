@@ -177,4 +177,31 @@ describe('parseCapabilitiesCore', () => {
       expect(parseCapabilitiesCore(valid)).not.toHaveProperty('providerVault');
     });
   });
+
+  /**
+   * US-005: the AGENT job capability. Strict like `botFix` (a report the API accepts is what placement
+   * trusts), so only the literal `true` is meaningful, a legacy runner omits the key, and `false` is a
+   * malformed report rather than a supported "off" — the capability is never advertised as off.
+   */
+  describe('agentsRun (US-005)', () => {
+    it('AC-1: keeps agentsRun: true from the report', () => {
+      expect(parseCapabilitiesCore({ ...valid, agentsRun: true }).agentsRun).toBe(true);
+    });
+
+    it('AC-1: drops the key when it is absent (a runner that cannot run agents)', () => {
+      const parsed = parseCapabilitiesCore(valid);
+      expect(parsed).not.toHaveProperty('agentsRun');
+      expect(parsed).toEqual(valid);
+    });
+
+    it.each([[false], ['yes'], [1], [{}]])("AC-1: rejects agentsRun %p with field 'agentsRun'", (agentsRun) => {
+      try {
+        parseCapabilities({ ...valid, agentsRun });
+        throw new Error('expected validation failure');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationAppException);
+        expect((error as ValidationAppException).args).toMatchObject({ reason: 'agentsRun' });
+      }
+    });
+  });
 });

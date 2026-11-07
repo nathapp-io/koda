@@ -7,6 +7,7 @@ import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 import type { ThreadAssign } from '../../common/thread-jobs';
 import type { ConfigJobResult } from '../../common/config-jobs';
+import type { AgentDeniedAsk, AgentJobInput, AgentJobResult } from '../../common/agent-jobs';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 
@@ -26,6 +27,78 @@ export interface FixReady {
 /** US-004: the `String?` column as the domain value. Anything the runner did not report is null. */
 export function fixOutcomeOf(value: string | null | undefined): FixOutcome | null {
   return value === 'pushed' || value === 'nothing' ? value : null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function isAgentResultStatus(value: unknown): value is AgentJobResult['status'] {
+  return value === 'completed' || value === 'failed' || value === 'cancelled' || value === 'timeout';
+}
+
+/** US-003: one stored denied ask; null when the row does not hold one of the two shapes nax reports. */
+function agentDeniedAskOf(value: unknown): AgentDeniedAsk | null {
+  if (!isRecord(value)) return null;
+  if (value['kind'] === 'approval') {
+    const { tool, summary } = value;
+    return typeof tool === 'string' && typeof summary === 'string' ? { kind: 'approval', tool, summary } : null;
+  }
+  if (value['kind'] === 'question') {
+    const { text } = value;
+    return typeof text === 'string' ? { kind: 'question', text } : null;
+  }
+  return null;
+}
+
+/** US-003: a stored alias map, or null when the column holds something else (the field is then dropped). */
+function agentModelAliasesOf(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+  const aliases: Record<string, string> = {};
+  for (const [key, target] of Object.entries(value)) {
+    if (typeof target !== 'string') return null;
+    aliases[key] = target;
+  }
+  return aliases;
+}
+
+/**
+ * US-003: the `Json?` agent input column as the domain value — `name` and `task` are what make it an input, and the
+ * optional fields are kept only when they hold the type this app writes. A stored value the guard does not recognise
+ * is absent (null), never an unchecked assertion: the column is JSON no schema constrains.
+ */
+export function agentInputOf(value: unknown): AgentJobInput | null {
+  if (!isRecord(value)) return null;
+  const { name, task, model, modelAliases, timeoutSec } = value;
+  if (typeof name !== 'string' || name.length === 0 || typeof task !== 'string') return null;
+  const input: AgentJobInput = { name, task };
+  if (typeof model === 'string') input.model = model;
+  const aliases = agentModelAliasesOf(modelAliases);
+  if (aliases !== null) input.modelAliases = aliases;
+  if (typeof timeoutSec === 'number' && Number.isInteger(timeoutSec)) input.timeoutSec = timeoutSec;
+  return input;
+}
+
+/**
+ * US-003: the `Json?` agent result column as the domain value. Every field the runner's reader always sends is
+ * required — the result is reported as a whole — and a stored value missing one of them is absent, not a partial
+ * result a client would have to interpret.
+ */
+export function agentResultOf(value: unknown): AgentJobResult | null {
+  if (!isRecord(value)) return null;
+  const { status, output, truncated, deniedAsks, deniedAsksTruncated, model, costUsd } = value;
+  if (!isAgentResultStatus(status)) return null;
+  if (typeof output !== 'string' || typeof truncated !== 'boolean' || typeof deniedAsksTruncated !== 'boolean') return null;
+  if (!Array.isArray(deniedAsks)) return null;
+  const asks: AgentDeniedAsk[] = [];
+  for (const stored of deniedAsks) {
+    const ask = agentDeniedAskOf(stored);
+    if (ask === null) return null;
+    asks.push(ask);
+  }
+  const result: AgentJobResult = { status, output, truncated, deniedAsks: asks, deniedAsksTruncated };
+  if (typeof model === 'string') result.model = model;
+  if (typeof costUsd === 'string') result.costUsd = costUsd;
+  return result;
 }
 
 /** createJob hit the partial unique index on active (repoId, feature) (spec §6.4). */
@@ -139,6 +212,9 @@ export interface FleetJobRecord {
   /** S6 K3 (US-004): a FIX job's pushed/nothing outcome, mirrored from its snapshots; cleared on requeue. */
   fixOutcome?: FixOutcome | null;
   fixReady?: FixReady | null;
+  /** US-003: an AGENT job's immutable dispatch input, and the latest attempt's result (cleared on requeue). */
+  agentInput?: AgentJobInput | null;
+  agentResult?: AgentJobResult | null;
   threadId: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
@@ -166,6 +242,7 @@ export interface NewFleetJob {
   requestedByType?: 'USER' | 'AGENT';
   threadId?: string | null;
   scheduleId?: string | null;
+  agentInput?: AgentJobInput | null;
 }
 
 type Mutable =
@@ -174,7 +251,7 @@ type Mutable =
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
   | 'finishResult' | 'escalationReason' | 'exitCode' | 'workflow'
   | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq'
-  | 'configResult' | 'fixOutcome' | 'fixReady' | 'prRulings';
+  | 'configResult' | 'fixOutcome' | 'fixReady' | 'prRulings' | 'agentResult';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };

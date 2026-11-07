@@ -19848,6 +19848,46 @@
           }
         }
       },
+      "DispatchAgentDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "maxLength": 128
+          },
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "pattern": "\\S",
+            "description": "The task text. U+0000 is refused: the job column is jsonb and PostgreSQL cannot store it."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^\\S+$",
+            "description": "U+0000 is refused, as for the task."
+          },
+          "modelAliases": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 8
+          },
+          "timeoutSec": {
+            "type": "number",
+            "minimum": 60,
+            "maximum": 86400
+          }
+        },
+        "required": [
+          "name",
+          "task"
+        ]
+      },
       "DispatchFleetJobDto": {
         "type": "object",
         "properties": {
@@ -19866,9 +19906,13 @@
               "RUN",
               "PLAN",
               "REVIEW",
-              "FIX"
+              "FIX",
+              "AGENT"
             ],
             "type": "string"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/DispatchAgentDto"
           },
           "feature": {
             "type": "string",
@@ -20213,7 +20257,8 @@
               "CONFIG_DRIFT",
               "THREAD",
               "REVIEW",
-              "FIX"
+              "FIX",
+              "AGENT"
             ],
             "type": "string"
           },
@@ -20384,6 +20429,16 @@
             "nullable": true,
             "description": "A FIX job’s ready result; null until reported."
           },
+          "agent": {
+            "type": "object",
+            "nullable": true,
+            "description": "An AGENT job's immutable dispatch input (name, task, model?, modelAliases?, timeoutSec?). Null for every other command."
+          },
+          "agentResult": {
+            "type": "object",
+            "nullable": true,
+            "description": "An AGENT job's latest attempt result (status, output, truncated, deniedAsks, deniedAsksTruncated, costUsd?). Null until the runner reports one, and after a requeue."
+          },
           "stories": {
             "nullable": true,
             "description": "PRD stories in PRD order (S1b §1.2). Null on list pages (D149).",
@@ -20502,7 +20557,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }
@@ -22715,7 +22771,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }
@@ -23369,7 +23426,8 @@
               "workspace_threads",
               "bot_review",
               "bot_fix",
-              "bot_rulings"
+              "bot_rulings",
+              "agents_run"
             ],
             "type": "string"
           }

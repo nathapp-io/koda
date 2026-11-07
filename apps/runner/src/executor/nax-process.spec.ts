@@ -160,3 +160,46 @@ describe('US-008 rulings argv', () => {
     expect(buildNaxArgv(['nax'], fix, { decisionsPath: '/decisions' })).toEqual(['nax', 'bot', 'review', '4', '--full', '--profile', 'fast,strict,koda-job-cj1', '--decisions', '/decisions']);
   });
 });
+
+describe('AGENT argv (fleet-agent-job US-008)', () => {
+  const agent = (over: Partial<AssignPayload> = {}): AssignPayload =>
+    assign({ command: 'AGENT', jobId: 'j1', profiles: ['p1'], agent: { name: 'spec-reviewer', task: 'x' }, ...over });
+
+  test('AC-4: agents run <name> --task-file <path> --json --profile <chain> --timeout <default>', () => {
+    expect(buildNaxArgv(['nax'], agent(), { agentTaskPath: '/jobs/j1/agent-task.md' })).toEqual(
+      ['nax', 'agents', 'run', 'spec-reviewer', '--task-file', '/jobs/j1/agent-task.md', '--json', '--profile', 'p1,koda-job-j1', '--timeout', '3600'],
+    );
+  });
+
+  test('AC-5: an explicit model and timeout end the argv with --model <model> --timeout <sec>', () => {
+    const argv = buildNaxArgv(['nax'], agent({ agent: { name: 'spec-reviewer', task: 'x', model: 'reviewer', timeoutSec: 600 } }), { agentTaskPath: '/jobs/j1/agent-task.md' });
+    expect(argv.slice(-4)).toEqual(['--model', 'reviewer', '--timeout', '600']);
+  });
+
+  test('AC-6: a maxCostUsd on an AGENT assign produces no --max-cost (nax agents run has no cost cap)', () => {
+    const argv = buildNaxArgv(['nax'], agent({ maxCostUsd: '5' }), { agentTaskPath: '/jobs/j1/agent-task.md' });
+    expect(argv).not.toContain('--max-cost');
+    expect(argv).not.toContain('5');
+    expect(argv.slice(-2)).toEqual(['--timeout', '3600']);
+  });
+
+  test('AC-7: an AGENT assign without agentTaskPath throws instead of building an argv', () => {
+    expect(() => buildNaxArgv(['nax'], agent())).toThrow(Error);
+    expect(() => buildNaxArgv(['nax'], agent(), {})).toThrow(Error);
+  });
+
+  test('an AGENT assign without an agent block throws instead of building an argv', () => {
+    expect(() => buildNaxArgv(['nax'], { ...agent(), agent: undefined }, { agentTaskPath: '/jobs/j1/agent-task.md' })).toThrow(Error);
+  });
+
+  test('AGENT keeps the profile chain rules and the task path out of the feature', () => {
+    expect(() => buildNaxArgv(['nax'], agent({ profiles: ['koda-job-x'] }), { agentTaskPath: '/t' })).toThrow();
+    expect(buildNaxArgv(['bun', '/x/fake.ts'], agent({ profiles: [] }), { agentTaskPath: '/t' })[0]).toBe('bun');
+  });
+
+  test('AC-15: a RUN argv is unchanged and needs no agentTaskPath', () => {
+    expect(buildNaxArgv(['nax'], assign({ command: 'RUN', feature: 'f1', jobId: 'j1', profiles: ['p1'], maxCostUsd: '5' }))).toEqual(
+      ['nax', 'run', '--headless', '--json', '-f', 'f1', '--profile', 'p1,koda-job-j1', '--max-cost', '5'],
+    );
+  });
+});

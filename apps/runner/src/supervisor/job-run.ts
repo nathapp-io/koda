@@ -4,6 +4,7 @@ import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
 import { readDiagnosticTail } from '../diagnostics';
 import { fitConfigResult } from '../executor/config-job/result-fit';
+import { fitAgentResult, readAgentResult } from '../executor/agent-job/agent-result';
 import type { ConfigJobRun, JobExecutor, JobWatcher } from '../executor/job-executor';
 import { wipPushValue, type ProgressPushOutcome } from '../executor/progress-push';
 import type { Journal } from '../journal/journal';
@@ -460,6 +461,25 @@ export class JobRun {
       const check = await this.deps.executor.readPlan(row);
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
       return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
+    }
+    if (row.command === 'AGENT') {
+      const read = await readAgentResult(row.jobDir);
+      if (read.ok) {
+        const agentResult = fitAgentResult(read.result);
+        const snapshot: SnapshotEventPayload = {
+          agentResult,
+          ...(agentResult.costUsd !== undefined ? { costSpentUsd: agentResult.costUsd } : {}),
+        };
+        if (cancelled) return { verdict: { state: 'CANCELLED', reason: null }, snapshot, workflow: undefined };
+        if (agentResult.status === 'completed') return { verdict: { state: 'COMPLETED', reason: null }, snapshot, workflow: undefined };
+        return { verdict: { state: 'FAILED', reason: `agent ${agentResult.status}` }, snapshot, workflow: undefined };
+      }
+      return {
+        verdict: cancelled
+          ? { state: 'CANCELLED', reason: null }
+          : { state: 'FAILED', reason: `agent result unreadable${read.stderrLine ? `: ${read.stderrLine}` : ''}` },
+        snapshot: {}, workflow: undefined,
+      };
     }
     if (row.command === 'REVIEW') {
       const costSpentUsd = await this.deps.executor.readPlanCost(row);

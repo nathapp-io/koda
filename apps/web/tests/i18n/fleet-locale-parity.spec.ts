@@ -20,7 +20,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 // dynamic key (fleet.state.<STATE> ...), which used-keys-exist.spec cannot see.
 const ENUMS: Record<string, string[]> = {
   'fleet.state': ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'],
-  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'bot_review', 'bot_fix', 'bot_rulings', 'trust_domain'],
+  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs', 'bot_review', 'bot_fix', 'bot_rulings', 'agents_run', 'trust_domain'],
   'fleet.repoReason': [
     'github_app_not_configured', 'github_app_key_unreadable', 'app_not_installed', 'app_permissions_insufficient',
     'repo_not_found', 'provider_unreachable', 'provider_error', 'vcs_connection_missing', 'vcs_connection_mismatch',
@@ -30,7 +30,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
   'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
-  'fleet.command': ['CONFIG_DRIFT', 'CONFIG_EDIT', 'FIX', 'PLAN', 'REVIEW', 'RUN'],
+  'fleet.command': ['AGENT', 'CONFIG_DRIFT', 'CONFIG_EDIT', 'FIX', 'PLAN', 'REVIEW', 'RUN'],
   'fleet.fixOutcome': ['nothing', 'pushed'],
   'fleet.rulings.state': ['pending', 'applied', 'skipped', 'replaced'],
   'fleet.rulings.disposition': ['fixed', 'waived', 'overridden', 'confirmed', 'verified'],
@@ -115,6 +115,13 @@ describe('Fleet locale parity (en and zh)', () => {
   test('nav has the project fleet jobs link (slice 4c)', () => {
     expect(at(en, 'nav.fleetJobs')).toBe('Fleet jobs')
     expect(at(zh, 'nav.fleetJobs')).toBeTruthy()
+  })
+
+  test('AC-9/AC-10: AGENT command and capability misfit labels are translated in both locales', () => {
+    expect(at(en, 'fleet.command.AGENT')).toBe('Agent task')
+    expect(at(en, 'fleet.misfit.agents_run')).toBe('nax on this runner cannot run agent tasks')
+    expect(String(at(zh, 'fleet.command.AGENT') ?? '').trim()).not.toBe('')
+    expect(String(at(zh, 'fleet.misfit.agents_run') ?? '').trim()).not.toBe('')
   })
 
   test('REVIEW labels are defined in Chinese', () => {

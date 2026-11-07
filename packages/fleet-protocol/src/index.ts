@@ -11,8 +11,10 @@ export const FLEET_PROTOCOL_VERSION = 4 as const;
 export * from './nax-config-paths';
 export * from './config-jobs';
 export * from './threads';
+export * from './agent-jobs';
 export * from './thread-doc-paths';
 import type { ConfigJobKind, ConfigJobResult } from './config-jobs';
+import type { AgentAssign, AgentJobResult } from './agent-jobs';
 import type { ThreadAnswerPayload, ThreadAssign, ThreadBackends, ThreadCommandType, ThreadInputPayload } from './threads';
 
 /** S1.5 §1.6: `gated` and `escalate` relay nax bash asks to the approvals inbox (protocol v2 runners only). */
@@ -100,6 +102,7 @@ export interface RunnerCapabilities {
    * older runners, and the credential board then reads that runner as "vault off".
    */
   providerVault?: true;
+  agentsRun?: true;
 }
 
 export interface EnrollRequest {
@@ -132,7 +135,7 @@ export interface RunnerIdentity {
 export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
-export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD' | 'REVIEW' | 'FIX';
+export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD' | 'REVIEW' | 'FIX' | 'AGENT';
 export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER' | ThreadCommandType;
 export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
@@ -186,6 +189,7 @@ export interface SnapshotEventPayload {
   droppedLogs?: number;
   /** Fleet S3 §3 (D475): a config job's result; files at most 50 x 512 chars, output at most 8 KiB. */
   configResult?: ConfigJobResult;
+  agentResult?: AgentJobResult;
 }
 
 /** STYLE-3: `details` is a free-form array of structured items the runner wants attached to a lifecycle event
@@ -283,6 +287,7 @@ export interface AssignPayload {
   gitIdentity: GitIdentity;
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
+  agent?: AgentAssign;
   /** Fleet PR review and fix: present only for REVIEW and FIX jobs. */
   review?: {
     prNumber: number;

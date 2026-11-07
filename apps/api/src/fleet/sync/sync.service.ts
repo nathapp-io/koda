@@ -13,6 +13,7 @@ import type {
 } from '../common/protocol';
 import { responsibleUserOf } from '../common/responsible-user';
 import { GitTokenBroker } from '../git-broker/git-token.broker';
+import type { GitTokenPurpose } from '../git-broker/git-token.broker';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
@@ -146,7 +147,7 @@ export class SyncService {
     const gitTokenErrors: GitTokenError[] = [];
     const unknownJobIds: string[] = [];
     const toMint = await this.txManager.run(async () => {
-      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: 'review' | 'fix' }> = [];
+      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean; purpose?: GitTokenPurpose }> = [];
       for (const req of requests) {
         // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
         const job = await this.repo.lockById(req.jobId);
@@ -172,7 +173,9 @@ export class SyncService {
             jobId: job.id,
             leaseEpoch: job.leaseEpoch,
             repo,
-            ...(job.command === FleetJobKind.REVIEW ? { purpose: 'review' as const } : job.command === FleetJobKind.FIX ? { purpose: 'fix' as const } : {}),
+            // US-005: the AGENT job's default repository credential is read-only. The purpose — not `readOnly` —
+            // keeps it repo-less in the response and under its own cache key, so it can never answer a write mint.
+            ...(job.command === FleetJobKind.AGENT ? { purpose: 'read' as const } : job.command === FleetJobKind.REVIEW ? { purpose: 'review' as const } : job.command === FleetJobKind.FIX ? { purpose: 'fix' as const } : {}),
             ...(req.fresh === true && (job.command === FleetJobKind.FIX || job.command === FleetJobKind.REVIEW) ? { fresh: true } : {}),
           });
         }
