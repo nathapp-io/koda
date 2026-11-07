@@ -3,7 +3,7 @@
   "feature": "fleet-flow-verdicts",
   "branchName": "feat/fleet-flow-verdicts",
   "createdAt": "2026-11-29T09:00:00.000Z",
-  "updatedAt": "2026-11-07T12:05:59.215Z",
+  "updatedAt": "2026-11-07T12:18:52.514Z",
   "userStories": [
     {
       "id": "US-001",
@@ -655,14 +655,17 @@
         "US-003",
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module transactional ticket/comment writes with actor fallback, delegated system context, new permission key and audit attribution require the security override."
+        "reasoning": "Cross-module transactional ticket/comment writes with actor fallback, delegated system context, new permission key and audit attribution require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/reviews/fix-follow-up.subscriber.ts",
@@ -702,7 +705,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7303b479c4c5fd8b66c159673960e4b78118e5a7"
     },
     {
       "id": "US-011",
