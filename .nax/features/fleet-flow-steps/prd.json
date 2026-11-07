@@ -3,7 +3,7 @@
   "feature": "fleet-flow-steps",
   "branchName": "feat/fleet-flow-steps",
   "createdAt": "2026-11-28T00:00:00.000Z",
-  "updatedAt": "2026-11-07T06:48:43.609Z",
+  "updatedAt": "2026-11-07T07:00:23.220Z",
   "userStories": [
     {
       "id": "US-001",
@@ -839,14 +839,17 @@
       "dependencies": [
         "US-013"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Approval lifecycle extraction, external forge token handling and SHA-dependent guards are security-sensitive cross-module changes."
+        "reasoning": "Approval lifecycle extraction, external forge token handling and SHA-dependent guards are security-sensitive cross-module changes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flows.service.ts",
@@ -859,7 +862,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3274fcfafc83807d52a0e6d9dac621bd9b183129"
     },
     {
       "id": "US-016",
