@@ -140,7 +140,9 @@ describeDb('PrismaFleetFlowRepository', () => {
   it('AC-10 stops a flow with reason, detail and end time, and stops every feature', async () => {
     const flow = await createFlow({ features: ['a', 'b'].map((feature) => ({ feature, specPath: `${feature}/spec.md`, dependsOn: [] })) }); const now = new Date();
     expect(await repo.stop(flow.id, 'cost_cap', now, 'spent 5 of cap 5')).toMatchObject({ state: 'STOPPED', stopReason: 'cost_cap', stopDetail: 'spent 5 of cap 5', endedAt: now });
-    expect(await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toEqual(expect.arrayContaining([expect.objectContaining({ state: 'STOPPED' }), expect.objectContaining({ state: 'STOPPED' })]));
+    const features = await prisma.fleetFlowFeature.findMany({ where: { flowId: flow.id }, orderBy: { position: 'asc' } });
+    expect(features).toHaveLength(2);
+    expect(features.map(({ state }) => state)).toEqual(['STOPPED', 'STOPPED']);
   });
   it('stores job flow linkage and preserves jobs when a flow is deleted', async () => {
     const flow = await createFlow();
