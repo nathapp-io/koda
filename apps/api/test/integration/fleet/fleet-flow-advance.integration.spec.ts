@@ -1,0 +1,98 @@
+import { canRunDbTests } from '../../helpers/test-environment';
+import { NathApplication } from '@nathapp/nestjs-app';
+import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { FleetFlowTicker } from '../../../src/fleet/flows/fleet-flow.ticker';
+import { FleetFlowsService } from '../../../src/fleet/flows/fleet-flows.service';
+import { fixtureDb, withTestActor } from '../../helpers/action-context';
+import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { bootHttpApp } from '../../helpers/http-app';
+import { resetDb } from '../../helpers/reset-db';
+
+const integration = canRunDbTests() ? describe : describe.skip;
+const SHA = 'a'.repeat(40);
+const SPEC = '.nax/features/flow/spec.md';
+
+integration('fleet flow advancement through the database', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let ticker: FleetFlowTicker;
+  let flows: FleetFlowsService;
+  let projectId: string;
+  let repoId: string;
+  let creatorId: string;
+  let runnerId: string;
+  let threadId: string;
+  const now = new Date('2026-11-07T12:00:00.000Z');
+
+  beforeAll(async () => {
+    vi.stubEnv('FLEET_THREADS_ENABLED', 'true');
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    db = fixtureDb(app);
+    ({ projectId, repoId, adminId: creatorId } = await seedFleetBase(db));
+    ticker = app.get(FleetFlowTicker);
+    flows = app.get(FleetFlowsService);
+  }, 60_000);
+
+  afterAll(async () => { try { await app?.close(); } finally { vi.unstubAllEnvs(); } });
+
+  beforeEach(async () => {
+    await db.fleetPrReview.deleteMany();
+    await db.fleetFlowFeature.deleteMany();
+    await db.fleetFlow.deleteMany();
+    await db.fleetJob.deleteMany({ where: { projectId } });
+    await db.chatThread.deleteMany({ where: { projectId } });
+    const runner = await db.runner.create({ data: {
+      name: `flow-runner-${Date.now()}`, apiKeyHash: `flow-hash-${Date.now()}`, os: 'linux', arch: 'x64',
+      labels: [], capacity: 1, capabilities: {}, daemonVersion: '0.1.0', protocolVersion: 1,
+      bootId: 'flow-boot', enabled: true, lastSeenAt: now, createdById: creatorId,
+    } });
+    runnerId = runner.id;
+    const thread = await db.chatThread.create({ data: {
+      projectId, repoId, title: 'flow integration', createdById: creatorId,
+      backend: { kind: 'native', model: 'm1' }, skills: [], feature: 'flow', specPath: SPEC,
+      baseRef: 'main', runnerId, publishedSha: SHA, specPublished: true, writtenPaths: [SPEC],
+    } });
+    threadId = thread.id;
+    await db.chatThread.update({ where: { id: threadId }, data: {
+      preApproval: { userId: creatorId, at: now.toISOString(), costCapUsd: '30' },
+    } });
+  });
+
+  async function createFlow(features = ['flow']) {
+    return withTestActor({ type: 'USER', id: creatorId }, async () => (await flows.create({
+      entry: 'THREAD', threadId,
+      features: features.map((feature) => ({ feature, specPath: SPEC, dependsOn: [] })),
+      roles: { reviewer: 'acp:claude', supervisor: 'native:fast' }, costCapUsd: '25',
+    }, { type: 'USER', id: creatorId }, { projectId, now })).flow).then(async (flow) => {
+      return db.fleetFlow.update({ where: { id: flow.id }, data: {
+        state: 'APPROVED', approvalMode: 'human', approverId: creatorId, approvedAt: now,
+      } }).then(() => flow);
+    });
+  }
+
+  it('AC-1–AC-4: tick dispatches and persists a linked SPEC_REVIEW job, step and audit', async () => {
+    const flow = await createFlow();
+    await ticker.tick(now);
+    const jobs = await db.fleetJob.findMany({ where: { flowId: flow.id } });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ flowId: flow.id, flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: SHA });
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'RUNNING' });
+    expect(await db.fleetFlowFeature.findMany({ where: { flowId: flow.id } })).toMatchObject([{ currentStep: 'SPEC_REVIEW' }]);
+    expect(await db.auditEntry.count({ where: { key: 'system.flow.advance', resourceType: 'flow', resourceId: flow.id } })).toBeGreaterThan(0);
+  });
+
+  it('AC-5: another tick does not duplicate a queued flow job', async () => {
+    const flow = await createFlow();
+    await ticker.tick(now);
+    await ticker.tick(new Date(now.getTime() + 1_000));
+    expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(1);
+  });
+
+  it('AC-6/7: multiple features remain approved and do not dispatch', async () => {
+    const flow = await createFlow(['flow', 'other']);
+    await ticker.tick(now);
+    expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(0);
+    expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'APPROVED' });
+  });
+});
