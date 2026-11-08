@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T07:04:35.706Z",
+  "updatedAt": "2026-11-08T07:21:21.076Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,14 +33,17 @@
         "agent-task"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure bounded task generation and item filtering with existing helpers; no integration or access-control changes."
+        "reasoning": "Pure bounded task generation and item filtering with existing helpers; no integration or access-control changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-steps.ts",
@@ -63,7 +66,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9b8aded33a43af8247e9a1a97a2f913a6ba1cebc"
     },
     {
       "id": "US-002",
@@ -114,7 +121,10 @@
         "parseRuleVerdict returns { ok: false } when the only marker is embedded in prose rather than starting a line."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -157,7 +167,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -213,7 +226,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -291,7 +307,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -336,7 +355,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -397,7 +419,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -443,7 +468,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -491,7 +519,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -572,7 +603,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -631,7 +665,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -681,7 +718,10 @@
         "A subsequent held FIX with a different job id returns the NAX flow to WAITING_ANSWER rather than starting another unguided RULE round."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Goal and done: extend the existing single-feature PR phase from RUN -> REVIEW -> FIX to RUN -> REVIEW -> conditional RULE -> FIX. RULE is a read-only reviewer-model AGENT job that returns evidenced Arc A rulings, never a code-writing replacement for FIX. There is one automatic round. A non-CI held FIX in a NAX-entry flow waits for one human answer, which authorizes exactly one further guided RULE + FIX round; further holds need fresh answers. CI holds and THREAD-entry holds still stop. Done includes durable SYSTEM/flow rulings, their FIX snapshot, replay safety, refusal reporting, guidance and question fan-out, and a PostgreSQL-backed end-to-end PR-phase scenario. The binding 12-story structure is retained, including the explicitly declared database-test story US-012.\n\nDiscovery and architecture: codebase-memory MCP is unavailable in this session; findings come from direct source reads and text searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The supplied automatic Express/Next.js labels are not authoritative: .nax/mono/apps/api/context.md:22 identifies NestJS 12 + Fastify, Prisma 7 and Vitest; the web is Nuxt per repository guidance and is untouched. Read nathapp-nestjs-patterns before implementation of NestJS code. Business rules stay in apps/api; use Nathapp transactions, repositories, action contexts, audit and outbox patterns, not new HTTP routes or client-side orchestration. No source code or tests were changed or executed while drafting this PRD.\n\nPure tasks and verdicts (US-001/002): apps/api/src/fleet/flows/flow-steps.ts:3 contains the six-value FlowStep union and :23 builds bounded review tasks. apps/api/src/fleet/common/agent-jobs.ts:3 caps tasks at 16,384 UTF-16 code units; :13 also bounds serialized results (output is only 8,192 bytes), so a nominal maximum of 100 rulings is an input limit, not a promise that all verbose rulings fit a runner result. apps/api/src/fleet/flows/flow-calls.ts:36 sanitizes lone surrogates, :62 truncates without splitting pairs, :73 supplies positional questions, :79 formats question comments, and :136 has private oneLine. Export oneLine unchanged; do not accidentally change existing callers. NUL is not currently replaced by sanitizeFlowText, so the new parser must explicitly replace it as well. Preserve Unicode validity after cutting to limits. apps/api/src/fleet/flows/flow-verdict.ts:16 is the existing verdict-parser precedent, but it searches the last marker anywhere in output: the new parser's explicit line-start contract is stricter and must not inherit that incidental permissiveness. Reserve space for complete guidance, instruction and the omitted-item count; never truncate those blocks to fit items. flow-rulings.ts and flow-rulings.spec.ts do not exist yet. US-001 and US-002 are deliberately independent in the binding graph but contribute to the same new module/test file; coordinate their additive changes without adding a dependency or overwriting either half. US-002 contextFiles therefore reference existing predecessors, not a file created by its non-dependency.\n\nDispatch and decisions (US-003/007/008): apps/api/src/fleet/flows/flow-step-dispatch.ts:14 defines BuildStepDispatchInput, :30 contains the exhaustive switch, and :9 computes remaining budget using Prisma.Decimal. Add RULE to the union and switch together; keep common repo, pin and remaining-cap fields. RULE runs against RUN.resultBranch, not resultSha, so later guided rounds see FIX pushes. apps/api/src/fleet/flows/flow-step-decision.ts:23 defines the existing required input fields; new run, ruledItemIds and rulingsJobId fields must remain optional for old fixtures and callers. :53 defines action variants, :76 skips multi-feature flows, :87-90 handles terminal failures, and :158 onward currently dispatches FIX after REVIEW and stops on a held FIX. Keep earlier review/plan/ingest rules unchanged. Existing completion includes markedReady=false with no readyHeld because an already-ready PR needs no change. Add apply_rulings before orchestrator access to action.step, since that variant has no step. Questions take precedence over rulings; answers are scoped to the specific questionsJobId, not reusable authorization for unbounded rounds. Automatic RULE needs draft plus an unprotected advisor/ruling/cannot-verify/story/reason item, while task filtering also includes gates and unknown non-finding/non-ci kinds. A guided RULE always runs. flow-step-decision.spec.ts:7 has an existing fixture that must remain unchanged; :121-147 anchors REVIEW/FIX behavior, including THREAD semantics via canApplyCalls=false. FlowStep is also imported by jobs/domain/fleet-job.domain.ts:11, jobs/fleet-jobs.service.ts:26 and jobs/prisma-fleet-job.repository.ts:17; job persistence stores flowStep as a string, so no job enum migration is needed.\n\nArc A actor and writer (US-004/005): apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts:15 restricts actorType to USER/AGENT, and dto/fleet-pr-ruling.dto.ts:14 repeats the Swagger enum. Add SYSTEM in both and regenerate only openapi.json with bun run api:export-spec, per the feature's explicit CLI/web exclusion. Do not manually edit generated clients. apps/api/prisma/schema.prisma:1038 stores actorType as String, so this actor widening requires no migration. apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:86 orders latestRuling newest by createdAt/id; :91 list uses the same descending order, so ruledItemIds must select only the first row per item, not any historical applied row. :100 pendingForFix filters actor ids for user/agent lookup; SYSTEM must use its actorId directly. apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:25 has five constructor dependencies; add ActorPrincipalLoader last and preserve all positional test harnesses. :34 snapshotForFix already loads pending rulings outside dispatch insertion, reads the PR head and caps the snapshot at 100; :47 currently maps all non-agents to users, which must become a three-way mapping. apps/api/src/fleet/jobs/fleet-jobs.service.ts:132 already calls snapshotForFix for FIX, so no parallel flow snapshot mechanism is required. :99 ruleTarget enforces latest draft RUN, PR, item existence, non-CI kind, parsed text and no applied ruling; :126 assertItemIndex performs the existing bounded forge read and intentionally fails open on provider failures. These methods and parseRulingText remain unchanged. createForFlow must reuse them, run forge checks outside transactions, and revalidate eligibility after lockTarget. Only expected app exceptions become refused outcomes; operational/database errors must not be silently treated as policy refusals.\n\nAttribution, access and atomicity: apps/api/src/auth/principal/actor-principal.loader.ts:27 loads USER/AGENT principals and rejects unavailable/disabled users or paused/missing agents. apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts:44 already uses runAsSystem('flow', ..., { onBehalfOf: creator }); action-context/action-context.ts:140 shows the SYSTEM actor/origin/onBehalfOf context. Reuse it for flow rulings, but the Finish ticket must be created with the loaded creator principal, and the RULING comment must have neither user nor agent author. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:48 ensureFinishTicket locks the job and creates/links a Finish ticket transactionally; :69 createRulingComment is principal-authored and :73 commentOnRulingResult delegates to the existing all-linked-ticket comment path. Add createSystemRulingComment over the existing repository system-comment method. :97 commentOnFinish deduplicates exact bodies and does nothing with no job/tickets. Keep system comment, replacePending, ruling insert and system.flow.advance audit in one transaction so a failure cannot leave partial records. The same-trimmed-text latest pending SYSTEM fast path must create no comment, audit or insert on replay. Pending USER/AGENT rulings are protected by ruledItemIds; pending SYSTEM rulings deliberately are not, allowing idempotent crash recovery and a new guided ruling. Actor attribution and access-sensitive stories US-005/010 use strict three-session-tdd. No new permission/approval is introduced and no route gate is invoked in-process, but eligibility checks and creator dispatch access are mandatory.\n\nPersistence and deployment (US-006): apps/api/prisma/schema.prisma:1264 defines FleetFlowFeature, with callsJobId at :1274 and JSON questions/answers immediately after it. Add nullable rulingsJobId in migration 20261201090000_fleet_flow_rulings/migration.sql and regenerate the local Prisma client using bun run db:generate before building dependent repository code. Apply the additive nullable migration before deploying code that reads/writes it; old rows remain null and need no backfill or job foreign key. apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:12 models features with optional durable per-job markers; add the field there. apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:24 maps feature rows by spreading row and decoding question JSON, which already naturally carries newly generated scalar fields; verify round-trip rather than duplicating mappings. apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:36 declares the step repository; prisma-fleet-flow-step.repository.ts:106 recordCalls is a precedent, but recordRulings must specifically updateMany scoped by BOTH id and flowId and leave every calls/questions/answers field unchanged. Test real database behavior in test/integration/fleet/fleet-flow-step.repository.integration.spec.ts.\n\nOrchestrator (US-010/011): apps/api/src/fleet/flows/fleet-flow-advance.service.ts:38 DispatchPass currently admits dispatch/apply_calls, :48 constructor ends with outbox, :67 advance branches on apply_calls before reading action.step, :96 advanceCalls demonstrates decide/work/record separation, :215 lockLive checks live state plus approval generation, :243 decide uses parent-before-flow lock order, :288 excludes work actions from writeDecision, :293 skips billed cap checks for calls, and :302 checks creator access. Extend these seams for apply_rulings: unbilled, access-checked, service calls outside the decide transaction, then one lockLive-guarded progress/activity/refusal-comment transaction. Per-ruling createForFlow owns its own transaction. Do not hold a flow transaction across forge I/O or wrap the full ruling loop in one transaction. Rulings recorded before a concurrent stop are already committed; the final live check suppresses new progress/activity/comment writes, not those prior per-ruling commits. Deduplicate verdict items by keeping each last occurrence in verdict order. :392 decisionInput currently loads no RUN workflow; add lazy reads only for latest REVIEW or RULE and skip ruledItemIds when no RUN workflow exists. Guided RULE dispatch after FIX still needs its RUN read as part of building dispatch data, not as an unconditional decisionInput read. Capture optional rule inputs in decide and pass through dispatchStep at :182; missing RUN.resultBranch must become the exact dispatch_refused detail rather than a raw Error escaping refuseDispatch. US-010 adds the injection and module dependency; US-011 fills the lazy data and guided task seam. apps/api/src/fleet/flows/flows.module.ts:39 imports FleetJobsModule, which already imports FleetRulingsModule (jobs/fleet-jobs.module.ts:1,37); direct import adds no cycle. FleetRulingsModule already imports AuthRepositoryModule and exports FleetPrRulingsService (rulings/fleet-rulings.module.ts:15-18). Preserve module DI coverage as no-DB unit tests.\n\nQuestions and consumers (US-009/011/012): apps/api/src/notifications/fleet/fleet-notification-events.ts:33 and :102 allow only SPEC_REVIEW/PRD_REVIEW today. Widen both the type and parser, not only the producer. FleetFlowStopTicketSubscriber at flows/fleet-flow-stop-ticket.subscriber.ts:38 and notifications/fleet/fleet-flow-stopped.subscriber.ts:25 both parse that payload; forgetting the parser would drop comments AND notifications. The notification subscriber deduplicates creator/approver recipients. flows/flow-calls.ts:79 also narrows step. The existing explicit malformed PLAN test at fleet-notification-events.spec.ts:97 must still reject PLAN. Existing comment-specific tests are also in flows/flow-questions.spec.ts:95, although the spec calls out flow-calls.spec.ts; extend the named files without weakening existing assertions. fleet-flow-advance.service.ts:472 already persists wait, audit, activity and fleet_flow_questions outbox atomically with event id flowId:questions:jobId. Its generic path should support RULE/FIX unchanged. flows/fleet-flows.service.ts:101 answer is already step-agnostic and rejects stale/missing answers, then resumes via recordAnswers; do not translate answers into rulings or change its route/DTO. Distinguish the flow's question ticket from the RUN's Finish ticket.\n\nTests, compatibility and risk: reuse flow-step-dispatch.spec.ts, flow-step-decision.spec.ts, flow-calls.spec.ts, flow-questions.spec.ts, notification payload tests, rulings service/snapshot/preflight/results tests and ticket effect tests. US-004 creates the repository and DTO specs; US-010 creates fleet-flow-advance-rulings.spec.ts. Add the final constructor argument without altering existing assertions in rulings service/snapshot/preflight/results and tickets/finish-ticket.spec.ts, and advance service/calls/review/answers harnesses. The unchanged REVIEW->FIX fixture has a latestJobForStep stub returning a PLAN with no workflow, so it must not cause ruledItemIds reads or change the FIX body. flows.module.spec.ts:151 module overrides need a FleetRulingsModule stub exporting the service. The bounded task and parser are critical untrusted-agent boundaries: multiline injection, malformed arrays, trailing prose, Unicode/NUL, exact caps and no ruling of finding/ci/unknown task ids need deterministic tests. Never override ruleTarget semantics in pursuit of an automatic ruling. Crash retry must not duplicate earlier rulings, and stale waits cannot reuse prior answers. Failure-table cases are retained as explicit behavioral criteria where not already enumerated; additional useful edge cases are only suggestedCriteria.\n\nUS-012 intentionally remains its own integration story per the binding override. apps/api/test/integration/fleet/fleet-flow-answers.integration.spec.ts:87 seeds NAX flows and :115 drives replay-safe question/comment/notification fan-out with real PostgreSQL and stubbed forge; fleet-flow-advance.integration.spec.ts:99 seeds terminal jobs and drives ticks. The supplied fleet-pr-rulings-ingest.integration.spec.ts:41 is useful for RUN/FIX/ruling seeding and :72 proves system RULING comments, but its existing RUN fixture does not actually populate workflow.openItems; the new fixture must explicitly store the draft workflow, PR URL, resultBranch and ordered terminal timestamps. Stub item-index comments and PR head reads only, retaining real persistence and service orchestration. Disable relay/sweep background work and publish the outbox explicitly to observe the question ticket plus notification without races. Unit tests use Vitest vi APIs and live beside source; module compilation has no DB. Integration tests use canRunDbTests(), KODA_DB_TESTS=1 and must run outside NAX_SANDBOXED=1 with test Postgres or Testcontainers; skipped database tests are not verification. Run bun run test:scoped on the integration files outside the sandbox. Test setup force-resets the test database, so do not run simultaneous DB suites on the same database; another checkout uses KODA_TEST_DB_CONTAINER=1. No migration weakening, generated acceptance edits, runner business logic, web/CLI enum updates, new permissions, multi-feature behavior or completion notifications are part of this feature.\n\nRefine-pass adversarial audit: re-read the complete on-disk spec, all story acceptance arrays and relevant implementation/test sources. The spec has 110 numbered ACs; every one remains in its original story and original ordinal position. Explicit preservation ledger (spec ordinal -> PRD acceptanceCriteria ordinal): US-001: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-002: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-003: 1->1, 2->2, 3->3, 4->4; US-004: 1->1, 2->2, 3->3, 4->4, 5->5; US-005: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-006: 1->1, 2->2, 3->3, 4->4; US-007: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14; US-008: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9; US-009: 1->1, 2->2, 3->3, 4->4; US-010: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11; US-011: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7; US-012: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7. Qualifiers retained include US-003.2 for the same input; US-004.1 lookup exclusions and .3 still USER/AGENT attribution; US-005.7 the loaded creator principal and .12 no insert/comment/audit; US-006.1 existing-row null and .2 all four unchanged fields; US-007.6 the verdict's rulings and .11 not apply_rulings; US-010.1 both items in task and D-1 first, .8 no cost_cap stop and .10 the no-active-transaction observation; US-012.2 the item-index forge stub, .3 no user/agent author, .4 PR head stub and .7 instead of waiting. No deprecated grep/file/verbatim AC tags were present.\n\nAudit corrections are clarifications, not deleted spec assertions: ruledItemIds returns string ids, not ruling/item objects (US-005.13/.14); the existing repository is IFleetFlowRepository implemented by PrismaFleetFlowRepository, not an invented FleetFlowRepository class (US-006.3; source prisma-fleet-flow.repository.ts:14,39); RULE-to-FIX decisions require a readable no-question verdict, and answered-question cases require the NAX/20-question branch preconditions, preserving question precedence (US-007.8-.14); createForFlow takes one object mapping verdict.item to itemId and verdict.ruling to text (US-010.1); repository RUN openItems are under workflow.openItems (jobs/domain/fleet-job.domain.ts:130-145), distinct from the FlowStepInput.run workflow projection; dispatch membership excludes pending USER/AGENT protected ids as well as applied ids (US-011.3). A wait tick persists an outbox event; the question comment is observed after FanOutPublisher delivers it, not synchronously inside advance (US-012.5; fleet-flow-advance.service.ts:472 and fleet-flow-stop-ticket.subscriber.ts:38,89).\n\nFailure-table ledger: unreadable RULE -> US-007.5; failed/cancelled/crashed/escalated RULE -> US-007.15; not-in-task ruling -> US-010.3; eligibility/index refusal -> US-005.3-.5 and US-010.4; every ruling refused without a ticket -> US-010.12; crash after partial recording -> US-010.13 and US-005.12; mixed questions/rulings -> US-007.11; unavailable creator -> US-005.6; over 20 questions -> US-007.13; CI hold -> US-008.4/.5 and US-012.7; NAX hold wait/comment/notification -> US-008.1, US-012.5 and the explicit notification AC US-012.8; THREAD hold -> US-008.6; no RUN resultBranch -> US-011.6. Every story now has an observable negative path: US-001.2/.3/.8; US-002.4-.11; US-003.4; US-004.6; US-005.3-.6; US-006.4; US-007.5/.12/.13/.15; US-008.4-.7; US-009.3; US-010.3/.4/.7/.9; US-011.6; US-012.7. Added only the missing required negative/regression/failure-table assertions; optional hardening remains in suggestedCriteria. All assertions can be checked via returned objects/text, thrown outcomes, spy arguments/call order/action context, persisted rows/comments/notifications or activity/outbox payloads.\n\nRegression audit: exporting oneLine is now anchored by an unchanged buildFlowCalls string result in US-001.16 (flow-calls.ts:109-138, flow-calls.spec.ts:5); old FIX dispatch shape is explicit in US-003.5 (flow-step-dispatch.spec.ts:40); old USER/AGENT snapshot naming remains US-004.3, and existing non-fatal head-read failures are US-004.6 (fleet-pr-rulings.snapshot.spec.ts:51); extending the writer constructor preserves direct AGENT create attribution in US-005.16 (fleet-pr-rulings.service.ts:139); existing persistence fields remain unchanged in US-006.2; absent run fields still choose FIX in US-007.4 and existing ready/thread behavior remains US-008.6/.8/.9; SPEC_REVIEW/PRD_REVIEW question parsing and the pre-existing positional-id comment remain US-009.5/.6 (flow-questions.spec.ts:95); the existing out-of-transaction apply_calls path is US-010.14 (fleet-flow-advance-calls.spec.ts:120); the REVIEW/PLAN-without-workflow fixture keeps its exact FIX body in US-011.8 (fleet-flow-advance.service.spec.ts:969). US-012 adds integration code rather than replacing a production path.\n\nContext/dependency/routing audit: all 12 ids and workdirs remain exactly as bound, and every referenced dependency exists. No binding edge was removed even where transitive. All spec-recommended context files are retained within the five-file limit except the still-nonexistent flow-rulings.ts in dependency-free US-002: it cannot legally be a readable upstream context because US-001 is not its dependency, so its additive shared-file instructions remain in the description instead. US-010 now includes the specifically recommended fleet-job-ticket.effects.ts instead of the less critical step-domain context; its upstream writer source remains the fifth context. US-004 is reduced to medium/tdd-simple because its five TypeScript edits are standard representations/delegation and spec generation, not a new authorization system; US-011 is reduced to medium/tdd-simple because it plumbs existing types/helpers in one service. US-005 and US-010 retain strict three-session-tdd for principal/access-sensitive writing. US-012 retains complex/three-session-tdd-lite for the existing app/PG/forge/outbox integration fixture. Descriptions and Scope/In boundaries were updated to include the added regression and notification assertions.\n\nOut-of-scope audit: all 12 feature-level bullets remain verbatim and separate in top-level outOfScope, in spec order: non-FIX code writes; CI rulings; direct answer-to-ruling conversion; THREAD waits; multi-feature flows; web form/flow DTO changes; completion notification; refreshing stored RUN items; web/CLI SYSTEM types; item-index caching; new permission/approval; cancelling running jobs on stop. Relevant boundaries remain echoed in adjacent stories' Scope/Out, and no story-local exclusion was hoisted. No implementation code, schema, tests or generated client were changed during the refine pass.",
