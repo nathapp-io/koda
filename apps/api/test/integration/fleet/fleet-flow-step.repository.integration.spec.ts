@@ -6,6 +6,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaFleetFlowStepRepository } from '../../../src/fleet/flows/prisma-fleet-flow-step.repository';
+import { PrismaFleetFlowRepository } from '../../../src/fleet/flows/prisma-fleet-flow.repository';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
 
@@ -13,6 +14,7 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
   let module: TestingModule;
   let prisma: PrismaClient;
   let repo: PrismaFleetFlowStepRepository;
+  let flowRepo: PrismaFleetFlowRepository;
   let projectId: string;
   let repoId: string;
   let creatorId: string;
@@ -21,11 +23,12 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     await resetDb();
     module = await Test.createTestingModule({
       imports: [PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } })],
-      providers: [PrismaFleetFlowStepRepository],
+      providers: [PrismaFleetFlowStepRepository, PrismaFleetFlowRepository],
     }).compile();
     await module.init();
     prisma = module.get<PrismaService<PrismaClient>>(PrismaService).client;
     repo = module.get(PrismaFleetFlowStepRepository);
+    flowRepo = module.get(PrismaFleetFlowRepository);
     const base = await seedFleetBase(prisma);
     ({ projectId, repoId } = base);
     creatorId = base.adminId;
@@ -146,6 +149,30 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     await repo.complete(flow.id, now);
     expect(await prisma.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } })).toMatchObject({ state: 'COMPLETED', endedAt: now });
     expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).state).toBe('COMPLETED');
+  });
+
+  it('US-006 AC-1..4 stores rulings job ids scoped to the feature and maps them through findById', async () => {
+    const firstFlow = await createFlow('RUNNING');
+    const otherFlow = await createFlow('RUNNING');
+    const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: firstFlow.id } });
+    const otherFeature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: otherFlow.id } });
+
+    expect(feature.rulingsJobId).toBeNull();
+    await prisma.fleetFlowFeature.update({ where: { id: feature.id }, data: { rulingsJobId: null } });
+    expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).rulingsJobId).toBeNull();
+
+    await prisma.fleetFlowFeature.update({ where: { id: feature.id }, data: {
+      callsJobId: 'calls', questionsJobId: 'questions', questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }],
+    } });
+    await repo.recordRulings(firstFlow.id, feature.id, 'j1');
+    expect(await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).toMatchObject({
+      rulingsJobId: 'j1', callsJobId: 'calls', questionsJobId: 'questions',
+      questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }],
+    });
+    expect((await flowRepo.findById(firstFlow.id))?.features[0]).toMatchObject({ rulingsJobId: 'j1' });
+
+    await repo.recordRulings(firstFlow.id, otherFeature.id, 'wrong-flow');
+    expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: otherFeature.id } })).rulingsJobId).toBeNull();
   });
 
   it('AC-14 does not settle an ingest from a different lease', async () => {
