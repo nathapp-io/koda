@@ -507,7 +507,7 @@ rulings snapshot, a held FIX, the wait, the answers and the guided RULE.
 10. [unit] With guidance `{ held: '2 open item(s): G-1, D-1', questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }] }` the task contains `Guidance from the user:`, `Still held: 2 open item(s): G-1, D-1` and `Q1: q A: a`, and the `Guidance from the user:` line comes before the first item line.
 11. [unit] With guidance whose `held` is null the task has no `Still held:` line.
 12. [unit] With 2,000 items and no guidance the returned task is at most `AGENT_TASK_MAX_LENGTH` characters, ends with the complete `FLOW_RULING_INSTRUCTION`, and contains a line `(N more items not shown)` with N equal to the number of item lines dropped.
-13. [unit] With 2,000 items and the guidance of AC-10 the task is at most `AGENT_TASK_MAX_LENGTH` characters and still contains `Still held: 2 open item(s): G-1, D-1` and `Q1: q A: a`.
+13. [unit] With 2,000 items and guidance `{ held: '2 open item(s): G-1, D-1', questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }] }` the task is at most `AGENT_TASK_MAX_LENGTH` characters and still contains `Still held: 2 open item(s): G-1, D-1` and `Q1: q A: a`.
 14. [unit] `FLOW_RULING_INSTRUCTION` names each keyword form `verified:`, `confirm:`, `override:`, `waive:` and `fixed <head sha>`, and its last line is `{"rulings":[{"item":"<id>","ruling":"<keyword line and evidence>"}],"questions":[{"item":"<id>","question":"<question>"}]}`.
 
 ### US-002: Rule verdict parser
@@ -578,7 +578,7 @@ rulings snapshot, a held FIX, the wait, the answers and the guided RULE.
 9. [unit] For a COMPLETED `RULE` whose id equals `rulingsJobId` and a null `featurePrNumber` it returns `wait`.
 10. [unit] For a COMPLETED `RULE` with one question, no rulings and `canApplyCalls: true` it returns `{ kind: 'wait_answer', step: 'RULE', jobId: <id>, questions: [{ id: '1', question: 'S-2: Which?' }] }`.
 11. [unit] For a COMPLETED `RULE` with one ruling and one question and `canApplyCalls: true` it returns `wait_answer` (not `apply_rulings`).
-12. [unit] For the RULE of AC-10 with `canApplyCalls: false` it returns a stop with reason `review_ambiguous`.
+12. [unit] For a COMPLETED `RULE` with one question, no rulings and `canApplyCalls: false` it returns a stop with reason `review_ambiguous`.
 13. [unit] For a `RULE` with 21 questions and `canApplyCalls: true` it returns a stop with reason `review_ambiguous`.
 14. [unit] For a `RULE` with questions where `questionsJobId` equals its id and `answers` is non-null it returns `{ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: <id> } }`.
 
@@ -608,7 +608,7 @@ rulings snapshot, a held FIX, the wait, the answers and the guided RULE.
 3. [unit] A ruling for item `F-1` of kind `finding` is never passed to `createForFlow` and is listed as refused with reason `not in task`.
 4. [unit] When one of two rulings returns `{ kind: 'refused', reason: 'fleet.rulings.notRulable' }` it still records the other, calls `recordRulings`, and calls `commentOnRulingResult(runId, body)` once with a body containing `Flow rulings refused (RULE job <id>): C-1 (fleet.rulings.notRulable)`.
 5. [unit] When no ruling is refused it never calls `commentOnRulingResult`.
-6. [unit] It records one `flow.rulings` activity whose payload is `{ jobId: <RULE id>, recorded: ['D-1'], refused: [{ item: 'C-1', reason: 'fleet.rulings.notRulable' }] }` for the case of AC-4.
+6. [unit] It records one `flow.rulings` activity whose payload is `{ jobId: <RULE id>, recorded: ['D-1'], refused: [{ item: 'C-1', reason: 'fleet.rulings.notRulable' }] }` when `D-1` is recorded and `C-1` is refused with `fleet.rulings.notRulable`.
 7. [unit] When the flow is no longer live at the record transaction (`lockLive` returns null) it calls neither `recordRulings` nor the activity recorder.
 8. [unit] With `spentUsd` equal to `costCapUsd`, an `apply_rulings` decision still calls `createForFlow` (no `cost_cap` stop).
 9. [unit] When the creator has lost dispatch access, an `apply_rulings` decision stops the flow `creator_lost_access` and never calls `createForFlow`.
