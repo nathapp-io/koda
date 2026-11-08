@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T14:38:22.063Z",
+  "updatedAt": "2026-11-08T14:53:11.824Z",
   "userStories": [
     {
       "id": "US-001",
@@ -496,14 +496,17 @@
         "US-005",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One existing service gains a conditional count, marker input and dispatch flag; existing unit/DB harnesses cover the changed review sequence without new orchestration abstractions or authorization logic."
+        "reasoning": "One existing service gains a conditional count, marker input and dispatch flag; existing unit/DB harnesses cover the changed review sequence without new orchestration abstractions or authorization logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -537,7 +540,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0aa2b4c66c79b2798709ba12ef48a10e7b9e90af"
     },
     {
       "id": "US-010",
