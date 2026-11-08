@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T14:03:43.186Z",
+  "updatedAt": "2026-11-08T14:11:32.225Z",
   "userStories": [
     {
       "id": "US-001",
@@ -191,14 +191,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive transport across three existing pure modules with an exact prompt and backward-compatible defaults."
+        "reasoning": "Additive transport across three existing pure modules with an exact prompt and backward-compatible defaults.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-verdict.ts",
@@ -225,7 +228,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bf1dbe2340f24a145284f5d7e55b4f07d22f686d"
     },
     {
       "id": "US-005",
