@@ -1,4 +1,5 @@
 import { FLOW_STOP_DETAIL_MAX } from './flow-steps';
+import { parsePrdEdits, type FlowPrdEdit } from './flow-prd-edits';
 
 export type FlowFindingClass = 'answered' | 'minor' | 'ambiguous';
 
@@ -11,7 +12,7 @@ export interface FlowFinding {
   answer?: string;
 }
 
-export type FlowVerdict = { ok: true; findings: FlowFinding[] } | { ok: false };
+export type FlowVerdict = { ok: true; findings: FlowFinding[]; prdEdits: FlowPrdEdit[] } | { ok: false };
 
 export function parseFlowVerdict(output: string | null | undefined): FlowVerdict {
   if (typeof output !== 'string') return { ok: false };
@@ -49,7 +50,9 @@ export function parseFlowVerdict(output: string | null | undefined): FlowVerdict
     result.push({ ...(id === undefined ? {} : { id }), class: classification, summary: finding.summary, ...(fix === undefined ? {} : { fix }), ...(question === undefined ? {} : { question }) });
   }
 
-  return { ok: true, findings: result };
+  const prdEdits = 'prdEdits' in parsed ? parsePrdEdits(parsed.prdEdits) : [];
+  if (prdEdits === null) return { ok: false };
+  return { ok: true, findings: result, prdEdits };
 }
 
 export function formatFindings(findings: readonly FlowFinding[]): string {
