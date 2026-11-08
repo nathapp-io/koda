@@ -1,5 +1,5 @@
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
-import { oneLine, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { oneLine, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 
 export type FlowOpenItem = {
   id: string;
@@ -53,11 +53,11 @@ export function buildRuleTask(input: { prNumber: number; items: FlowOpenItem[]; 
   const prefix = [`Rule the open workflow items of PR #${input.prNumber}.`, ''];
   if (input.guidance !== null) {
     const guidance = ['Guidance from the user:'];
-    if (input.guidance.held !== null) guidance.push(`Still held: ${oneLine(input.guidance.held).slice(0, 500)}`);
+    if (input.guidance.held !== null) guidance.push(truncateFlowText(`Still held: ${oneLine(input.guidance.held)}`, 500));
     const answers = new Map(input.guidance.answers.map(({ id, answer }) => [id, answer]));
     for (const question of input.guidance.questions) {
       const answer = answers.get(question.id);
-      if (answer !== undefined) guidance.push(`Q${oneLine(question.id)}: ${oneLine(question.question)} A: ${oneLine(answer)}`.slice(0, 300));
+      if (answer !== undefined) guidance.push(truncateFlowText(`Q${oneLine(question.id)}: ${oneLine(question.question)} A: ${oneLine(answer)}`, 300));
     }
     prefix.push(...guidance, '');
   }

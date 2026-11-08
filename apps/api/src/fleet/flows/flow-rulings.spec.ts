@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
+import { isWellFormedFlowText } from './flow-calls';
 import { FLOW_RULING_INSTRUCTION, buildRuleTask, needsAutomaticRule, ruleTaskItems } from './flow-rulings';
 import type { FlowOpenItem } from './flow-rulings';
 
@@ -37,6 +38,18 @@ describe('flow ruling tasks', () => {
     expect(task.indexOf('Guidance from the user:')).toBeLessThan(task.indexOf('- I (reason)'));
     expect(buildRuleTask({ prNumber: 7, items: [], guidance: { held: null, questions: [], answers: [] } })).not.toContain('Still held:');
   });
+  it('does not split Unicode surrogate pairs while truncating held or answer guidance', () => {
+    const task = buildRuleTask({ prNumber: 7, items: [], guidance: {
+      held: `${'h'.repeat(488)}😀`,
+      questions: [{ id: '1', question: 'q' }],
+      answers: [{ id: '1', answer: `${'a'.repeat(290)}😀` }],
+    } });
+    const guidanceLines = task.split('\n').filter((line) => line.startsWith('Still held:') || line.startsWith('Q1:'));
+    expect(guidanceLines).toHaveLength(2);
+    expect(guidanceLines.every(isWellFormedFlowText)).toBe(true);
+    expect(guidanceLines[1]).toBe(`Q1: q A: ${'a'.repeat(290)}`);
+  });
+
   it('bounds item lists and guidance while preserving fixed content', () => {
     const large = Array.from({ length: 2000 }, (_, index) => ({ id: `I-${index}`, kind: 'reason', issue: 'x'.repeat(30) }));
     const task = buildRuleTask({ prNumber: 7, items: large, guidance: null });
