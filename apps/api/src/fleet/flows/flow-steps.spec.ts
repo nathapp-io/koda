@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
 import {
   buildReviewTask,
+  FLOW_CALLS_PRECEDENCE,
   FLOW_STOP_DETAIL_MAX,
   FLOW_VERDICT_INSTRUCTION,
 } from './flow-steps';
@@ -9,13 +10,13 @@ import {
 describe('flow steps', () => {
   it('builds a SPEC_REVIEW task with the verdict instruction', () => {
     expect(buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a')).toBe(
-      `/spec-review .nax/features/a/spec.md\n\n${FLOW_VERDICT_INSTRUCTION}`,
+      `/spec-review .nax/features/a/spec.md\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`,
     );
   });
 
   it('builds a PRD_REVIEW task with both spec and PRD paths', () => {
     expect(buildReviewTask('PRD_REVIEW', '.nax/features/a/spec.md', 'a')).toBe(
-      `/spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json --phase 9\n\n${FLOW_VERDICT_INSTRUCTION}`,
+      `/spec-review --spec .nax/features/a/spec.md --prd .nax/features/a/prd.json --phase 9\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`,
     );
   });
 
@@ -26,7 +27,13 @@ describe('flow steps', () => {
 
   it('preserves the complete verdict suffix when truncating an oversized PRD review task', () => {
     const task = buildReviewTask('PRD_REVIEW', 'p'.repeat(20_000), 'a');
-    expect(task.endsWith(`\n\n${FLOW_VERDICT_INSTRUCTION}`)).toBe(true);
+    expect(task.endsWith(`\n\n${FLOW_CALLS_PRECEDENCE}\n\n${FLOW_VERDICT_INSTRUCTION}`)).toBe(true);
+  });
+
+  it('tells the reviewer that the Flow\'s calls section amends the spec body above it', () => {
+    expect(FLOW_CALLS_PRECEDENCE).toContain("## Flow's calls");
+    expect(FLOW_CALLS_PRECEDENCE).toContain('amends the spec text above it');
+    expect(FLOW_CALLS_PRECEDENCE).toContain('not been edited to match');
   });
 
   it('includes the classified schema and ends with the exact empty-findings line', () => {
