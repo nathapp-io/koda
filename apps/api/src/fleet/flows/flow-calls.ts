@@ -77,7 +77,7 @@ export function flowQuestions(findings: FlowFinding[]): FlowQuestion[] {
 }
 
 export function formatQuestionsComment(input: {
-  step: 'SPEC_REVIEW' | 'PRD_REVIEW';
+  step: 'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX';
   jobId: string;
   questions: FlowQuestion[];
   answerPath: string;
