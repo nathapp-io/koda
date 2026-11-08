@@ -128,6 +128,17 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld: 'no CI' } }) })))
       .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'no CI' });
   });
+  it('#411 completes after FIX finds the PR already ready (markedReady false, no hold)', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: false } }) }))).toEqual({ kind: 'complete' });
+  });
+  it('#411 completes after FIX finds the PR already ready with replies or resolutions recorded', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: false, replied: 1, resolved: 1 } }) })))
+      .toEqual({ kind: 'complete' });
+  });
+  it('#411 still stops when FIX is held with a hold reason', () => {
+    expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld: 'CI failure: test' } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'CI failure: test' });
+  });
   it('US-009 AC-8 stops after FIX ends without a ready result', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: null }) })))
       .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });

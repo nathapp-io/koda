@@ -163,6 +163,11 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
 
     if (latestJob.step === 'FIX') {
       if (latestJob.fixReady?.markedReady === true) return { kind: 'complete' };
+      // #411: nax reports `markedReady: false` with no `readyHeld` only when the PR was already ready (not a draft);
+      // every hold it applies carries a reason. A RUN that publishes a ready PR therefore completes here too.
+      if (latestJob.fixReady && latestJob.fixReady.markedReady === false && !latestJob.fixReady.readyHeld) {
+        return { kind: 'complete' };
+      }
       return {
         kind: 'stop',
         reason: 'pr_not_ready',
