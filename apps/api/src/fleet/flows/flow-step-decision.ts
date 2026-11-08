@@ -1,6 +1,6 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
-import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, oneLine, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, oneLine, sanitizeFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
 import { needsAutomaticRule, parseRuleVerdict, type FlowOpenItem, type FlowRuling } from './flow-rulings';
 import type { FlowFinding } from './flow-verdict';
@@ -69,6 +69,7 @@ export type ApplyRulingsAction = Extract<FlowStepAction, { kind: 'apply_rulings'
 export type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
+const safeRuleItemLabel = (value: string): string => oneLine(sanitizeFlowText(value.replace(/\u0000/g, '\uFFFD')));
 
 function failed(job: FlowJobView): FlowStepAction {
   const reason = job.stateReason ?? 'no reason';
@@ -175,7 +176,7 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
         return { kind: 'stop', reason: 'verdict_unreadable', detail: `RULE job ${latestJob.id}: no rulings JSON in the agent output` };
       }
       if (verdict.questions.length > 0) {
-        const detail = verdict.questions.map(({ item, question }, index) => `${index + 1}. ${oneLine(item)}: ${oneLine(question)}`).join(' ');
+        const detail = verdict.questions.map(({ item, question }, index) => `${index + 1}. ${safeRuleItemLabel(item)}: ${oneLine(question)}`).join(' ');
         if (!input.canApplyCalls || verdict.questions.length > FLOW_CALLS_MAX_FINDINGS) {
           return { kind: 'stop', reason: 'review_ambiguous', detail };
         }
@@ -183,7 +184,7 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
           return { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: latestJob.id } };
         }
         return { kind: 'wait_answer', step: 'RULE', jobId: latestJob.id,
-          questions: verdict.questions.map(({ item, question }, index) => ({ id: String(index + 1), question: `${oneLine(item)}: ${question}` })) };
+          questions: verdict.questions.map(({ item, question }, index) => ({ id: String(index + 1), question: `${safeRuleItemLabel(item)}: ${question}` })) };
       }
       if (input.rulingsJobId === latestJob.id) {
         return input.featurePrNumber === null

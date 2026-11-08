@@ -315,6 +315,14 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) })))
       .toEqual({ kind: 'wait_answer', step: 'RULE', jobId: 'rule-1', questions: [{ id: '1', question: 'S-2: Which?' }] });
   });
+  it('sanitizes RULE item labels before wait questions and stop details', () => {
+    const unsafeItem = `S-\u0000\uD800-2`;
+    const latestJob = ruleJob({ agentOutput: ruleVerdict([], [{ item: unsafeItem, question: 'Which?' }]) });
+    const waiting = decideFlowStep(input({ canApplyCalls: true, latestJob }));
+    expect(waiting).toEqual({ kind: 'wait_answer', step: 'RULE', jobId: 'rule-1', questions: [{ id: '1', question: 'S-\uFFFD\uFFFD-2: Which?' }] });
+    const stopped = decideFlowStep(input({ canApplyCalls: false, latestJob }));
+    expect(stopped).toEqual({ kind: 'stop', reason: 'review_ambiguous', detail: '1. S-\uFFFD\uFFFD-2: Which?' });
+  });
   it('US-007 AC-11 questions take precedence over rulings', () => {
     const verdict = ruleVerdict([{ item: 'S-2', ruling: 'verified: evidence' }], [{ item: 'S-3', question: 'Which?' }]);
     expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) }))).toMatchObject({ kind: 'wait_answer', step: 'RULE' });
