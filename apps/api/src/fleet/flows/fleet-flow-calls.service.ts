@@ -52,8 +52,8 @@ export class FleetFlowCallsService {
       const { token } = await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
       const head = await this.github.getBranchHead(token, repo.owner, repo.name, flow.branch);
       const file = await this.github.getFile(token, repo.owner, repo.name, path, head);
-      if (!file) return { kind: 'failed', detail: `prd.json missing on ${flow.branch}` };
       if (head !== expectedHead) {
+        if (!file) return { kind: 'stale', head };
         const base = await this.github.getFile(token, repo.owner, repo.name, path, expectedHead);
         const expected = base && applyPrdEditsToText(base.content.toString('utf8'), action.edits);
         if (!expected || expected.kind !== 'ok'
@@ -63,6 +63,7 @@ export class FleetFlowCallsService {
         }
         return { kind: 'committed', sha: head, applied: expected.applied, refused: expected.refused };
       }
+      if (!file) return { kind: 'failed', detail: `prd.json missing on ${flow.branch}` };
 
       const result = applyPrdEditsToText(file.content.toString('utf8'), action.edits);
       if (result.kind === 'unreadable') return { kind: 'failed', detail: 'prd.json unreadable' };

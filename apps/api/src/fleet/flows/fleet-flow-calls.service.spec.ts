@@ -180,6 +180,12 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
     expect(h.github.putFile).not.toHaveBeenCalled();
   });
 
+  it('AC-1: returns stale when a moved head no longer contains the PRD file', async () => {
+    const h = build({ files: [null], head: OTHER_HEAD });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
   it('AC-3/4: recovers our exact single-file PRD commit without writing twice', async () => {
     const editedResult = prdEdits.applyPrdEditsToText(PRD, [onePrdEdit]);
     if (editedResult.kind !== 'ok') throw new Error('test fixture PRD must be readable');
