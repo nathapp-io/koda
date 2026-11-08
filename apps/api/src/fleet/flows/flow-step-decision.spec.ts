@@ -3,6 +3,7 @@ import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswe
 import { formatFindings } from './flow-verdict';
 import type { FlowOpenItem, FlowRuling } from './flow-rulings';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
+import type { FlowPrdEdit } from './flow-prd-edits';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
 const input = (overrides: Partial<FlowStepInput> = {}): FlowStepInput => ({
@@ -384,6 +385,66 @@ describe('decideFlowStep', () => {
   });
   it.each(['FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] as const)('US-007 AC-15 stops terminal RULE %s', (state) => {
     expect(decideFlowStep(input({ latestJob: ruleJob({ state }) }))).toMatchObject({ kind: 'stop', reason: 'step_failed' });
+  });
+
+  describe('US-006 PRD edit and two-pass review decisions', () => {
+    const edit: FlowPrdEdit = { story: 'US-001', op: 'add_ac', new: 'Cover the behavior' };
+    const reviewWithEdits = (step: 'SPEC_REVIEW' | 'PRD_REVIEW', findings: unknown[], id = 'review-1') =>
+      job({ id, step, agentOutput: JSON.stringify({ findings, prdEdits: [edit] }) });
+
+    it('AC-1 repeats SPEC_REVIEW after first-pass calls', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, callsJobId: 'review-1', specReviewCount: 1,
+        latestJob: reviewWithEdits('SPEC_REVIEW', [minor]) })))
+        .toEqual({ kind: 'dispatch', step: 'SPEC_REVIEW' });
+    });
+    it('AC-2 dispatches PLAN after second-pass calls', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, callsJobId: 'review-1', specReviewCount: 2,
+        latestJob: reviewWithEdits('SPEC_REVIEW', [minor]) })))
+        .toEqual({ kind: 'dispatch', step: 'PLAN' });
+    });
+    it('AC-3 keeps dispatching PLAN when the spec review count is absent', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, callsJobId: 'review-1',
+        latestJob: reviewWithEdits('SPEC_REVIEW', [minor]) })))
+        .toEqual({ kind: 'dispatch', step: 'PLAN' });
+    });
+    it('AC-4 sends an empty SPEC_REVIEW verdict to PLAN on either pass', () => {
+      expect(decideFlowStep(input({ specReviewCount: 1,
+        latestJob: job({ step: 'SPEC_REVIEW', agentOutput: '{"findings":[]}' }) })))
+        .toEqual({ kind: 'dispatch', step: 'PLAN' });
+    });
+    it('AC-5 applies calls from second-pass findings when they are not recorded yet', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, specReviewCount: 2,
+        latestJob: reviewWithEdits('SPEC_REVIEW', [minor]) })))
+        .toEqual({ kind: 'apply_calls', step: 'SPEC_REVIEW', jobId: 'review-1', findings: [minor] });
+    });
+    it('AC-6 applies PRD edits after a no-findings PRD_REVIEW', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 1,
+        latestJob: reviewWithEdits('PRD_REVIEW', []) })))
+        .toEqual({ kind: 'apply_prd_edits', jobId: 'review-1', edits: [edit], accepted: [] });
+    });
+    it('AC-7 dispatches RUN when PRD edits for this job are already recorded', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 1, prdEditsJobId: 'review-1',
+        latestJob: reviewWithEdits('PRD_REVIEW', []) })))
+        .toEqual({ kind: 'dispatch', step: 'RUN' });
+    });
+    it('AC-8 ignores PRD edits when calls cannot be applied', () => {
+      expect(decideFlowStep(input({ canApplyCalls: false, planCount: 1,
+        latestJob: reviewWithEdits('PRD_REVIEW', []) })))
+        .toEqual({ kind: 'dispatch', step: 'RUN' });
+    });
+    it('AC-9 applies first-round PRD findings and ignores accompanying edits', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 1,
+        latestJob: reviewWithEdits('PRD_REVIEW', [minor]) })))
+        .toEqual({ kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'review-1', findings: [minor] });
+    });
+    it.each(['SPEC_REVIEW', 'PRD_REVIEW'] as const)(
+      'AC-10 keeps the 21-finding cap for %s in every round', (step) => {
+        const findings = Array.from({ length: 21 }, (_, index) => ({ ...minor, id: `m${index}` }));
+        expect(decideFlowStep(input({ canApplyCalls: true, specReviewCount: 2, planCount: 2,
+          latestJob: reviewWithEdits(step, findings) })))
+          .toMatchObject({ kind: 'stop', reason: 'review_findings' });
+      },
+    );
   });
 
   it.each([
