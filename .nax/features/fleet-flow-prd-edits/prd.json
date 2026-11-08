@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T13:58:03.713Z",
+  "updatedAt": "2026-11-08T14:03:43.186Z",
   "userStories": [
     {
       "id": "US-001",
@@ -139,14 +139,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Completes the existing pure edit engine with bounded input application, relative context-path validation and serialization; no credential or authorization path."
+        "reasoning": "Completes the existing pure edit engine with bounded input application, relative context-path validation and serialization; no credential or authorization path.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-calls.ts",
@@ -159,7 +162,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a01e8d3eded8f192258e6d7c9a3d25bc68c46ca8"
     },
     {
       "id": "US-004",
