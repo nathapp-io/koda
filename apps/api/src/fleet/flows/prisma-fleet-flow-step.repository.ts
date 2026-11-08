@@ -111,6 +111,10 @@ export class PrismaFleetFlowStepRepository implements IFleetFlowStepRepository {
     await this.db.fleetFlowFeature.updateMany({ where: { id: featureId, flowId }, data: { rulingsJobId: jobId } });
   }
 
+  async recordPrdEdits(flowId: string, featureId: string, jobId: string): Promise<void> {
+    await this.db.fleetFlowFeature.updateMany({ where: { id: featureId, flowId }, data: { prdEditsJobId: jobId } });
+  }
+
   /**
    * The feature waits for the answers to the questions of the review job `jobId`. The answers of an
    * earlier review are cleared with `Prisma.DbNull` (a nullable JSON column keeps its value for a

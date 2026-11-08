@@ -21,6 +21,7 @@ export interface FleetFlowFeatureRecord {
   prNumber: number | null;
   callsJobId?: string | null;
   rulingsJobId?: string | null;
+  prdEditsJobId?: string | null;
   /** The review job the stored questions and answers belong to: a later review replaces them. */
   questionsJobId?: string | null;
   questions?: FlowQuestion[] | null;

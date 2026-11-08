@@ -175,6 +175,24 @@ describeDb('PrismaFleetFlowStepRepository (PG)', () => {
     expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: otherFeature.id } })).rulingsJobId).toBeNull();
   });
 
+  it('US-005 AC-1..6 records PRD edits only for the matching flow feature and maps the marker', async () => {
+    const flow = await createFlow('RUNNING');
+    const otherFlow = await createFlow('RUNNING');
+    const feature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } });
+    const otherFeature = await prisma.fleetFlowFeature.findFirstOrThrow({ where: { flowId: otherFlow.id } });
+
+    expect(feature.prdEditsJobId).toBeNull();
+    await prisma.fleetFlowFeature.update({ where: { id: feature.id }, data: { callsJobId: 'calls', rulingsJobId: 'rulings' } });
+    await repo.recordPrdEdits(flow.id, feature.id, 'job-1');
+    expect(await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: feature.id } })).toMatchObject({
+      prdEditsJobId: 'job-1', callsJobId: 'calls', rulingsJobId: 'rulings',
+    });
+    expect((await flowRepo.findById(flow.id))?.features[0]).toMatchObject({ prdEditsJobId: 'job-1' });
+
+    await repo.recordPrdEdits(flow.id, otherFeature.id, 'wrong-flow');
+    expect((await prisma.fleetFlowFeature.findUniqueOrThrow({ where: { id: otherFeature.id } })).prdEditsJobId).toBeNull();
+  });
+
   it('AC-14 does not settle an ingest from a different lease', async () => {
     const job = await createJob((await createFlow('RUNNING')).id);
     const artifact = await prisma.fleetJobArtifact.create({ data: { jobId: job.id, leaseEpoch: 4, kind: 'bundle', storageKey: `key-${job.id}`, sizeBytes: 0n, sha256: 'sha' } });
