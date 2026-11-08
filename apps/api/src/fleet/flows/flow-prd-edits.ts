@@ -47,15 +47,25 @@ export function applyPrdEditsToText(prdText: string, edits: FlowPrdEdit[]): PrdE
   let applied = 0;
 
   for (const [index, edit] of edits.entries()) {
+    const refuse = (reason: string): void => {
+      refused.push({ index, story: edit.story, op: edit.op, reason });
+    };
+
+    if (index >= FLOW_PRD_EDITS_MAX) {
+      refuse('over limit');
+      continue;
+    }
+
+    if ((edit.op === 'replace_description' || edit.op === 'replace_ac' || edit.op === 'add_ac') && edit.new.length > FLOW_PRD_EDIT_TEXT_MAX) {
+      refuse('text too long');
+      continue;
+    }
+
     const story = document.userStories.find((candidate) => isRecord(candidate) && candidate.id === edit.story);
     if (!story || !isRecord(story)) {
       refused.push({ index, story: edit.story, op: edit.op, reason: 'unknown story' });
       continue;
     }
-
-    const refuse = (reason: string): void => {
-      refused.push({ index, story: edit.story, op: edit.op, reason });
-    };
 
     switch (edit.op) {
       case 'replace_description': {
@@ -135,10 +145,39 @@ export function applyPrdEditsToText(prdText: string, edits: FlowPrdEdit[]): PrdE
         applied += 1;
         break;
       }
-      case 'add_context_file':
-      case 'remove_context_file':
-        refuse('unsupported operation');
+      case 'add_context_file': {
+        if (!edit.path || edit.path.startsWith('/') || edit.path.includes('\\') || edit.path.split('/').includes('..')) {
+          refuse('invalid path');
+          break;
+        }
+        if (story.contextFiles !== undefined && !Array.isArray(story.contextFiles)) {
+          refuse('story malformed');
+          break;
+        }
+        const contextFiles: unknown[] = Array.isArray(story.contextFiles) ? story.contextFiles : [];
+        if (contextFiles.includes(edit.path)) {
+          refuse('duplicate path');
+          break;
+        }
+        contextFiles.push(edit.path);
+        story.contextFiles = contextFiles;
+        applied += 1;
         break;
+      }
+      case 'remove_context_file': {
+        if (!Array.isArray(story.contextFiles)) {
+          refuse('path not listed');
+          break;
+        }
+        const pathIndex = story.contextFiles.indexOf(edit.path);
+        if (pathIndex === -1) {
+          refuse('path not listed');
+          break;
+        }
+        story.contextFiles.splice(pathIndex, 1);
+        applied += 1;
+        break;
+      }
     }
   }
 
