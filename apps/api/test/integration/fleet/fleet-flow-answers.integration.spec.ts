@@ -103,7 +103,7 @@ integration('answered fleet flows through tick and outbox (PG)', () => {
       selectorLabels: [], pinnedRunnerId: runnerId, requestedById: creatorId, state: 'COMPLETED' };
   }
 
-  it('AC-1–AC-7: waits, publishes replay-safe questions, answers, commits calls, and dispatches PLAN', async () => {
+  it('AC-1–AC-7: waits, publishes replay-safe questions, answers, commits calls, and dispatches the second review', async () => {
     const { flow, job } = await seedReview();
     await ticker.tick(now);
 
@@ -160,9 +160,10 @@ integration('answered fleet flows through tick and outbox (PG)', () => {
     forgeHead = 'c2';
     vi.mocked(github.getBranchHead).mockClear();
     await ticker.tick(new Date(now.getTime() + 3_000));
-    const plans = await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'PLAN' }, take: 2 });
-    expect(plans).toHaveLength(1);
-    expect(plans[0]).toMatchObject({ flowId: flow.id, flowStep: 'PLAN', command: 'PLAN', ref: BRANCH });
+    const reviews = await db.fleetJob.findMany({ where: { flowId: flow.id, flowStep: 'SPEC_REVIEW' }, take: 3 });
+    expect(reviews).toHaveLength(2);
+    expect(reviews[1]).toMatchObject({ flowId: flow.id, flowStep: 'SPEC_REVIEW', command: 'AGENT', ref: 'c2' });
+    expect(await db.fleetJob.count({ where: { flowId: flow.id, flowStep: 'PLAN' } })).toBe(0);
     expect(github.getBranchHead).toHaveBeenCalledWith('test-read-token', 'acme', repoName, BRANCH);
     expect(forgeCallsOutsideTransaction.length).toBeGreaterThan(0);
     expect(forgeCallsOutsideTransaction.every(Boolean)).toBe(true);

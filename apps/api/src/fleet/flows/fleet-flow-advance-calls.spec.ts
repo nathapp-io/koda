@@ -240,6 +240,7 @@ describe('FleetFlowAdvanceService.advance calls', () => {
   });
   it('AC-11: retains the applied SPEC_REVIEW despite its old ref and dispatches PLAN', async () => {
     const h = build({ flow: { specSha: 's2', features: [feature({ callsJobId: 'j1' })] } });
+    h.steps.countJobsForStepSince.mockImplementation(async (_flowId, step) => step === 'SPEC_REVIEW' ? 2 : 0);
     await h.service.advance('flow-1', NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }),
       expect.objectContaining({ flowStep: 'PLAN' }));

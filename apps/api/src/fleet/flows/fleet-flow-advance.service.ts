@@ -250,6 +250,7 @@ export class FleetFlowAdvanceService {
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
       ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}), ...(pass.rule ? { rule: pass.rule } : {}),
+      prdEdits: flow.entry === 'NAX',
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
@@ -495,6 +496,9 @@ export class FleetFlowAdvanceService {
     const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, 'RUN') : null;
     const workflow = run?.workflow ?? null;
     const ruledItemIds = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
+    const specReviewCount = latestJob?.step === 'SPEC_REVIEW'
+      ? await this.steps.countJobsForStepSince(flow.id, 'SPEC_REVIEW', flow.approvedAt ?? now)
+      : undefined;
     return {
       state: flow.state,
       featureCount: flow.features.length,
@@ -513,6 +517,8 @@ export class FleetFlowAdvanceService {
       featurePrNumber: flow.features[0]?.prNumber ?? null,
       callsJobId: flow.features[0]?.callsJobId ?? null,
       planCount: await this.steps.countJobsForStepSince(flow.id, 'PLAN', flow.approvedAt ?? now),
+      ...(specReviewCount !== undefined ? { specReviewCount } : {}),
+      prdEditsJobId: flow.features[0]?.prdEditsJobId ?? null,
       canApplyCalls: flow.entry === 'NAX',
       questionsJobId: flow.features[0]?.questionsJobId ?? null,
       answers: flow.features[0]?.answers ?? null,
