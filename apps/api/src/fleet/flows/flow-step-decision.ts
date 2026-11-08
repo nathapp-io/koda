@@ -1,7 +1,8 @@
 import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FlowStep } from './flow-steps';
-import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, oneLine, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { formatFindings, parseFlowVerdict } from './flow-verdict';
+import { needsAutomaticRule, parseRuleVerdict, type FlowOpenItem, type FlowRuling } from './flow-rulings';
 import type { FlowFinding } from './flow-verdict';
 import type { FixReady } from '../jobs/domain/fleet-job.domain';
 import type { FleetFlowState } from './flow-states';
@@ -34,6 +35,9 @@ export interface FlowStepInput {
   canApplyCalls: boolean;
   questionsJobId: string | null;
   answers: FlowAnswer[] | null;
+  run?: { outcome: string | null; openItems: FlowOpenItem[] } | null;
+  ruledItemIds?: string[];
+  rulingsJobId?: string | null;
 }
 
 export type FlowStopReason =
@@ -55,11 +59,13 @@ export type FlowStepAction =
   | { kind: 'wait' }
   | { kind: 'complete' }
   | { kind: 'stop'; reason: FlowStopReason; detail: string }
-  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string } }
+  | { kind: 'dispatch'; step: FlowStep; pr?: { number: number; headSha?: string }; rule?: { answeredJobId: string | null } }
   | { kind: 'apply_calls'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; findings: FlowFinding[] }
-  | { kind: 'wait_answer'; step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[] };
+  | { kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] }
+  | { kind: 'wait_answer'; step: 'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX'; jobId: string; questions: FlowQuestion[] };
 
 export type ApplyCallsAction = Extract<FlowStepAction, { kind: 'apply_calls' }>;
+export type ApplyRulingsAction = Extract<FlowStepAction, { kind: 'apply_rulings' }>;
 export type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
@@ -156,9 +162,35 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
     }
 
     if (latestJob.step === 'REVIEW') {
-      return input.featurePrNumber === null
-        ? { kind: 'wait' }
-        : { kind: 'dispatch', step: 'FIX', pr: { number: input.featurePrNumber } };
+      if (input.featurePrNumber === null) return { kind: 'wait' };
+      if (input.run?.outcome === 'draft' && needsAutomaticRule(input.run.openItems, input.ruledItemIds ?? [])) {
+        return { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: null } };
+      }
+      return { kind: 'dispatch', step: 'FIX', pr: { number: input.featurePrNumber } };
+    }
+
+    if (latestJob.step === 'RULE') {
+      const verdict = parseRuleVerdict(latestJob.agentOutput);
+      if (!verdict.ok) {
+        return { kind: 'stop', reason: 'verdict_unreadable', detail: `RULE job ${latestJob.id}: no rulings JSON in the agent output` };
+      }
+      if (verdict.questions.length > 0) {
+        const detail = verdict.questions.map(({ item, question }, index) => `${index + 1}. ${oneLine(item)}: ${oneLine(question)}`).join(' ');
+        if (!input.canApplyCalls || verdict.questions.length > FLOW_CALLS_MAX_FINDINGS) {
+          return { kind: 'stop', reason: 'review_ambiguous', detail };
+        }
+        if (input.questionsJobId === latestJob.id && input.answers !== null) {
+          return { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: latestJob.id } };
+        }
+        return { kind: 'wait_answer', step: 'RULE', jobId: latestJob.id,
+          questions: verdict.questions.map(({ item, question }, index) => ({ id: String(index + 1), question: `${oneLine(item)}: ${question}` })) };
+      }
+      if (input.rulingsJobId === latestJob.id) {
+        return input.featurePrNumber === null
+          ? { kind: 'wait' }
+          : { kind: 'dispatch', step: 'FIX', pr: { number: input.featurePrNumber } };
+      }
+      return { kind: 'apply_rulings', jobId: latestJob.id, rulings: verdict.rulings };
     }
 
     if (latestJob.step === 'FIX') {

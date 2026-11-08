@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswer } from './flow-calls';
 import { formatFindings } from './flow-verdict';
+import type { FlowOpenItem, FlowRuling } from './flow-rulings';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
@@ -270,6 +271,72 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: classifiedReview('SPEC_REVIEW', []) })))
       .toEqual({ kind: 'dispatch', step: 'PLAN' });
   });
+  const advisorItem: FlowOpenItem = { id: 'S-2', kind: 'advisor', issue: 'Question' };
+  const ruleVerdict = (rulings: FlowRuling[] = [], questions: { item: string; question: string }[] = []) => JSON.stringify({ rulings, questions });
+  const ruleJob = (overrides: Partial<FlowJobView> = {}) => job({ id: 'rule-1', step: 'RULE', agentOutput: ruleVerdict(), ...overrides });
+
+  it('US-007 AC-1 dispatches RULE for draft workflow advisor items', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'draft', openItems: [advisorItem] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: null } });
+  });
+  it('US-007 AC-2 dispatches FIX for a ready run', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'ready', openItems: [advisorItem] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-3 does not rule draft findings or gates', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'draft', openItems: [{ ...advisorItem, kind: 'finding' }, { ...advisorItem, id: 'G', kind: 'gate' }] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-4 preserves FIX dispatch when RUN data is absent', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-5 stops on unreadable RULE verdict', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: 'no json' }) })))
+      .toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'RULE job rule-1: no rulings JSON in the agent output' });
+  });
+  it('US-007 AC-6 applies readable rulings', () => {
+    const rulings = [{ item: 'S-2', ruling: 'verified: evidence' }];
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: ruleVerdict(rulings) }) })))
+      .toEqual({ kind: 'apply_rulings', jobId: 'rule-1', rulings });
+  });
+  it('US-007 AC-7 applies an empty ruling set', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob() }))).toEqual({ kind: 'apply_rulings', jobId: 'rule-1', rulings: [] });
+  });
+  it('US-007 AC-8 dispatches FIX after rulings are recorded', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, rulingsJobId: 'rule-1', latestJob: ruleJob() })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-9 waits for PR after rulings are recorded', () => {
+    expect(decideFlowStep(input({ rulingsJobId: 'rule-1', latestJob: ruleJob() }))).toEqual({ kind: 'wait' });
+  });
+  it('US-007 AC-10 asks RULE questions positionally', () => {
+    const verdict = ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]);
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) })))
+      .toEqual({ kind: 'wait_answer', step: 'RULE', jobId: 'rule-1', questions: [{ id: '1', question: 'S-2: Which?' }] });
+  });
+  it('US-007 AC-11 questions take precedence over rulings', () => {
+    const verdict = ruleVerdict([{ item: 'S-2', ruling: 'verified: evidence' }], [{ item: 'S-3', question: 'Which?' }]);
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) }))).toMatchObject({ kind: 'wait_answer', step: 'RULE' });
+  });
+  it('US-007 AC-12 stops RULE questions when calls cannot be applied', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+  });
+  it('US-007 AC-13 stops RULE questions above the cap', () => {
+    const questions = Array.from({ length: FLOW_CALLS_MAX_FINDINGS + 1 }, (_, index) => ({ item: `S-${index}`, question: 'Which?' }));
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: ruleVerdict([], questions) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+  });
+  it('US-007 AC-14 dispatches guided RULE after answers', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'rule-1', answers: [{ id: '1', answer: 'A' }],
+      latestJob: ruleJob({ agentOutput: ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]) }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: 'rule-1' } });
+  });
+  it.each(['FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] as const)('US-007 AC-15 stops terminal RULE %s', (state) => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ state }) }))).toMatchObject({ kind: 'stop', reason: 'step_failed' });
+  });
+
   it.each([
     { summary: 'Missing class', fix: 'fix' },
     { class: 'major', summary: 'Unknown class', fix: 'fix' },
