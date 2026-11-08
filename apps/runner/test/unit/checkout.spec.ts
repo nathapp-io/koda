@@ -248,6 +248,40 @@ describe('prepareCheckout PLAN with expectBranch (US-005)', () => {
     expect(await head(repoDir)).toBe(remote);
   });
 
+  /** #409: the clone's local feat/add-auth is BEHIND origin (a flow's calls commit was written to origin by the API). */
+  async function behindLocally() {
+    const { repoDir, origin, base } = await setup(undefined, { branches: [{ name: 'feat/add-auth', files: { 'docs/a.md': '1' } }] });
+    await sh(repoDir, 'branch', 'feat/add-auth', 'origin/feat/add-auth');
+    const local = await sh(repoDir, 'rev-parse', 'feat/add-auth');
+    const remote = await pushCommit(base, origin.url, 'feat/add-auth', 'docs/calls.md', 'calls');
+    await cleanWorkspace(g, repoDir);
+    return { repoDir, origin, base, local, remote };
+  }
+
+  test('#409: detaches at origin/<ref> when the local expectBranch is behind origin', async () => {
+    const { repoDir, local, remote } = await behindLocally();
+    expect(await sh(repoDir, 'rev-parse', 'origin/feat/add-auth')).toBe(remote);
+    expect(local).not.toBe(remote);
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toEqual({ ok: true, branch: null, refSha: remote });
+    expect(await head(repoDir)).toBe(remote);
+  });
+
+  test('#409: detaches at the local expectBranch when it equals origin', async () => {
+    const { repoDir } = await setup(undefined, { branches: [{ name: 'feat/add-auth', files: { 'docs/a.md': '1' } }] });
+    await sh(repoDir, 'branch', 'feat/add-auth', 'origin/feat/add-auth');
+    const remote = await sh(repoDir, 'rev-parse', 'origin/feat/add-auth');
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toEqual({ ok: true, branch: null, refSha: remote });
+  });
+
+  test('#409: refuses a local expectBranch that diverged from origin', async () => {
+    const { repoDir, local } = await behindLocally();
+    await sh(repoDir, 'checkout', '-q', 'feat/add-auth');
+    await sh(repoDir, 'commit', '-q', '--allow-empty', '-m', 'local re-publish');
+    await sh(repoDir, 'checkout', '-q', '--detach', 'origin/main');
+    expect(await sh(repoDir, 'rev-parse', 'feat/add-auth')).not.toBe(local);
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toEqual({ ok: false, reason: 'checkout: branch diverged' });
+  });
+
   test('the .nax check applies to the local commit that is chosen', async () => {
     const { repoDir } = await aheadLocally();
     await sh(repoDir, 'checkout', '-q', 'feat/add-auth');

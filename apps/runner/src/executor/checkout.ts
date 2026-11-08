@@ -21,11 +21,30 @@ async function localBranchSha(git: Git, repoDir: string, branch: string): Promis
   return (await git.ok(['rev-parse', '--verify', `${full}^{commit}`], { cwd: repoDir })).trim();
 }
 
+type LocalPlanBase = { kind: 'local'; sha: string } | { kind: 'origin' } | { kind: 'diverged' };
+
+/**
+ * US-005 + #409: a PLAN with `expectBranch` uses the clone's local branch only when it is equal to or ahead of
+ * origin (a thread's re-published docs are local-only). A local branch behind origin (a flow's calls commit, written
+ * by the API to origin only) yields to origin; a diverged one is refused, as the PLAN commit would refuse it.
+ */
+async function localPlanBase(git: Git, repoDir: string, branch: string): Promise<LocalPlanBase> {
+  const localSha = await localBranchSha(git, repoDir, branch);
+  if (localSha === null) return { kind: 'origin' };
+  const origin = `refs/remotes/origin/${branch}`;
+  if ((await git.run(['show-ref', '--verify', '--quiet', origin], { cwd: repoDir })).code !== 0) return { kind: 'local', sha: localSha };
+  const ancestor = async (a: string, b: string): Promise<boolean> =>
+    (await git.run(['merge-base', '--is-ancestor', a, b], { cwd: repoDir })).code === 0;
+  if (await ancestor(origin, localSha)) return { kind: 'local', sha: localSha };
+  return (await ancestor(localSha, origin)) ? { kind: 'origin' } : { kind: 'diverged' };
+}
+
 /** Design §2 steps 3-4 (R-3.3): RUN continues or creates `prd.branchName`; PLAN detaches at the ref. */
 export async function prepareCheckout(input: CheckoutInput): Promise<CheckoutResult> {
   const { git, repoDir, assign } = input;
-  // US-005: a thread PLAN detaches at the local expectBranch when it exists (its re-published docs are ahead of origin).
-  const localSha = assign.command === 'PLAN' && assign.expectBranch !== undefined ? await localBranchSha(git, repoDir, assign.expectBranch) : null;
+  const base = assign.command === 'PLAN' && assign.expectBranch !== undefined ? await localPlanBase(git, repoDir, assign.expectBranch) : null;
+  if (base?.kind === 'diverged') return { ok: false, reason: 'checkout: branch diverged' };
+  const localSha = base?.kind === 'local' ? base.sha : null;
   let refSha: string;
   if (localSha !== null) {
     refSha = localSha;
