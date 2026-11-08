@@ -10,7 +10,7 @@ function setup() {
     runsForPr: vi.fn(async () => ['run', 'run2']),
   };
   const effects = { commentOnRulingResult: vi.fn(), commentOnReady: vi.fn() };
-  const svc = new FleetPrRulingsService(repo as never, {} as never, {} as never, effects as never, {} as never);
+  const svc = new FleetPrRulingsService(repo as never, {} as never, {} as never, effects as never, {} as never, {} as never);
   const record = (callerRulings?: CallerRulings) => svc.recordResults(job as never, { outcome: 'done', trusted: true, events: [], ...(callerRulings ? { callerRulings } : {}) });
   return { repo, effects, job, svc, record };
 }

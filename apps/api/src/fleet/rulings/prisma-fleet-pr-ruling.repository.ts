@@ -102,10 +102,10 @@ export class PrismaFleetPrRulingRepository extends AbstractPrismaRepository<Flee
     const agentIds = rows.filter((r) => r.actorType === 'AGENT').map((r) => r.actorId);
     const userIds = rows.filter((r) => r.actorType === 'USER').map((r) => r.actorId);
     const [agents, users] = await Promise.all([
-      this.prisma.client.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, slug: true }, take: 100 }),
-      this.prisma.client.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true }, take: 100 }),
+      agentIds.length ? this.prisma.client.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, slug: true }, take: 100 }) : Promise.resolve([]),
+      userIds.length ? this.prisma.client.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true }, take: 100 }) : Promise.resolve([]),
     ]);
-    return rows.map((r) => ({ ...this.toDomain(r), actorName: (r.actorType === 'AGENT'
+    return rows.map((r) => ({ ...this.toDomain(r), actorName: r.actorType === 'SYSTEM' ? r.actorId : (r.actorType === 'AGENT'
       ? agents.find((a) => a.id === r.actorId)?.slug : users.find((u) => u.id === r.actorId)?.name) ?? r.actorId }));
   }
 

@@ -93,7 +93,16 @@ describe('truncateFlowText', () => {
 });
 
 describe('formatQuestionsComment', () => {
-  it('formats all questions and uses the first positional id in the example', () => {
+  it('AC-4: formats FIX questions with their answers heading', () => {
+    const comment = formatQuestionsComment({
+      step: 'FIX', jobId: 'j9', questions: [{ id: '1', question: 'q' }],
+      answerPath: '/api/projects/sandbox/flows/f1/answers',
+    });
+    expect(comment.startsWith('Flow needs answers (FIX job j9):')).toBe(true);
+    expect(comment.split('\n')).toContain('1. q');
+  });
+
+  it('AC-6: formats existing review questions with the first positional id in the example', () => {
     expect(formatQuestionsComment({
       step: 'SPEC_REVIEW', jobId: 'j1',
       questions: [{ id: '2', question: 'Q1' }, { id: '5', question: 'Q2' }],

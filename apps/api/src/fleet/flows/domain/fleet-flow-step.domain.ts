@@ -48,6 +48,7 @@ export interface IFleetFlowStepRepository {
   /** Adopt the PLAN output branch before applying PRD calls or re-asking that branch's head. */
   setBranch(flowId: string, branch: string): Promise<void>;
   recordCalls(flowId: string, featureId: string, jobId: string, specSha: string): Promise<void>;
+  recordRulings(flowId: string, featureId: string, jobId: string): Promise<void>;
   /**
    * Puts the feature and its flow into `WAITING_ANSWER` for the review job `jobId`: the questions are
    * stored and the answers of an earlier review are cleared, so a wait never answers a later review.

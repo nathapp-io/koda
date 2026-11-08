@@ -2,6 +2,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { DispatchFleetJobDto } from '../jobs/dto/dispatch-fleet-job.dto';
 import type { FlowStep } from './flow-steps';
 import { buildReviewTask } from './flow-steps';
+import { buildRuleTask, type FlowOpenItem, type FlowRuleGuidance } from './flow-rulings';
 
 const MIN_REMAINING_CAP_USD = new Prisma.Decimal('0.0001');
 
@@ -25,6 +26,7 @@ export interface BuildStepDispatchInput {
   reviewAgent: string;
   plan?: { resultSha: string | null; resultBranch: string | null };
   pr?: { number: number };
+  rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };
 }
 
 export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJobDto {
@@ -64,6 +66,22 @@ export function buildStepDispatch(input: BuildStepDispatchInput): DispatchFleetJ
       return {
         ...common, command: 'RUN', ref,
         feature: feature.feature, profiles: [],
+      };
+    }
+    case 'RULE': {
+      const rule = input.rule;
+      if (!rule) throw new Error('RULE requires the RUN branch and PR');
+      return {
+        ...common,
+        command: 'AGENT',
+        feature: feature.feature,
+        ref: rule.ref,
+        bashMode: 'raw',
+        agent: {
+          name: input.reviewAgent,
+          task: buildRuleTask({ prNumber: rule.prNumber, items: rule.items, guidance: rule.guidance }),
+          model: flow.reviewerRole,
+        },
       };
     }
     case 'REVIEW':

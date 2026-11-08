@@ -75,10 +75,24 @@ describe('payload parsers', () => {
     expect(parseFlowStoppedPayload({ ...stopped, approverId: null })).toEqual(stopped);
   });
 
-  it('AC-1: accepts a valid flow questions payload', () => {
-    const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'SPEC_REVIEW', jobId: 'j1',
+  it('AC-1: accepts RULE flow questions unchanged', () => {
+    const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'RULE', jobId: 'j1',
       questions: [{ id: '2', question: 'Q1' }], approverId: null, creatorType: 'USER', creatorId: 'u1' } as const;
     expect(parseFlowQuestionsPayload(payload)).toEqual(payload);
+  });
+
+  it('AC-2: accepts FIX flow questions unchanged', () => {
+    const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'FIX', jobId: 'j1',
+      questions: [{ id: '2', question: 'Q1' }], approverId: null, creatorType: 'USER', creatorId: 'u1' } as const;
+    expect(parseFlowQuestionsPayload(payload)).toEqual(payload);
+  });
+
+  it('AC-5: accepts existing review steps unchanged', () => {
+    for (const step of ['SPEC_REVIEW', 'PRD_REVIEW'] as const) {
+      const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step, jobId: 'j1',
+        questions: [{ id: '2', question: 'Q1' }], approverId: null, creatorType: 'USER', creatorId: 'u1' } as const;
+      expect(parseFlowQuestionsPayload(payload)).toEqual(payload);
+    }
   });
 
   it.each([

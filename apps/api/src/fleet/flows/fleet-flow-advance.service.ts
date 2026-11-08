@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -18,8 +18,11 @@ import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository 
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
-import { decideFlowStep, type ApplyCallsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
+import { decideFlowStep, type ApplyCallsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
+import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
+import { oneLine, sanitizeFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
 import { prNumberOfReviewFeature } from '../common/review-jobs';
@@ -35,16 +38,19 @@ import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
 import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
-interface DispatchPass<A extends DispatchAction | ApplyCallsAction = DispatchAction | ApplyCallsAction> {
+interface DispatchPass<A extends DispatchAction | ApplyCallsAction | ApplyRulingsAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction> {
   flow: FleetFlowRecord;
   action: A;
   plan: FleetJobRecord | null;
   remainingCapUsd: string;
+  rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };
 }
 
 /** Decide under parent/flow locks, dispatch or apply calls outside a transaction, then re-lock to record progress. */
 @Injectable()
 export class FleetFlowAdvanceService {
+  private readonly logger = new Logger(FleetFlowAdvanceService.name);
+
   constructor(
     @Inject(FLEET_FLOW_REPOSITORY) private readonly flows: IFleetFlowRepository,
     @Inject(FLEET_FLOW_STEP_REPOSITORY) private readonly steps: IFleetFlowStepRepository,
@@ -61,6 +67,7 @@ export class FleetFlowAdvanceService {
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'flowPrWaitMs' | 'flowReviewAgent'>,
     private readonly calls: FleetFlowCallsService,
     private readonly outbox: OutboxService,
+    private readonly rulings: FleetPrRulingsService,
   ) {}
 
   async advance(flowId: string, now: Date): Promise<void> {
@@ -69,6 +76,10 @@ export class FleetFlowAdvanceService {
     const { flow, action } = pass;
     if (action.kind === 'apply_calls') {
       await this.advanceCalls(flow, action, pass.plan, now);
+      return;
+    }
+    if (action.kind === 'apply_rulings') {
+      await this.advanceRulings(flow, action);
       return;
     }
     const dispatchPass = { ...pass, action };
@@ -113,6 +124,59 @@ export class FleetFlowAdvanceService {
       await this.record(current, `flow calls ${action.step}`, 'flow.calls', {
         step: action.step, jobId: action.jobId, specSha: outcome.specSha, count: action.findings.length,
       });
+    });
+  }
+
+  /**
+   * The RULE verdict's rulings leave the decide transaction: every ruling owns its own transaction, so a
+   * ruling that cannot be written is a refusal the flow reports, never a failed pass. A ruling for an
+   * item the RULE task does not list is refused as well: the task is what the flow may rule.
+   */
+  private async advanceRulings(flow: FleetFlowRecord, action: ApplyRulingsAction): Promise<void> {
+    const slug = await this.steps.projectSlug(flow.projectId);
+    if (slug === null) {
+      // The project is gone: there is nothing left to rule, and no slug to rule it in.
+      this.logger.warn(`Flow ${flow.id}: project slug unavailable; the RULE verdict is skipped`);
+      return;
+    }
+    const run = await this.steps.latestJobForStep(flow.id, 'RUN');
+    const openItems = run?.workflow?.openItems ?? [];
+    const ruled = run === null ? [] : await this.rulings.ruledItemIds(run.id);
+    // The RULE task lists the RUN's items that are still open and not ruled yet.
+    const taskItems = new Set(ruleTaskItems(openItems, ruled).map(({ id }) => id));
+    const recorded: string[] = [];
+    const refused: { item: string; reason: string }[] = [];
+    for (const { item, ruling } of lastRulingPerItem(action.rulings)) {
+      if (run === null || !taskItems.has(item)) {
+        refused.push({ item: safeItemLabel(item), reason: 'not in task' });
+        continue;
+      }
+      const outcome = await this.rulings.createForFlow({
+        projectId: flow.projectId,
+        projectSlug: slug,
+        runJobId: run.id,
+        itemId: item,
+        text: ruling,
+        creator: { type: flow.createdByType, id: flow.createdById },
+        approvalRequestId: flow.approvalRequestId,
+        flowId: flow.id,
+      });
+      if (outcome.kind === 'recorded') recorded.push(safeItemLabel(item));
+      else refused.push({ item: safeItemLabel(item), reason: outcome.reason });
+    }
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      // A stop that landed while the rulings were written keeps the rulings: they are already committed.
+      if (!current) return;
+      await this.steps.recordRulings(current.id, current.features[0].id, action.jobId);
+      await this.record(current, 'flow rulings', 'flow.rulings', {
+        jobId: action.jobId, recorded, refused,
+      });
+      if (refused.length > 0 && run !== null) {
+        const body = `Flow rulings refused (RULE job ${action.jobId}): `
+          + refused.map(({ item, reason }) => `${item} (${reason})`).join('; ');
+        await this.rulings.commentRefused(run.id, body);
+      }
     });
   }
 
@@ -185,7 +249,7 @@ export class FleetFlowAdvanceService {
       flow, feature: flow.features[0], step: action.step,
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
-      ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
+      ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}), ...(pass.rule ? { rule: pass.rule } : {}),
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
@@ -285,11 +349,11 @@ export class FleetFlowAdvanceService {
         await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
-      if (action.kind !== 'dispatch' && action.kind !== 'apply_calls') {
+      if (action.kind !== 'dispatch' && action.kind !== 'apply_calls' && action.kind !== 'apply_rulings') {
         await this.writeDecision(current, job ?? null, action, now);
         return;
       }
-      // Calls are not billed. Dispatch guards retain their order; both paths check creator access.
+      // Calls and rulings are not billed. Dispatch guards retain their order; every path checks creator access.
       const remaining = action.kind === 'dispatch' ? remainingCapUsd(current.costCapUsd, spentUsd) : '0.0000';
       if (remaining === null) {
         await this.writeDecision(current, job ?? null, {
@@ -305,6 +369,10 @@ export class FleetFlowAdvanceService {
           kind: 'stop', reason: 'creator_lost_access', detail: 'flow creator lost dispatch access',
         }, now);
         return;
+      }
+      if (action.kind === 'apply_rulings') {
+        // Rulings are written outside this transaction, each in its own: the flow records them after.
+        return { flow: current, action, plan: null, remainingCapUsd: remaining };
       }
       if (action.kind === 'apply_calls') {
         const plan = action.step === 'PRD_REVIEW' ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
@@ -341,7 +409,39 @@ export class FleetFlowAdvanceService {
       }
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
         ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
-      return { flow: current, action, plan, remainingCapUsd: remaining };
+      let rule: DispatchPass['rule'];
+      if (action.step === 'RULE') {
+        const run = await this.steps.latestJobForStep(current.id, 'RUN');
+        if (!run?.resultBranch) {
+          await this.writeDecision(current, job ?? null, {
+            kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: RUN has no result branch',
+          }, now);
+          return;
+        }
+        const workflow = run.workflow;
+        const ruled = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
+        const feature = current.features[0];
+        if (feature.prNumber === null) {
+          await this.writeDecision(current, job ?? null, {
+            kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: feature has no PR number',
+          }, now);
+          return;
+        }
+        const answeredId = action.rule?.answeredJobId ?? null;
+        const answeredJob = answeredId !== null && latest?.job.id === answeredId ? latest.job : null;
+        const guidance: FlowRuleGuidance | null = answeredId === null ? null : {
+          held: answeredJob?.flowStep === 'FIX' ? answeredJob.fixReady?.readyHeld ?? null : null,
+          questions: (feature.questions ?? []) as FlowQuestion[],
+          answers: (feature.answers ?? []) as FlowAnswer[],
+        };
+        rule = {
+          ref: run.resultBranch,
+          prNumber: feature.prNumber,
+          items: ruleTaskItems((workflow?.openItems ?? []) as FlowOpenItem[], ruled),
+          guidance,
+        };
+      }
+      return { flow: current, action, plan, remainingCapUsd: remaining, ...(rule ? { rule } : {}) };
     });
   }
 
@@ -390,12 +490,22 @@ export class FleetFlowAdvanceService {
   }
 
   private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
+    const latestJob = latest === null ? null : await this.jobView(flow, latest.job);
+    const needsRuleInputs = latestJob?.step === 'REVIEW' || latestJob?.step === 'RULE';
+    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, 'RUN') : null;
+    const workflow = run?.workflow ?? null;
+    const ruledItemIds = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
     return {
       state: flow.state,
       featureCount: flow.features.length,
       // An APPROVED or RUNNING flow was approved before it became live; the fallback only widens the type.
       approvedAt: flow.approvedAt ?? now,
-      latestJob: latest === null ? null : await this.jobView(flow, latest.job),
+      latestJob,
+      ...(needsRuleInputs ? {
+        run: workflow === null ? null : { outcome: workflow.outcome, openItems: workflow.openItems as FlowOpenItem[] },
+        ruledItemIds,
+        rulingsJobId: flow.features[0]?.rulingsJobId ?? null,
+      } : {}),
       now,
       prWaitMs: this.config.flowPrWaitMs,
       // Only a finished RUN consults this, and it arrives with the row it belongs to.
@@ -513,6 +623,29 @@ export class FleetFlowAdvanceService {
       projectId: flow.projectId, payload,
     });
   }
+}
+
+/**
+ * A verdict item id is untrusted text: it is written into the activity's JSONB payload and into a
+ * ticket comment, and PostgreSQL rejects a NUL and an unpaired surrogate in both. The raw id still
+ * decides whether the ruling is in the task and which item it rules; only the display is sanitized.
+ */
+function safeItemLabel(item: string): string {
+  return oneLine(sanitizeFlowText(item.split('\u0000').join('\uFFFD')));
+}
+
+/**
+ * The verdict may rule one item twice: the last ruling of an item wins, and the rulings that are kept
+ * stay in the order of the verdict. A `Map` keeps the position of a key it already holds, so the
+ * earlier ruling is deleted before the later one is set.
+ */
+function lastRulingPerItem(rulings: FlowRuling[]): FlowRuling[] {
+  const latest = new Map<string, FlowRuling>();
+  for (const ruling of rulings) {
+    latest.delete(ruling.item);
+    latest.set(ruling.item, ruling);
+  }
+  return [...latest.values()];
 }
 
 /** Match ReviewHeadDispatcher: only a string validation reason is safe to expose as the detail. */

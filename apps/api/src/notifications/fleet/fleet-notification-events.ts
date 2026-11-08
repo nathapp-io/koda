@@ -30,7 +30,7 @@ export interface FleetFlowStoppedPayload {
 }
 export interface FleetFlowQuestionsPayload {
   flowId: string; projectId: string; feature: string;
-  step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[];
+  step: 'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX'; jobId: string; questions: FlowQuestion[];
   approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string;
 }
 
@@ -103,7 +103,7 @@ export function parseFlowQuestionsPayload(raw: unknown): FleetFlowQuestionsPaylo
   if (!isObject(raw)) return null;
   const { flowId, projectId, feature, step, jobId, questions, approverId, creatorType, creatorId } = raw;
   if (!isText(flowId) || !isText(projectId) || typeof feature !== 'string'
-    || (step !== 'SPEC_REVIEW' && step !== 'PRD_REVIEW') || !isText(jobId)
+    || (step !== 'SPEC_REVIEW' && step !== 'PRD_REVIEW' && step !== 'RULE' && step !== 'FIX') || !isText(jobId)
     || !Array.isArray(questions) || questions.length === 0
     || (approverId !== null && !isText(approverId))
     || (creatorType !== 'USER' && creatorType !== 'AGENT') || !isText(creatorId)) return null;

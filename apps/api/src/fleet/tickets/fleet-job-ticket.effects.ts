@@ -65,6 +65,11 @@ export class FleetJobTicketEffects {
     return ticket.id;
   }
 
+  /** System-authored ruling comment used by flow rulings inside the ruling transaction. */
+  createSystemRulingComment(ticketId: string, body: string): Promise<{ id: string }> {
+    return this.repo.createSystemComment(ticketId, body, CommentType.RULING);
+  }
+
   /** Authored as the ruling principal, inside the same transaction (fleet.job.rule is sufficient). */
   createRulingComment(ticketId: string, body: string, principal: KodaPrincipal): Promise<{ id: string }> {
     return this.repo.createRulingComment(ticketId, body, principal);

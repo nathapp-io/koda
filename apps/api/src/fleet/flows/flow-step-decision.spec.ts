@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW_CALLS_MAX_FINDINGS, flowQuestions, formatQuestions, type FlowAnswer } from './flow-calls';
 import { formatFindings } from './flow-verdict';
+import type { FlowOpenItem, FlowRuling } from './flow-rulings';
 import { decideFlowStep, type FlowJobView, type FlowStepInput } from './flow-step-decision';
 
 const approvedAt = new Date('2026-11-07T12:00:00.000Z');
@@ -143,6 +144,47 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: null }) })))
       .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });
   });
+
+  it('US-008 AC-1 waits for guidance after a held FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true,
+      latestJob: job({ id: 'fix-1', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'wait_answer', step: 'FIX', jobId: 'fix-1', questions: [{ id: '1', question: 'PR still held after FIX fix-1: 1 open item(s): G-1. Answer with guidance for one more ruling and FIX round, or stop the flow.' }] });
+  });
+  it('US-008 AC-2 dispatches RULE after the FIX hold is answered', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'fix-1', answers: [{ id: '1', answer: 'Please address G-1' }],
+      latestJob: job({ id: 'fix-1', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: 'fix-1' } });
+  });
+  it('US-008 AC-3 does not use answers associated with an older job', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'older-fix', answers: [{ id: '1', answer: 'stale guidance' }],
+      latestJob: job({ id: 'fix-2', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toMatchObject({ kind: 'wait_answer', step: 'FIX', jobId: 'fix-2' });
+  });
+  it.each([
+    'CI failure: test',
+    'CI no-checks: no CI check reported within 20m 0s',
+  ])('US-008 AC-4/5 stops on CI hold: %s', (readyHeld) => {
+    expect(decideFlowStep(input({ canApplyCalls: true,
+      latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: readyHeld });
+  });
+  it('US-008 AC-6 preserves thread-entry stop for held FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: false,
+      latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: '1 open item(s): G-1' });
+  });
+  it('US-008 AC-7 stops FIX without a ready result', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: null }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });
+  });
+  it('US-008 AC-8 completes a ready FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: { markedReady: true } }) })))
+      .toEqual({ kind: 'complete' });
+  });
+  it('US-008 AC-9 completes a FIX with no hold reason', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: { markedReady: false } }) })))
+      .toEqual({ kind: 'complete' });
+  });
   it('US-009 AC-9 waits on an escalated RUN until ingest or timeout', () => {
     expect(decideFlowStep(input({ now: new Date(10_000), prWaitMs: 5_000, ingestSettled: false,
       latestJob: job({ step: 'RUN', state: 'ESCALATED', finishedAt: new Date(6_000) }) }))).toEqual({ kind: 'wait' });
@@ -270,6 +312,80 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: classifiedReview('SPEC_REVIEW', []) })))
       .toEqual({ kind: 'dispatch', step: 'PLAN' });
   });
+  const advisorItem: FlowOpenItem = { id: 'S-2', kind: 'advisor', issue: 'Question' };
+  const ruleVerdict = (rulings: FlowRuling[] = [], questions: { item: string; question: string }[] = []) => JSON.stringify({ rulings, questions });
+  const ruleJob = (overrides: Partial<FlowJobView> = {}) => job({ id: 'rule-1', step: 'RULE', agentOutput: ruleVerdict(), ...overrides });
+
+  it('US-007 AC-1 dispatches RULE for draft workflow advisor items', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'draft', openItems: [advisorItem] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: null } });
+  });
+  it('US-007 AC-2 dispatches FIX for a ready run', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'ready', openItems: [advisorItem] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-3 does not rule draft findings or gates', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, run: { outcome: 'draft', openItems: [{ ...advisorItem, kind: 'finding' }, { ...advisorItem, id: 'G', kind: 'gate' }] }, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-4 preserves FIX dispatch when RUN data is absent', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, latestJob: job({ step: 'REVIEW' }) })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-5 stops on unreadable RULE verdict', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: 'no json' }) })))
+      .toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'RULE job rule-1: no rulings JSON in the agent output' });
+  });
+  it('US-007 AC-6 applies readable rulings', () => {
+    const rulings = [{ item: 'S-2', ruling: 'verified: evidence' }];
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: ruleVerdict(rulings) }) })))
+      .toEqual({ kind: 'apply_rulings', jobId: 'rule-1', rulings });
+  });
+  it('US-007 AC-7 applies an empty ruling set', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob() }))).toEqual({ kind: 'apply_rulings', jobId: 'rule-1', rulings: [] });
+  });
+  it('US-007 AC-8 dispatches FIX after rulings are recorded', () => {
+    expect(decideFlowStep(input({ featurePrNumber: 12, rulingsJobId: 'rule-1', latestJob: ruleJob() })))
+      .toEqual({ kind: 'dispatch', step: 'FIX', pr: { number: 12 } });
+  });
+  it('US-007 AC-9 waits for PR after rulings are recorded', () => {
+    expect(decideFlowStep(input({ rulingsJobId: 'rule-1', latestJob: ruleJob() }))).toEqual({ kind: 'wait' });
+  });
+  it('US-007 AC-10 asks RULE questions positionally', () => {
+    const verdict = ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]);
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) })))
+      .toEqual({ kind: 'wait_answer', step: 'RULE', jobId: 'rule-1', questions: [{ id: '1', question: 'S-2: Which?' }] });
+  });
+  it('sanitizes RULE item labels before wait questions and stop details', () => {
+    const unsafeItem = `S-\u0000\uD800-2`;
+    const latestJob = ruleJob({ agentOutput: ruleVerdict([], [{ item: unsafeItem, question: 'Which?' }]) });
+    const waiting = decideFlowStep(input({ canApplyCalls: true, latestJob }));
+    expect(waiting).toEqual({ kind: 'wait_answer', step: 'RULE', jobId: 'rule-1', questions: [{ id: '1', question: 'S-\uFFFD\uFFFD-2: Which?' }] });
+    const stopped = decideFlowStep(input({ canApplyCalls: false, latestJob }));
+    expect(stopped).toEqual({ kind: 'stop', reason: 'review_ambiguous', detail: '1. S-\uFFFD\uFFFD-2: Which?' });
+  });
+  it('US-007 AC-11 questions take precedence over rulings', () => {
+    const verdict = ruleVerdict([{ item: 'S-2', ruling: 'verified: evidence' }], [{ item: 'S-3', question: 'Which?' }]);
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: verdict }) }))).toMatchObject({ kind: 'wait_answer', step: 'RULE' });
+  });
+  it('US-007 AC-12 stops RULE questions when calls cannot be applied', () => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ agentOutput: ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+  });
+  it('US-007 AC-13 stops RULE questions above the cap', () => {
+    const questions = Array.from({ length: FLOW_CALLS_MAX_FINDINGS + 1 }, (_, index) => ({ item: `S-${index}`, question: 'Which?' }));
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: ruleJob({ agentOutput: ruleVerdict([], questions) }) })))
+      .toMatchObject({ kind: 'stop', reason: 'review_ambiguous' });
+  });
+  it('US-007 AC-14 dispatches guided RULE after answers', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'rule-1', answers: [{ id: '1', answer: 'A' }],
+      latestJob: ruleJob({ agentOutput: ruleVerdict([], [{ item: 'S-2', question: 'Which?' }]) }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: 'rule-1' } });
+  });
+  it.each(['FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] as const)('US-007 AC-15 stops terminal RULE %s', (state) => {
+    expect(decideFlowStep(input({ latestJob: ruleJob({ state }) }))).toMatchObject({ kind: 'stop', reason: 'step_failed' });
+  });
+
   it.each([
     { summary: 'Missing class', fix: 'fix' },
     { class: 'major', summary: 'Unknown class', fix: 'fix' },

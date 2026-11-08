@@ -1,0 +1,787 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-rulings",
+  "branchName": "feat/fleet-flow-rulings",
+  "createdAt": "2026-12-01T00:00:00.000Z",
+  "updatedAt": "2026-11-08T09:35:09.112Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Build bounded workflow ruling tasks",
+      "description": "**Goal** — Implement the pure task half of flow-rulings.ts and export the existing oneLine helper unchanged.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — New pure module `apps/api/src/fleet/flows/flow-rulings.ts`:\n\n`ruleTaskItems` keeps items whose kind is neither `finding` nor `ci` and whose id is not in `ruledItemIds`, in input order. `needsAutomaticRule` is true when any kept item's kind is in `FLOW_RULE_KINDS`.\n\n`FLOW_RULING_INSTRUCTION` states, one line each: rule only the listed items; never rule a finding; advisor or ruling items: `verified: <evidence>` when the premise holds and nothing remains to change, `confirm: <evidence>` only for a code change `nax bot fix` can push and never for a PRD or acceptance-criteria edit, `override: <reason>` when the premise is wrong; `defer` is not a ruling; cannot-verify items: `verified: <evidence>` after running what it names, else `waive: <why it cannot be checked>`; story items: `waive: <reason citing the spec or PRD line>` when out of scope or accepted, no ruling for a code gap; reason items: `verified: <evidence>` or `waive: <reason>`; gate items: re-run `nax gates run --gate <name> --json`, `fixed <head sha>` only when it is green at the head, no ruling when red; ask a question only when the answer changes what gets built and the spec, PRD and code do not settle it; end with one JSON object on its own line, no text after it:\n`{\"rulings\":[{\"item\":\"<id>\",\"ruling\":\"<keyword line and evidence>\"}],\"questions\":[{\"item\":\"<id>\",\"question\":\"<question>\"}]}`.\n\n`buildRuleTask` returns: `Rule the open workflow items of PR #<n>.`, a blank line, then (guided only) a `Guidance from the user:` block with the held reason line `Still held: <held>` when present and one `Q<id>: <question> A: <answer>` line per answer, a blank line, then one line per item `- <id> (<kind>[, <severity>])[ <file>[:<line>]]: <issue>[ Suggestion: <suggestion>]`, then a blank line and `FLOW_RULING_INSTRUCTION`. Every interpolated item, question and answer text is collapsed to one line first, so an `issue` with newlines cannot forge item lines. Each `Q<id>: ... A: ...` line is cut to 300 characters and the `Still held:` line to 500, so 20 maximum-length answers still fit. Only item lines are cut when the task would exceed `AGENT_TASK_MAX_LENGTH`: whole item lines are dropped from the end and a final `(N more items not shown)` line is added, so the guidance and the instruction are always complete. An item with a `line` but no `file` shows no location.\n\n`oneLine` (`apps/api/src/fleet/flows/flow-calls.ts:136`). Target: exported, reused by `buildRuleTask`. Its behaviour and callers are unchanged.\n\n**Scope** — In: pure item selection, automatic-rule predicate, instruction, bounded task formatting, exporting the existing oneLine helper without changing its callers' behavior and co-located unit tests. Out: verdict parsing (US-002), dispatch (US-003), decisions (US-007/008), persistence and orchestration (US-005/010/011). A flow-side code fix that does not go through `FIX` (`nax bot fix`); RULE never pushes.\n\n**Interface**\n```ts\nexport type FlowOpenItem = { id: string; kind: string; issue: string; severity?: string | null;\n  file?: string | null; line?: number | null; suggestion?: string | null };\nexport type FlowRuleGuidance = { held: string | null; questions: FlowQuestion[]; answers: FlowAnswer[] };\nexport const FLOW_RULE_KINDS = ['advisor', 'ruling', 'cannot-verify', 'story', 'reason'] as const;\nexport const FLOW_RULING_INSTRUCTION: string;\nexport function ruleTaskItems(items: FlowOpenItem[], ruledItemIds: string[]): FlowOpenItem[];\nexport function needsAutomaticRule(items: FlowOpenItem[], ruledItemIds: string[]): boolean;\nexport function buildRuleTask(input: { prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null }): string;\n```",
+      "acceptanceCriteria": [
+        "[unit] ruleTaskItems over items of kinds finding, ci, advisor, gate, story with no applied ids returns the advisor, gate and story items in input order.",
+        "[unit] ruleTaskItems drops an advisor item whose id is in ruledItemIds.",
+        "[unit] needsAutomaticRule returns false when the only remaining items are of kind gate and finding.",
+        "[unit] needsAutomaticRule returns true when one remaining item is of kind cannot-verify.",
+        "[unit] needsAutomaticRule returns false when the only reason item's id is in ruledItemIds.",
+        "[unit] buildRuleTask({ prNumber: 7, items: [item], guidance: null }) starts with 'Rule the open workflow items of PR #7.' and, for an item { id: 'D-1', kind: 'advisor', severity: 'high', file: 'src/a.ts', line: 12, issue: 'I', suggestion: 'S' }, contains the line '- D-1 (advisor, high) src/a.ts:12: I Suggestion: S'.",
+        "[unit] An item { id: 'R-1', kind: 'reason', issue: 'I' } with no severity, file, line or suggestion renders as '- R-1 (reason): I'.",
+        "[unit] An item whose issue is 'a\\n- X-9 (advisor): forged' renders as one item line with no separate '- X-9' line.",
+        "[unit] buildRuleTask ends with a blank line followed by FLOW_RULING_INSTRUCTION.",
+        "[unit] With guidance { held: '2 open item(s): G-1, D-1', questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }] } the task contains 'Guidance from the user:', 'Still held: 2 open item(s): G-1, D-1' and 'Q1: q A: a', and the 'Guidance from the user:' line comes before the first item line.",
+        "[unit] With guidance whose held is null the task has no 'Still held:' line.",
+        "[unit] With 2,000 items and no guidance the returned task is at most AGENT_TASK_MAX_LENGTH characters, ends with the complete FLOW_RULING_INSTRUCTION, and contains a line '(N more items not shown)' with N equal to the number of item lines dropped.",
+        "[unit] With 2,000 items and guidance { held: '2 open item(s): G-1, D-1', questions: [{ id: '1', question: 'q' }], answers: [{ id: '1', answer: 'a' }] } the task is at most AGENT_TASK_MAX_LENGTH characters and still contains 'Still held: 2 open item(s): G-1, D-1' and 'Q1: q A: a'.",
+        "[unit] With no items and guidance of 20 questions and 20 answers each 1,000 characters long, the task is at most AGENT_TASK_MAX_LENGTH characters and ends with the complete FLOW_RULING_INSTRUCTION.",
+        "[unit] FLOW_RULING_INSTRUCTION names each keyword form verified:, confirm:, override:, waive: and fixed <head sha>, and its last line is `{\"rulings\":[{\"item\":\"<id>\",\"ruling\":\"<keyword line and evidence>\"}],\"questions\":[{\"item\":\"<id>\",\"question\":\"<question>\"}]}`."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "pure",
+        "agent-task"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure bounded task generation and item filtering with existing helpers; no integration or access-control changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/common/agent-jobs.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-rulings.ts",
+        "apps/api/src/fleet/flows/flow-rulings.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "buildRuleTask omits a location when an item has line: 12 but no file.",
+        "buildRuleTask limits each guidance answer line to 300 characters and the held-reason line to 500 characters."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-calls.ts",
+          "reason": "export the existing `oneLine` helper (line ~136) so `buildRuleTask` reuses it; its behaviour and callers are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9b8aded33a43af8247e9a1a97a2f913a6ba1cebc"
+    },
+    {
+      "id": "US-002",
+      "title": "Parse and sanitize RULE verdicts",
+      "description": "**Goal** — Add the pure RULE verdict parser, result types and ruling count limit in flow-rulings.ts.\n\n**Motivation** — Arc A (#390) already lets an agent rule an item and a `FIX` apply the rulings.\n\n**Approach** — `parseRuleVerdict` reads the last line that starts with `{\"rulings\"` and parses it as JSON, tolerating a single trailing code-fence line after it as `parseFlowVerdict` does. `rulings` and `questions` must be arrays (either may be empty); each ruling needs non-blank string `item` and `ruling`, each question non-blank `item` and `question`; anything else, other trailing text after the object, or no such line is `{ ok: false }`. Each returned ruling text passes through `sanitizeFlowText` with U+0000 also replaced by U+FFFD, then is cut to 2,000 characters (the `parseRulingText` limit); each question text the same, cut to `FLOW_CALL_TEXT_MAX` (1,000), so no agent text can break a JSON column. More than `FLOW_RULINGS_MAX` rulings is `{ ok: false }`.\n\nThis story has no dependencies. US-001 authors the task half in the same module and co-located spec; contribute the parser half additively and preserve it regardless of execution order. Do not impose a dependency on US-001. The new parser requires a marker at the start of a line, even though the existing parseFlowVerdict uses lastIndexOf without that restriction.\n\n**Scope** — In: verdict types, shape validation, trailing-fence compatibility, count limit and JSON-safe text bounds. Out: task construction (US-001), decision/question handling (US-007), ruling eligibility and storage (US-005), orchestration (US-010).\n\n**Interface**\n```ts\nexport type FlowRuling = { item: string; ruling: string };\nexport type FlowRuleQuestion = { item: string; question: string };\nexport const FLOW_RULINGS_MAX = 100;\nexport function parseRuleVerdict(output: string | null):\n  | { ok: true; rulings: FlowRuling[]; questions: FlowRuleQuestion[] } | { ok: false };\n```",
+      "acceptanceCriteria": [
+        "[unit] parseRuleVerdict of output ending with the line {\"rulings\":[{\"item\":\"D-1\",\"ruling\":\"verified: test green\"}],\"questions\":[]} returns { ok: true, rulings: [{ item: 'D-1', ruling: 'verified: test green' }], questions: [] }.",
+        "[unit] When two {\"rulings\" lines appear, the last one is parsed.",
+        "[unit] A verdict line followed by one line holding only a code fence (three backticks) is parsed as ok: true.",
+        "[unit] parseRuleVerdict(null) returns { ok: false }.",
+        "[unit] Output with no line starting {\"rulings\" returns { ok: false }.",
+        "[unit] A {\"rulings\" line that is not valid JSON returns { ok: false }.",
+        "[unit] A prose line after the JSON line returns { ok: false }.",
+        "[unit] A verdict whose questions is missing returns { ok: false }.",
+        "[unit] A ruling with a blank ruling string returns { ok: false }.",
+        "[unit] A question with a non-string question returns { ok: false }.",
+        "[unit] A verdict with 101 rulings returns { ok: false }.",
+        "[unit] A verdict with exactly FLOW_RULINGS_MAX (100) rulings returns ok: true.",
+        "[unit] {\"rulings\":[],\"questions\":[{\"item\":\"S-2\",\"question\":\"Which?\"}]} returns ok: true with one question and no rulings.",
+        "[unit] A ruling text containing U+0000 and a lone surrogate U+D800 is returned with both replaced by U+FFFD.",
+        "[unit] A question text of 1,500 characters is returned cut to 1,000 characters."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "pure",
+        "verdict"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Deterministic bounded parser with malformed-input and Unicode cases; no permission or authentication logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/rulings/ruling-keyword.ts"
+      ],
+      "suggestedCriteria": [
+        "parseRuleVerdict returns { ok: false } when either array contains a null member or a member with a blank item string.",
+        "parseRuleVerdict returns a ruling text of at most 2,000 characters when the supplied ruling text exceeds that limit.",
+        "parseRuleVerdict returns text without lone surrogates when truncation would otherwise split an astral character.",
+        "parseRuleVerdict returns { ok: false } when the only marker is embedded in prose rather than starting a line."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "89ddb744962bc92f42e74cc120919e9b70512a57"
+    },
+    {
+      "id": "US-003",
+      "title": "Dispatch RULE as a reviewer AGENT job",
+      "description": "**Goal** — Add RULE to FlowStep together with its exhaustive dispatch case and typed task input.\n\n**Motivation** — The flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, step 2.5) says the finish is \"Arc A's rulings by agent, then the ready step\"; Arc A (#390) already lets an agent rule an item and a `FIX` apply the rulings.\n\n**Approach** — `FlowStep` (`apps/api/src/fleet/flows/flow-steps.ts:3`). Baseline: `'SPEC_REVIEW' | 'PLAN' | 'PRD_REVIEW' | 'RUN' | 'REVIEW' | 'FIX'`. Target: adds `'RULE'`.\n\n`buildStepDispatch` (`apps/api/src/fleet/flows/flow-step-dispatch.ts:30`) and `BuildStepDispatchInput` (:14). Target: input gains optional `rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null }`; a `RULE` case returns `{ command: 'AGENT', feature, ref: rule.ref, bashMode: 'raw', agent: { name: reviewAgent, task: buildRuleTask(...), model: flow.reviewerRole } }` plus the common fields.\n\n`FlowStep` gains `RULE` together with the `RULE` case of the exhaustive `buildStepDispatch` switch, so the type check stays green. RULE is read-only; the existing AGENT dispatch path is reused, not a new command or permission. Missing rule input throws `RULE requires the RUN branch and PR`. Preserve all existing step bodies and their assertions in flow-step-dispatch.spec.ts.\n\n**Scope** — In: RULE type, dispatch input/body, common remaining-cap/repo/pinned-runner propagation and seam to US-001 buildRuleTask. Out: when to choose RULE (US-007/008), loading RUN/guidance (US-011), ruling persistence (US-005/010). A flow-side code fix that does not go through `FIX` (`nax bot fix`); RULE never pushes.\n\n**Interface**\n```ts\nrule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };\n```",
+      "acceptanceCriteria": [
+        "[unit] buildStepDispatch with step: 'RULE' and rule: { ref: 'feat/x', prNumber: 7, items, guidance: null } returns command: 'AGENT', feature equal to input.feature.feature, ref: 'feat/x', bashMode: 'raw', the flow's repoId, maxCostUsd from the remaining cap and agent: { name: reviewAgent, model: flow.reviewerRole }.",
+        "[unit] The returned agent.task equals buildRuleTask({ prNumber: 7, items, guidance: null }) for the same input.",
+        "[unit] A flow with pinnedRunnerId set carries it on the RULE body.",
+        "[unit] buildStepDispatch with step: 'RULE' and no rule input throws an error with message 'RULE requires the RUN branch and PR'.",
+        "[unit] buildStepDispatch with step: 'FIX', pr: { number: 12 }, flow.repoId: 'repo-1', flow.pinnedRunnerId: null and remainingCapUsd: '6.7500' still returns exactly { repoId: 'repo-1', command: 'FIX', prNumber: 12, profiles: [], maxCostUsd: 6.75 }, preserving the existing body without ref, feature or agent fields."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "dispatch"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive union/switch extension with existing dispatch DTO patterns and a pure task-builder seam.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.spec.ts",
+        "apps/api/src/fleet/flows/flow-rulings.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-dispatch.spec.ts",
+          "reason": "add the `RULE` body tests; existing step bodies and their assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e87f7be66e911977783f36254f3dcc5469251611"
+    },
+    {
+      "id": "US-004",
+      "title": "Support SYSTEM-authored Arc A rulings",
+      "description": "**Goal** — Extend ruling attribution, FIX snapshot naming, system comments and the API ruling contract to SYSTEM.\n\n**Motivation** — Arc A (#390) already lets an agent rule an item and a `FIX` apply the rulings.\n\n**Approach** — **Ruling actor.** A flow ruling is stored with `actorType: 'SYSTEM'`, `actorId: 'flow'` (the column is a string, no migration) and the flow's `approvalRequestId`; it runs under `runAsSystem('flow', ..., { onBehalfOf: creator })`, as the flow's stop tickets do. The Finish ticket is created with the creator's principal; the ruling comment is a system-authored `RULING` comment. `snapshotForFix` sends it to nax as `by: koda:system:flow`. The actual createForFlow writer and action context belong to US-005; this story supplies the actor representations and comment primitive.\n\n`FleetPrRuling.actorType` (`apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts:15`). Baseline: `'USER' | 'AGENT'`. Target: `'USER' | 'AGENT' | 'SYSTEM'`. `FleetPrRulingDto.actorType` (`apps/api/src/fleet/rulings/dto/fleet-pr-ruling.dto.ts:14`) enum: `['USER', 'AGENT', 'SYSTEM']`.\n\n`pendingForFix` (`apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:98`). Target: a `SYSTEM` row's `actorName` is its `actorId`, with no user or agent lookup.\n\n`snapshotForFix` (`apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:33`). Baseline `by` is `koda:agent:<name>` or `koda:user:<name>`. Target: a `SYSTEM` ruling is `koda:system:<actorId>`.\n\n`FleetJobTicketEffects` (`apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts`). Target: adds `createSystemRulingComment(ticketId: string, body: string): Promise<{ id: string }>` over the repository's existing `createSystemComment(ticketId, body, CommentType.RULING)`.\n\n**The ruling contract.** `FleetPrRulingDto.actorType`'s enum gains `SYSTEM` and `openapi.json` is regenerated (`bun run api:export-spec`) in the same story, as F4b did for its route; the web and CLI types are out of scope. The generated spec diff is only this enum change. Add repository and DTO unit specs, the koda:system:flow case next to existing USER/AGENT snapshot cases, and the ticket-effects case; existing assertions are unchanged.\n\n**Scope** — In: actor union/Swagger metadata, repository naming, snapshot attribution with existing non-fatal head-read failures preserved, system RULING comment primitive and root OpenAPI artifact. Out: principal loading and system write context (US-005), flow-feature migration (US-006), advance integration (US-010/011). `SYSTEM` in the web (`apps/web/lib/fleet-types.ts`) and generated CLI ruling types; the API DTO and `openapi.json` are updated.\n\n**Interface**\n```ts\nactorType: 'USER' | 'AGENT' | 'SYSTEM';\ncreateSystemRulingComment(ticketId: string, body: string): Promise<{ id: string }>;\n```",
+      "acceptanceCriteria": [
+        "[unit] PrismaFleetPrRulingRepository.pendingForFix maps a pending row with actorType: 'SYSTEM', actorId: 'flow' to actorName: 'flow', with the stubbed agent and user lookups not asked for that id.",
+        "[unit] snapshotForFix sends a pending SYSTEM ruling with by: 'koda:system:flow'.",
+        "[unit] snapshotForFix still sends a USER ruling as koda:user:<name> and an AGENT ruling as koda:agent:<slug>.",
+        "[unit] The Swagger metadata of FleetPrRulingDto.actorType lists the enum ['USER', 'AGENT', 'SYSTEM'].",
+        "[unit] FleetJobTicketEffects.createSystemRulingComment('t1', 'body') calls the repository's createSystemComment with ('t1', 'body', CommentType.RULING) and returns its { id }.",
+        "[unit] When pending rulings include a SYSTEM ruling and the PR head read throws, snapshotForFix returns { notSent: 'head-unreadable' }, preserving the existing non-fatal forge-failure behavior."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "rulings",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Five existing TypeScript files need straightforward actor-union, naming and comment-delegation additions plus spec regeneration; there is no new abstraction or authorization decision.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts",
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/src/fleet/rulings/dto/fleet-pr-ruling.dto.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.spec.ts",
+        "apps/api/src/fleet/rulings/dto/fleet-pr-ruling.dto.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts",
+          "reason": "add the `koda:system:flow` case next to the user and agent `by` cases; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts",
+          "reason": "add the `createSystemRulingComment` case; existing assertions are unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with `bun run api:export-spec`: the `FleetPrRulingDto.actorType` enum gains `SYSTEM`; nothing else changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "baa2c97c2d4dd471ace4c3971524271effbabfaf"
+    },
+    {
+      "id": "US-005",
+      "title": "Record idempotent flow rulings under the creator",
+      "description": "**Goal** — Implement createForFlow, ruledItemIds and commentRefused using Arc A eligibility and system-on-behalf-of attribution.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — `FleetPrRulingsService.createForFlow`:\n\nFirst, when `latestRuling(runJobId, itemId)` is `pending`, `actorType: 'SYSTEM'` and has the same trimmed text, it returns `{ kind: 'recorded', rulingId: <that id> }` with no writes. Otherwise, outside any transaction it runs `ruleTarget` then `assertItemIndex`; a thrown app exception becomes `{ kind: 'refused', reason: <its message key> }`. Then, under `runAsSystem('flow', fn, { onBehalfOf: creator })`, in one transaction: `lockTarget(projectSlug, runJobId)`, `ruleTarget` again (refusal -> `refused`), load the creator's principal with `ActorPrincipalLoader` (unavailable -> `refused`, reason `creator unavailable`), `ensureFinishTicket`, `createSystemRulingComment(ticketId, '<item> (<kind>): <text> (flow <flowId>)')`, `replacePending`, `insert` with `actorType: 'SYSTEM'`, `actorId: 'flow'`, `approvalRequestId` from the input, and one audit record `system.flow.advance` with summary `flow ruled <item>: <disposition>`.\n\n**No new permission or approval.** The in-process ruling path skips the route gate: the flow's approval covers it. It still runs every eligibility check of `ruleTarget` and the item-index check of `assertItemIndex`.\n\n**Recording is idempotent.** `createForFlow` returns the existing ruling, with no new comment, audit or insert, when the item's latest ruling is `pending`, `SYSTEM`-authored and has the same text, so a tick that crashed after some rulings re-runs safely.\n\n**The item-index check runs per ruling** (`assertItemIndex`, at most `FLOW_RULINGS_MAX` per RULE job); caching it is left out.\n\n`FleetPrRulingsService` constructor (`apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:25`). Target: gains `ActorPrincipalLoader` as its last parameter.\n\n`FleetPrRulingsService` (same file). Target: adds `createForFlow(input: FlowRulingInput): Promise<FlowRulingOutcome>` `ruledItemIds(runJobId: string): Promise<string[]>` (the item ids of `ruledItemIds` above, from `repo.list(runJobId)`'s newest row per item), and `commentRefused(runId: string, body: string): Promise<void>` delegating to `FleetJobTicketEffects.commentOnRulingResult`, so the advance service needs no second new dependency.\n\nThe protected item ids are items of that RUN whose latest ruling is `applied`, or `pending` from a `USER` or `AGENT`, so a flow never replaces a human's pending ruling. Preserve `ruleTarget`, `assertItemIndex`, `latestRunForPr`, repository locking/insertion helpers and parseRulingText unchanged. Unknown operational failures propagate instead of being mislabeled refused. Add the ActorPrincipalLoader stub as the final positional constructor argument in fleet-pr-rulings.service.spec.ts, fleet-pr-rulings.snapshot.spec.ts, fleet-pr-rulings.preflight.spec.ts, fleet-pr-rulings.results.spec.ts and tickets/finish-ticket.spec.ts; existing assertions are unchanged. Add new writer tests separately within the existing service spec harness without changing old expectations.\n\n**Scope** — In: secure attribution, principal loading, refusal outcomes, idempotent atomic writer, protected latest-ruling ids, refusal-comment delegation and preservation of the existing direct create caller attribution. Out: SYSTEM representation primitive (US-004), task membership filtering and batch activity (US-010), flow progress marker (US-006). A new permission key or approval for the RULE step or the flow's rulings. Caching the item-index forge read across the rulings of one RULE job.\n\n**Interface**\n```ts\nexport type FlowRulingInput = { projectId: string; projectSlug: string; runJobId: string; itemId: string; text: string;\n  creator: { type: 'USER' | 'AGENT'; id: string }; approvalRequestId: string | null; flowId: string };\nexport type FlowRulingOutcome = { kind: 'recorded'; rulingId: string } | { kind: 'refused'; reason: string };\ncreateForFlow(input: FlowRulingInput): Promise<FlowRulingOutcome>;\nruledItemIds(runJobId: string): Promise<string[]>;\ncommentRefused(runId: string, body: string): Promise<void>;\n```",
+      "acceptanceCriteria": [
+        "[unit] createForFlow with an eligible advisor item and text 'verified: test green' calls repo.insert once with actorType: 'SYSTEM', actorId: 'flow', itemId, itemKind: 'advisor', disposition: 'verified', state: 'pending' and the input's approvalRequestId, and returns { kind: 'recorded', rulingId } with the inserted id.",
+        "[unit] It calls ruleTarget and assertItemIndex before opening the transaction, and ruleTarget again after lockTarget(projectSlug, runJobId) inside it.",
+        "[unit] When the pre-transaction ruleTarget throws fleet.rulings.notRulable, it returns { kind: 'refused', reason: 'fleet.rulings.notRulable' } and never calls lockTarget or insert.",
+        "[unit] When assertItemIndex throws fleet.rulings.noItemIndex, it returns { kind: 'refused', reason: 'fleet.rulings.noItemIndex' } and never inserts.",
+        "[unit] When the in-transaction ruleTarget throws fleet.rulings.settled, it returns refused with that reason and never inserts.",
+        "[unit] When ActorPrincipalLoader.load throws ActorUnavailableError for the creator, it returns { kind: 'refused', reason: 'creator unavailable' } and never inserts.",
+        "[unit] It calls ensureFinishTicket({ id: runJobId }, creatorPrincipal) with the principal loaded for the input's creator.",
+        "[unit] It calls createSystemRulingComment(ticketId, 'D-1 (advisor): verified: test green (flow f1)') and stores the returned id as the ruling's commentId.",
+        "[unit] It calls replacePending(runJobId, itemId) before insert.",
+        "[unit] It records one audit entry with key system.flow.advance, resource fleet_job / runJobId, and summary 'flow ruled D-1: verified'.",
+        "[unit] The action context seen by audit.record has actor SYSTEM / flow with onBehalfOf equal to the input's creator.",
+        "[unit] When latestRuling(runJobId, itemId) is pending, actorType: 'SYSTEM', with the same trimmed text, it returns { kind: 'recorded', rulingId: <that id> } and calls neither insert, createSystemRulingComment nor audit.record.",
+        "[unit] ruledItemIds('r1') returns the item ids for an item whose latest ruling is applied and an item whose latest ruling is pending with actorType USER.",
+        "[unit] ruledItemIds('r1') omits the item ids for an item whose latest ruling is pending with actorType SYSTEM and items whose latest ruling is skipped or replaced.",
+        "[unit] commentRefused('r1', 'body') calls FleetJobTicketEffects.commentOnRulingResult('r1', 'body')."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "rulings",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: trusted in-process writer bypasses the route gate, loads creator principals and preserves system-on-behalf-of attribution across eligibility checks and atomic persistence.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts",
+        "apps/api/src/auth/principal/actor-principal.loader.ts"
+      ],
+      "suggestedCriteria": [
+        "ruledItemIds('r1') returns the item id of an item whose latest ruling is pending with actorType AGENT.",
+        "ruledItemIds omits an item whose newest ruling is skipped even when an older ruling for the same item was applied.",
+        "When repo.insert fails, createForFlow leaves no newly committed ruling comment or replacement of a prior pending ruling.",
+        "createForFlow propagates an unexpected database error rather than returning a refused outcome."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.service.spec.ts",
+          "reason": "the positional `new FleetPrRulingsService(...)` call (line ~23) gains an `ActorPrincipalLoader` stub as its last argument; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.snapshot.spec.ts",
+          "reason": "the positional constructor call (line ~16) gains the `ActorPrincipalLoader` stub; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.preflight.spec.ts",
+          "reason": "the positional constructor call (line ~23) gains the `ActorPrincipalLoader` stub; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/rulings/fleet-pr-rulings.results.spec.ts",
+          "reason": "the positional constructor call (line ~13) gains the `ActorPrincipalLoader` stub; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/finish-ticket.spec.ts",
+          "reason": "the positional `new FleetPrRulingsService(...)` call (line ~48) gains the `ActorPrincipalLoader` stub; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6e696b9cd9f8e1f79ba71e9e60307c8db1fa3bbf"
+    },
+    {
+      "id": "US-006",
+      "title": "Persist the flow feature's recorded RULE job",
+      "description": "**Goal** — Add the nullable durable rulingsJobId marker and a flow-scoped repository operation.\n\n**Motivation** — Arc A (#390) already lets an agent rule an item and a `FIX` apply the rulings.\n\n**Approach** — `FleetFlowFeature` (`apps/api/prisma/schema.prisma:1274` area) and `FleetFlowFeatureRecord` (`apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:15`). Target: adds `rulingsJobId String?` / `rulingsJobId?: string | null`, mapped by the flow repositories like `callsJobId`.\n\n`IFleetFlowStepRepository` (`apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts`). Target: adds `recordRulings(flowId: string, featureId: string, jobId: string): Promise<void>`, an `updateMany({ where: { id: featureId, flowId } })`.\n\nMigration adding `FleetFlowFeature.rulingsJobId`, the record field and mappers, and `recordRulings`. Create apps/api/prisma/migrations/20261201090000_fleet_flow_rulings/migration.sql. The column is nullable; existing rows read null, with no backfill. Preserve callsJobId, questionsJobId, questions and answers when recording this marker. Use the generated Prisma client and regenerate it after schema changes. The existing toFeature row spread should preserve the field once Prisma is regenerated; verify findById round-trips. Add rulingsJobId/recordRulings cases to test/integration/fleet/fleet-flow-step.repository.integration.spec.ts; existing assertions are unchanged. Use real PostgreSQL and the shared DB gate, not a mocked substitute for the integration behavior.\n\n**Scope** — In: schema, additive migration, record type/mappers, scoped update and repository integration cases. Out: choosing or recording ruling contents (US-005/007/010), optional decision inputs (US-007), guided dispatch (US-011), flow DTO changes.\n\n**Interface**\n```prisma\nrulingsJobId String?\n```\n```ts\nrulingsJobId?: string | null;\nrecordRulings(flowId: string, featureId: string, jobId: string): Promise<void>;\n```",
+      "acceptanceCriteria": [
+        "[integration] After the migration, a FleetFlowFeature row accepts rulingsJobId null and a string, and an existing row reads rulingsJobId null.",
+        "[integration] recordRulings(flowId, featureId, 'j1') sets that feature's rulingsJobId to j1 and leaves callsJobId, questionsJobId, questions and answers unchanged.",
+        "[integration] IFleetFlowRepository.findById, implemented by PrismaFleetFlowRepository, returns the feature with rulingsJobId: 'j1' after recordRulings.",
+        "[integration] recordRulings with a feature id that belongs to another flow changes no row."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "prisma",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard nullable scalar migration and repository update scoped by parent identity; existing PostgreSQL integration harness covers persistence without changing access policies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261201090000_fleet_flow_rulings/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "add the `rulingsJobId` / `recordRulings` cases; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "042b20f65eee855229e388df26c8ea13a039abb5"
+    },
+    {
+      "id": "US-007",
+      "title": "Choose RULE and apply its verdict after REVIEW",
+      "description": "**Goal** — Extend the pure decision contract and REVIEW/RULE branches without changing earlier steps.\n\n**Motivation** — The flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, Steps, step 2.5) says the finish is \"Arc A's rulings by agent, then the ready step\"; Arc A (#390) already lets an agent rule an item and a `FIX` apply the rulings.\n\n**Approach** — `FlowStepInput` (`apps/api/src/fleet/flows/flow-step-decision.ts:23`). Target: adds OPTIONAL `run?: { outcome: string | null; openItems: FlowOpenItem[] } | null` (the feature's latest `RUN` job's `workflow`), `ruledItemIds?: string[]` (items of that RUN whose latest ruling is `applied`, or `pending` from a `USER` or `AGENT`, so a flow never replaces a human's pending ruling) and `rulingsJobId?: string | null` (the `RULE` job whose rulings were recorded); absent reads as `null` / `[]`, so `decisionInput` compiles before US-011 fills them.\n\n`FlowStepAction` (same file :53). Target: the `dispatch` variant gains optional `rule?: { answeredJobId: string | null }`; a new variant `{ kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] }`; `wait_answer.step` widens to `'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX'`. Export ApplyRulingsAction as the extracted action type for US-010.\n\n`decideFlowStep` PR-phase rules (single-feature flows; all earlier rules unchanged):\n1. `REVIEW` COMPLETED, `featurePrNumber` null -> `wait` (unchanged).\n2. `REVIEW` COMPLETED: `run?.outcome === 'draft'` and `needsAutomaticRule(run.openItems, ruledItemIds)` -> `dispatch RULE` with `rule: { answeredJobId: null }`; otherwise `dispatch FIX` (unchanged shape).\n3. `RULE` COMPLETED, verdict unreadable -> stop `verdict_unreadable`, detail `RULE job <id>: no rulings JSON in the agent output`.\n4. `RULE` with questions: `canApplyCalls` false -> stop `review_ambiguous` (detail lists the questions); more than `FLOW_CALLS_MAX_FINDINGS` -> stop `review_ambiguous`; `questionsJobId === job.id && answers !== null` -> `dispatch RULE` with `rule: { answeredJobId: job.id }`; otherwise `wait_answer` step `RULE` with positional questions whose text is `<item>: <question>`.\n5. `RULE` with no questions: `rulingsJobId === job.id` -> `dispatch FIX` with the feature PR (`wait` while `featurePrNumber` is null); otherwise `apply_rulings` with the job id and the verdict's rulings (possibly empty). A verdict with both rulings and questions follows rule 4 (its rulings are not recorded).\n\n**Questions take precedence over rulings in one verdict.** A RULE verdict with both is a wait: its rulings are not recorded, and the guided RULE after the answer rules again with the answers in hand.\n\n**Questions from RULE** use the F4b path: positional ids, at most `FLOW_CALLS_MAX_FINDINGS` (20); more is a stop. An answered `RULE` question, like an answered `FIX` hold, dispatches a new guided `RULE`; answers are never turned into rulings directly, so every ruling keeps the agent's evidence.\n\nRULE job FAILED / CANCELLED / CRASHED / ESCALATED -> stop `step_failed` (existing rule). Retain multi-feature skip and all earlier behavior. Add REVIEW/RULE cases to flow-step-decision.spec.ts; the input() fixture is unchanged because new fields are optional, and existing assertions are unchanged.\n\n**Scope** — In: optional inputs, new action variants, widened question-step type and rules 1-5, including failure-table terminal cases. Out: FIX rules 6-9 (US-008), question payload/parser widening (US-009), transaction/orchestration (US-010/011). Turning human answers directly into rulings; answers are guidance for a new RULE job. Multi-feature flows; `decideFlowStep` still skips them (F5).\n\n**Interface**\n```ts\nrun?: { outcome: string | null; openItems: FlowOpenItem[] } | null;\nruledItemIds?: string[];\nrulingsJobId?: string | null;\n// dispatch option\nrule?: { answeredJobId: string | null };\n// new action\n{ kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] };\n// wait_answer.step\n'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX';\n```",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep for a COMPLETED REVIEW, a feature PR, run: { outcome: 'draft', openItems: [advisorItem] } and no applied ids returns { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: null } }.",
+        "[unit] For a COMPLETED REVIEW with run.outcome: 'ready' and the same items it returns dispatch FIX with the feature PR number.",
+        "[unit] For a COMPLETED REVIEW with a draft RUN whose only items are of kind finding and gate it returns dispatch FIX.",
+        "[unit] For a COMPLETED REVIEW with no run field it returns dispatch FIX.",
+        "[unit] For a COMPLETED RULE whose agentOutput has no rulings JSON it returns { kind: 'stop', reason: 'verdict_unreadable', detail: 'RULE job <id>: no rulings JSON in the agent output' }.",
+        "[unit] For a COMPLETED RULE with rulings and no questions and no rulingsJobId it returns { kind: 'apply_rulings', jobId: <id>, rulings } with the verdict's rulings.",
+        "[unit] For a COMPLETED RULE with an empty rulings list and no questions it returns apply_rulings with rulings: [].",
+        "[unit] For a COMPLETED RULE job whose id equals rulingsJobId and whose readable verdict contains no questions, it returns { kind: 'dispatch', step: 'FIX', pr: { number: <feature PR> } }.",
+        "[unit] For a COMPLETED RULE job whose id equals rulingsJobId and whose readable verdict contains no questions, with a null featurePrNumber it returns wait.",
+        "[unit] For a COMPLETED RULE with the single question { item: 'S-2', question: 'Which?' }, no rulings, canApplyCalls: true and no current answers, it returns { kind: 'wait_answer', step: 'RULE', jobId: <id>, questions: [{ id: '1', question: 'S-2: Which?' }] }.",
+        "[unit] For a COMPLETED RULE with one ruling, one question, canApplyCalls: true and no current answers, it returns wait_answer (not apply_rulings).",
+        "[unit] For a COMPLETED RULE with one question, no rulings and canApplyCalls: false it returns a stop with reason review_ambiguous.",
+        "[unit] For a COMPLETED RULE with 21 questions and canApplyCalls: true it returns a stop with reason review_ambiguous.",
+        "[unit] For a COMPLETED RULE with between 1 and FLOW_CALLS_MAX_FINDINGS questions and canApplyCalls: true, where questionsJobId equals its id and answers is non-null, it returns { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: <id> } }.",
+        "[unit] decideFlowStep returns a stop with reason step_failed when the latest RULE job is FAILED, CANCELLED, CRASHED or ESCALATED, preserving the existing terminal-job failure rule."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "state-machine",
+        "pure"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure state-machine extension using upstream helpers; no persistence or authorization-policy implementation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/flows/flow-rulings.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "suggestedCriteria": [
+        "decideFlowStep returns wait for a COMPLETED REVIEW with featurePrNumber null even when the RUN is draft with an advisor item.",
+        "decideFlowStep returns dispatch FIX when all automatic-rule candidates are present in ruledItemIds.",
+        "decideFlowStep returns wait_answer for a RULE question when questionsJobId refers to an older job despite non-null stored answers."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "add the REVIEW and RULE cases; the `input()` fixture (line ~10) is unchanged because the new fields are optional; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8a3901712aba4929e8b711a361df47185d5c28cd"
+    },
+    {
+      "id": "US-008",
+      "title": "Require human guidance for each held FIX round",
+      "description": "**Goal** — Make the FIX decision wait for fresh human guidance in NAX flows while preserving completion and stop semantics.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — `decideFlowStep` PR-phase rules (single-feature flows; all earlier rules unchanged):\n6. `FIX` COMPLETED and ready (`markedReady` true, or false with no `readyHeld`) -> `complete` (unchanged).\n7. `FIX` held, `readyHeld` starting with `CI ` -> stop `pr_not_ready` with `readyHeld` (unchanged detail).\n8. `FIX` held, `canApplyCalls` false, or `fixReady` null -> stop `pr_not_ready` (unchanged).\n9. `FIX` held (nax entry): `questionsJobId === job.id && answers !== null` -> `dispatch RULE` with `rule: { answeredJobId: job.id }`; otherwise `wait_answer` step `FIX`, one question id `1`: `PR still held after FIX <id>: <readyHeld>. Answer with guidance for one more ruling and FIX round, or stop the flow.`\n\n**One automatic round; any extra round asks the human.** If the PR is still held after the `FIX`, the flow waits for a human answer (nax entry), which starts exactly one more `RULE` + `FIX` round with the answer as guidance. The human can stop instead (the existing stop route).\n\n**A red gate is the agent's to fix**: `FIX` tries the code fix; the guided `RULE` after it re-runs the gate and rules `fixed <sha>` when it is green.\n\n**CI holds stop.** A `FIX` whose `readyHeld` starts with `CI ` stops `pr_not_ready` (nobody can rule a CI item). Thread-entry flows keep F4b's behaviour: no waits, a held `FIX` stops `pr_not_ready` and `RULE` questions stop `review_ambiguous`.\n\nAdd nax-entry FIX hold cases to flow-step-decision.spec.ts. The existing FIX cases keep canApplyCalls: false and their assertions are unchanged. This story only changes decisions; US-011 writes the wait and dispatches the guided task.\n\n**Scope** — In: rules 6-9, exact hold question, answer-job matching and CI/thread stops. Out: RULE verdict decisions (US-007), payload widening (US-009), actual wait/outbox/guided dispatch wiring (US-011), answer API changes. Waits for thread-entry flows; they keep F4b's stop behaviour. Turning human answers directly into rulings; answers are guidance for a new RULE job.\n\n**Interface** — Reuse US-007's widened FlowStepAction: `{ kind: 'wait_answer'; step: 'FIX'; jobId: string; questions: FlowQuestion[] }` or `{ kind: 'dispatch'; step: 'RULE'; rule: { answeredJobId: string | null } }`.",
+      "acceptanceCriteria": [
+        "[unit] A COMPLETED FIX with fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' }, canApplyCalls: true and no stored answers returns { kind: 'wait_answer', step: 'FIX', jobId: <id>, questions: [{ id: '1', question: 'PR still held after FIX <id>: 1 open item(s): G-1. Answer with guidance for one more ruling and FIX round, or stop the flow.' }] }.",
+        "[unit] The same FIX with questionsJobId equal to its id and non-null answers returns { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: <id> } }.",
+        "[unit] A COMPLETED non-CI held FIX with canApplyCalls: true whose questionsJobId names an older job returns wait_answer even when the older job has non-null stored answers.",
+        "[unit] A held FIX with readyHeld: 'CI failure: test' and canApplyCalls: true returns { kind: 'stop', reason: 'pr_not_ready', detail: 'CI failure: test' }.",
+        "[unit] A held FIX with readyHeld: 'CI no-checks: no CI check reported within 20m 0s' and canApplyCalls: true returns a pr_not_ready stop.",
+        "[unit] A held FIX with canApplyCalls: false returns a pr_not_ready stop with the readyHeld detail.",
+        "[unit] A FIX with fixReady: null and canApplyCalls: true returns { kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' }.",
+        "[unit] A FIX with markedReady: true and canApplyCalls: true returns complete.",
+        "[unit] A FIX with markedReady: false, no readyHeld and canApplyCalls: true returns complete."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "state-machine",
+        "human-guidance"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small pure-decision change with exact branch precedence and stale-answer safeguards; it does not change route access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "add the nax-entry FIX hold cases; the existing FIX cases (lines ~124-150) keep `canApplyCalls: false` and their assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a294be80afc0b5f0827fe523aec2f4017a895b73"
+    },
+    {
+      "id": "US-009",
+      "title": "Accept RULE and FIX in the F4b question path",
+      "description": "**Goal** — Widen the existing question event contract/parser and comment formatter to RULE and FIX.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — `FleetFlowQuestionsPayload` and `parseFlowQuestionsPayload` (`apps/api/src/notifications/fleet/fleet-notification-events.ts:33`, :104). Target: `step` accepts `RULE` and `FIX`.\n\n`formatQuestionsComment` (`apps/api/src/fleet/flows/flow-calls.ts:79`). Target: `step` accepts `RULE` and `FIX`.\n\nWiden `FleetFlowQuestionsPayload.step`, `parseFlowQuestionsPayload` and `formatQuestionsComment` to `RULE` and `FIX`. Add RULE/FIX accepted-step cases to fleet-notification-events.spec.ts; the existing malformed-step PLAN case is unchanged. Add the FIX questions-comment case to flow-calls.spec.ts; existing assertions are unchanged. Existing question-format tests also live in flow-questions.spec.ts. Keep F4b's existing outbox consumers: the ticket subscriber and notification subscriber both parse the payload, and the generic comment body starts `Flow needs answers (<step> job <id>):`. No new notification producer or consumer is necessary.\n\n**Scope** — In: payload step union and runtime allowlist, unchanged validation of other fields, comment formatter step type and behavioral cases. Out: decisions (US-007/008), wait/outbox emission (US-011), database fan-out scenario (US-012), new answer routes and UI. A notification when a flow completes.\n\n**Interface**\n```ts\n// FleetFlowQuestionsPayload.step and formatQuestionsComment input.step\nstep: 'SPEC_REVIEW' | 'PRD_REVIEW' | 'RULE' | 'FIX';\n```",
+      "acceptanceCriteria": [
+        "[unit] parseFlowQuestionsPayload accepts a payload with step: 'RULE' and returns it with step: 'RULE'.",
+        "[unit] It accepts a payload with step: 'FIX' and returns it with step: 'FIX'.",
+        "[unit] It returns null for step: 'PLAN'.",
+        "[unit] formatQuestionsComment({ step: 'FIX', jobId: 'j9', questions: [{ id: '1', question: 'q' }], answerPath }) starts with 'Flow needs answers (FIX job j9):' and contains the line '1. q'.",
+        "[unit] parseFlowQuestionsPayload still returns an otherwise valid payload unchanged for each existing step SPEC_REVIEW and PRD_REVIEW.",
+        "[unit] formatQuestionsComment({ step: 'SPEC_REVIEW', jobId: 'j1', questions: [{ id: '2', question: 'Q1' }, { id: '5', question: 'Q2' }], answerPath: '/api/projects/sandbox/flows/f1/answers' }) still returns the existing four-line comment with header 'Flow needs answers (SPEC_REVIEW job j1):', lines '2. Q1' and '5. Q2', and the answer example using jobId j1 and the first positional id 2."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "notifications",
+        "questions"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard additive event allowlist/type change plus formatter tests; existing fan-out infrastructure remains intact.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+        "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-calls.spec.ts",
+        "apps/api/src/fleet/flows/flow-questions.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+          "reason": "add the `RULE` and `FIX` accepted-step cases; the existing malformed-step case (line ~97) is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flow-calls.spec.ts",
+          "reason": "add the `FIX` questions-comment case; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a4896780d29c419de2ed7769006d203bba7249db"
+    },
+    {
+      "id": "US-010",
+      "title": "Apply RULE rulings outside the decide transaction",
+      "description": "**Goal** — Wire the ruling service into flow advance and record batch progress, refusals and activity safely.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — `FleetFlowAdvanceService` constructor (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts:48`). Target: gains `FleetPrRulingsService` as its last parameter; `FlowsModule` imports `FleetRulingsModule` (no cycle: it is already reached through `FleetJobsModule`).\n\n`DispatchPass` (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts:38`). Target: the type parameter also admits `ApplyRulingsAction`, and `advance()` branches on `apply_rulings` before reading `action.step` (US-010).\n\n`apply_rulings` leaves the decide transaction like `apply_calls`; `advanceRulings` re-reads the RUN with `steps.latestJobForStep(flowId, 'RUN')`, `rulings.ruledItemIds(run.id)` and the slug with `steps.projectSlug`, and keeps only the last ruling per item id when the verdict repeats an item; (creator-access check first, no cost-cap check: rulings are not billed). `advanceRulings` calls `createForFlow` once per ruling, in verdict order, outside any transaction, skipping (as refused, reason `not in task`) any ruling whose item is not in `ruleTaskItems(run.openItems, ruledItemIds)`; then in one transaction under `lockLive` (nothing is written when the flow is no longer live): `recordRulings(flowId, featureId, ruleJobId)`, one `flow.rulings` activity record with payload `{ jobId, recorded: <item ids>, refused: [{ item, reason }] }`, and, when any were refused, `rulings.commentRefused(runId, 'Flow rulings refused (RULE job <id>): <item> (<reason>)[; ...]')`.\n\n**Refused rulings are skipped, not fatal.** A ruling for an item that is not in the RULE task (a finding, a CI item, an unknown id), or one that `ruleTarget` refuses (invalid text, already applied) or whose item index is missing, is not recorded. The flow lists the refused ones in one `commentOnRulingResult` comment on the RUN's tickets (the Finish ticket; nothing is posted when no ticket exists, i.e. every ruling was refused) and in the `flow.rulings` activity record, and continues to `FIX`. If the PR stays held, the human is asked anyway.\n\nThe RUN job returned by latestJobForStep is a FleetJobRecord: its openItems are at run.workflow.openItems, not a top-level run.openItems property; the algorithm's run.openItems shorthand refers to that workflow projection. Map each verdict { item, ruling } to the single createForFlow input object's { itemId: item, text: ruling }, retaining the RUN job id, flow creator, approval request, flow/project identity and resolved project slug.\n\nTick crashes after recording some rulings -> the next tick re-runs; already-recorded identical rulings are returned, not duplicated. `createForFlow` owns each ruling transaction; never invoke it inside the decide transaction or a batch transaction. The final lockLive guards progress/activity/refusal comments after the ruling loop, not a rollback of per-ruling transactions already committed before a concurrent stop. Keep last duplicate occurrences in their verdict order. Reuse commentRefused rather than injecting a second ticket-effects dependency.\n\nCreate fleet-flow-advance-rulings.spec.ts using the advance-calls harness precedent. Add a final FleetPrRulingsService stub with ruledItemIds: async () => [] and createForFlow/commentRefused stubs to positional constructors in fleet-flow-advance.service.spec.ts, fleet-flow-advance-calls.spec.ts, fleet-flow-advance-review.spec.ts and fleet-flow-advance-answers.spec.ts; existing assertions are unchanged. In flows.module.spec.ts, add .overrideModule(FleetRulingsModule).useModule(StubFleetRulingsModule) beside existing overrides, with a stub exporting FleetPrRulingsService; existing assertions are unchanged and module compilation stays a no-DB unit test.\n\n**Scope** — In: DI/module seam, apply_rulings pass, access check, unbilled execution, per-ruling task eligibility, duplicate-last behavior, progress marker, refusal reporting, activity, recovery cases and preservation of the existing apply_calls path. Out: lazy decision inputs and RULE dispatch guidance (US-011), actual ruling writer implementation (US-005), schema/repository implementation (US-006), question payload change (US-009). A new permission key or approval for the RULE step or the flow's rulings. Cancelling a running job when the flow stops.\n\n**Interface**\n```ts\n// FlowStepAction work variant passed outside decide\n{ kind: 'apply_rulings'; jobId: string; rulings: FlowRuling[] };\n// upstream service/repository seams\ncreateForFlow(input: FlowRulingInput): Promise<FlowRulingOutcome>;\nruledItemIds(runJobId: string): Promise<string[]>;\ncommentRefused(runId: string, body: string): Promise<void>;\nrecordRulings(flowId: string, featureId: string, jobId: string): Promise<void>;\n```",
+      "acceptanceCriteria": [
+        "[unit] A tick whose decision is apply_rulings with rulings for D-1 and S-1 (both in the RULE task) calls FleetPrRulingsService.createForFlow twice, D-1 first, each with one input object mapping runJobId to the RUN job id, itemId to the verdict ruling's item, text to its ruling, creator to { type: flow.createdByType, id: flow.createdById }, approvalRequestId to the flow's approvalRequestId, flowId to flow.id, projectId to flow.projectId and projectSlug to the resolved project slug.",
+        "[unit] After the rulings are recorded it calls recordRulings(flowId, featureId, ruleJobId) once.",
+        "[unit] A ruling for item F-1 of kind finding is never passed to createForFlow and is listed as refused with reason 'not in task'.",
+        "[unit] When one of two rulings returns { kind: 'refused', reason: 'fleet.rulings.notRulable' } it still records the other, calls recordRulings, and calls FleetPrRulingsService.commentRefused(runId, body) once with a body containing 'Flow rulings refused (RULE job <id>): C-1 (fleet.rulings.notRulable)'.",
+        "[unit] When no ruling is refused it never calls commentRefused.",
+        "[unit] It records one flow.rulings activity whose payload is { jobId: <RULE id>, recorded: ['D-1'], refused: [{ item: 'C-1', reason: 'fleet.rulings.notRulable' }] } when D-1 is recorded and C-1 is refused with fleet.rulings.notRulable.",
+        "[unit] When the flow is no longer live at the record transaction (lockLive returns null) it calls neither recordRulings nor the activity recorder.",
+        "[unit] With spentUsd equal to costCapUsd, an apply_rulings decision still calls createForFlow (no cost_cap stop).",
+        "[unit] When the creator has lost dispatch access, an apply_rulings decision stops the flow creator_lost_access and never calls createForFlow.",
+        "[unit] createForFlow is never called while the decide transaction is open (the stubbed transaction manager records no active run when the stub is invoked).",
+        "[unit] A verdict ruling D-1 twice, first 'verified: a' then 'verified: b', calls createForFlow once for D-1, with text 'verified: b'.",
+        "[unit] When every ruling is refused and the RUN has no linked Finish ticket or other tickets, advancing records the refused list in flow.rulings without creating a ticket comment.",
+        "[unit] When a tick crashes after recording some rulings and the next tick retries the same verdict, previously recorded identical rulings produce no duplicate ruling inserts, comments or ruling audit entries.",
+        "[unit] Given an existing SPEC_REVIEW apply_calls decision with expected head s1, advance still invokes FleetFlowCallsService.apply(flow, action, 's1') outside a transaction, preserving the pre-existing calls path after adding apply_rulings."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "orchestration",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-006",
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security override: access-checked system writes cross the decision/per-ruling/progress transaction boundaries and must remain replay-safe under concurrent flow stops.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+        "apps/api/src/fleet/flows/flows.module.ts",
+        "apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-rulings.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A verdict ruling for a ci item or an unknown item is refused with reason 'not in task' and is never passed to createForFlow.",
+        "An empty apply_rulings verdict records the RULE job marker and a flow.rulings activity with empty recorded and refused lists.",
+        "When a pending USER or AGENT ruling protects an item, advanceRulings refuses the flow's ruling for that item as 'not in task'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "the positional `new FleetFlowAdvanceService(...)` call (line ~187) gains a `FleetPrRulingsService` stub as its last argument, carrying `ruledItemIds: async () => []` and `createForFlow`/`commentRefused` stubs; existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+          "reason": "the positional constructor call (line ~108) gains the same `FleetPrRulingsService` stub (`ruledItemIds: async () => []`); existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts",
+          "reason": "the positional constructor call (line ~121) gains the same `FleetPrRulingsService` stub (`ruledItemIds: async () => []`); existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts",
+          "reason": "the positional constructor call (line ~82) gains the same `FleetPrRulingsService` stub (`ruledItemIds: async () => []`); existing assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/flows.module.spec.ts",
+          "reason": "add `.overrideModule(FleetRulingsModule).useModule(StubFleetRulingsModule)` next to the existing module stubs (line ~151), the stub exporting a `FleetPrRulingsService` value; existing assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "aded116e1932397a1da61b2b770b74e7fa85f5ba"
+    },
+    {
+      "id": "US-011",
+      "title": "Load PR ruling inputs and dispatch guided RULE rounds",
+      "description": "**Goal** — Fill the optional PR-phase decision inputs, pass RUN-based RULE task data through dispatch, and reuse the existing FIX wait writer.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — `decisionInput` (only when the latest job's step is `REVIEW` or `RULE`): `run` from `latestJobForStep(flowId, 'RUN')`'s `workflow` (null when no RUN or no workflow), `ruledItemIds` from `FleetPrRulingsService.ruledItemIds(run.id)` (called only when that RUN has a non-null `workflow`; empty otherwise), `rulingsJobId` from the feature.\n\n**Decision inputs load lazily.** `run` and `ruledItemIds` are read only when the latest job is `REVIEW` or `RULE`, so earlier steps add no reads.\n\n`RULE` dispatch: `ref` = the RUN's `resultBranch`, `prNumber` = the feature PR, items = `ruleTaskItems(run.openItems, ruledItemIds)`, guidance = when `answeredJobId` is set, the feature's stored `questions` and `answers` plus `held` = that job's `fixReady.readyHeld` when it is a `FIX` (else null).\n\n**RULE ref** is the RUN's `resultBranch` (the PR's head branch), so a guided round sees `FIX`'s push.\n\n`DispatchPass` gains optional `rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null }`, read inside the decide transaction like `plan` and passed to `buildStepDispatch` (US-011). A guided RULE after FIX must still load its RUN for dispatch data even though FIX does not trigger decisionInput's lazy REVIEW/RULE read. The RUN returned by the repository is a FleetJobRecord: read resultBranch from that record and openItems from its workflow.openItems; FlowStepInput.run is only the workflow projection, not the job record. A guided RULE always runs, irrespective of needsAutomaticRule. Missing RUN.resultBranch stops `dispatch_refused`, detail `RULE: RUN has no result branch`.\n\n`FleetFlowAdvanceService` (`apps/api/src/fleet/flows/fleet-flow-advance.service.ts`). Target: `decisionInput` fills `run`, `ruledItemIds`, `rulingsJobId`; `RULE` dispatch reads the RUN, the guidance and the held reason; `writeDecision`'s `wait_answer` branch works unchanged for the new steps. A FIX wait uses setWaiting and the existing fleet_flow_questions outbox event, preserving its transactional audit/activity and per-job event id. US-009 widens the consumer contract; this story must not absorb that independent story or add a dependency.\n\nThe existing 'dispatches the exact FIX body' case in fleet-flow-advance.service.spec.ts has a COMPLETED REVIEW as its latest job and a latestJobForStep stub returning the PLAN job for any step; that PLAN job has no workflow, so ruledItemIds is not called and the FIX body assertion is unchanged. Add RULE-dispatch and FIX-wait cases to fleet-flow-advance-answers.spec.ts; existing assertions are unchanged (their latest jobs are SPEC_REVIEW/PRD_REVIEW, so the lazy RUN read is not triggered). FleetFlowsService.answer remains step-agnostic and unchanged.\n\n**Scope** — In: lazy decision reads, RUN task items/protected ids, current-branch RULE ref, answered-job guidance, missing-branch stop, dispatch seam and existing wait/outbox path. Out: action selection (US-007/008), question payload widening (US-009), ruling batch recording (US-010), real-DB scenario (US-012). Refreshing a RUN's stored `openItems` after a FIX; rulings stay bound to the RUN snapshot (Arc A). Turning human answers directly into rulings; answers are guidance for a new RULE job.\n\n**Interface**\n```ts\nrule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };\n// FlowRuleGuidance\n{ held: string | null; questions: FlowQuestion[]; answers: FlowAnswer[] };\n```",
+      "acceptanceCriteria": [
+        "[unit] With a COMPLETED REVIEW as the latest job, decisionInput passes run from the latest RUN's workflow, ruledItemIds from FleetPrRulingsService.ruledItemIds(runId) and rulingsJobId from the feature to decideFlowStep.",
+        "[unit] With a COMPLETED PLAN as the latest job, decisionInput never calls ruledItemIds or latestJobForStep(flowId, 'RUN').",
+        "[unit] A tick deciding dispatch RULE with answeredJobId: null dispatches an AGENT body whose ref is the latest RUN's resultBranch and whose task lists its workflow.openItems except finding, ci and ids protected by ruledItemIds (applied rulings or pending USER/AGENT rulings).",
+        "[unit] A tick deciding dispatch RULE with answeredJobId naming a held FIX dispatches a task containing 'Still held: <that FIX's readyHeld>' and the stored answers as 'Q<id>: <question> A: <answer>' lines.",
+        "[unit] A tick deciding dispatch RULE with answeredJobId naming a RULE job dispatches a task with the stored answers and no 'Still held:' line.",
+        "[unit] A dispatch RULE when the latest RUN has no resultBranch stops the flow dispatch_refused with detail 'RULE: RUN has no result branch'.",
+        "[unit] A wait_answer decision with step FIX calls setWaiting with the FIX job id and records a fleet_flow_questions outbox event with step: 'FIX'.",
+        "[unit] Given a COMPLETED REVIEW, feature PR 12 and latestJobForStep returning a PLAN record with no workflow, advance still dispatches the exact existing FIX body produced by buildStepDispatch with the remaining cap, repo and pin, and never calls ruledItemIds, preserving the existing exact-FIX-body assertion."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "orchestration",
+        "human-guidance"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-008",
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The upstream writer, action types and dispatch builder already exist; this story adds conditional reads and typed input plumbing in one service with existing unit harnesses and unchanged access guards.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+        "apps/api/src/fleet/flows/flow-rulings.ts"
+      ],
+      "suggestedCriteria": [
+        "When a REVIEW or RULE has no latest RUN workflow, decisionInput passes run: null and ruledItemIds: [] without calling FleetPrRulingsService.ruledItemIds.",
+        "A guided RULE dispatch excludes an item protected by a pending USER or AGENT ruling from its task.",
+        "A second held FIX with a new job id emits a fresh wait instead of reusing the previous FIX's answers."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "the \"dispatches the exact FIX body\" case (line ~970) has a COMPLETED REVIEW as its latest job and a `latestJobForStep` stub returning the PLAN job for any step; that PLAN job has no `workflow`, so `ruledItemIds` is not called and the FIX body assertion is unchanged; add `run`-reading cases only if needed."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts",
+          "reason": "add the RULE-dispatch and FIX-wait cases; existing assertions are unchanged (their latest jobs are review steps, so the lazy `run` read is not triggered)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d5c878e48f5832f2e2eb2fe4036341b9bf094c75"
+    },
+    {
+      "id": "US-012",
+      "title": "Exercise PR-phase ruling and guided rounds against PostgreSQL",
+      "description": "**Goal** — Add the binding integration scenario proving real flow/ruling/ticket/outbox persistence from draft RUN through a guided RULE round.\n\n**Motivation** — Live flows 7-9 (fleet design doc §9.174-§9.176) reach `FIX`, but a draft PR whose open items need rulings stops the flow `pr_not_ready`, and the human has to rule each item through `POST .../fleet/jobs/:id/rulings` and dispatch `FIX` by hand.\n\n**Approach** — An integration spec driving a nax-entry flow from a draft RUN through RULE, recorded rulings, FIX dispatch with the rulings snapshot, a held FIX, the wait, the answers and the guided RULE.\n\nCreate apps/api/test/integration/fleet/fleet-flow-rulings.integration.spec.ts. Use fleet-flow-answers.integration.spec.ts for NAX-entry seeding, answer execution and explicit FanOutPublisher publication; fleet-flow-advance.integration.spec.ts for advancing linked terminal jobs; and fleet-pr-rulings-ingest.integration.spec.ts for real ruling/FIX/ticket persistence patterns. Explicitly seed workflow.outcome='draft', workflow.openItems (D-1 advisor, F-1 finding), RUN.resultBranch, canonical PR URL, completed REVIEW and strictly ordered job times. The ingest fixture is only a seeding precedent; do not assume it already has workflow.openItems. Stub the item-index forge read to find the marker and the PR head read for the FIX snapshot; do not mock away the writer, repositories, advance decisions, question consumers or PostgreSQL.\n\nThe single FIX that follows carries those rulings (`--rulings`), fixes the findings, and readies the PR. That is the one automatic round. When FIX leaves the PR held (a red gate, items it could not close), a nax-entry flow asks the human instead of stopping: one ticket comment and notification (the F4b question path), and the human's answer is the guidance for one more RULE + FIX round. Every further round needs a new answer. CI holds still stop.\n\nPublish the fleet_flow_questions event through the real F4b fan-out to observe the question comment and notification; it is distinct from the RUN Finish ticket's RULING comment. Disable background relay/sweeps for deterministic assertions, use real creator/approver fixtures and restore forge stubs. Use canRunDbTests() and run bun run test:scoped test/integration/fleet/fleet-flow-rulings.integration.spec.ts outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1 enabled by the scoped command. Database skips do not verify this story. Do not run database-resetting suites concurrently against the same test database.\n\n**Scope** — In: the explicitly declared integration-test story and its PR-phase seam behaviors, including SYSTEM comment authors, snapshot attribution, waiting/answers, the F4b question notification and CI stopping. Out: production logic already delivered by US-001 through US-011, answer API/DTO changes, new frontend/CLI behavior. A web form for answering or showing rulings (F6); the flow DTO is unchanged. A notification when a flow completes.\n\n**Interface** — Drive the existing `FleetFlowAdvanceService.advance(flowId: string, now: Date): Promise<void>` or its FleetFlowTicker wrapper, `FleetFlowsService.answer`, and the existing FanOutPublisher; do not add a test-only production route.",
+      "acceptanceCriteria": [
+        "[integration] A nax-entry flow whose RUN is a draft with open items D-1 (advisor) and F-1 (finding), after a COMPLETED REVIEW, dispatches a RULE AGENT job on the next advance tick.",
+        "[integration] With that RULE job COMPLETED and output ending {\"rulings\":[{\"item\":\"D-1\",\"ruling\":\"verified: test green\"}],\"questions\":[]}, the next tick stores one FleetPrRuling for D-1 with actorType SYSTEM, actorId flow and state pending, and sets the feature's rulingsJobId to the RULE job id (the item-index forge read stubbed to find the marker).",
+        "[integration] The RUN's Finish ticket carries a RULING comment 'D-1 (advisor): verified: test green (flow <flowId>)' with no author user or agent.",
+        "[integration] The following tick dispatches a FIX job whose prRulings snapshot (PR head read stubbed) contains the D-1 ruling with by: 'koda:system:flow'.",
+        "[integration] With that FIX COMPLETED and fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' }, the next tick moves the flow and feature to WAITING_ANSWER with questionsJobId equal to the FIX id, and, after publishing that tick's questions outbox event through FanOutPublisher, the questions ticket comment starts 'Flow needs answers (FIX job <id>):'.",
+        "[integration] After FleetFlowsService.answer with that job id and answer 're-run the gate after the fix', the next tick dispatches a RULE job whose agentInput.task contains 'Still held: 1 open item(s): G-1' and 'A: re-run the gate after the fix'.",
+        "[integration] A held FIX with readyHeld: 'CI failure: test' stops the flow pr_not_ready instead of waiting.",
+        "[integration] When the held-FIX fleet_flow_questions event is published through FanOutPublisher, each eligible creator/approver recipient receives a persisted notification with kind flow_questions, sourceType fleet_flow and sourceId <flowId>:<FIX id>, completing the existing F4b question path."
+      ],
+      "tags": [
+        "fleet-flow-rulings",
+        "api",
+        "integration",
+        "postgresql"
+      ],
+      "dependencies": [
+        "US-009",
+        "US-011"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Binding test-only story exception: multi-module real-PostgreSQL scenario verifies orchestration, system attribution, FIX snapshots and existing outbox fan-out without changing access policies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-answers.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-rulings-ingest.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/test/helpers/test-environment.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-rulings.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Publishing the held-FIX question event twice leaves one identical question comment and one flow_questions notification per eligible recipient.",
+        "A subsequent held FIX with a different job id returns the NAX flow to WAITING_ANSWER rather than starting another unguided RULE round."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5fbe91ac300d0667148c47dd238d238bb8c89b46"
+    }
+  ],
+  "analysis": "Goal and done: extend the existing single-feature PR phase from RUN -> REVIEW -> FIX to RUN -> REVIEW -> conditional RULE -> FIX. RULE is a read-only reviewer-model AGENT job that returns evidenced Arc A rulings, never a code-writing replacement for FIX. There is one automatic round. A non-CI held FIX in a NAX-entry flow waits for one human answer, which authorizes exactly one further guided RULE + FIX round; further holds need fresh answers. CI holds and THREAD-entry holds still stop. Done includes durable SYSTEM/flow rulings, their FIX snapshot, replay safety, refusal reporting, guidance and question fan-out, and a PostgreSQL-backed end-to-end PR-phase scenario. The binding 12-story structure is retained, including the explicitly declared database-test story US-012.\n\nDiscovery and architecture: codebase-memory MCP is unavailable in this session; findings come from direct source reads and text searches rooted at /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The supplied automatic Express/Next.js labels are not authoritative: .nax/mono/apps/api/context.md:22 identifies NestJS 12 + Fastify, Prisma 7 and Vitest; the web is Nuxt per repository guidance and is untouched. Read nathapp-nestjs-patterns before implementation of NestJS code. Business rules stay in apps/api; use Nathapp transactions, repositories, action contexts, audit and outbox patterns, not new HTTP routes or client-side orchestration. No source code or tests were changed or executed while drafting this PRD.\n\nPure tasks and verdicts (US-001/002): apps/api/src/fleet/flows/flow-steps.ts:3 contains the six-value FlowStep union and :23 builds bounded review tasks. apps/api/src/fleet/common/agent-jobs.ts:3 caps tasks at 16,384 UTF-16 code units; :13 also bounds serialized results (output is only 8,192 bytes), so a nominal maximum of 100 rulings is an input limit, not a promise that all verbose rulings fit a runner result. apps/api/src/fleet/flows/flow-calls.ts:36 sanitizes lone surrogates, :62 truncates without splitting pairs, :73 supplies positional questions, :79 formats question comments, and :136 has private oneLine. Export oneLine unchanged; do not accidentally change existing callers. NUL is not currently replaced by sanitizeFlowText, so the new parser must explicitly replace it as well. Preserve Unicode validity after cutting to limits. apps/api/src/fleet/flows/flow-verdict.ts:16 is the existing verdict-parser precedent, but it searches the last marker anywhere in output: the new parser's explicit line-start contract is stricter and must not inherit that incidental permissiveness. Reserve space for complete guidance, instruction and the omitted-item count; never truncate those blocks to fit items. flow-rulings.ts and flow-rulings.spec.ts do not exist yet. US-001 and US-002 are deliberately independent in the binding graph but contribute to the same new module/test file; coordinate their additive changes without adding a dependency or overwriting either half. US-002 contextFiles therefore reference existing predecessors, not a file created by its non-dependency.\n\nDispatch and decisions (US-003/007/008): apps/api/src/fleet/flows/flow-step-dispatch.ts:14 defines BuildStepDispatchInput, :30 contains the exhaustive switch, and :9 computes remaining budget using Prisma.Decimal. Add RULE to the union and switch together; keep common repo, pin and remaining-cap fields. RULE runs against RUN.resultBranch, not resultSha, so later guided rounds see FIX pushes. apps/api/src/fleet/flows/flow-step-decision.ts:23 defines the existing required input fields; new run, ruledItemIds and rulingsJobId fields must remain optional for old fixtures and callers. :53 defines action variants, :76 skips multi-feature flows, :87-90 handles terminal failures, and :158 onward currently dispatches FIX after REVIEW and stops on a held FIX. Keep earlier review/plan/ingest rules unchanged. Existing completion includes markedReady=false with no readyHeld because an already-ready PR needs no change. Add apply_rulings before orchestrator access to action.step, since that variant has no step. Questions take precedence over rulings; answers are scoped to the specific questionsJobId, not reusable authorization for unbounded rounds. Automatic RULE needs draft plus an unprotected advisor/ruling/cannot-verify/story/reason item, while task filtering also includes gates and unknown non-finding/non-ci kinds. A guided RULE always runs. flow-step-decision.spec.ts:7 has an existing fixture that must remain unchanged; :121-147 anchors REVIEW/FIX behavior, including THREAD semantics via canApplyCalls=false. FlowStep is also imported by jobs/domain/fleet-job.domain.ts:11, jobs/fleet-jobs.service.ts:26 and jobs/prisma-fleet-job.repository.ts:17; job persistence stores flowStep as a string, so no job enum migration is needed.\n\nArc A actor and writer (US-004/005): apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts:15 restricts actorType to USER/AGENT, and dto/fleet-pr-ruling.dto.ts:14 repeats the Swagger enum. Add SYSTEM in both and regenerate only openapi.json with bun run api:export-spec, per the feature's explicit CLI/web exclusion. Do not manually edit generated clients. apps/api/prisma/schema.prisma:1038 stores actorType as String, so this actor widening requires no migration. apps/api/src/fleet/rulings/prisma-fleet-pr-ruling.repository.ts:86 orders latestRuling newest by createdAt/id; :91 list uses the same descending order, so ruledItemIds must select only the first row per item, not any historical applied row. :100 pendingForFix filters actor ids for user/agent lookup; SYSTEM must use its actorId directly. apps/api/src/fleet/rulings/fleet-pr-rulings.service.ts:25 has five constructor dependencies; add ActorPrincipalLoader last and preserve all positional test harnesses. :34 snapshotForFix already loads pending rulings outside dispatch insertion, reads the PR head and caps the snapshot at 100; :47 currently maps all non-agents to users, which must become a three-way mapping. apps/api/src/fleet/jobs/fleet-jobs.service.ts:132 already calls snapshotForFix for FIX, so no parallel flow snapshot mechanism is required. :99 ruleTarget enforces latest draft RUN, PR, item existence, non-CI kind, parsed text and no applied ruling; :126 assertItemIndex performs the existing bounded forge read and intentionally fails open on provider failures. These methods and parseRulingText remain unchanged. createForFlow must reuse them, run forge checks outside transactions, and revalidate eligibility after lockTarget. Only expected app exceptions become refused outcomes; operational/database errors must not be silently treated as policy refusals.\n\nAttribution, access and atomicity: apps/api/src/auth/principal/actor-principal.loader.ts:27 loads USER/AGENT principals and rejects unavailable/disabled users or paused/missing agents. apps/api/src/fleet/flows/fleet-flow-stop-ticket.subscriber.ts:44 already uses runAsSystem('flow', ..., { onBehalfOf: creator }); action-context/action-context.ts:140 shows the SYSTEM actor/origin/onBehalfOf context. Reuse it for flow rulings, but the Finish ticket must be created with the loaded creator principal, and the RULING comment must have neither user nor agent author. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:48 ensureFinishTicket locks the job and creates/links a Finish ticket transactionally; :69 createRulingComment is principal-authored and :73 commentOnRulingResult delegates to the existing all-linked-ticket comment path. Add createSystemRulingComment over the existing repository system-comment method. :97 commentOnFinish deduplicates exact bodies and does nothing with no job/tickets. Keep system comment, replacePending, ruling insert and system.flow.advance audit in one transaction so a failure cannot leave partial records. The same-trimmed-text latest pending SYSTEM fast path must create no comment, audit or insert on replay. Pending USER/AGENT rulings are protected by ruledItemIds; pending SYSTEM rulings deliberately are not, allowing idempotent crash recovery and a new guided ruling. Actor attribution and access-sensitive stories US-005/010 use strict three-session-tdd. No new permission/approval is introduced and no route gate is invoked in-process, but eligibility checks and creator dispatch access are mandatory.\n\nPersistence and deployment (US-006): apps/api/prisma/schema.prisma:1264 defines FleetFlowFeature, with callsJobId at :1274 and JSON questions/answers immediately after it. Add nullable rulingsJobId in migration 20261201090000_fleet_flow_rulings/migration.sql and regenerate the local Prisma client using bun run db:generate before building dependent repository code. Apply the additive nullable migration before deploying code that reads/writes it; old rows remain null and need no backfill or job foreign key. apps/api/src/fleet/flows/domain/fleet-flow.domain.ts:12 models features with optional durable per-job markers; add the field there. apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:24 maps feature rows by spreading row and decoding question JSON, which already naturally carries newly generated scalar fields; verify round-trip rather than duplicating mappings. apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:36 declares the step repository; prisma-fleet-flow-step.repository.ts:106 recordCalls is a precedent, but recordRulings must specifically updateMany scoped by BOTH id and flowId and leave every calls/questions/answers field unchanged. Test real database behavior in test/integration/fleet/fleet-flow-step.repository.integration.spec.ts.\n\nOrchestrator (US-010/011): apps/api/src/fleet/flows/fleet-flow-advance.service.ts:38 DispatchPass currently admits dispatch/apply_calls, :48 constructor ends with outbox, :67 advance branches on apply_calls before reading action.step, :96 advanceCalls demonstrates decide/work/record separation, :215 lockLive checks live state plus approval generation, :243 decide uses parent-before-flow lock order, :288 excludes work actions from writeDecision, :293 skips billed cap checks for calls, and :302 checks creator access. Extend these seams for apply_rulings: unbilled, access-checked, service calls outside the decide transaction, then one lockLive-guarded progress/activity/refusal-comment transaction. Per-ruling createForFlow owns its own transaction. Do not hold a flow transaction across forge I/O or wrap the full ruling loop in one transaction. Rulings recorded before a concurrent stop are already committed; the final live check suppresses new progress/activity/comment writes, not those prior per-ruling commits. Deduplicate verdict items by keeping each last occurrence in verdict order. :392 decisionInput currently loads no RUN workflow; add lazy reads only for latest REVIEW or RULE and skip ruledItemIds when no RUN workflow exists. Guided RULE dispatch after FIX still needs its RUN read as part of building dispatch data, not as an unconditional decisionInput read. Capture optional rule inputs in decide and pass through dispatchStep at :182; missing RUN.resultBranch must become the exact dispatch_refused detail rather than a raw Error escaping refuseDispatch. US-010 adds the injection and module dependency; US-011 fills the lazy data and guided task seam. apps/api/src/fleet/flows/flows.module.ts:39 imports FleetJobsModule, which already imports FleetRulingsModule (jobs/fleet-jobs.module.ts:1,37); direct import adds no cycle. FleetRulingsModule already imports AuthRepositoryModule and exports FleetPrRulingsService (rulings/fleet-rulings.module.ts:15-18). Preserve module DI coverage as no-DB unit tests.\n\nQuestions and consumers (US-009/011/012): apps/api/src/notifications/fleet/fleet-notification-events.ts:33 and :102 allow only SPEC_REVIEW/PRD_REVIEW today. Widen both the type and parser, not only the producer. FleetFlowStopTicketSubscriber at flows/fleet-flow-stop-ticket.subscriber.ts:38 and notifications/fleet/fleet-flow-stopped.subscriber.ts:25 both parse that payload; forgetting the parser would drop comments AND notifications. The notification subscriber deduplicates creator/approver recipients. flows/flow-calls.ts:79 also narrows step. The existing explicit malformed PLAN test at fleet-notification-events.spec.ts:97 must still reject PLAN. Existing comment-specific tests are also in flows/flow-questions.spec.ts:95, although the spec calls out flow-calls.spec.ts; extend the named files without weakening existing assertions. fleet-flow-advance.service.ts:472 already persists wait, audit, activity and fleet_flow_questions outbox atomically with event id flowId:questions:jobId. Its generic path should support RULE/FIX unchanged. flows/fleet-flows.service.ts:101 answer is already step-agnostic and rejects stale/missing answers, then resumes via recordAnswers; do not translate answers into rulings or change its route/DTO. Distinguish the flow's question ticket from the RUN's Finish ticket.\n\nTests, compatibility and risk: reuse flow-step-dispatch.spec.ts, flow-step-decision.spec.ts, flow-calls.spec.ts, flow-questions.spec.ts, notification payload tests, rulings service/snapshot/preflight/results tests and ticket effect tests. US-004 creates the repository and DTO specs; US-010 creates fleet-flow-advance-rulings.spec.ts. Add the final constructor argument without altering existing assertions in rulings service/snapshot/preflight/results and tickets/finish-ticket.spec.ts, and advance service/calls/review/answers harnesses. The unchanged REVIEW->FIX fixture has a latestJobForStep stub returning a PLAN with no workflow, so it must not cause ruledItemIds reads or change the FIX body. flows.module.spec.ts:151 module overrides need a FleetRulingsModule stub exporting the service. The bounded task and parser are critical untrusted-agent boundaries: multiline injection, malformed arrays, trailing prose, Unicode/NUL, exact caps and no ruling of finding/ci/unknown task ids need deterministic tests. Never override ruleTarget semantics in pursuit of an automatic ruling. Crash retry must not duplicate earlier rulings, and stale waits cannot reuse prior answers. Failure-table cases are retained as explicit behavioral criteria where not already enumerated; additional useful edge cases are only suggestedCriteria.\n\nUS-012 intentionally remains its own integration story per the binding override. apps/api/test/integration/fleet/fleet-flow-answers.integration.spec.ts:87 seeds NAX flows and :115 drives replay-safe question/comment/notification fan-out with real PostgreSQL and stubbed forge; fleet-flow-advance.integration.spec.ts:99 seeds terminal jobs and drives ticks. The supplied fleet-pr-rulings-ingest.integration.spec.ts:41 is useful for RUN/FIX/ruling seeding and :72 proves system RULING comments, but its existing RUN fixture does not actually populate workflow.openItems; the new fixture must explicitly store the draft workflow, PR URL, resultBranch and ordered terminal timestamps. Stub item-index comments and PR head reads only, retaining real persistence and service orchestration. Disable relay/sweep background work and publish the outbox explicitly to observe the question ticket plus notification without races. Unit tests use Vitest vi APIs and live beside source; module compilation has no DB. Integration tests use canRunDbTests(), KODA_DB_TESTS=1 and must run outside NAX_SANDBOXED=1 with test Postgres or Testcontainers; skipped database tests are not verification. Run bun run test:scoped on the integration files outside the sandbox. Test setup force-resets the test database, so do not run simultaneous DB suites on the same database; another checkout uses KODA_TEST_DB_CONTAINER=1. No migration weakening, generated acceptance edits, runner business logic, web/CLI enum updates, new permissions, multi-feature behavior or completion notifications are part of this feature.\n\nRefine-pass adversarial audit: re-read the complete on-disk spec, all story acceptance arrays and relevant implementation/test sources. The spec has 110 numbered ACs; every one remains in its original story and original ordinal position. Explicit preservation ledger (spec ordinal -> PRD acceptanceCriteria ordinal): US-001: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-002: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-003: 1->1, 2->2, 3->3, 4->4; US-004: 1->1, 2->2, 3->3, 4->4, 5->5; US-005: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14, 15->15; US-006: 1->1, 2->2, 3->3, 4->4; US-007: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11, 12->12, 13->13, 14->14; US-008: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9; US-009: 1->1, 2->2, 3->3, 4->4; US-010: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7, 8->8, 9->9, 10->10, 11->11; US-011: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7; US-012: 1->1, 2->2, 3->3, 4->4, 5->5, 6->6, 7->7. Qualifiers retained include US-003.2 for the same input; US-004.1 lookup exclusions and .3 still USER/AGENT attribution; US-005.7 the loaded creator principal and .12 no insert/comment/audit; US-006.1 existing-row null and .2 all four unchanged fields; US-007.6 the verdict's rulings and .11 not apply_rulings; US-010.1 both items in task and D-1 first, .8 no cost_cap stop and .10 the no-active-transaction observation; US-012.2 the item-index forge stub, .3 no user/agent author, .4 PR head stub and .7 instead of waiting. No deprecated grep/file/verbatim AC tags were present.\n\nAudit corrections are clarifications, not deleted spec assertions: ruledItemIds returns string ids, not ruling/item objects (US-005.13/.14); the existing repository is IFleetFlowRepository implemented by PrismaFleetFlowRepository, not an invented FleetFlowRepository class (US-006.3; source prisma-fleet-flow.repository.ts:14,39); RULE-to-FIX decisions require a readable no-question verdict, and answered-question cases require the NAX/20-question branch preconditions, preserving question precedence (US-007.8-.14); createForFlow takes one object mapping verdict.item to itemId and verdict.ruling to text (US-010.1); repository RUN openItems are under workflow.openItems (jobs/domain/fleet-job.domain.ts:130-145), distinct from the FlowStepInput.run workflow projection; dispatch membership excludes pending USER/AGENT protected ids as well as applied ids (US-011.3). A wait tick persists an outbox event; the question comment is observed after FanOutPublisher delivers it, not synchronously inside advance (US-012.5; fleet-flow-advance.service.ts:472 and fleet-flow-stop-ticket.subscriber.ts:38,89).\n\nFailure-table ledger: unreadable RULE -> US-007.5; failed/cancelled/crashed/escalated RULE -> US-007.15; not-in-task ruling -> US-010.3; eligibility/index refusal -> US-005.3-.5 and US-010.4; every ruling refused without a ticket -> US-010.12; crash after partial recording -> US-010.13 and US-005.12; mixed questions/rulings -> US-007.11; unavailable creator -> US-005.6; over 20 questions -> US-007.13; CI hold -> US-008.4/.5 and US-012.7; NAX hold wait/comment/notification -> US-008.1, US-012.5 and the explicit notification AC US-012.8; THREAD hold -> US-008.6; no RUN resultBranch -> US-011.6. Every story now has an observable negative path: US-001.2/.3/.8; US-002.4-.11; US-003.4; US-004.6; US-005.3-.6; US-006.4; US-007.5/.12/.13/.15; US-008.4-.7; US-009.3; US-010.3/.4/.7/.9; US-011.6; US-012.7. Added only the missing required negative/regression/failure-table assertions; optional hardening remains in suggestedCriteria. All assertions can be checked via returned objects/text, thrown outcomes, spy arguments/call order/action context, persisted rows/comments/notifications or activity/outbox payloads.\n\nRegression audit: exporting oneLine is now anchored by an unchanged buildFlowCalls string result in US-001.16 (flow-calls.ts:109-138, flow-calls.spec.ts:5); old FIX dispatch shape is explicit in US-003.5 (flow-step-dispatch.spec.ts:40); old USER/AGENT snapshot naming remains US-004.3, and existing non-fatal head-read failures are US-004.6 (fleet-pr-rulings.snapshot.spec.ts:51); extending the writer constructor preserves direct AGENT create attribution in US-005.16 (fleet-pr-rulings.service.ts:139); existing persistence fields remain unchanged in US-006.2; absent run fields still choose FIX in US-007.4 and existing ready/thread behavior remains US-008.6/.8/.9; SPEC_REVIEW/PRD_REVIEW question parsing and the pre-existing positional-id comment remain US-009.5/.6 (flow-questions.spec.ts:95); the existing out-of-transaction apply_calls path is US-010.14 (fleet-flow-advance-calls.spec.ts:120); the REVIEW/PLAN-without-workflow fixture keeps its exact FIX body in US-011.8 (fleet-flow-advance.service.spec.ts:969). US-012 adds integration code rather than replacing a production path.\n\nContext/dependency/routing audit: all 12 ids and workdirs remain exactly as bound, and every referenced dependency exists. No binding edge was removed even where transitive. All spec-recommended context files are retained within the five-file limit except the still-nonexistent flow-rulings.ts in dependency-free US-002: it cannot legally be a readable upstream context because US-001 is not its dependency, so its additive shared-file instructions remain in the description instead. US-010 now includes the specifically recommended fleet-job-ticket.effects.ts instead of the less critical step-domain context; its upstream writer source remains the fifth context. US-004 is reduced to medium/tdd-simple because its five TypeScript edits are standard representations/delegation and spec generation, not a new authorization system; US-011 is reduced to medium/tdd-simple because it plumbs existing types/helpers in one service. US-005 and US-010 retain strict three-session-tdd for principal/access-sensitive writing. US-012 retains complex/three-session-tdd-lite for the existing app/PG/forge/outbox integration fixture. Descriptions and Scope/In boundaries were updated to include the added regression and notification assertions.\n\nOut-of-scope audit: all 12 feature-level bullets remain verbatim and separate in top-level outOfScope, in spec order: non-FIX code writes; CI rulings; direct answer-to-ruling conversion; THREAD waits; multi-feature flows; web form/flow DTO changes; completion notification; refreshing stored RUN items; web/CLI SYSTEM types; item-index caching; new permission/approval; cancelling running jobs on stop. Relevant boundaries remain echoed in adjacent stories' Scope/Out, and no story-local exclusion was hoisted. No implementation code, schema, tests or generated client were changed during the refine pass.",
+  "outOfScope": [
+    "A flow-side code fix that does not go through `FIX` (`nax bot fix`); RULE never pushes.",
+    "Ruling `ci` items; a CI hold stops the flow.",
+    "Turning human answers directly into rulings; answers are guidance for a new RULE job.",
+    "Waits for thread-entry flows; they keep F4b's stop behaviour.",
+    "Multi-feature flows; `decideFlowStep` still skips them (F5).",
+    "A web form for answering or showing rulings (F6); the flow DTO is unchanged.",
+    "A notification when a flow completes.",
+    "Refreshing a RUN's stored `openItems` after a FIX; rulings stay bound to the RUN snapshot (Arc A).",
+    "`SYSTEM` in the web (`apps/web/lib/fleet-types.ts`) and generated CLI ruling types; the API DTO and `openapi.json` are updated.",
+    "Caching the item-index forge read across the rulings of one RULE job.",
+    "A new permission key or approval for the RULE step or the flow's rulings.",
+    "Cancelling a running job when the flow stops."
+  ],
+  "routingProfile": "native-codex-m3-flash"
+}

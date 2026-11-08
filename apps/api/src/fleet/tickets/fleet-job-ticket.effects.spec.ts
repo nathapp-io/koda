@@ -7,6 +7,15 @@ import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository'
 
 const auditRecord = mockAuditRecorder.record as unknown as Mock;
 
+describe('FleetJobTicketEffects system ruling comment', () => {
+  it('AC-5 delegates as a system RULING comment and returns its id', async () => {
+    const repo = { createSystemComment: vi.fn().mockResolvedValue({ id: 'c-flow' }) };
+    const effects = new FleetJobTicketEffects({} as never, repo as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    await expect(effects.createSystemRulingComment('t1', 'body')).resolves.toEqual({ id: 'c-flow' });
+    expect(repo.createSystemComment).toHaveBeenCalledExactlyOnceWith('t1', 'body', 'RULING');
+  });
+});
+
 describe('FleetJobTicketEffects flow and ready comments', () => {
   let repo: { hasCommentBody: Mock; createSystemComment: Mock; findJobForEffects: Mock; findTicketsForJob: Mock };
   let effects: FleetJobTicketEffects;

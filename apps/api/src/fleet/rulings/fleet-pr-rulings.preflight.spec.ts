@@ -20,7 +20,7 @@ function setup() {
     runsForPr: vi.fn(async () => []), settlePending: vi.fn(), replacePending: vi.fn(), insert: vi.fn(),
   };
   const github = { mintThreadReadToken: vi.fn(async () => ({ token: 'ephemeral', expiresAt: new Date() })), listIssueComments: vi.fn() };
-  const service = new FleetPrRulingsService(repo, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, {} as never, github as never);
+  const service = new FleetPrRulingsService(repo, { run: (fn: () => Promise<unknown>) => fn() } as never, {} as never, {} as never, github as never, {} as never);
   return { repo, github, service };
 }
 
@@ -213,5 +213,9 @@ describe('ruling refusal i18n', () => {
       notRulable: { 409: expect.stringMatching(/\S/) },
       noItemIndex: { 409: expect.stringMatching(/\S/) },
     });
+  });
+
+  it.each(['en', 'zh'])('US-005: %s carries the already-ruled refusal code', (locale) => {
+    expect(fleet(locale).rulings).toMatchObject({ alreadyRuled: { 409: expect.stringMatching(/\S/) } });
   });
 });

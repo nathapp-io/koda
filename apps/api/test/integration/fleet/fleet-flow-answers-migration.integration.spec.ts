@@ -29,6 +29,10 @@ describeDb('fleet flow answers migration (PG)', () => {
     await scratch.db.$executeRaw`INSERT INTO "FleetFlowFeature" ("id", "flowId", "position", "feature", "specPath", "dependsOn") VALUES (${featureId}, ${flowId}, 0, 'feature', 'spec.md', ARRAY[]::text[])`;
 
     await applyMigration(scratch.db, MIGRATION);
+    // The generated client selects every FleetFlowFeature scalar, including `rulingsJobId`, which only
+    // the later fleet_flow_rulings migration adds. Apply it so the read below can use the client; the
+    // assertions still cover only what the answers migration writes.
+    await applyMigration(scratch.db, '20261201090000_fleet_flow_rulings');
 
     const columns = await scratch.db.$queryRaw<Array<{ column_name: string; is_nullable: string; data_type: string }>>`
       SELECT column_name, is_nullable, data_type FROM information_schema.columns
