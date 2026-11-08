@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T08:43:44.959Z",
+  "updatedAt": "2026-11-08T09:03:19.550Z",
   "userStories": [
     {
       "id": "US-001",
@@ -588,14 +588,17 @@
         "US-006",
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security override: access-checked system writes cross the decision/per-ruling/progress transaction boundaries and must remain replay-safe under concurrent flow stops."
+        "reasoning": "Security override: access-checked system writes cross the decision/per-ruling/progress transaction boundaries and must remain replay-safe under concurrent flow stops.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -638,7 +641,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "aded116e1932397a1da61b2b770b74e7fa85f5ba"
     },
     {
       "id": "US-011",
