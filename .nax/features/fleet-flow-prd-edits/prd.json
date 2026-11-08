@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T13:50:35.835Z",
+  "updatedAt": "2026-11-08T13:58:03.713Z",
   "userStories": [
     {
       "id": "US-001",
@@ -86,14 +86,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Pure ordered document mutation with several exact-match invariants and independent refusal paths; no network or persistence."
+        "reasoning": "Pure ordered document mutation with several exact-match invariants and independent refusal paths; no network or persistence.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-calls.ts",
@@ -106,7 +109,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7fc92f72482f4b8f1400772a5eac15251138d783"
     },
     {
       "id": "US-003",
