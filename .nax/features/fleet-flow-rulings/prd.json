@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T07:21:21.076Z",
+  "updatedAt": "2026-11-08T07:26:40.701Z",
   "userStories": [
     {
       "id": "US-001",
@@ -100,14 +100,17 @@
         "verdict"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Deterministic bounded parser with malformed-input and Unicode cases; no permission or authentication logic."
+        "reasoning": "Deterministic bounded parser with malformed-input and Unicode cases; no permission or authentication logic.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-verdict.ts",
@@ -124,7 +127,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "89ddb744962bc92f42e74cc120919e9b70512a57"
     },
     {
       "id": "US-003",
