@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T07:31:32.453Z",
+  "updatedAt": "2026-11-08T07:38:25.833Z",
   "userStories": [
     {
       "id": "US-001",
@@ -199,14 +199,17 @@
         "openapi"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Five existing TypeScript files need straightforward actor-union, naming and comment-delegation additions plus spec regeneration; there is no new abstraction or authorization decision."
+        "reasoning": "Five existing TypeScript files need straightforward actor-union, naming and comment-delegation additions plus spec regeneration; there is no new abstraction or authorization decision.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/rulings/fleet-pr-ruling.domain.ts",
@@ -237,7 +240,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "baa2c97c2d4dd471ace4c3971524271effbabfaf"
     },
     {
       "id": "US-005",
