@@ -16,7 +16,7 @@ type ReviewStep = Extract<FlowStep, 'SPEC_REVIEW' | 'PRD_REVIEW'>;
 export function buildReviewTask(step: ReviewStep, specPath: string, feature: string): string {
   const prompt = step === 'SPEC_REVIEW'
     ? `/spec-review ${specPath}`
-    : `/spec-review --spec ${specPath} --prd .nax/features/${feature}/prd.json`;
+    : `/spec-review --spec ${specPath} --prd .nax/features/${feature}/prd.json --phase 9`;
   const suffix = `\n\n${FLOW_VERDICT_INSTRUCTION}`;
   const promptLimit = Math.max(0, AGENT_TASK_MAX_LENGTH - suffix.length);
 

@@ -8,6 +8,7 @@ export interface FlowFinding {
   summary: string;
   fix?: string;
   question?: string;
+  answer?: string;
 }
 
 export type FlowVerdict = { ok: true; findings: FlowFinding[] } | { ok: false };

@@ -112,6 +112,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'fleet.flow.create': 'project',
   'fleet.flow.start': 'project',
   'fleet.flow.stop': 'project',
+  'fleet.flow.answer': 'project',
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
   'system.flow.advance': 'any',
@@ -325,6 +326,12 @@ describe('PERMISSION_CATALOG', () => {
 
   it('US-001 AC-10: flow start remains pending until its route is declared', () => {
     expect(PENDING_SURFACE_KEYS.has('fleet.flow.start')).toBe(true);
+  });
+
+  it('US-009 AC-1: flow answer is project-scoped and medium risk', () => {
+    const entry = findCatalogEntry('fleet.flow.answer');
+    expect(entry?.scope).toBe('project');
+    expect(entry?.risk).toBe('medium');
   });
 
   it('US-001 AC-1/2: flow start is project-scoped, critical and human-approved', () => {

@@ -166,6 +166,21 @@ describe('ApprovalGate', () => {
     expect('variant' in (requests.create.mock.calls[0]?.[0] ?? {})).toBe(false);
   });
 
+  it('opens a request for a human when the route asks even for humans', async () => {
+    resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
+
+    const outcome = await runWithActionContext(
+      { actor: { type: 'USER', id: 'u1' }, origin: 'rest', correlationId: 'correlation' },
+      () => gate.gate('label.delete', input, { ...opts, askEvenForHumans: true }, now),
+    );
+
+    expect(outcome).toMatchObject({ status: 'pending', request: { actor: { type: 'USER', id: 'u1' } } });
+    expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      permissionKey: 'label.delete', actor: { type: 'USER', id: 'u1' }, requiredMode: 'agent',
+    }));
+    expect(testCommand.state.calls).toEqual([]);
+  });
+
   it('returns the still-pending duplicate instead of opening a second request', async () => {
     resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
     const existing = storedRequest();

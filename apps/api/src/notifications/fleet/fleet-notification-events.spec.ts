@@ -1,6 +1,6 @@
 import {
   budgetIncidentId, budgetScopeLabel, buildJobOutcomePayload, jobOutcomeOf,
-  parseBudgetIncidentPayload, parseFlowStoppedPayload, parseHealthAlertPayload, parseJobOutcomePayload,
+  parseBudgetIncidentPayload, parseFlowQuestionsPayload, parseFlowStoppedPayload, parseHealthAlertPayload, parseJobOutcomePayload,
 } from './fleet-notification-events';
 
 describe('jobOutcomeOf (S4a §2.4)', () => {
@@ -73,6 +73,29 @@ describe('payload parsers', () => {
     expect(parseFlowStoppedPayload({ ...stopped, flowId: undefined })).toBeNull();
     expect(parseFlowStoppedPayload({ ...stopped, creatorType: 'RUNNER' })).toBeNull();
     expect(parseFlowStoppedPayload({ ...stopped, approverId: null })).toEqual(stopped);
+  });
+
+  it('AC-1: accepts a valid flow questions payload', () => {
+    const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'SPEC_REVIEW', jobId: 'j1',
+      questions: [{ id: '2', question: 'Q1' }], approverId: null, creatorType: 'USER', creatorId: 'u1' } as const;
+    expect(parseFlowQuestionsPayload(payload)).toEqual(payload);
+  });
+
+  it.each([
+    { questions: [] },
+    { questions: [{ question: 'Q' }] },
+    { questions: [{ id: 2, question: 'Q' }] },
+    { questions: [{ id: '1' }] },
+    { questions: [{ id: '1', question: 3 }] },
+  ])('AC-2: rejects malformed questions $questions', (overrides) => {
+    const payload = { flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'SPEC_REVIEW', jobId: 'j1',
+      questions: [{ id: '2', question: 'Q1' }], approverId: null, creatorType: 'USER', creatorId: 'u1', ...overrides };
+    expect(parseFlowQuestionsPayload(payload)).toBeNull();
+  });
+
+  it('AC-3: rejects a non-review step', () => {
+    expect(parseFlowQuestionsPayload({ flowId: 'flow-1', projectId: 'p1', feature: 'f', step: 'PLAN', jobId: 'j1',
+      questions: [{ id: '1', question: 'Q' }], approverId: null, creatorType: 'USER', creatorId: 'u1' })).toBeNull();
   });
 
   it('accepts a health alert with or without provider', () => {

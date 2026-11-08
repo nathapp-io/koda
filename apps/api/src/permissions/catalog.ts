@@ -151,6 +151,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'fleet.flow.create': 'project',
   'fleet.flow.start': 'project',
   'fleet.flow.stop': 'project',
+  'fleet.flow.answer': 'project',
   'fleet.thread.preapprove': 'project',
   'system.flow.respec': 'any',
   'system.flow.advance': 'any',

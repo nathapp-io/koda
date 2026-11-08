@@ -2,8 +2,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { NotificationWriter } from '../notification-writer';
-import { flowStoppedDraft } from './fleet-notification-drafts';
-import { FLEET_FLOW_STOPPED, parseFlowStoppedPayload } from './fleet-notification-events';
+import { flowQuestionsDraft, flowStoppedDraft } from './fleet-notification-drafts';
+import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED, parseFlowQuestionsPayload, parseFlowStoppedPayload } from './fleet-notification-events';
 import { FleetNotificationReader } from './fleet-notification.reader';
 
 @Injectable()
@@ -19,7 +19,23 @@ export class FleetFlowStoppedSubscriber implements OnModuleInit {
 
   onModuleInit(): void {
     this.registry.register(FLEET_FLOW_STOPPED, this.handle);
+    this.registry.register(FLEET_FLOW_QUESTIONS, this.handleQuestions);
   }
+
+  readonly handleQuestions = async (payload: unknown): Promise<void> => {
+    const p = parseFlowQuestionsPayload(payload);
+    if (!p) {
+      this.logger.warn(`${FLEET_FLOW_QUESTIONS}: malformed payload skipped`);
+      return;
+    }
+    const slug = await this.reader.projectSlug(p.projectId);
+    if (!slug) return;
+    const userIds = new Set<string>();
+    if (p.approverId) userIds.add(p.approverId);
+    if (p.creatorType === 'USER') userIds.add(p.creatorId);
+    if (userIds.size === 0) return;
+    await this.writer.deliver([...userIds].map((userId) => flowQuestionsDraft(p, slug, userId)));
+  };
 
   readonly handle = async (payload: unknown): Promise<void> => {
     const p = parseFlowStoppedPayload(payload);

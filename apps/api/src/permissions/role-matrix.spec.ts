@@ -221,7 +221,7 @@ describe('the seeded-role allow/deny matrix', () => {
 
     for (const row of rows) {
       expect(Object.keys(row.cells)).toEqual(PERMISSION_CATALOG.map((entry) => entry.key));
-      expect(Object.keys(row.cells)).toHaveLength(244);
+      expect(Object.keys(row.cells)).toHaveLength(245);
     }
   });
 
@@ -241,6 +241,18 @@ describe('the seeded-role allow/deny matrix', () => {
     expect(PINNED_CELLS.map((cell) => cell.reason)).toEqual([...PINNED_REASONS]);
     expect(readPinned(matrix)).toEqual([...PINNED_REASONS]);
     expect(readPinned(readCommittedMatrix())).toEqual([...PINNED_REASONS]);
+  });
+
+  it('US-009 AC-2: the developer system role includes flow answer', () => {
+    const developer = SYSTEM_ROLES.find(({ key }) => key === 'developer');
+    expect(developer?.permissions).toContain('fleet.flow.answer');
+  });
+
+  it('US-009 AC-3: flow answer is project-granted to exactly the roles holding flow stop', () => {
+    for (const role of SYSTEM_ROLES.map(({ key }) => key)) {
+      expect(matrix[role]['fleet.flow.answer'][1]).toBe(matrix[role]['fleet.flow.stop'][1]);
+    }
+    expect(matrix.developer['fleet.flow.answer'][0]).toBe('no-project');
   });
 
   it('US-001 AC-6/7/8: flow project grants follow the developer and viewer role boundaries', () => {

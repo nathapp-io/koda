@@ -1,6 +1,12 @@
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { describe, expect, it, vi } from 'vitest';
-import { FlowRouteCommands, THREAD_FLOW_CREATE_VARIANT, THREAD_PREAPPROVAL_ROUTE_VARIANTS } from './flow-route.commands';
+import { parseFlowAnswers } from './flow-answers';
+import {
+  FLOW_ANSWER_VARIANT,
+  FlowRouteCommands,
+  THREAD_FLOW_CREATE_VARIANT,
+  THREAD_PREAPPROVAL_ROUTE_VARIANTS,
+} from './flow-route.commands';
 
 function setup() {
   const commands = new Map<string, { parse(input: unknown): unknown; execute(input: unknown): Promise<unknown> }>();
@@ -11,7 +17,10 @@ function setup() {
   };
   const user = { actorType: 'user', id: 'user-1' };
   const loader = { forContext: vi.fn().mockResolvedValue(user) };
-  const flows = { create: vi.fn().mockResolvedValue({ flow: { id: 'flow-1' }, approvalRequestId: null }) };
+  const flows = {
+    create: vi.fn().mockResolvedValue({ flow: { id: 'flow-1' }, approvalRequestId: null }),
+    answer: vi.fn().mockResolvedValue({ id: 'flow-1', state: 'RUNNING' }),
+  };
   new FlowRouteCommands(registry as never, threads as never, loader as never, flows as never).onModuleInit();
   const command = (variant: string) => {
     const registered = commands.get(variant);
@@ -98,5 +107,38 @@ describe('FlowRouteCommands', () => {
     const command = registeredCommand(THREAD_PREAPPROVAL_ROUTE_VARIANTS.clear);
     await expect(command.execute(command.parse({ projectId: 'project-1', threadId: 'thread-1' }))).resolves.toBeNull();
     expect(threads.clearPreApproval).toHaveBeenCalledWith('project-1', 'thread-1');
+  });
+
+  it('AC-12: the answer command parses the route input and reparses its JSON round-trip to the same value', () => {
+    const { command: registeredCommand, commands } = setup();
+    const command = registeredCommand(FLOW_ANSWER_VARIANT);
+    const body = { jobId: 'job-1', answers: [{ id: '2', answer: 'Clamp the bound' }] };
+    const parsed = command.parse({ projectId: 'project-1', flowId: 'flow-1', body });
+    expect(parsed).toEqual({ projectId: 'project-1', flowId: 'flow-1', body: parseFlowAnswers(body) });
+    const persisted: unknown = JSON.parse(JSON.stringify(parsed));
+    expect(command.parse(persisted)).toEqual(parsed);
+    expect(commands.has(FLOW_ANSWER_VARIANT)).toBe(true);
+  });
+
+  it('AC-13: an agent principal is refused and the answer service is never called', async () => {
+    const { command: registeredCommand, loader, flows } = setup();
+    loader.forContext.mockResolvedValue({ actorType: 'agent', id: 'agent-1' });
+    const command = registeredCommand(FLOW_ANSWER_VARIANT);
+    const error = await command.execute(command.parse({
+      projectId: 'project-1', flowId: 'flow-1', body: { jobId: 'job-1', answers: [{ id: '2', answer: 'A' }] },
+    })).then(() => null, (thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect((error as ForbiddenAppException).prefix).toBe('fleet.flows.answerHumanOnly');
+    expect((error as ForbiddenAppException).httpStatus).toBe(403);
+    expect(flows.answer).not.toHaveBeenCalled();
+  });
+
+  it('AC-15: a user answers through the service with the parsed body and the caller identity', async () => {
+    const { command: registeredCommand, flows, user } = setup();
+    const command = registeredCommand(FLOW_ANSWER_VARIANT);
+    const body = { jobId: 'job-1', answers: [{ id: '2', answer: 'Clamp the bound' }] };
+    await command.execute(command.parse({ projectId: 'project-1', flowId: 'flow-1', body }));
+    expect(flows.answer).toHaveBeenCalledOnce();
+    expect(flows.answer).toHaveBeenCalledWith('project-1', 'flow-1', parseFlowAnswers(body), { type: 'USER', id: user.id });
   });
 });

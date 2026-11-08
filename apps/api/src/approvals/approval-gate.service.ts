@@ -65,7 +65,19 @@ export class ApprovalGate {
   async gate<TResult>(
     key: string,
     input: unknown,
-    opts: { projectId: string | null; variant?: string; alsoKeys?: readonly string[]; minMode?: ApprovalMode },
+    opts: {
+      projectId: string | null;
+      variant?: string;
+      alsoKeys?: readonly string[];
+      minMode?: ApprovalMode;
+      /**
+       * Whether a policy that asks opens an approval request even when the caller is a human.
+       * Defaults to false: a human acting directly satisfies any mode (P3 design §4, decision 8).
+       * A route that asks for the opposite sets it: the write it guards is one a policy may want a
+       * second pair of eyes for, so the asking policy — not the caller's own humanity — decides.
+       */
+      askEvenForHumans?: boolean;
+    },
     now?: Date,
   ): Promise<GateOutcome<TResult>> {
     const command = this.registry.get(key, opts.variant);
@@ -114,7 +126,7 @@ export class ApprovalGate {
     let approval: ActionApproval;
     if (resolved.mode === 'none') {
       approval = { requiredMode: 'none', satisfiedBy: 'none' };
-    } else if (subject.type === 'USER') {
+    } else if (subject.type === 'USER' && opts.askEvenForHumans !== true) {
       // Direct humans satisfy every mode, regardless of request-decision policy flags.
       approval = { requiredMode: resolved.mode, satisfiedBy: 'human', approverType: 'USER', approverId: actor.id };
     } else {

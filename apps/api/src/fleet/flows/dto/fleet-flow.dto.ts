@@ -52,6 +52,16 @@ export class FleetFlowApprovalDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare approvalRequestId: string | null;
 }
 
+export class FleetFlowQuestionDto {
+  @ApiProperty() declare id: string;
+  @ApiProperty() declare question: string;
+}
+
+export class FleetFlowAnswerDto {
+  @ApiProperty() declare id: string;
+  @ApiProperty() declare answer: string;
+}
+
 export class FleetFlowFeatureDto {
   @ApiProperty() declare feature: string;
   @ApiProperty() declare specPath: string;
@@ -59,11 +69,20 @@ export class FleetFlowFeatureDto {
   @ApiProperty() declare state: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare currentStep: string | null;
   @ApiPropertyOptional({ type: Number, nullable: true }) declare prNumber: number | null;
+  /** The review job the questions and the answers belong to: a later review replaces them. */
+  @ApiPropertyOptional({ type: String, nullable: true }) declare questionsJobId: string | null;
+  @ApiPropertyOptional({ type: () => [FleetFlowQuestionDto], nullable: true }) declare questions: FleetFlowQuestionDto[] | null;
+  @ApiPropertyOptional({ type: () => [FleetFlowAnswerDto], nullable: true }) declare answers: FleetFlowAnswerDto[] | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) declare answeredAt: string | null;
 
   static from(feature: FleetFlowFeatureRecord): FleetFlowFeatureDto {
     return Object.assign(new FleetFlowFeatureDto(), {
       feature: feature.feature, specPath: feature.specPath, dependsOn: feature.dependsOn ?? [],
       state: feature.state, currentStep: feature.currentStep, prNumber: feature.prNumber,
+      questionsJobId: feature.questionsJobId ?? null,
+      questions: feature.questions?.map((question) => ({ id: question.id, question: question.question })) ?? null,
+      answers: feature.answers?.map((answer) => ({ id: answer.id, answer: answer.answer })) ?? null,
+      answeredAt: iso(feature.answeredAt ?? null),
     });
   }
 }

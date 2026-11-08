@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { FleetFlowRecord } from '../domain/fleet-flow.domain';
-import { FleetFlowDto } from './fleet-flow.dto';
+import type { FleetFlowFeatureRecord, FleetFlowRecord } from '../domain/fleet-flow.domain';
+import { FleetFlowDto, FleetFlowFeatureDto } from './fleet-flow.dto';
 
 const CREATED_AT = new Date('2026-11-05T10:00:00.000Z');
 const APPROVED_AT = new Date('2026-11-05T11:00:00.000Z');
+const ANSWERED_AT = new Date('2026-11-05T12:00:00.000Z');
 
 const record = (overrides: Partial<FleetFlowRecord> = {}): FleetFlowRecord => ({
   id: 'flow-1',
@@ -63,8 +64,8 @@ describe('FleetFlowDto', () => {
       endedAt: null,
       createdAt: CREATED_AT.toISOString(),
       features: [
-        { feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'RUNNING', currentStep: 'spec-review', prNumber: 12 },
-        { feature: 'flow-b', specPath: '.nax/features/flow-b/spec.md', dependsOn: ['flow-a'], state: 'PENDING', currentStep: null, prNumber: null },
+        { feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'RUNNING', currentStep: 'spec-review', prNumber: 12, questionsJobId: null, questions: null, answers: null, answeredAt: null },
+        { feature: 'flow-b', specPath: '.nax/features/flow-b/spec.md', dependsOn: ['flow-a'], state: 'PENDING', currentStep: null, prNumber: null, questionsJobId: null, questions: null, answers: null, answeredAt: null },
       ],
       url: '/web/flows/flow-1',
     });
@@ -107,5 +108,34 @@ describe('FleetFlowDto', () => {
       entry: 'NAX', threadId: null, pinnedRunnerId: null, createdBy: { type: 'AGENT', id: 'agent-1' },
       approval: { mode: 'REQUEST', approverId: 'user-2', approvedAt: APPROVED_AT.toISOString(), approvalRequestId: 'request-1' },
     });
+  });
+
+  const feature = (overrides: Partial<FleetFlowFeatureRecord> = {}): FleetFlowFeatureRecord => ({
+    id: 'feature-1', flowId: 'flow-1', position: 0, feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md',
+    dependsOn: [], state: 'WAITING_ANSWER', currentStep: 'SPEC_REVIEW', prNumber: null,
+    ...overrides,
+  });
+
+  it('AC-6 maps the question and answer columns of a feature unchanged', () => {
+    const dto = FleetFlowFeatureDto.from(feature({
+      questionsJobId: 'j1',
+      questions: [{ id: '2', question: 'Q1' }],
+      answers: [{ id: '2', answer: 'A1' }],
+      answeredById: 'u1',
+      answeredAt: ANSWERED_AT,
+    }));
+
+    expect(dto).toEqual({
+      feature: 'flow-a', specPath: '.nax/features/flow-a/spec.md', dependsOn: [], state: 'WAITING_ANSWER',
+      currentStep: 'SPEC_REVIEW', prNumber: null,
+      questionsJobId: 'j1', questions: [{ id: '2', question: 'Q1' }], answers: [{ id: '2', answer: 'A1' }],
+      answeredAt: ANSWERED_AT.toISOString(),
+    });
+  });
+
+  it('AC-7 answers null for a feature without the question and answer columns', () => {
+    const dto = FleetFlowFeatureDto.from(feature());
+
+    expect(dto).toMatchObject({ questionsJobId: null, questions: null, answers: null, answeredAt: null });
   });
 });

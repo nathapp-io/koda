@@ -3,9 +3,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { resolvePageOption, type IPageOption } from '@nathapp/nestjs-common';
 import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
-import { Prisma, type FleetFlow as FleetFlowRow, type PrismaClient } from '../../generated/prisma/client';
+import { Prisma, type FleetFlow as FleetFlowRow, type FleetFlowFeature as FleetFlowFeatureRow, type PrismaClient } from '../../generated/prisma/client';
 import { canTransitionFlow, FleetFlowState, isLiveFlowState } from './flow-states';
-import { FlowTransitionError, type CreateFleetFlow, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
+import { FlowTransitionError, type CreateFleetFlow, type FleetFlowFeatureRecord, type FleetFlowRecord, type IFleetFlowRepository } from './domain/fleet-flow.domain';
+import type { FlowAnswer, FlowQuestion } from './flow-calls';
 
 const PAGE_SIZE_MAX = 100;
 
@@ -16,8 +17,12 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
   protected modelDelegate(client: unknown): PrismaModelDelegate<FleetFlowRow, string> {
     return (client as Record<string, unknown>).fleetFlow as PrismaModelDelegate<FleetFlowRow, string>;
   }
-  protected toDomain(row: FleetFlowRow & { features?: FleetFlowRecord['features'] }): FleetFlowRecord {
-    return { ...row, costCapUsd: row.costCapUsd.toFixed(4), spentUsd: row.spentUsd.toFixed(4), entry: row.entry as FleetFlowRecord['entry'], createdByType: row.createdByType as FleetFlowRecord['createdByType'], state: row.state as FleetFlowRecord['state'], approvalMode: row.approvalMode as FleetFlowRecord['approvalMode'], features: [...(row.features ?? [])].sort((a, b) => a.position - b.position) };
+  protected toDomain(row: FleetFlowRow & { features?: FleetFlowFeatureRow[] }): FleetFlowRecord {
+    return { ...row, costCapUsd: row.costCapUsd.toFixed(4), spentUsd: row.spentUsd.toFixed(4), entry: row.entry as FleetFlowRecord['entry'], createdByType: row.createdByType as FleetFlowRecord['createdByType'], state: row.state as FleetFlowRecord['state'], approvalMode: row.approvalMode as FleetFlowRecord['approvalMode'], features: [...(row.features ?? [])].sort((a, b) => a.position - b.position).map((feature) => this.toFeature(feature)) };
+  }
+  /** The questions and the answers are JSON columns: an array when the column holds one, null when it is empty. */
+  private toFeature(row: FleetFlowFeatureRow): FleetFlowFeatureRecord {
+    return { ...row, questions: jsonArray<FlowQuestion>(row.questions), answers: jsonArray<FlowAnswer>(row.answers) };
   }
   protected toPersistenceCreate(record: FleetFlowRecord) { return { ...record }; }
   protected toPersistenceUpdate(patch: Partial<FleetFlowRecord>) { return { ...patch }; }
@@ -97,4 +102,30 @@ export class PrismaFleetFlowRepository extends AbstractPrismaRepository<FleetFlo
   stop(id: string, reason: string, now: Date, detail?: string | null): Promise<FleetFlowRecord> {
     return this.transition(id, FleetFlowState.STOPPED, { state: FleetFlowState.STOPPED, stopReason: reason, stopDetail: detail ?? null, endedAt: now });
   }
+  /**
+   * The answers a human gave to the review the feature waits on. The feature keeps the questions and
+   * the job they belong to, so the stored answers apply to that review only; the flow resumes.
+   */
+  async recordAnswers(flowId: string, featureId: string, input: { answers: FlowAnswer[]; userId: string; at: Date }): Promise<FleetFlowRecord> {
+    const result = await this.transactionManager.run(async () => {
+      await this.prisma.client.fleetFlow.update({ where: { id: flowId }, data: { state: FleetFlowState.RUNNING } });
+      await this.prisma.client.fleetFlowFeature.update({
+        where: { id: featureId },
+        data: {
+          answers: input.answers as unknown as Prisma.InputJsonValue,
+          answeredById: input.userId,
+          answeredAt: input.at,
+          state: FleetFlowState.RUNNING,
+        },
+      });
+      return this.findById(flowId);
+    });
+    if (!result) throw new FlowTransitionError(flowId, 'missing', FleetFlowState.RUNNING);
+    return result;
+  }
+}
+
+/** A JSON column holds the questions or the answers as an array; an empty column reads back as null. */
+function jsonArray<T>(value: Prisma.JsonValue | null | undefined): T[] | null {
+  return Array.isArray(value) ? (value as unknown as T[]) : null;
 }

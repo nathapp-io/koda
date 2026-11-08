@@ -20,6 +20,7 @@ import {
   type FleetFlowRecord,
   type IFleetFlowRepository,
 } from './domain/fleet-flow.domain';
+import type { FlowAnswersInput } from './flow-answers';
 import type { NormalizedFlowFeature } from './flow-input';
 
 const SPEC_SHA_RE = /^[a-f0-9]{40}$/;
@@ -95,6 +96,48 @@ export class FleetFlowsService {
     const flow = await this.findById(id);
     if (flow.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.flows.notFound');
     return flow;
+  }
+
+  async answer(projectId: string, id: string, input: FlowAnswersInput, actor: { type: 'USER'; id: string }, now = new Date()): Promise<FleetFlowRecord> {
+    return this.txManager.run(async () => {
+      // The initial read selects only the parent lock. The flow's project and answer state are
+      // re-read after acquiring locks in the same parent-before-flow order as stop/create.
+      const target = await this.get(projectId, id);
+      if (target.threadId !== null) await this.threads.lockForFlowTransition(projectId, target.threadId);
+      else await this.repos.lockById(target.repoId);
+      const flow = await this.flows.lockById(id);
+      if (!flow || flow.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.flows.notFound');
+      if (flow.state !== 'WAITING_ANSWER') throw new ConflictAppException({}, 'fleet.flows.notWaiting');
+
+      const feature = flow.features.find(({ state }) => state === 'WAITING_ANSWER');
+      if (!feature || feature.questions === null || feature.questions === undefined) {
+        throw new ConflictAppException({}, 'fleet.flows.notWaiting');
+      }
+      if (feature.questionsJobId !== input.jobId) throw new ConflictAppException({}, 'fleet.flows.answersStale');
+
+      const answersById = new Map(input.answers.map((answer) => [answer.id, answer]));
+      const questionIds = new Set(feature.questions.map(({ id: questionId }) => questionId));
+      for (const answer of input.answers) {
+        if (!questionIds.has(answer.id)) {
+          throw new ValidationAppException({ reason: `unknown question ${answer.id}` }, 'fleet.flows.answersInput');
+        }
+      }
+      const orderedAnswers = feature.questions.map(({ id: questionId }) => {
+        const answer = answersById.get(questionId);
+        if (!answer) throw new ValidationAppException({ reason: `missing answer ${questionId}` }, 'fleet.flows.answersInput');
+        return answer;
+      });
+      const answered = await this.flows.recordAnswers(flow.id, feature.id, { answers: orderedAnswers, userId: actor.id, at: now });
+      await this.audit.record({
+        key: 'fleet.flow.answer', resourceType: 'flow', resourceId: flow.id, projectId,
+        summary: 'flow answered',
+      });
+      await this.activity.record({
+        actorType: actor.type, actorId: actor.id, action: 'flow.answered', entityType: 'flow',
+        entityId: flow.id, projectId, payload: { flowId: flow.id, jobId: input.jobId, count: orderedAnswers.length },
+      });
+      return answered;
+    });
   }
 
   async stop(projectId: string, id: string, actor: FlowCreator, now = new Date()): Promise<FleetFlowRecord> {

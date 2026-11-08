@@ -92,7 +92,7 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     vi.mocked(Logger.prototype.error).mockClear();
   });
 
-  async function seedReview(step: 'SPEC_REVIEW' | 'PRD_REVIEW', finding: typeof minor | typeof ambiguous) {
+  async function seedReview(step: 'SPEC_REVIEW' | 'PRD_REVIEW', finding: typeof minor | typeof ambiguous, entry: 'NAX' | 'THREAD' = 'NAX') {
     const { flow } = await withTestActor({ type: 'USER', id: creatorId }, () => app.get(FleetFlowsService).create({
       entry: 'NAX', repoId, branch: BRANCH, specSha: SHA,
       features: [{ feature: FEATURE, specPath: SPEC, dependsOn: [] }],
@@ -101,6 +101,7 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     // Approval precedes every job. Match persisted bookkeeping so tick advances, rather than just recovering it.
     await db.fleetFlow.update({ where: { id: flow.id }, data: {
       state: 'RUNNING', approvalMode: 'REQUEST', approverId, approvedAt, pinnedRunnerId: runnerId,
+      ...(entry === 'THREAD' ? { entry: 'THREAD' } : {}),
     } });
     await db.fleetFlowFeature.updateMany({ where: { flowId: flow.id }, data: { state: 'RUNNING', currentStep: step } });
     const job = await db.fleetJob.create({ data: {
@@ -153,7 +154,7 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
   });
 
   it('AC-3–AC-9: ambiguous review stops, and publishing its actual outbox row creates replay-safe ticket, comment and notification', async () => {
-    const { flow } = await seedReview('SPEC_REVIEW', ambiguous);
+    const { flow } = await seedReview('SPEC_REVIEW', ambiguous, 'THREAD');
     await ticker.tick(now);
 
     const stopped = await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } });
@@ -197,7 +198,7 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
   });
 
   it('AC-4: failure after persisting the stop event rolls back both writes', async () => {
-    const { flow } = await seedReview('SPEC_REVIEW', ambiguous);
+    const { flow } = await seedReview('SPEC_REVIEW', ambiguous, 'THREAD');
     const outbox = app.get(OutboxService);
     const record = outbox.record.bind(outbox);
     const eventWhere = { type: 'fleet_flow_stopped', eventId: `${flow.id}:stopped` };

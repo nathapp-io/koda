@@ -7,12 +7,14 @@ import { parseRouteInput } from '../../approvals/route/parse-route-input';
 import { routeCommand } from '../../approvals/route/route-command';
 import type { ThreadPreApproval } from '../threads/domain/chat-thread.domain';
 import { FleetFlowsService, type FlowCreator } from './fleet-flows.service';
+import { parseFlowAnswers, type FlowAnswersInput } from './flow-answers';
 import { parseFlowInput, type NormalizedFlowInput, type NormalizedNaxFlowInput } from './flow-input';
 import { ThreadsService } from '../threads/threads.service';
 
 export const THREAD_FLOW_CREATE_VARIANT = 'rest:fleet-thread-flow.create';
 export const NAX_FLOW_CREATE_VARIANT = 'rest:fleet-nax-flow.create';
 export const FLOW_STOP_VARIANT = 'rest:fleet-flow.stop';
+export const FLOW_ANSWER_VARIANT = 'rest:fleet-flow.answer';
 
 export const THREAD_PREAPPROVAL_ROUTE_VARIANTS = {
   set: 'rest:fleet-thread-preapproval.set',
@@ -23,6 +25,7 @@ interface ThreadFlowCreateInput { projectId: string; threadId: string; body: Nor
 interface NaxFlowCreateInput { projectId: string; repoId: string; body: NormalizedNaxFlowInput }
 interface SetPreApprovalInput { projectId: string; threadId: string; costCapUsd: string }
 interface ClearPreApprovalInput { projectId: string; threadId: string }
+interface FlowAnswerInput { projectId: string; flowId: string; body: FlowAnswersInput }
 
 @Injectable()
 export class FlowRouteCommands implements OnModuleInit {
@@ -91,6 +94,20 @@ export class FlowRouteCommands implements OnModuleInit {
         return null;
       },
     }, this.loader));
+    this.registry.register(routeCommand<FlowAnswerInput, Awaited<ReturnType<FleetFlowsService['answer']>>>({
+      key: 'fleet.flow.answer', variant: FLOW_ANSWER_VARIANT,
+      parse: (input) => {
+        const route = parseRouteInput(input, ['projectId', 'flowId']);
+        const body = (input as Record<string, unknown>).body;
+        return { projectId: route.projectId, flowId: route.flowId, body: parseFlowAnswers(body) };
+      },
+      run: (principal, input) => {
+        // The backstop for the route's own human check: a deferred execution must answer as the
+        // human who asked, so an agent never records answers.
+        assertAnswerHuman(principal);
+        return this.flows.answer(input.projectId, input.flowId, input.body, { type: 'USER', id: principal.id });
+      },
+    }, this.loader));
   }
 }
 
@@ -105,4 +122,12 @@ function parseSetInput(value: unknown): SetPreApprovalInput {
 
 function assertHuman(principal: KodaPrincipal): void {
   if (principal.actorType !== 'user') throw new ForbiddenAppException({}, 'fleet.flows.humanOnly');
+}
+
+/**
+ * The answers route is human-only: only a user answers a flow's questions, so an agent is refused
+ * with its own key rather than the thread pre-approval's.
+ */
+function assertAnswerHuman(principal: KodaPrincipal): void {
+  if (principal.actorType !== 'user') throw new ForbiddenAppException({}, 'fleet.flows.answerHumanOnly');
 }

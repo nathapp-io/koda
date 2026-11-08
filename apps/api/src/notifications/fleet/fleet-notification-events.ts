@@ -1,5 +1,6 @@
 import { FleetJobState } from '../../common/enums';
 import type { BudgetScopeType } from '../../fleet/budgets/domain/budget.domain';
+import type { FlowQuestion } from '../../fleet/flows/flow-calls';
 
 /**
  * Fleet S4a §2.4: outbox event types the fleet enqueues for notifications, their payloads and the pure helpers
@@ -10,6 +11,7 @@ export const FLEET_JOB_OUTCOME = 'fleet_job_outcome';
 export const FLEET_BUDGET_INCIDENT = 'fleet_budget_incident';
 export const FLEET_HEALTH_ALERT = 'fleet_health_alert';
 export const FLEET_FLOW_STOPPED = 'fleet_flow_stopped';
+export const FLEET_FLOW_QUESTIONS = 'fleet_flow_questions';
 
 export const JOB_OUTCOMES = ['escalated', 'failed', 'crashed', 'pr_opened'] as const;
 export type JobOutcome = (typeof JOB_OUTCOMES)[number];
@@ -24,6 +26,11 @@ export interface FleetBudgetIncidentPayload { incidentId: string; kind: BudgetIn
 export interface FleetHealthAlertPayload { alertId: string; kind: HealthAlertKind; runner: string; provider: string | null; expiresAt: string | null }
 export interface FleetFlowStoppedPayload {
   flowId: string; projectId: string; feature: string; stopReason: string; detail: string;
+  approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string;
+}
+export interface FleetFlowQuestionsPayload {
+  flowId: string; projectId: string; feature: string;
+  step: 'SPEC_REVIEW' | 'PRD_REVIEW'; jobId: string; questions: FlowQuestion[];
   approverId: string | null; creatorType: 'USER' | 'AGENT'; creatorId: string;
 }
 
@@ -90,6 +97,25 @@ export function parseFlowStoppedPayload(raw: unknown): FleetFlowStoppedPayload |
     || (creatorType !== 'USER' && creatorType !== 'AGENT') || !isText(creatorId)) return null;
   const validApproverId: string | null = typeof approverId === 'string' ? approverId : null;
   return { flowId, projectId, feature, stopReason, detail, approverId: validApproverId, creatorType, creatorId };
+}
+
+export function parseFlowQuestionsPayload(raw: unknown): FleetFlowQuestionsPayload | null {
+  if (!isObject(raw)) return null;
+  const { flowId, projectId, feature, step, jobId, questions, approverId, creatorType, creatorId } = raw;
+  if (!isText(flowId) || !isText(projectId) || typeof feature !== 'string'
+    || (step !== 'SPEC_REVIEW' && step !== 'PRD_REVIEW') || !isText(jobId)
+    || !Array.isArray(questions) || questions.length === 0
+    || (approverId !== null && !isText(approverId))
+    || (creatorType !== 'USER' && creatorType !== 'AGENT') || !isText(creatorId)) return null;
+  const parsedQuestions: FlowQuestion[] = [];
+  for (const question of questions) {
+    if (!isObject(question) || typeof question.id !== 'string' || typeof question.question !== 'string') return null;
+    parsedQuestions.push({ id: question.id, question: question.question });
+  }
+  return {
+    flowId, projectId, feature, step, jobId, questions: parsedQuestions,
+    approverId: typeof approverId === 'string' ? approverId : null, creatorType, creatorId,
+  };
 }
 
 export function parseHealthAlertPayload(raw: unknown): FleetHealthAlertPayload | null {

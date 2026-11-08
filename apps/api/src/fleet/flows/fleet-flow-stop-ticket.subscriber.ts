@@ -5,7 +5,8 @@ import { bookkeeping } from '../../action-context/audit-coverage';
 import { ActorPrincipalLoader, ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { TicketType } from '../../common/enums';
-import { FLEET_FLOW_STOPPED, parseFlowStoppedPayload, type FleetFlowStoppedPayload } from '../../notifications/fleet/fleet-notification-events';
+import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED, parseFlowQuestionsPayload, parseFlowStoppedPayload, type FleetFlowQuestionsPayload, type FleetFlowStoppedPayload } from '../../notifications/fleet/fleet-notification-events';
+import { formatQuestionsComment } from './flow-calls';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { TicketsService } from '../../tickets/tickets.service';
@@ -31,7 +32,19 @@ export class FleetFlowStopTicketSubscriber implements OnModuleInit {
 
   onModuleInit(): void {
     this.registry.register(FLEET_FLOW_STOPPED, this.handle);
+    this.registry.register(FLEET_FLOW_QUESTIONS, this.handleQuestions);
   }
+
+  readonly handleQuestions = async (payload: unknown): Promise<void> => {
+    const p = parseFlowQuestionsPayload(payload);
+    if (p === null) {
+      this.logger.warn(`${FLEET_FLOW_QUESTIONS}: malformed payload skipped`);
+      return;
+    }
+    await runAsSystem('flow', () => this.questionsTicket(p), {
+      onBehalfOf: { type: p.creatorType, id: p.creatorId },
+    });
+  };
 
   readonly handle = async (payload: unknown): Promise<void> => {
     const p = parseFlowStoppedPayload(payload);
@@ -71,7 +84,39 @@ export class FleetFlowStopTicketSubscriber implements OnModuleInit {
     });
   }
 
-  private async author(p: FleetFlowStoppedPayload): Promise<KodaPrincipal | null> {
+  private async questionsTicket(p: FleetFlowQuestionsPayload): Promise<void> {
+    // Keep the flow lock through ticket creation/linking and comment deduplication, so outbox retries are safe.
+    await this.txManager.run(async () => {
+      const flow = await this.flows.lockById(p.flowId);
+      if (flow === null) return;
+      const slug = await this.steps.projectSlug(p.projectId);
+      if (slug === null) return;
+      let ticketId = flow.ticketId;
+      if (ticketId == null) {
+        const principal = await this.author(p);
+        if (principal === null) {
+          this.logger.warn(`Flow ${p.flowId}: ticket author unavailable; questions ticket skipped`);
+          return;
+        }
+        const ticket = await this.tickets.create(slug, {
+          type: TicketType.TASK,
+          title: `Fleet flow: ${p.feature}`,
+          description: `Flow ${p.flowId} on ${flow.branch}`,
+        }, principal);
+        ticketId = ticket.id;
+        await bookkeeping('fleet.flow-bookkeeping', () => this.steps.setTicket(p.flowId, ticket.id));
+      }
+      const body = formatQuestionsComment({
+        step: p.step,
+        jobId: p.jobId,
+        questions: p.questions,
+        answerPath: `/api/projects/${slug}/flows/${p.flowId}/answers`,
+      });
+      await this.effects.commentOnFlowTicket(ticketId, p.projectId, body);
+    });
+  }
+
+  private async author(p: FleetFlowStoppedPayload | FleetFlowQuestionsPayload): Promise<KodaPrincipal | null> {
     try {
       return await this.actors.load({ type: p.creatorType, id: p.creatorId });
     } catch (error) {
