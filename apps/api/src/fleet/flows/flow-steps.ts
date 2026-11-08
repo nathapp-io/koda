@@ -7,6 +7,7 @@ export const FLOW_VERDICT_INSTRUCTION = `When you are done, end your reply with 
 Classes: "answered" = the spec, the brainstorm or the code already settles it; "minor" = a small call you can make
 and record; "ambiguous" = only the user can settle it, because the answer changes what gets built.
 Use {"findings":[]} when you found nothing that should change before the next step.
+Leave out anything that needs no change: a note such as "already settled" is not a finding, and an "answered" or "minor" finding with an empty fix is dropped.
 {"findings":[]}`;
 
 /**

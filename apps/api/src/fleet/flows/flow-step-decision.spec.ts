@@ -85,7 +85,19 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: '{"findings":[{"class":"minor","summary":"Update plan","fix":"update it"}]}' }) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
   it('US-008 AC-6 reports an unreadable null SPEC_REVIEW output', () => {
-    expect(decideFlowStep(input({ latestJob: job({ id: 'j2', step: 'SPEC_REVIEW', agentOutput: null }) }))).toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'SPEC_REVIEW job j2: no verdict JSON in the agent output' });
+    expect(decideFlowStep(input({ latestJob: job({ id: 'j2', step: 'SPEC_REVIEW', agentOutput: null }) }))).toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'SPEC_REVIEW job j2: verdict unreadable (no agent output)' });
+  });
+  it('#415 names the parse reason in the unreadable stop detail', () => {
+    expect(decideFlowStep(input({ latestJob: job({ id: 'j3', step: 'SPEC_REVIEW', agentOutput: '{"findings":[{"summary":"s"}]}' }) })))
+      .toEqual({ kind: 'stop', reason: 'verdict_unreadable', detail: 'SPEC_REVIEW job j3: verdict unreadable (finding 1 has no valid class)' });
+  });
+  it.each([
+    { class: 'minor', summary: 'Missing fix' },
+    { class: 'answered', summary: 'Blank fix', fix: '   ' },
+  ])('#415 treats a fix-less $class finding as a note, so a clean SPEC_REVIEW plans', (finding) => {
+    expect(decideFlowStep(input({ canApplyCalls: true,
+      latestJob: job({ step: 'SPEC_REVIEW', agentOutput: JSON.stringify({ findings: [finding] }) }) })))
+      .toEqual({ kind: 'dispatch', step: 'PLAN' });
   });
   it('US-008 AC-7 reports an unreadable PRD_REVIEW output', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'PRD_REVIEW', agentOutput: 'not a verdict' }) }))).toMatchObject({ kind: 'stop', reason: 'verdict_unreadable' });
@@ -484,8 +496,6 @@ describe('decideFlowStep', () => {
   it.each([
     { summary: 'Missing class', fix: 'fix' },
     { class: 'major', summary: 'Unknown class', fix: 'fix' },
-    { class: 'minor', summary: 'Missing fix' },
-    { class: 'answered', summary: 'Blank fix', fix: '   ' },
     { class: 'ambiguous', summary: 'Missing question' },
     { class: 'ambiguous', summary: 'Blank question', question: '  ' },
   ])('US-005 AC-12..15 rejects unreadable classified findings: $summary', (finding) => {
