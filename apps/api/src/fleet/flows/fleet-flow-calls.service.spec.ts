@@ -173,6 +173,50 @@ describe('FleetFlowCallsService.applyPrdEdits', () => {
     await expect(h.service.applyPrdEdits(flow({ features: [] }), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
     expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
   });
+
+  it('AC-1/2: returns stale and never writes when the moved head is not our commit', async () => {
+    const h = build({ files: [prdFile(), prdFile()], head: OTHER_HEAD, singleFileCommit: false });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  it('AC-3/4: recovers our exact single-file PRD commit without writing twice', async () => {
+    const editedResult = prdEdits.applyPrdEditsToText(PRD, [onePrdEdit]);
+    if (editedResult.kind !== 'ok') throw new Error('test fixture PRD must be readable');
+    const edited = editedResult.text;
+    const h = build({ files: [prdFile(edited), prdFile()], head: OTHER_HEAD, singleFileCommit: true });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'committed', sha: OTHER_HEAD, applied: 1, refused: [] });
+    expect(h.github.isSingleFileCommit).toHaveBeenCalledWith(TOKEN, 'o', 'r', EXPECTED_HEAD, OTHER_HEAD, PRD_PATH);
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  it('AC-5: a proved commit with different bytes is stale', async () => {
+    const h = build({ files: [prdFile(JSON.stringify({ userStories: [] })), prdFile()], head: OTHER_HEAD, singleFileCommit: true });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'stale', head: OTHER_HEAD });
+    expect(h.github.putFile).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: a refused PRD contents write is a permanent failure', async () => {
+    const h = build({ files: [prdFile()], put: { kind: 'refused' } });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
+  });
+
+  it('AC-7: conflict with unchanged blob sha is a refusal', async () => {
+    const h = build({ files: [prdFile(), prdFile()], put: { kind: 'conflict' } });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json write refused' });
+  });
+
+  it('AC-8: conflict with moved blob sha retries', async () => {
+    const h = build({ files: [prdFile(), prdFile(PRD, MOVED_BLOB_SHA)], put: { kind: 'conflict' } });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+  });
+
+  it('AC-9/10: maps permanent and transient forge exceptions', async () => {
+    const permanent = build({ mintError: new RepoCheckException('app_not_installed') });
+    await expect(permanent.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'app_not_installed' });
+    const transient = build({ mintError: new RepoCheckException('provider_error') });
+    await expect(transient.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'retry' });
+  });
 });
 
 describe('FleetFlowCallsService.apply', () => {
