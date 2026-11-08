@@ -69,7 +69,7 @@ export type ApplyRulingsAction = Extract<FlowStepAction, { kind: 'apply_rulings'
 export type WaitAnswerAction = Extract<FlowStepAction, { kind: 'wait_answer' }>;
 
 const dispatch = (step: FlowStep): FlowStepAction => ({ kind: 'dispatch', step });
-const safeRuleItemLabel = (value: string): string => oneLine(sanitizeFlowText(value.replace(/\u0000/g, '\uFFFD')));
+const safeRuleItemLabel = (value: string): string => oneLine(sanitizeFlowText(value.split('\u0000').join('\uFFFD')));
 
 function failed(job: FlowJobView): FlowStepAction {
   const reason = job.stateReason ?? 'no reason';
