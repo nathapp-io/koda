@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T09:03:19.550Z",
+  "updatedAt": "2026-11-08T09:15:42.223Z",
   "userStories": [
     {
       "id": "US-001",
@@ -669,14 +669,17 @@
         "US-008",
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The upstream writer, action types and dispatch builder already exist; this story adds conditional reads and typed input plumbing in one service with existing unit harnesses and unchanged access guards."
+        "reasoning": "The upstream writer, action types and dispatch builder already exist; this story adds conditional reads and typed input plumbing in one service with existing unit harnesses and unchanged access guards.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
@@ -704,7 +707,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d5c878e48f5832f2e2eb2fe4036341b9bf094c75"
     },
     {
       "id": "US-012",
