@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
 import { isWellFormedFlowText } from './flow-calls';
-import { FLOW_RULING_INSTRUCTION, buildRuleTask, needsAutomaticRule, ruleTaskItems } from './flow-rulings';
+import { FLOW_RULINGS_MAX, FLOW_RULING_INSTRUCTION, buildRuleTask, needsAutomaticRule, parseRuleVerdict, ruleTaskItems } from './flow-rulings';
 import type { FlowOpenItem } from './flow-rulings';
 
 describe('flow ruling tasks', () => {
@@ -69,5 +69,49 @@ describe('flow ruling tasks', () => {
   it('states every ruling keyword and the exact verdict shape', () => {
     for (const keyword of ['verified:', 'confirm:', 'override:', 'waive:', 'fixed <head sha>']) expect(FLOW_RULING_INSTRUCTION).toContain(keyword);
     expect(FLOW_RULING_INSTRUCTION.split('\n').at(-1)).toBe('{"rulings":[{"item":"<id>","ruling":"<keyword line and evidence>"}],"questions":[{"item":"<id>","question":"<question>"}]}');
+  });
+});
+
+describe('parseRuleVerdict', () => {
+  const encoded = (rulings: unknown[], questions: unknown[] = []): string =>
+    `{"rulings":${JSON.stringify(rulings)},"questions":${JSON.stringify(questions)}}`;
+
+  it('parses ruling and question arrays from a verdict line', () => {
+    expect(parseRuleVerdict('log\n{"rulings":[{"item":"D-1","ruling":"verified: test green"}],"questions":[]}')).toEqual({
+      ok: true, rulings: [{ item: 'D-1', ruling: 'verified: test green' }], questions: [],
+    });
+  });
+  it('uses the last verdict line and accepts one trailing code fence', () => {
+    expect(parseRuleVerdict('{"rulings":[],"questions":[]}\n{"rulings":[{"item":"D-2","ruling":"verified"}],"questions":[]}')).toMatchObject({ rulings: [{ item: 'D-2' }] });
+    expect(parseRuleVerdict('{"rulings":[],"questions":[]}\n```')).toMatchObject({ ok: true });
+  });
+  it.each([
+    null,
+    'prefix {"rulings":[],"questions":[]}',
+    '{"rulings": nope',
+    '{"rulings":[],"questions":[]}\nprose',
+    '{"rulings":[]}',
+    encoded([{ item: 'D-1', ruling: '  ' }]),
+    encoded([], [{ item: 'S-2', question: 3 }]),
+  ])('rejects malformed verdict %s', (output) => {
+    expect(parseRuleVerdict(output)).toEqual({ ok: false });
+  });
+  it('rejects over-limit rulings and accepts exactly the limit', () => {
+    const rulings = Array.from({ length: FLOW_RULINGS_MAX + 1 }, (_, index) => ({ item: `D-${index}`, ruling: 'verified' }));
+    expect(parseRuleVerdict(encoded(rulings))).toEqual({ ok: false });
+    expect(parseRuleVerdict(encoded(rulings.slice(0, FLOW_RULINGS_MAX))).ok).toBe(true);
+  });
+  it('parses questions without rulings', () => {
+    expect(parseRuleVerdict(encoded([], [{ item: 'S-2', question: 'Which?' }]))).toEqual({
+      ok: true, rulings: [], questions: [{ item: 'S-2', question: 'Which?' }],
+    });
+  });
+  it('sanitizes nulls and lone surrogates and bounds question text', () => {
+    expect(parseRuleVerdict(encoded([{ item: 'D-1', ruling: `a\0${String.fromCharCode(0xd800)}` }]))).toMatchObject({
+      rulings: [{ ruling: 'a��' }],
+    });
+    const question = 'q'.repeat(1500);
+    const parsed = parseRuleVerdict(encoded([], [{ item: 'S-2', question }]));
+    expect(parsed.ok && parsed.questions[0].question).toHaveLength(1000);
   });
 });

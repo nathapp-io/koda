@@ -1,5 +1,51 @@
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
-import { oneLine, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALL_TEXT_MAX, oneLine, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+
+export type FlowRuling = { item: string; ruling: string };
+export type FlowRuleQuestion = { item: string; question: string };
+export const FLOW_RULINGS_MAX = 100;
+
+type FlowRuleVerdict = { rulings: unknown; questions: unknown };
+
+export function parseRuleVerdict(output: string | null):
+  | { ok: true; rulings: FlowRuling[]; questions: FlowRuleQuestion[] }
+  | { ok: false } {
+  if (typeof output !== 'string') return { ok: false };
+
+  const lines = output.split(/\r?\n/);
+  let markerLine = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].startsWith('{"rulings"')) markerLine = index;
+  }
+  if (markerLine < 0) return { ok: false };
+
+  let candidate = lines.slice(markerLine).join('\n').trim();
+  candidate = candidate.replace(/\n\s*```\s*$/, '').trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return { ok: false };
+  }
+  if (typeof parsed !== 'object' || parsed === null || !('rulings' in parsed) || !('questions' in parsed)) return { ok: false };
+  const { rulings, questions } = parsed as FlowRuleVerdict;
+  if (!Array.isArray(rulings) || !Array.isArray(questions) || rulings.length > FLOW_RULINGS_MAX) return { ok: false };
+
+  const validText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  const safeText = (value: string, max: number): string => truncateFlowText(value.split('\u0000').join('\uFFFD'), max);
+  const safeRulings: FlowRuling[] = [];
+  for (const ruling of rulings) {
+    if (typeof ruling !== 'object' || ruling === null || !('item' in ruling) || !validText(ruling.item) || !('ruling' in ruling) || !validText(ruling.ruling)) return { ok: false };
+    safeRulings.push({ item: ruling.item, ruling: safeText(ruling.ruling, 2000) });
+  }
+
+  const safeQuestions: FlowRuleQuestion[] = [];
+  for (const question of questions) {
+    if (typeof question !== 'object' || question === null || !('item' in question) || !validText(question.item) || !('question' in question) || !validText(question.question)) return { ok: false };
+    safeQuestions.push({ item: question.item, question: safeText(question.question, FLOW_CALL_TEXT_MAX) });
+  }
+  return { ok: true, rulings: safeRulings, questions: safeQuestions };
+}
 
 export type FlowOpenItem = {
   id: string;
