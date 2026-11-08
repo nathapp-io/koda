@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { actorKind, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { currentContext, runWithActionContext } from '../../action-context/action-context';
-import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling, type RulingJobTarget } from './fleet-pr-ruling.domain';
+import { ActorPrincipalLoader, ActorUnavailableError } from '../../auth/principal/actor-principal.loader';
+import { currentContext, runAsSystem, runWithActionContext } from '../../action-context/action-context';
+import { FLEET_PR_RULING_REPOSITORY, type IFleetPrRulingRepository, type CreateRulingInput, type FleetPrRuling, type RulingDisposition, type RulingJobTarget } from './fleet-pr-ruling.domain';
 import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import type { FleetRepoRef, FleetJobPrRulings, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
@@ -27,6 +28,7 @@ export class FleetPrRulingsService {
     private readonly audit: AuditRecorder,
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly github: GitHubAppClient,
+    private readonly actors: ActorPrincipalLoader,
   ) {}
 
   /** Dispatch-only, outside the insert transaction; forge failures never reject the FIX. */
@@ -166,4 +168,117 @@ export class FleetPrRulingsService {
       return ruling;
     }));
   }
+
+  /**
+   * US-005: the flow's own ruling writer. The flow's approval covers the write, so the route gate
+   * is skipped, but every eligibility check of `ruleTarget` and the item-index read still run.
+   * The write is attributed to the flow on behalf of the flow's creator.
+   */
+  async createForFlow(input: FlowRulingInput): Promise<FlowRulingOutcome> {
+    const dto: CreateRulingInput = { itemId: input.itemId, text: input.text };
+    const text = input.text.trim();
+    // A tick that crashed after some rulings re-runs: the same ruling, already pending and written
+    // by the flow, is the same outcome, not a second one.
+    const existing = await this.repo.latestRuling(input.runJobId, input.itemId);
+    if (existing !== null && existing.state === 'pending' && existing.actorType === 'SYSTEM' && existing.text === text) {
+      return { kind: 'recorded', rulingId: existing.id };
+    }
+    try {
+      await this.assertItemIndex(await this.ruleTarget(input.projectId, input.runJobId, dto));
+    } catch (error) {
+      const reason = refusalReason(error);
+      if (reason === null) throw error;
+      return { kind: 'refused', reason };
+    }
+    const parsed = parseRulingText(input.text);
+    // `ruleTarget` refused an unparsable text above; this only reads the disposition it validated.
+    if (parsed === null) return { kind: 'refused', reason: 'fleet.rulings.invalidText' };
+    return runAsSystem('flow', () => this.txManager.run(async () => this.writeFlowRuling(input, dto, text, parsed.disposition)), {
+      onBehalfOf: { type: input.creator.type, id: input.creator.id },
+    });
+  }
+
+  /**
+   * US-005: the one transaction of a flow ruling. Every refusal is decided before the first write,
+   * so a refused ruling leaves nothing behind; a failure after a write rolls the transaction back.
+   */
+  private async writeFlowRuling(input: FlowRulingInput, dto: CreateRulingInput, text: string, disposition: RulingDisposition): Promise<FlowRulingOutcome> {
+    const target = await this.repo.lockTarget(input.projectSlug, input.runJobId);
+    if (!target) return { kind: 'refused', reason: 'fleet.jobs' };
+    try {
+      // The pre-transaction gate is advisory until these locks are held: re-read the eligibility.
+      await this.ruleTarget(target.projectId, input.runJobId, dto);
+    } catch (error) {
+      const reason = refusalReason(error);
+      if (reason === null) throw error;
+      return { kind: 'refused', reason };
+    }
+    const item = target.openItems.find((open) => open.id === input.itemId);
+    if (!item) return { kind: 'refused', reason: 'fleet.rulings.unknownItem' };
+    if (target.prNumber === null) return { kind: 'refused', reason: 'fleet.rulings.invalidPr' };
+    let principal: KodaPrincipal;
+    try {
+      principal = await this.actors.load({ type: input.creator.type, id: input.creator.id });
+    } catch (error) {
+      if (!(error instanceof ActorUnavailableError)) throw error;
+      return { kind: 'refused', reason: 'creator unavailable' };
+    }
+    const ticketId = await this.ticketEffects.ensureFinishTicket({ id: input.runJobId }, principal);
+    const comment = await this.ticketEffects.createSystemRulingComment(ticketId, `${input.itemId} (${item.kind}): ${text} (flow ${input.flowId})`);
+    await this.repo.replacePending(input.runJobId, input.itemId);
+    const ruling = await this.repo.insert({
+      projectId: target.projectId, repoId: target.repoId, prNumber: target.prNumber, jobId: input.runJobId,
+      itemId: input.itemId, itemKind: item.kind, text, disposition,
+      actorType: 'SYSTEM', actorId: 'flow', state: 'pending', skipReason: null, appliedJobId: null,
+      commentId: comment.id, approvalRequestId: input.approvalRequestId,
+    });
+    await this.audit.record({
+      key: 'system.flow.advance', resourceType: 'fleet_job', resourceId: input.runJobId, projectId: target.projectId,
+      summary: `flow ruled ${input.itemId}: ${disposition}`,
+    });
+    return { kind: 'recorded', rulingId: ruling.id };
+  }
+
+  /**
+   * US-005: the item ids a flow must not rule again. An applied ruling is settled, and a pending
+   * ruling of a human or an agent is theirs: a flow never replaces it. A pending flow ruling does
+   * not protect the item, so the same flow may rule it again.
+   */
+  async ruledItemIds(runJobId: string): Promise<string[]> {
+    const latest = new Map<string, FleetPrRuling>();
+    for (const ruling of await this.repo.list(runJobId)) {
+      if (!latest.has(ruling.itemId)) latest.set(ruling.itemId, ruling);
+    }
+    const ids: string[] = [];
+    for (const [itemId, ruling] of latest) {
+      if (ruling.state === 'applied' || (ruling.state === 'pending' && ruling.actorType !== 'SYSTEM')) ids.push(itemId);
+    }
+    return ids;
+  }
+
+  /** US-005: the flow's refusal note on the RUN's finish ticket. */
+  commentRefused(runId: string, body: string): Promise<void> {
+    return this.ticketEffects.commentOnRulingResult(runId, body);
+  }
+}
+
+/** US-005: the ruling a flow records, under the flow's creator. */
+export type FlowRulingInput = {
+  projectId: string;
+  projectSlug: string;
+  runJobId: string;
+  itemId: string;
+  text: string;
+  creator: { type: 'USER' | 'AGENT'; id: string };
+  approvalRequestId: string | null;
+  flowId: string;
+};
+
+/** US-005: a recorded ruling, or the reason the flow may not record it. */
+export type FlowRulingOutcome = { kind: 'recorded'; rulingId: string } | { kind: 'refused'; reason: string };
+
+/** An app exception's i18n message key, or null when the failure is not a known refusal. */
+function refusalReason(error: unknown): string | null {
+  if (!(error instanceof AppException)) return null;
+  return error.prefix ?? null;
 }

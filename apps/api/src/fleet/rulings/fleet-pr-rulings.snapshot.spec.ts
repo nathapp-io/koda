@@ -14,7 +14,7 @@ function setup() {
     ]),
   };
   const github = { mintThreadReadToken: vi.fn(async () => ({ token: 'ephemeral' })), getPullRequest: vi.fn(async (): Promise<unknown> => ({ state: 'open', headSha })) };
-  const service = new FleetPrRulingsService(repo as never, {} as never, {} as never, {} as never, github as never);
+  const service = new FleetPrRulingsService(repo as never, {} as never, {} as never, {} as never, github as never, {} as never);
   return { service, repo, github };
 }
 
