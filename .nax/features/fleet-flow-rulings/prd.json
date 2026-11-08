@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T08:18:36.386Z",
+  "updatedAt": "2026-11-08T08:38:51.056Z",
   "userStories": [
     {
       "id": "US-001",
@@ -472,14 +472,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Small pure-decision change with exact branch precedence and stale-answer safeguards; it does not change route access control."
+        "reasoning": "Small pure-decision change with exact branch precedence and stale-answer safeguards; it does not change route access control.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-step-decision.ts",
@@ -495,7 +498,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a294be80afc0b5f0827fe523aec2f4017a895b73"
     },
     {
       "id": "US-009",
