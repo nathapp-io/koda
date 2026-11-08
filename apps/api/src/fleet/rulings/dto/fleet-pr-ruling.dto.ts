@@ -11,7 +11,7 @@ export class FleetPrRulingDto implements FleetPrRuling {
   @ApiProperty() declare itemKind: string;
   @ApiProperty() declare text: string;
   @ApiProperty({ enum: ['fixed', 'waived', 'overridden', 'confirmed', 'verified'] }) declare disposition: FleetPrRuling['disposition'];
-  @ApiProperty({ enum: ['USER', 'AGENT'] }) declare actorType: FleetPrRuling['actorType'];
+  @ApiProperty({ enum: ['USER', 'AGENT', 'SYSTEM'] }) declare actorType: FleetPrRuling['actorType'];
   @ApiProperty() declare actorId: string;
   @ApiProperty({ enum: ['pending', 'applied', 'skipped', 'replaced'] }) declare state: FleetPrRuling['state'];
   @ApiProperty({ type: String, nullable: true }) declare skipReason: string | null;

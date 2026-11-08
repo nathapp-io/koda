@@ -19646,7 +19646,8 @@
           "actorType": {
             "enum": [
               "USER",
-              "AGENT"
+              "AGENT",
+              "SYSTEM"
             ],
             "type": "string"
           },

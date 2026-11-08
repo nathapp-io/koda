@@ -8,8 +8,9 @@ function setup() {
   const repo = {
     latestRunForPr: vi.fn(async () => 'latest'),
     pendingForFix: vi.fn(async () => [
-      { id: 'r1', itemId: 'D-1', text: 'confirmed: evidence', actorType: 'AGENT', actorName: 'rev-bot', createdAt: at },
+      { id: 'r1', itemId: 'D-1', text: 'confirmed: evidence', actorType: 'AGENT', actorId: 'agent-id', actorName: 'rev-bot', createdAt: at },
       { id: 'r2', itemId: 'B3', text: 'waived: scope', actorType: 'USER', actorName: `A\n${'x'.repeat(120)}`, createdAt: at },
+      { id: 'r3', itemId: 'S-1', text: 'verified: system', actorType: 'SYSTEM', actorId: 'flow', actorName: 'flow', createdAt: at },
     ]),
   };
   const github = { mintThreadReadToken: vi.fn(async () => ({ token: 'ephemeral' })), getPullRequest: vi.fn(async (): Promise<unknown> => ({ state: 'open', headSha })) };
@@ -26,6 +27,7 @@ describe('FIX ruling snapshot', () => {
     expect(result).toEqual({ headSha, rulings: [
       { rulingId: 'r1', item: 'D-1', ruling: 'confirmed: evidence', by: 'koda:agent:rev-bot', at: at.toISOString() },
       { rulingId: 'r2', item: 'B3', ruling: 'waived: scope', by: `koda:user:A${'x'.repeat(89)}`, at: at.toISOString() },
+      { rulingId: 'r3', item: 'S-1', ruling: 'verified: system', by: 'koda:system:flow', at: at.toISOString() },
     ] });
     expect(github.mintThreadReadToken).toHaveBeenCalledExactlyOnceWith(42n, 'app');
     expect(github.getPullRequest).toHaveBeenCalledExactlyOnceWith('ephemeral', 'acme', 'app', 42);
@@ -46,6 +48,13 @@ describe('FIX ruling snapshot', () => {
     expect(await service.snapshotForFix(repoRef as never, 42)).toBeUndefined();
     expect(repo.pendingForFix).not.toHaveBeenCalled();
   });
+  it('AC-6 SYSTEM ruling with a failed head read remains non-fatal', async () => {
+    const { service, repo, github } = setup();
+    repo.pendingForFix.mockResolvedValue([{ id: 'r3', itemId: 'S-1', text: 'verified: system', actorType: 'SYSTEM', actorId: 'flow', actorName: 'flow', createdAt: at }]);
+    github.getPullRequest.mockRejectedValue(new Error('forge unavailable'));
+    expect(await service.snapshotForFix(repoRef as never, 42)).toEqual({ notSent: 'head-unreadable' });
+  });
+
   it('AC-5 thrown reads are accepted as unreadable', async () => {
     const { service, github } = setup(); github.getPullRequest.mockRejectedValue(new Error('provider failure'));
     expect(await service.snapshotForFix(repoRef as never, 42)).toEqual({ notSent: 'head-unreadable' });

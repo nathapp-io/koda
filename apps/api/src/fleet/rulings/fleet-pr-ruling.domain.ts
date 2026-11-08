@@ -12,7 +12,7 @@ export interface FleetPrRuling {
   itemKind: string;
   text: string;
   disposition: RulingDisposition;
-  actorType: 'USER' | 'AGENT';
+  actorType: 'USER' | 'AGENT' | 'SYSTEM';
   actorId: string;
   state: RulingState;
   skipReason: string | null;
@@ -38,7 +38,7 @@ export interface RulingJobTarget {
   openItems: { id: string; kind: string }[];
   repo: RulingTargetRepo;
 }
-export type PendingFixRuling = Pick<FleetPrRuling, 'id' | 'itemId' | 'text' | 'actorType' | 'createdAt'> & { actorName: string };
+export type PendingFixRuling = Pick<FleetPrRuling, 'id' | 'itemId' | 'text' | 'actorType' | 'actorId' | 'createdAt'> & { actorName: string };
 export interface RulingResultPatch { state: 'applied' | 'skipped'; appliedJobId: string; skipReason: string | null }
 export interface IFleetPrRulingRepository {
   settlePending(id: string, repoId: string, patch: RulingResultPatch): Promise<{ jobId: string } | null>;

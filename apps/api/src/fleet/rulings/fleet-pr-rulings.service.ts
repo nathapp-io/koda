@@ -44,7 +44,7 @@ export class FleetPrRulingsService {
       if (!pr.headSha) return { notSent: 'head-unreadable' };
       return { headSha: pr.headSha, rulings: [...pending].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, 100).map((r) => ({
         rulingId: r.id, item: r.itemId, ruling: r.text,
-        by: `koda:${r.actorType === 'AGENT' ? 'agent' : 'user'}:${r.actorName}`.replace(/[\r\n\u2028\u2029]/g, '').slice(0, 100),
+        by: `koda:${r.actorType === 'AGENT' ? 'agent' : r.actorType === 'SYSTEM' ? 'system' : 'user'}:${r.actorType === 'SYSTEM' ? r.actorId : r.actorName}`.replace(/[\r\n\u2028\u2029]/g, '').slice(0, 100),
         at: r.createdAt.toISOString(),
       })) };
     } catch {
