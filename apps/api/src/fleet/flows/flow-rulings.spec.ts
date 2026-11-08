@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
 import { isWellFormedFlowText } from './flow-calls';
-import { FLOW_RULINGS_MAX, FLOW_RULING_INSTRUCTION, buildRuleTask, needsAutomaticRule, parseRuleVerdict, ruleTaskItems } from './flow-rulings';
+import {
+  FLOW_GUIDANCE_ANSWER_SHARE,
+  FLOW_GUIDANCE_LINE_MAX,
+  FLOW_RULINGS_MAX,
+  FLOW_RULING_INSTRUCTION,
+  buildRuleTask,
+  needsAutomaticRule,
+  parseRuleVerdict,
+  ruleTaskItems,
+} from './flow-rulings';
 import type { FlowOpenItem } from './flow-rulings';
 
 describe('flow ruling tasks', () => {
@@ -48,6 +57,46 @@ describe('flow ruling tasks', () => {
     expect(guidanceLines).toHaveLength(2);
     expect(guidanceLines.every(isWellFormedFlowText)).toBe(true);
     expect(guidanceLines[1]).toBe(`Q1: q A: ${'a'.repeat(290)}`);
+  });
+
+  it('keeps the human answer when a long RULE question fills the line', () => {
+    const answer = 'ship the flag behind the env var';
+    const task = buildRuleTask({ prNumber: 7, items: [], guidance: {
+      held: null,
+      questions: [{ id: '1', question: `S-2: ${'q'.repeat(990)}` }],
+      answers: [{ id: '1', answer }],
+    } });
+    const line = task.split('\n').find((entry) => entry.startsWith('Q1:'));
+    expect(line).toBeDefined();
+    expect(line).toContain(`A: ${answer}`);
+    expect(line?.length).toBeLessThanOrEqual(FLOW_GUIDANCE_LINE_MAX);
+  });
+
+  it('keeps the human answer when a long FIX hold fills the question', () => {
+    const answer = 're-run the gate after the fix';
+    const held = `1 open item(s): G-1 ${'detail '.repeat(140)}`;
+    const task = buildRuleTask({ prNumber: 7, items: [], guidance: {
+      held,
+      questions: [{ id: '1', question: `PR still held after FIX j9: ${held}. Answer with guidance for one more ruling and FIX round, or stop the flow.` }],
+      answers: [{ id: '1', answer }],
+    } });
+    const line = task.split('\n').find((entry) => entry.startsWith('Q1:'));
+    expect(line).toBeDefined();
+    expect(line).toContain(`A: ${answer}`);
+    expect(line?.length).toBeLessThanOrEqual(FLOW_GUIDANCE_LINE_MAX);
+  });
+
+  it('reserves a share of the guidance line for a long answer', () => {
+    const task = buildRuleTask({ prNumber: 7, items: [], guidance: {
+      held: null,
+      questions: [{ id: '1', question: 'q'.repeat(1000) }],
+      answers: [{ id: '1', answer: 'a'.repeat(1000) }],
+    } });
+    const line = task.split('\n').find((entry) => entry.startsWith('Q1:')) ?? '';
+    const shown = line.slice(line.indexOf(' A: ') + ' A: '.length);
+    const available = FLOW_GUIDANCE_LINE_MAX - 'Q1: '.length - ' A: '.length;
+    expect(shown).toBe('a'.repeat(Math.floor(available * FLOW_GUIDANCE_ANSWER_SHARE)));
+    expect(line.length).toBeLessThanOrEqual(FLOW_GUIDANCE_LINE_MAX);
   });
 
   it('bounds item lists and guidance while preserving fixed content', () => {

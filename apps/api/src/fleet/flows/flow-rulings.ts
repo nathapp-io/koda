@@ -1,5 +1,5 @@
 import { AGENT_TASK_MAX_LENGTH } from '../common/agent-jobs';
-import { FLOW_CALL_TEXT_MAX, oneLine, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALL_ID_MAX, FLOW_CALL_TEXT_MAX, oneLine, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 
 export type FlowRuling = { item: string; ruling: string };
 export type FlowRuleQuestion = { item: string; question: string };
@@ -95,6 +95,32 @@ function itemLine(item: FlowOpenItem): string {
   return `- ${id} (${kind}${severity})${location}: ${oneLine(item.issue)}${suggestion}`;
 }
 
+/** A `Q<id>: <question> A: <answer>` guidance line never grows past this many characters. */
+export const FLOW_GUIDANCE_LINE_MAX = 300;
+/** The share of the guidance line the answer keeps before the question may use the rest. */
+export const FLOW_GUIDANCE_ANSWER_SHARE = 0.5;
+
+/**
+ * One `Q<id>: <question> A: <answer>` guidance line.
+ *
+ * The question and the answer are budgeted separately: the answer is the guidance the human gave
+ * for this round, so it keeps a reserved share of the line and the question only takes what is
+ * left. A long question (a RULE question of 1,000 characters, or a FIX question that carries a long
+ * hold) can therefore never erase the answer, and what the question does not use goes back to it.
+ */
+function guidanceLine(id: string, question: string, answer: string): string {
+  const label = `Q${truncateFlowText(oneLine(id), FLOW_CALL_ID_MAX)}: `;
+  const separator = ' A: ';
+  const budget = Math.max(0, FLOW_GUIDANCE_LINE_MAX - label.length - separator.length);
+  const questionText = oneLine(question);
+  const answerText = oneLine(answer);
+  let shownAnswer = truncateFlowText(answerText, Math.floor(budget * FLOW_GUIDANCE_ANSWER_SHARE));
+  let shownQuestion = truncateFlowText(questionText, budget - shownAnswer.length);
+  const spare = budget - shownAnswer.length - shownQuestion.length;
+  if (spare > 0) shownAnswer = truncateFlowText(answerText, shownAnswer.length + spare);
+  return `${label}${shownQuestion}${separator}${shownAnswer}`;
+}
+
 export function buildRuleTask(input: { prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null }): string {
   const prefix = [`Rule the open workflow items of PR #${input.prNumber}.`, ''];
   if (input.guidance !== null) {
@@ -103,7 +129,7 @@ export function buildRuleTask(input: { prNumber: number; items: FlowOpenItem[]; 
     const answers = new Map(input.guidance.answers.map(({ id, answer }) => [id, answer]));
     for (const question of input.guidance.questions) {
       const answer = answers.get(question.id);
-      if (answer !== undefined) guidance.push(truncateFlowText(`Q${oneLine(question.id)}: ${oneLine(question.question)} A: ${oneLine(answer)}`, 300));
+      if (answer !== undefined) guidance.push(guidanceLine(question.id, question.question, answer));
     }
     prefix.push(...guidance, '');
   }

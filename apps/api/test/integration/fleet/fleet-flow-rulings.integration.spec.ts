@@ -138,7 +138,9 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
    */
   async function ruleRound(flowId: string): Promise<string> {
     await ticker.tick(now);
-    const rule = await db.fleetJob.findFirstOrThrow({ where: { flowId, flowStep: 'RULE' } });
+    const rule = await db.fleetJob.findFirstOrThrow({
+      where: { flowId, flowStep: 'RULE' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }],
+    });
     await db.fleetJob.update({ where: { id: rule.id }, data: {
       state: 'COMPLETED', finishedAt: at(1_000),
       agentResult: { status: 'completed', output: RULE_OUTPUT, truncated: false, deniedAsks: [], deniedAsksTruncated: false },
@@ -150,7 +152,9 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
   /** The FIX round the recorded ruling triggers: dispatched, then completed with its ready result. */
   async function fixRound(flowId: string, fixReady: Prisma.InputJsonValue): Promise<string> {
     await ticker.tick(at(3_000));
-    const fix = await db.fleetJob.findFirstOrThrow({ where: { flowId, flowStep: 'FIX' } });
+    const fix = await db.fleetJob.findFirstOrThrow({
+      where: { flowId, flowStep: 'FIX' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }],
+    });
     await db.fleetJob.update({ where: { id: fix.id }, data: {
       state: 'COMPLETED', finishedAt: at(4_000), fixReady,
     } });
@@ -168,7 +172,9 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
     const { flowId } = await seedDraftRun('ruled-ac1');
     await ticker.tick(now);
 
-    const rules = await db.fleetJob.findMany({ where: { flowId, flowStep: 'RULE' }, take: 2 });
+    const rules = await db.fleetJob.findMany({
+      where: { flowId, flowStep: 'RULE' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: 2,
+    });
     expect(rules).toHaveLength(1);
     expect(rules[0]).toMatchObject({ command: 'AGENT', feature: 'ruled-ac1', ref: RUN_BRANCH, flowStep: 'RULE' });
     const task = agentTask(rules[0].agentInput);
@@ -206,7 +212,9 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
     await ruleRound(flowId);
     await ticker.tick(at(3_000));
 
-    const fixes = await db.fleetJob.findMany({ where: { flowId, flowStep: 'FIX' }, take: 2 });
+    const fixes = await db.fleetJob.findMany({
+      where: { flowId, flowStep: 'FIX' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: 2,
+    });
     expect(fixes).toHaveLength(1);
     expect(fixes[0]).toMatchObject({ command: 'FIX', feature: `review-pr-${PR}`, flowStep: 'FIX' });
     const ruling = await db.fleetPrRuling.findFirstOrThrow({ where: { jobId: runId } });
@@ -271,7 +279,33 @@ integration('fleet flow PR-phase rulings against the database (PG)', () => {
 
     await ticker.tick(at(7_000));
 
-    const rules = await db.fleetJob.findMany({ where: { flowId, flowStep: 'RULE' }, take: 3 });
+    const rules = await db.fleetJob.findMany({
+      where: { flowId, flowStep: 'RULE' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: 3,
+    });
+    expect(rules).toHaveLength(2);
+    const task = agentTask(rules[1].agentInput);
+    expect(task).toContain('Still held: 1 open item(s): G-1');
+    expect(task).toContain('A: re-run the gate after the fix');
+    expect(Logger.prototype.error).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: a long hold still carries the human answer into the guided RULE round', async () => {
+    const { flowId } = await seedDraftRun('ruled-ac6-long');
+    await ruleRound(flowId);
+    // A hold long enough to fill the question line: the answer must survive it.
+    const held = `1 open item(s): G-1 ${'detail '.repeat(140)}`;
+    const fixId = await fixRound(flowId, { markedReady: false, readyHeld: held });
+    await ticker.tick(at(5_000));
+
+    await withTestActor({ type: 'USER', id: creatorId }, () => flows.answer(projectId, flowId,
+      { jobId: fixId, answers: [{ id: '1', answer: 're-run the gate after the fix' }] },
+      { type: 'USER', id: creatorId }, at(6_000)));
+
+    await ticker.tick(at(7_000));
+
+    const rules = await db.fleetJob.findMany({
+      where: { flowId, flowStep: 'RULE' }, orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }], take: 3,
+    });
     expect(rules).toHaveLength(2);
     const task = agentTask(rules[1].agentInput);
     expect(task).toContain('Still held: 1 open item(s): G-1');
