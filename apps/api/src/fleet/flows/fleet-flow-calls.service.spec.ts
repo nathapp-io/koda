@@ -6,6 +6,9 @@ import type { FleetFlowFeatureRecord, FleetFlowRecord } from './domain/fleet-flo
 import { buildFlowCalls } from './flow-calls';
 import type { ApplyCallsAction } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
+import type { ApplyPrdEditsAction } from './flow-step-decision';
+import type { FlowPrdEdit } from './flow-prd-edits';
+import * as prdEdits from './flow-prd-edits';
 
 const NOW = new Date('2026-11-07T12:30:00.000Z');
 const SPEC_PATH = '.nax/features/f/spec.md';
@@ -89,6 +92,88 @@ function build(opts: HarnessOptions = {}) {
   const reads = (): number => github.getFile.mock.calls.length;
   return { service, repos, github, putArgs, reads };
 }
+
+const PRD_PATH = '.nax/features/f/prd.json';
+const PRD = JSON.stringify({ userStories: [{ id: 'US-001', acceptanceCriteria: ['old criterion'] }] });
+const prdAction = (edits: FlowPrdEdit[]): ApplyPrdEditsAction => ({
+  kind: 'apply_prd_edits', jobId: 'j-prd', edits, accepted: [],
+});
+const onePrdEdit: FlowPrdEdit = { story: 'US-001', op: 'replace_ac', old: 'old criterion', new: 'new criterion' };
+const prdFile = (text = PRD, sha = BLOB_SHA): ForgeFile => ({ sha, size: Buffer.byteLength(text), content: Buffer.from(text, 'utf8') });
+
+describe('FleetFlowCallsService.applyPrdEdits', () => {
+  const prdFlow = () => flow({ features: [feature({ feature: 'f', specPath: PRD_PATH })] });
+
+  it('AC-1: writes the PRD on the flow branch with the pinned blob sha', async () => {
+    const h = build({ files: [prdFile()] });
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    const [token, owner, name, path, input] = h.putArgs();
+    expect([token, owner, name, path]).toEqual([TOKEN, 'o', 'r', PRD_PATH]);
+    expect(input.branch).toBe(BRANCH);
+    expect(input.blobSha).toBe(BLOB_SHA);
+  });
+
+  it('AC-2: uses the PRD review job in the commit message', async () => {
+    const h = build({ files: [prdFile()] });
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    expect(h.putArgs()[4].message).toBe('chore(f): flow PRD edits from PRD_REVIEW job j-prd');
+  });
+
+  it('AC-3: returns the committed sha, applied count and refusals', async () => {
+    const h = build({ files: [prdFile()], put: { kind: 'committed', commitSha: COMMIT_SHA } });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({
+      kind: 'committed', sha: COMMIT_SHA, applied: 1, refused: [],
+    });
+  });
+
+  it('AC-4: writes the exact text returned by applyPrdEditsToText', async () => {
+    const h = build({ files: [prdFile()] });
+    const apply = vi.spyOn(prdEdits, 'applyPrdEditsToText').mockReturnValue({ kind: 'ok', text: 'T', applied: 1, refused: [] });
+    await h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD);
+    expect(apply).toHaveBeenCalledWith(PRD, [onePrdEdit]);
+    expect(h.putArgs()[4].content).toEqual(Buffer.from('T', 'utf8'));
+    apply.mockRestore();
+  });
+
+  it('AC-5: empty edits are unchanged without minting a token', async () => {
+    const h = build();
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'unchanged', refused: [] });
+    expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('AC-6/7: all refused edits are unchanged and do not write', async () => {
+    const h = build({ files: [prdFile()] });
+    const refused = [{ index: 0, story: 'US-001', op: 'replace_ac', reason: 'text not found' }];
+    vi.spyOn(prdEdits, 'applyPrdEditsToText').mockReturnValue({ kind: 'ok', text: PRD, applied: 0, refused });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'unchanged', refused });
+    expect(h.github.putFile).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('AC-8: missing PRD fails with the branch name', async () => {
+    const h = build({ files: [null] });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: `prd.json missing on ${BRANCH}` });
+  });
+
+  it('AC-9: unreadable PRD fails', async () => {
+    const h = build({ files: [prdFile('not json')] });
+    await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'prd.json unreadable' });
+  });
+
+  it('AC-10/12: missing or disconnected repo fails before minting', async () => {
+    for (const repo of [null, reviewRepo({ githubInstallationId: null })]) {
+      const h = build({ repo });
+      await expect(h.service.applyPrdEdits(prdFlow(), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'repo not connected' });
+      expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
+    }
+  });
+
+  it('AC-11: missing feature fails before minting', async () => {
+    const h = build();
+    await expect(h.service.applyPrdEdits(flow({ features: [] }), prdAction([onePrdEdit]), EXPECTED_HEAD)).resolves.toEqual({ kind: 'failed', detail: 'feature missing' });
+    expect(h.github.mintInstallationToken).not.toHaveBeenCalled();
+  });
+});
 
 describe('FleetFlowCallsService.apply', () => {
   it('AC-1: reads the spec at the immutable head of the flow branch with an installation token', async () => {
