@@ -3,7 +3,7 @@
   "feature": "fleet-flow-rulings",
   "branchName": "feat/fleet-flow-rulings",
   "createdAt": "2026-12-01T00:00:00.000Z",
-  "updatedAt": "2026-11-08T07:26:40.701Z",
+  "updatedAt": "2026-11-08T07:31:32.453Z",
   "userStories": [
     {
       "id": "US-001",
@@ -149,14 +149,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive union/switch extension with existing dispatch DTO patterns and a pure task-builder seam."
+        "reasoning": "Additive union/switch extension with existing dispatch DTO patterns and a pure task-builder seam.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/flow-steps.ts",
@@ -174,7 +177,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e87f7be66e911977783f36254f3dcc5469251611"
     },
     {
       "id": "US-004",
