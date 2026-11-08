@@ -126,11 +126,12 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
   if (latestJob.state === 'COMPLETED') {
     if (latestJob.step === 'SPEC_REVIEW' || latestJob.step === 'PRD_REVIEW') {
       const verdict = parseFlowVerdict(latestJob.agentOutput);
-      if (!verdict.ok) {
+      // `in` narrows the union even without strictNullChecks (the api's tsconfig), where `!ok` does not.
+      if ('reason' in verdict) {
         return {
           kind: 'stop',
           reason: 'verdict_unreadable',
-          detail: `${latestJob.step} job ${latestJob.id}: no verdict JSON in the agent output`,
+          detail: `${latestJob.step} job ${latestJob.id}: verdict unreadable (${verdict.reason})`,
         };
       }
       if (verdict.findings.length === 0) {

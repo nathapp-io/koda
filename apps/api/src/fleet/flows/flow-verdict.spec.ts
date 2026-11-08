@@ -12,17 +12,54 @@ describe('classified flow verdicts', () => {
     expect(parseFlowVerdict('ok\n{"findings":[{"id":"F1","class":"minor","summary":"s","fix":"f"}]}')).toEqual({ ok: true, findings: [{ id: 'F1', class: 'minor', summary: 's', fix: 'f' }], prdEdits: [] });
     expect(parseFlowVerdict('{"findings":[{"class":"ambiguous","summary":"s","question":"q"}]}')).toEqual({ ok: true, findings: [{ class: 'ambiguous', summary: 's', question: 'q' }], prdEdits: [] });
     expect(parseFlowVerdict('{"findings":[{"class":"answered","summary":"s","fix":"f"}]}')).toMatchObject({ ok: true, findings: [{ class: 'answered' }] });
-    for (const verdict of ['{"findings":[{"summary":"s"}]}', '{"findings":[{"class":"major","summary":"s","fix":"f"}]}', '{"findings":[{"class":"minor","summary":"s"}]}', '{"findings":[{"class":"answered","summary":"s","fix":"   "}]}', '{"findings":[{"class":"ambiguous","summary":"s"}]}']) {
-      expect(parseFlowVerdict(verdict)).toEqual({ ok: false });
+    for (const verdict of ['{"findings":[{"summary":"s"}]}', '{"findings":[{"class":"major","summary":"s","fix":"f"}]}', '{"findings":[{"class":"ambiguous","summary":"s"}]}']) {
+      expect(parseFlowVerdict(verdict)).toMatchObject({ ok: false });
     }
     expect(parseFlowVerdict('{"findings":[]}')).toEqual({ ok: true, findings: [], prdEdits: [] });
     expect(parseFlowVerdict('{"findings":[],"prdEdits":[{"story":"US-001","op":"add_ac","new":"n"}]}'))
       .toEqual({ ok: true, findings: [], prdEdits: [{ story: 'US-001', op: 'add_ac', new: 'n' }] });
   });
 
+  it('#415 drops an answered or minor finding with no fix as a note and counts it', () => {
+    const output = JSON.stringify({ findings: [
+      { id: 'F1', class: 'minor', summary: 's1', fix: 'f1' },
+      { id: 'N1', class: 'answered', summary: 'already settled', fix: '' },
+      { id: 'N2', class: 'minor', summary: 'no change' },
+      { id: 'N3', class: 'answered', summary: 'blank', fix: '   ' },
+    ] });
+    expect(parseFlowVerdict(output)).toEqual({
+      ok: true, findings: [{ id: 'F1', class: 'minor', summary: 's1', fix: 'f1' }], prdEdits: [], notes: 3,
+    });
+  });
+
+  it('#415 a verdict whose every finding is a note is clean', () => {
+    expect(parseFlowVerdict('{"findings":[{"class":"answered","summary":"s","fix":""}]}'))
+      .toEqual({ ok: true, findings: [], prdEdits: [], notes: 1 });
+  });
+
+  it('#415 an ambiguous finding with no question still makes the verdict unreadable', () => {
+    expect(parseFlowVerdict('{"findings":[{"class":"minor","summary":"s","fix":"f"},{"class":"ambiguous","summary":"s","question":" "}]}'))
+      .toEqual({ ok: false, reason: 'finding 2 has no question' });
+  });
+
+  it.each([
+    ['All fine', 'no verdict line'],
+    ['{"findings":[}', 'verdict is not valid JSON'],
+    ['{"findings":{"a":1}}', 'findings is not a list'],
+    ['{"findings":[{"summary":"s"}]}', 'finding 1 has no valid class'],
+    ['{"findings":["bad"]}', 'finding 1 is not an object with a summary'],
+  ])('#415 names why %s is unreadable', (output, reason) => {
+    expect(parseFlowVerdict(output)).toEqual({ ok: false, reason });
+  });
+
+  it('#415 names a rejected PRD edit payload', () => {
+    vi.mocked(prdEditsModule.parsePrdEdits).mockReturnValueOnce(null);
+    expect(parseFlowVerdict('{"findings":[],"prdEdits":[]}')).toEqual({ ok: false, reason: 'prdEdits is invalid' });
+  });
+
   it('rejects a present PRD edit payload when the edit parser rejects it', () => {
     vi.mocked(prdEditsModule.parsePrdEdits).mockReturnValueOnce(null);
-    expect(parseFlowVerdict('{"findings":[],"prdEdits":[]}')).toEqual({ ok: false });
+    expect(parseFlowVerdict('{"findings":[],"prdEdits":[]}')).toMatchObject({ ok: false });
   });
 
   it('drops an answer supplied by the verdict', () => {
@@ -32,16 +69,16 @@ describe('classified flow verdicts', () => {
 
   it('preserves final-verdict, malformed and trailing-text rejection behavior', () => {
     expect(parseFlowVerdict('Review\n{"findings":[{"id":"F1","class":"minor","summary":"s","fix":"f"}]}')).toMatchObject({ ok: true });
-    expect(parseFlowVerdict('{"findings":[]} thanks')).toEqual({ ok: false });
-    expect(parseFlowVerdict('{"findings":{"a":1}}')).toEqual({ ok: false });
-    expect(parseFlowVerdict('All fine')).toEqual({ ok: false });
-    expect(parseFlowVerdict(null)).toEqual({ ok: false });
+    expect(parseFlowVerdict('{"findings":[]} thanks')).toMatchObject({ ok: false });
+    expect(parseFlowVerdict('{"findings":{"a":1}}')).toMatchObject({ ok: false });
+    expect(parseFlowVerdict('All fine')).toMatchObject({ ok: false });
+    expect(parseFlowVerdict(null)).toEqual({ ok: false, reason: 'no agent output' });
   });
 
   it('selects the final marker rather than an earlier example', () => {
     expect(parseFlowVerdict('{"findings":[{"class":"minor","summary":"example","fix":"f"}]}\nActual verdict:\n{"findings":[]}'))
       .toEqual({ ok: true, findings: [], prdEdits: [] });
-    expect(parseFlowVerdict('{"findings":[]}\n{"findings":[')).toEqual({ ok: false });
+    expect(parseFlowVerdict('{"findings":[]}\n{"findings":[')).toMatchObject({ ok: false });
   });
 
   it('accepts the final verdict inside a code fence', () => {
@@ -50,12 +87,12 @@ describe('classified flow verdicts', () => {
 
   it.each(['{"findings":[}', '{"findings":[]', '{"findings":[null]}', '{"findings":["bad"]}'])(
     'rejects malformed JSON or findings: %s', (output) => {
-      expect(parseFlowVerdict(output)).toEqual({ ok: false });
+      expect(parseFlowVerdict(output)).toMatchObject({ ok: false });
     },
   );
 
   it.each([undefined, null, 12, {}, []])('rejects invalid summary %j', (summary) => {
-    expect(parseFlowVerdict(JSON.stringify({ findings: [{ class: 'minor', summary, fix: 'f' }] }))).toEqual({ ok: false });
+    expect(parseFlowVerdict(JSON.stringify({ findings: [{ class: 'minor', summary, fix: 'f' }] }))).toMatchObject({ ok: false });
   });
 
   it.each([null, 12, {}, []])('ignores non-string id %j', (id) => {
