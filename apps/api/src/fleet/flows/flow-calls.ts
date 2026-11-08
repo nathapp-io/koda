@@ -57,6 +57,14 @@ export function sanitizeFlowText(value: string): string {
 }
 
 /**
+ * Text that is persisted in a JSON column: PostgreSQL rejects a NUL and an unpaired surrogate in
+ * both, so both are replaced with U+FFFD before the text is stored.
+ */
+export function safeFlowJsonText(value: string): string {
+  return sanitizeFlowText(value.split('\u0000').join('\uFFFD'));
+}
+
+/**
  * Cut a text to `max` UTF-16 code units without splitting a surrogate pair. A cut between the two
  * halves of an astral character leaves a lone high surrogate, which PostgreSQL JSONB rejects, so
  * the text stops before the pair instead. A lone surrogate already in the text is replaced with

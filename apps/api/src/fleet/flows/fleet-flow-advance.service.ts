@@ -21,7 +21,7 @@ import {
 import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
-import { FLOW_CALL_TEXT_MAX, oneLine, sanitizeFlowText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALL_TEXT_MAX, oneLine, safeFlowJsonText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
@@ -137,7 +137,7 @@ export class FleetFlowAdvanceService {
    * calls: the forge call never holds the flow locks. The marker and the activity are written in a
    * second transaction, under the locks, so a stop or a re-ask that lands in between keeps the commit
    * and drops the progress. The accepted findings are the review's own summary, cut and sanitized:
-   * the payload is a JSON column, and a lone surrogate would fail the write on every tick.
+   * the payload is a JSON column, and a NUL or a lone surrogate would fail the write on every tick.
    */
   private async advancePrdEdits(
     flow: FleetFlowRecord, action: ApplyPrdEditsAction, plan: FleetJobRecord | null, now: Date,
@@ -163,7 +163,7 @@ export class FleetFlowAdvanceService {
         sha: outcome.kind === 'committed' ? outcome.sha : null,
         applied: outcome.kind === 'committed' ? outcome.applied : 0,
         refused: outcome.refused,
-        accepted: action.accepted.map((finding) => truncateFlowText(finding.summary, FLOW_CALL_TEXT_MAX)),
+        accepted: action.accepted.map((finding) => truncateFlowText(safeFlowJsonText(finding.summary), FLOW_CALL_TEXT_MAX)),
       });
     });
   }
@@ -681,7 +681,7 @@ export class FleetFlowAdvanceService {
  * decides whether the ruling is in the task and which item it rules; only the display is sanitized.
  */
 function safeItemLabel(item: string): string {
-  return oneLine(sanitizeFlowText(item.split('\u0000').join('\uFFFD')));
+  return oneLine(safeFlowJsonText(item));
 }
 
 /**

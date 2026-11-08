@@ -226,6 +226,29 @@ describe('FleetFlowAdvanceService.advance PRD edits', () => {
       payload: expect.objectContaining({ accepted: ['bad \uFFFD text'] }),
     }));
   });
+  it('AC-9: keeps an accepted finding whose summary carries a NUL, and the flow still reaches RUN', async () => {
+    const h = build({
+      planCount: 2,
+      latest: { agentResult: { status: 'completed', output: verdict([{ id: 'F1', class: 'minor', summary: 'bad \u0000 text', fix: 'fix' }]) } },
+    });
+    h.steps.recordPrdEdits.mockImplementation(async (_flowId, _featureId, jobId) => {
+      h.row.features[0].prdEditsJobId = jobId;
+    });
+
+    await h.service.advance('flow-1', NOW);
+
+    // The payload is a JSONB column: PostgreSQL rejects a NUL in it, and the write would roll back
+    // the marker on every tick, so the flow would never reach RUN.
+    const payload = h.activity.record.mock.calls[0][0].payload;
+    expect(payload).toMatchObject({ accepted: ['bad \uFFFD text'] });
+    expect(JSON.stringify(payload)).not.toContain('\u0000');
+
+    await h.service.advance('flow-1', NOW);
+
+    expect(h.calls.applyPrdEdits).toHaveBeenCalledOnce();
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'RUN' }),
+      expect.objectContaining({ flowStep: 'RUN' }));
+  });
   it('AC-10: re-asks a stale head instead of recording the edits', async () => {
     const h = build({ outcome: { kind: 'stale', head: 'h9' } });
     await h.service.advance('flow-1', NOW);

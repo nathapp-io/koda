@@ -254,4 +254,34 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     expect(github.mintInstallationToken).not.toHaveBeenCalled();
     expect(Logger.prototype.error).not.toHaveBeenCalled();
   });
+
+  it('AC-9: an accepted finding whose summary carries a NUL is stored, and the flow still reaches RUN', async () => {
+    const nulFinding = { id: 'F1', class: 'minor', summary: 'Missing\u0000coverage note', fix: 'Document the retry case' };
+    const { flow, job } = await seedReview('PRD_REVIEW', nulFinding);
+    for (const secondsAgo of [90, 60]) {
+      await db.fleetJob.create({ data: {
+        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA, resultBranch: BRANCH,
+        queuedAt: new Date(now.getTime() - secondsAgo * 1_000),
+        finishedAt: new Date(now.getTime() - (secondsAgo - 10) * 1_000),
+      } });
+    }
+
+    await ticker.tick(now);
+
+    // The activity payload is a JSONB column: PostgreSQL rejects a NUL in it, so the write would
+    // roll back the marker on every tick and the flow would never reach RUN.
+    const activities = await db.fleetActivity.findMany({
+      where: { entityId: flow.id, action: 'flow.prd_edits' }, take: 2,
+    });
+    expect(activities).toHaveLength(1);
+    expect(activities[0].payload).toMatchObject({ jobId: job.id, accepted: ['Missing\uFFFDcoverage note'] });
+    expect(await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } }))
+      .toMatchObject({ prdEditsJobId: job.id });
+
+    await ticker.tick(new Date(now.getTime() + 1_000));
+
+    const run = await db.fleetJob.findFirstOrThrow({ where: { flowId: flow.id, flowStep: 'RUN' } });
+    expect(run).toMatchObject({ flowId: flow.id, flowStep: 'RUN', command: 'RUN' });
+    expect(Logger.prototype.error).not.toHaveBeenCalled();
+  });
 });
