@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildReviewTask, type FlowStep } from './flow-steps';
+import { buildRuleTask, type FlowOpenItem } from './flow-rulings';
 import { buildStepDispatch, remainingCapUsd, type BuildStepDispatchInput } from './flow-step-dispatch';
 
 const baseInput = (step: FlowStep): BuildStepDispatchInput => ({
@@ -39,6 +40,26 @@ describe('buildStepDispatch', () => {
   });
   it('builds FIX without ref or feature', () => {
     expect(buildStepDispatch({ ...baseInput('FIX'), pr: { number: 12 } })).toEqual({ repoId: 'repo-1', command: 'FIX', prNumber: 12, profiles: [], maxCostUsd: 6.75 });
+  });
+  it('dispatches RULE as an AGENT task with the flow reviewer model and remaining cap', () => {
+    const items: FlowOpenItem[] = [{ id: 'D-1', kind: 'advisor', issue: 'Confirm the behavior' }];
+    const input = { ...baseInput('RULE'), rule: { ref: 'feat/x', prNumber: 7, items, guidance: null } };
+
+    expect(buildStepDispatch(input)).toEqual({
+      repoId: 'repo-1', command: 'AGENT', feature: 'f', ref: 'feat/x', bashMode: 'raw', maxCostUsd: 6.75,
+      agent: { name: 'Explore', task: buildRuleTask({ prNumber: 7, items, guidance: null }), model: 'opus' },
+    });
+  });
+  it('carries pinnedRunnerId on RULE dispatch', () => {
+    const input = {
+      ...baseInput('RULE'),
+      flow: { ...baseInput('RULE').flow, pinnedRunnerId: 'runner-1' },
+      rule: { ref: 'feat/x', prNumber: 7, items: [], guidance: null },
+    };
+    expect(buildStepDispatch(input)).toHaveProperty('pinnedRunnerId', 'runner-1');
+  });
+  it('requires RUN branch and PR inputs for RULE', () => {
+    expect(() => buildStepDispatch(baseInput('RULE'))).toThrowError('RULE requires the RUN branch and PR');
   });
   it('includes pinnedRunnerId when set', () => {
     const input = baseInput('PLAN');
