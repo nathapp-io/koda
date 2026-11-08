@@ -208,6 +208,18 @@ export class FleetPrRulingsService {
     try {
       // The pre-transaction gate is advisory until these locks are held: re-read the eligibility.
       await this.ruleTarget(target.projectId, input.runJobId, dto);
+      // Under these locks no other writer can add a ruling for this job until this transaction
+      // commits, so the item's latest ruling is the one the flow must not overwrite.
+      const latest = await this.repo.latestRuling(input.runJobId, input.itemId);
+      if (latest !== null && latest.state === 'pending') {
+        if (latest.actorType === 'SYSTEM') {
+          // The same ruling, already written by the flow: the same outcome, not a second one.
+          if (latest.text === text) return { kind: 'recorded', rulingId: latest.id };
+        } else {
+          // A person's or an agent's pending ruling is theirs: a flow never replaces it.
+          throw new ConflictAppException({}, 'fleet.rulings.alreadyRuled');
+        }
+      }
     } catch (error) {
       const reason = refusalReason(error);
       if (reason === null) throw error;

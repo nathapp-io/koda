@@ -253,6 +253,31 @@ describe('FleetPrRulingsService flow rulings', () => {
     await expect(service.createForFlow(flowInput())).rejects.toThrow('database down');
   });
 
+  it.each(['USER', 'AGENT'] as const)('refuses an item a %s ruling arrived for after the caller read the protected ids', async (actorType) => {
+    const { service, repo, effects, order } = flowSetup();
+    // The caller's `ruledItemIds` read saw no ruling; the person's ruling lands before the lock.
+    const human = ruling({ id: 'human-1', state: 'pending', actorType, actorId: 'creator' });
+    vi.mocked(repo.latestRuling).mockImplementation(async () => (order.includes('tx') ? human : null));
+    expect(await service.createForFlow(flowInput())).toEqual({ kind: 'refused', reason: 'fleet.rulings.alreadyRuled' });
+    expect(repo.replacePending).not.toHaveBeenCalled();
+    expect(repo.insert).not.toHaveBeenCalled();
+    expect(effects.ensureFinishTicket).not.toHaveBeenCalled();
+    expect(effects.createSystemRulingComment).not.toHaveBeenCalled();
+  });
+
+  it('returns the ruling an identical concurrent call committed while this one waited for the lock', async () => {
+    const { service, repo, effects, audit, order } = flowSetup();
+    // The other call committed the same ruling while this one waited for the job lock.
+    const concurrent = ruling({ id: 'ruling-2', state: 'pending', actorType: 'SYSTEM', actorId: 'flow' });
+    vi.mocked(repo.latestRuling).mockImplementation(async () => (order.includes('tx') ? concurrent : null));
+    expect(await service.createForFlow(flowInput())).toEqual({ kind: 'recorded', rulingId: 'ruling-2' });
+    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.replacePending).not.toHaveBeenCalled();
+    expect(effects.ensureFinishTicket).not.toHaveBeenCalled();
+    expect(effects.createSystemRulingComment).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
   it('propagates a failed insert instead of reporting a ruling', async () => {
     const { service, repo } = flowSetup();
     vi.mocked(repo.insert).mockRejectedValue(new Error('insert failed'));

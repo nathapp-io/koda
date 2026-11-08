@@ -214,4 +214,8 @@ describe('ruling refusal i18n', () => {
       noItemIndex: { 409: expect.stringMatching(/\S/) },
     });
   });
+
+  it.each(['en', 'zh'])('US-005: %s carries the already-ruled refusal code', (locale) => {
+    expect(fleet(locale).rulings).toMatchObject({ alreadyRuled: { 409: expect.stringMatching(/\S/) } });
+  });
 });

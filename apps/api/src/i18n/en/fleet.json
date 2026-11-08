@@ -15,6 +15,7 @@
     "notDraft": { "409": "Only draft RUN jobs with a GitHub pull request can be ruled" },
     "notLatest": { "409": "Only the latest RUN of this pull request can be ruled" },
     "settled": { "409": "This item has already been applied" },
+    "alreadyRuled": { "409": "This item already has a pending ruling from a person or an agent" },
     "notRulable": { "409": "CI items cannot be ruled; a FIX cannot settle them" },
     "noItemIndex": { "409": "This pull request has no nax item index, so a FIX cannot settle a ruling on it; re-run the job to republish" },
     "invalidText": { "-2": "{property}: Text must start with a supported ruling and the required evidence" },
