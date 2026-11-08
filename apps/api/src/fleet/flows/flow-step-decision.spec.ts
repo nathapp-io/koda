@@ -144,6 +144,47 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ latestJob: job({ step: 'FIX', fixReady: null }) })))
       .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });
   });
+
+  it('US-008 AC-1 waits for guidance after a held FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true,
+      latestJob: job({ id: 'fix-1', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'wait_answer', step: 'FIX', jobId: 'fix-1', questions: [{ id: '1', question: 'PR still held after FIX fix-1: 1 open item(s): G-1. Answer with guidance for one more ruling and FIX round, or stop the flow.' }] });
+  });
+  it('US-008 AC-2 dispatches RULE after the FIX hold is answered', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'fix-1', answers: [{ id: '1', answer: 'Please address G-1' }],
+      latestJob: job({ id: 'fix-1', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'dispatch', step: 'RULE', rule: { answeredJobId: 'fix-1' } });
+  });
+  it('US-008 AC-3 does not use answers associated with an older job', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, questionsJobId: 'older-fix', answers: [{ id: '1', answer: 'stale guidance' }],
+      latestJob: job({ id: 'fix-2', step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toMatchObject({ kind: 'wait_answer', step: 'FIX', jobId: 'fix-2' });
+  });
+  it.each([
+    'CI failure: test',
+    'CI no-checks: no CI check reported within 20m 0s',
+  ])('US-008 AC-4/5 stops on CI hold: %s', (readyHeld) => {
+    expect(decideFlowStep(input({ canApplyCalls: true,
+      latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: readyHeld });
+  });
+  it('US-008 AC-6 preserves thread-entry stop for held FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: false,
+      latestJob: job({ step: 'FIX', fixReady: { markedReady: false, readyHeld: '1 open item(s): G-1' } }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: '1 open item(s): G-1' });
+  });
+  it('US-008 AC-7 stops FIX without a ready result', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: null }) })))
+      .toEqual({ kind: 'stop', reason: 'pr_not_ready', detail: 'FIX ended without a ready result' });
+  });
+  it('US-008 AC-8 completes a ready FIX', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: { markedReady: true } }) })))
+      .toEqual({ kind: 'complete' });
+  });
+  it('US-008 AC-9 completes a FIX with no hold reason', () => {
+    expect(decideFlowStep(input({ canApplyCalls: true, latestJob: job({ step: 'FIX', fixReady: { markedReady: false } }) })))
+      .toEqual({ kind: 'complete' });
+  });
   it('US-009 AC-9 waits on an escalated RUN until ingest or timeout', () => {
     expect(decideFlowStep(input({ now: new Date(10_000), prWaitMs: 5_000, ingestSettled: false,
       latestJob: job({ step: 'RUN', state: 'ESCALATED', finishedAt: new Date(6_000) }) }))).toEqual({ kind: 'wait' });

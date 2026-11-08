@@ -201,10 +201,21 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
       if (latestJob.fixReady && latestJob.fixReady.markedReady === false && !latestJob.fixReady.readyHeld) {
         return { kind: 'complete' };
       }
+      const readyHeld = latestJob.fixReady?.readyHeld;
+      const stop = (detail: string): FlowStepAction => ({ kind: 'stop', reason: 'pr_not_ready', detail });
+      if (!readyHeld) return stop('FIX ended without a ready result');
+      if (readyHeld.startsWith('CI ') || !input.canApplyCalls) return stop(readyHeld);
+      if (input.questionsJobId === latestJob.id && input.answers !== null) {
+        return { kind: 'dispatch', step: 'RULE', rule: { answeredJobId: latestJob.id } };
+      }
       return {
-        kind: 'stop',
-        reason: 'pr_not_ready',
-        detail: latestJob.fixReady?.readyHeld ?? 'FIX ended without a ready result',
+        kind: 'wait_answer',
+        step: 'FIX',
+        jobId: latestJob.id,
+        questions: [{
+          id: '1',
+          question: `PR still held after FIX ${latestJob.id}: ${readyHeld}. Answer with guidance for one more ruling and FIX round, or stop the flow.`,
+        }],
       };
     }
   }
