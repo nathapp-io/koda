@@ -21,6 +21,7 @@ import {
 import { decideFlowStep, type ApplyCallsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { ruleTaskItems, type FlowRuling } from './flow-rulings';
+import { oneLine, sanitizeFlowText } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
@@ -146,7 +147,7 @@ export class FleetFlowAdvanceService {
     const refused: { item: string; reason: string }[] = [];
     for (const { item, ruling } of lastRulingPerItem(action.rulings)) {
       if (run === null || !taskItems.has(item)) {
-        refused.push({ item, reason: 'not in task' });
+        refused.push({ item: safeItemLabel(item), reason: 'not in task' });
         continue;
       }
       const outcome = await this.rulings.createForFlow({
@@ -159,8 +160,8 @@ export class FleetFlowAdvanceService {
         approvalRequestId: flow.approvalRequestId,
         flowId: flow.id,
       });
-      if (outcome.kind === 'recorded') recorded.push(item);
-      else refused.push({ item, reason: outcome.reason });
+      if (outcome.kind === 'recorded') recorded.push(safeItemLabel(item));
+      else refused.push({ item: safeItemLabel(item), reason: outcome.reason });
     }
     await this.txManager.run(async () => {
       const current = await this.lockLive(flow);
@@ -579,6 +580,15 @@ export class FleetFlowAdvanceService {
       projectId: flow.projectId, payload,
     });
   }
+}
+
+/**
+ * A verdict item id is untrusted text: it is written into the activity's JSONB payload and into a
+ * ticket comment, and PostgreSQL rejects a NUL and an unpaired surrogate in both. The raw id still
+ * decides whether the ruling is in the task and which item it rules; only the display is sanitized.
+ */
+function safeItemLabel(item: string): string {
+  return oneLine(sanitizeFlowText(item.split('\u0000').join('\uFFFD')));
 }
 
 /**

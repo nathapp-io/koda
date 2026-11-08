@@ -5,6 +5,7 @@ import type { PermissionService } from '../../permissions/permission.service';
 import type { FleetPrRuling, IFleetPrRulingRepository, NewFleetPrRuling } from '../rulings/fleet-pr-ruling.domain';
 import { FleetPrRulingsService, NAX_ITEM_INDEX_MARKER, type FlowRulingInput, type FlowRulingOutcome } from '../rulings/fleet-pr-rulings.service';
 import { FleetFlowAdvanceService } from './fleet-flow-advance.service';
+import { isWellFormedFlowText } from './flow-calls';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 /**
@@ -284,6 +285,29 @@ describe('FleetFlowAdvanceService.advance, the RULE verdict', () => {
       action: 'flow.rulings',
       payload: expect.objectContaining({ refused: [{ item: 'F-1', reason: 'not in task' }] }),
     }));
+  });
+
+  it.each([
+    ['a NUL', 'bad\u0000id', 'bad\uFFFDid'],
+    ['a lone surrogate', 'bad\uD800id', 'bad\uFFFDid'],
+  ])('AC-3: keeps the progress when a refused item id carries %s', async (_label, item, safe) => {
+    const h = build({ rulings: [{ item: 'D-1', ruling: 'verified: a' }, { item, ruling: 'verified: b' }] });
+
+    await h.service.advance('flow-1', NOW);
+
+    // The flow records its progress: the refusal is reported, not retried forever.
+    expect(h.steps.recordRulings).toHaveBeenCalledExactlyOnceWith('flow-1', 'feature-1', RULE_JOB);
+    expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'flow.rulings',
+      payload: expect.objectContaining({ recorded: ['D-1'], refused: [{ item: safe, reason: 'not in task' }] }),
+    }));
+    // The refused id lands in a JSONB payload and in a ticket comment: both reject what it carried.
+    const payload = h.activity.record.mock.calls[0][0].payload;
+    expect(isWellFormedFlowText(JSON.stringify(payload))).toBe(true);
+    expect(JSON.stringify(payload)).not.toContain('\u0000');
+    expect(h.rulings.commentRefused).toHaveBeenCalledExactlyOnceWith(
+      RUN_JOB, `Flow rulings refused (RULE job rule-1): ${safe} (not in task)`,
+    );
   });
 
   it('AC-4: keeps the ruling it wrote and reports the one it could not', async () => {
