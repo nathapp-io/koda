@@ -20,8 +20,8 @@ import {
 } from './domain/fleet-flow-step.domain';
 import { decideFlowStep, type ApplyCallsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
-import { ruleTaskItems, type FlowRuling } from './flow-rulings';
-import { oneLine, sanitizeFlowText } from './flow-calls';
+import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
+import { oneLine, sanitizeFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
@@ -43,6 +43,7 @@ interface DispatchPass<A extends DispatchAction | ApplyCallsAction | ApplyRuling
   action: A;
   plan: FleetJobRecord | null;
   remainingCapUsd: string;
+  rule?: { ref: string; prNumber: number; items: FlowOpenItem[]; guidance: FlowRuleGuidance | null };
 }
 
 /** Decide under parent/flow locks, dispatch or apply calls outside a transaction, then re-lock to record progress. */
@@ -248,7 +249,7 @@ export class FleetFlowAdvanceService {
       flow, feature: flow.features[0], step: action.step,
       // The dispatch guard supplies the remaining cap; the API config selects the review agent.
       remainingCapUsd: pass.remainingCapUsd, reviewAgent: this.config.flowReviewAgent,
-      ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}),
+      ...(plan ? { plan } : {}), ...(action.pr ? { pr: action.pr } : {}), ...(pass.rule ? { rule: pass.rule } : {}),
     });
     const result = await this.jobs.dispatch(flow.createdById, flow.projectId, body, {
       flowId: flow.id, flowStep: action.step, auditKey: 'system.flow.advance',
@@ -408,7 +409,39 @@ export class FleetFlowAdvanceService {
       }
       const plan = action.step === 'PRD_REVIEW' || action.step === 'RUN'
         ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
-      return { flow: current, action, plan, remainingCapUsd: remaining };
+      let rule: DispatchPass['rule'];
+      if (action.step === 'RULE') {
+        const run = await this.steps.latestJobForStep(current.id, 'RUN');
+        if (!run?.resultBranch) {
+          await this.writeDecision(current, job ?? null, {
+            kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: RUN has no result branch',
+          }, now);
+          return;
+        }
+        const workflow = run.workflow;
+        const ruled = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
+        const feature = current.features[0];
+        if (feature.prNumber === null) {
+          await this.writeDecision(current, job ?? null, {
+            kind: 'stop', reason: 'dispatch_refused', detail: 'RULE: feature has no PR number',
+          }, now);
+          return;
+        }
+        const answeredId = action.rule?.answeredJobId ?? null;
+        const answeredJob = answeredId !== null && latest?.job.id === answeredId ? latest.job : null;
+        const guidance: FlowRuleGuidance | null = answeredId === null ? null : {
+          held: answeredJob?.flowStep === 'FIX' ? answeredJob.fixReady?.readyHeld ?? null : null,
+          questions: (feature.questions ?? []) as FlowQuestion[],
+          answers: (feature.answers ?? []) as FlowAnswer[],
+        };
+        rule = {
+          ref: run.resultBranch,
+          prNumber: feature.prNumber,
+          items: ruleTaskItems((workflow?.openItems ?? []) as FlowOpenItem[], ruled),
+          guidance,
+        };
+      }
+      return { flow: current, action, plan, remainingCapUsd: remaining, ...(rule ? { rule } : {}) };
     });
   }
 
@@ -457,12 +490,22 @@ export class FleetFlowAdvanceService {
   }
 
   private async decisionInput(flow: FleetFlowRecord, latest: LatestFlowJob | null, now: Date): Promise<FlowStepInput> {
+    const latestJob = latest === null ? null : await this.jobView(flow, latest.job);
+    const needsRuleInputs = latestJob?.step === 'REVIEW' || latestJob?.step === 'RULE';
+    const run = needsRuleInputs ? await this.steps.latestJobForStep(flow.id, 'RUN') : null;
+    const workflow = run?.workflow ?? null;
+    const ruledItemIds = workflow === null ? [] : await this.rulings.ruledItemIds(run.id);
     return {
       state: flow.state,
       featureCount: flow.features.length,
       // An APPROVED or RUNNING flow was approved before it became live; the fallback only widens the type.
       approvedAt: flow.approvedAt ?? now,
-      latestJob: latest === null ? null : await this.jobView(flow, latest.job),
+      latestJob,
+      ...(needsRuleInputs ? {
+        run: workflow === null ? null : { outcome: workflow.outcome, openItems: workflow.openItems as FlowOpenItem[] },
+        ruledItemIds,
+        rulingsJobId: flow.features[0]?.rulingsJobId ?? null,
+      } : {}),
       now,
       prWaitMs: this.config.flowPrWaitMs,
       // Only a finished RUN consults this, and it arrives with the row it belongs to.

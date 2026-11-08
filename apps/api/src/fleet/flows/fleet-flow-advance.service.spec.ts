@@ -184,11 +184,12 @@ function build(opts: HarnessOptions = {}) {
   };
   const config = testFleetConfig();
   const outbox = { record: vi.fn(async () => undefined) };
+  const rulings = { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() };
   const service = new FleetFlowAdvanceService(
     flows as never, steps as never, threads as never, repos as never,
     activity as never, audit as never, txManager as never, jobs as never, permissions as never,
     flowService as never, github as never, reviews as never, config, { apply: vi.fn() } as never, outbox as never,
-    { ruledItemIds: vi.fn(async () => []), createForFlow: vi.fn(), commentRefused: vi.fn() } as never,
+    rulings as never,
   );
   /** Every write the pass could make; each AC's "writes nothing" claim holds over all of them. */
   const wrote = (): boolean => [
@@ -196,7 +197,7 @@ function build(opts: HarnessOptions = {}) {
   ].some((fn) => fn.mock.calls.length > 0);
 
   return { service, flows, steps, threads, repos, reviews, activity, audit, txManager, jobs, permissions, flowService, github,
-    order, record, wrote, config, outbox, inTransaction: () => inTransaction, transactionIdentity: () => activeTransaction };
+    order, record, wrote, config, outbox, rulings, inTransaction: () => inTransaction, transactionIdentity: () => activeTransaction };
 }
 
 describe('FleetFlowAdvanceService.advance, decide phase', () => {
@@ -212,6 +213,41 @@ describe('FleetFlowAdvanceService.advance, decide phase', () => {
     expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'run_no_pr', NOW, expect.any(String));
   });
 
+  it('AC-1: REVIEW decision receives RUN workflow, protected ids and ruling job id', async () => {
+    const run = job({ id: 'run-1', workflow: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'advisor', issue: 'I' }] } });
+    const review = job({ id: 'review-1', flowStep: 'REVIEW', command: 'REVIEW',
+      agentResult: { status: 'completed', output: '{"findings":[]}' } });
+    const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'REVIEW', prNumber: 12, rulingsJobId: 'rule-old' })] },
+      snapshot: { job: review, ingestSettled: true } });
+    h.steps.latestJobForStep.mockResolvedValue(run);
+    h.rulings.ruledItemIds.mockResolvedValue(['D-1']);
+    await h.service.advance('flow-1', NOW);
+    expect(h.rulings.ruledItemIds).toHaveBeenCalledExactlyOnceWith('run-1');
+    expect(decisions.inputs.at(-1)).toEqual(expect.objectContaining({
+      run: { outcome: 'draft', openItems: [{ id: 'D-1', kind: 'advisor', issue: 'I' }] },
+      ruledItemIds: ['D-1'], rulingsJobId: 'rule-old',
+    }));
+  });
+  it('AC-3: automatic RULE dispatch uses RUN resultBranch and excludes non-ruleable/protected items', async () => {
+    const run = job({ id: 'run-1', resultBranch: 'pr/head', workflow: { outcome: 'draft', openItems: [
+      { id: 'D-1', kind: 'advisor', issue: 'Protected' }, { id: 'F-1', kind: 'finding', issue: 'Finding' },
+      { id: 'C-1', kind: 'ci', issue: 'CI' }, { id: 'D-2', kind: 'advisor', issue: 'Eligible' },
+    ] } });
+    const review = job({ id: 'review-1', flowStep: 'REVIEW', command: 'REVIEW',
+      agentResult: { status: 'completed', output: '{"findings":[]}' } });
+    const h = build({ flow: { state: 'RUNNING', features: [feature({ state: 'RUNNING', currentStep: 'REVIEW', prNumber: 12 })] },
+      snapshot: { job: review, ingestSettled: true } });
+    h.steps.latestJobForStep.mockResolvedValue(run);
+    h.rulings.ruledItemIds.mockResolvedValue(['D-1']);
+    await h.service.advance('flow-1', NOW);
+    const body = h.jobs.dispatch.mock.calls[0]?.[2];
+    expect(body).toEqual(expect.objectContaining({ command: 'AGENT', ref: 'pr/head', bashMode: 'raw' }));
+    if (body.command !== 'AGENT') throw new Error('expected RULE AGENT dispatch');
+    expect(body.agent.task).toContain('- D-2 (advisor): Eligible');
+    expect(body.agent.task).not.toContain('D-1');
+    expect(body.agent.task).not.toContain('F-1');
+    expect(body.agent.task).not.toContain('C-1');
+  });
   it('dispatches review steps with the configured review agent', async () => {
     const h = build();
     h.config.flowReviewAgent = 'plugin:reviewer';
@@ -982,6 +1018,7 @@ describe('FleetFlowAdvanceService.advance, dispatch and record', () => {
       flow: h.record, feature: h.record.features[0], step, remainingCapUsd: '10.0000', reviewAgent: 'Explore',
       plan, ...(step === 'FIX' ? { pr: { number: 12 } } : {}),
     }), { flowId: 'flow-1', flowStep: step, auditKey: 'system.flow.advance' });
+    if (step === 'FIX') expect(h.rulings.ruledItemIds).not.toHaveBeenCalled();
     expect(h.steps.markStep).toHaveBeenCalledWith('flow-1', 'feature-1', step,
       { flowState: 'RUNNING', ...(step === 'FIX' ? { prNumber: 12 } : {}) });
   });
