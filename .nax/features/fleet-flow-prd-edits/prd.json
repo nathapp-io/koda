@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T14:11:32.225Z",
+  "updatedAt": "2026-11-08T14:18:24.119Z",
   "userStories": [
     {
       "id": "US-001",
@@ -251,14 +251,17 @@
         "migration"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A nullable scalar, scoped updateMany and existing scratch-schema/repository test patterns are additive persistence work; no authentication, credential or authorization-policy behavior changes."
+        "reasoning": "A nullable scalar, scoped updateMany and existing scratch-schema/repository test patterns are additive persistence work; no authentication, credential or authorization-policy behavior changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -289,7 +292,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e2cec19df2a99f2d5cef5048691a54eff7a48478"
     },
     {
       "id": "US-006",
