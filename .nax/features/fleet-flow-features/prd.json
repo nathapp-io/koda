@@ -1,0 +1,711 @@
+{
+  "project": "koda",
+  "feature": "fleet-flow-features",
+  "branchName": "feat/fleet-flow-features",
+  "createdAt": "2026-12-03T00:00:00.000Z",
+  "updatedAt": "2026-11-08T17:52:14.634Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Feature-scoped flow jobs",
+      "description": "**Goal** — Persist feature identity on flow jobs and scope the engine's job reads without changing single-feature behavior.\n\n**Motivation** — A flow created with two or more features is accepted, approved, and then never advanced: `listAdvanceable` filters on a feature count of 1 and `decideFlowStep` returns `skip` when `featureCount !== 1`.\n\n**Approach** — Migration `20261203090000_fleet_flow_features`: `FleetJob.flowFeatureId String?` with `@@index([flowId, flowFeatureId, queuedAt])`, backfilled from the position-0 feature of each job's flow; `FleetFlowFeature.branch String?`; `FleetFlow.setSha String`, backfilled from `specSha`. `FleetJobsService.dispatch` writes `opts.flowFeatureId`; `adoptForFlow` takes the feature id (service, repository and `FleetJobRecord`/domain interface). The step repository's job reads take a `featureId` as their second argument and filter on `flowFeatureId`. The advance service passes `flow.features[0].id` everywhere (single-feature behaviour unchanged).\n\n**Jobs are scoped to a feature by a new `FleetJob.flowFeatureId` column**, not by `FleetJob.feature`: a REVIEW job's `feature` is the canonical PR feature (`prNumberOfReviewFeature`), not the nax feature name. The migration backfills every existing flow job to its flow's position-0 feature, so single-feature flows read the same jobs.\n\nPreserve the one-statement latest-job/own-lease ingest snapshot and queuedAt/id ordering. Write flowFeatureId at the dispatch insert only when flowId is supplied; adoption writes all three links in the same conditional update. Update all production callers and positional test doubles/assertions, including negative assertions, exact dispatch options and REVIEW adoption. Add setSha to direct Prisma fixtures as required by the schema; US-002 owns the repository's setSha update lifecycle. Exercise actual backfill with rows seeded before applying the migration using scratchSchemaBefore/applyMigration.\n\n**Scope** — In: schema, SQL backfill/index, job domain/create data, dispatch/adoption, feature-scoped reads and single-feature engine wiring. Out: active feature selection (US-008), feature progression and sha-write semantics (US-002), later-feature start and merge polling (US-011/012).\n\n**Interface** — `latestJobWithIngest(flowId, featureId)`, `latestJobForStep(flowId, featureId, step)`, `countJobsForStepSince(flowId, featureId, step, since)` filter on `FleetJob.flowFeatureId`; `adoptForFlow(jobId, flowId, flowFeatureId, step)`, writing `flowFeatureId` in the same conditional update. `FleetJobsService.dispatch(actorId, projectId, dto, opts)` also accepts `opts.flowFeatureId`, written with `flowId`.",
+      "acceptanceCriteria": [
+        "[integration] After migration 20261203090000_fleet_flow_features, a FleetJob row seeded before the migration with a flowId has flowFeatureId equal to the id of that flow's position-0 FleetFlowFeature.",
+        "[integration] After the migration, a FleetJob row with a null flowId has a null flowFeatureId.",
+        "[integration] After the migration, FleetFlowFeature.branch is null on every existing row, and every existing FleetFlow row has setSha equal to its specSha.",
+        "[integration] FleetJobsService.dispatch called with { flowId: 'f1', flowStep: 'PLAN', flowFeatureId: 'ff2' } inserts a job with flowFeatureId 'ff2'.",
+        "[integration] FleetJobsService.dispatch called without flowId and with flowFeatureId: 'ff2' inserts a job with a null flowFeatureId.",
+        "[integration] adoptForFlow(jobId, 'f1', 'ff2', 'REVIEW') on a job with a null flowId returns true and the row has flowId 'f1', flowStep 'REVIEW' and flowFeatureId 'ff2'.",
+        "[integration] adoptForFlow(jobId, 'f1', 'ff2', 'REVIEW') on a job that already has a flowId returns false and leaves its flowFeatureId unchanged.",
+        "[integration] With jobs for features ff1 and ff2 of one flow, latestJobWithIngest(flowId, 'ff1') returns the newest ff1 job even when an ff2 job is newer.",
+        "[integration] latestJobForStep(flowId, 'ff2', 'PLAN') returns the newest PLAN job of ff2 and ignores a newer PLAN job of ff1.",
+        "[integration] countJobsForStepSince(flowId, 'ff2', 'PLAN', since) counts only ff2's PLAN jobs queued at or after since.",
+        "[unit] For a single-feature flow, FleetFlowAdvanceService.advance dispatches SPEC_REVIEW through jobs.dispatch with options containing flowFeatureId equal to the flow's only feature id.",
+        "[unit] For a single-feature flow, advance reads its latest job with steps.latestJobWithIngest(flowId, <that feature id>)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "persistence",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module schema/backfill and positional interface changes must preserve job snapshot, adoption and single-feature recovery behavior."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261203090000_fleet_flow_features/migration.sql",
+        "apps/api/test/integration/fleet/fleet-flow-features-migration.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.spec.ts",
+          "reason": "calls `latestJobWithIngest('flow-1')` with one argument (lines 49, 57, 71, 75); the method now takes `(flowId, featureId)` and filters on `flowFeatureId`, so the calls gain a feature id and the asserted query gains the filter."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "`latestJobForStep(flow.id, 'PLAN')` (line 89) uses the old positional signature; it becomes `latestJobForStep(flow.id, <feature id>, 'PLAN')`, and the seeded jobs carry `flowFeatureId`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-verdicts-migration.integration.spec.ts",
+          "reason": "`countJobsForStepSince(flow.id, 'PLAN', since)` (lines 134, 139) becomes `countJobsForStepSince(flow.id, <feature id>, 'PLAN', since)`, and the seeded jobs carry `flowFeatureId`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-job-flow-fields.integration.spec.ts",
+          "reason": "`adoptForFlow(jobId, flowId, step)` (lines 96, 104) gains the feature id argument, and the adopted row is asserted to carry `flowFeatureId`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-review.spec.ts",
+          "reason": "`adoptForFlow` is asserted with `('j9', 'flow-1', 'REVIEW')` (line 199) and the dispatch options with exactly `{ flowId, flowStep: 'REVIEW', auditKey }` (line 164); they become `('j9', 'flow-1', <feature id>, 'REVIEW')` and options that also carry `flowFeatureId`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "`latestJobWithIngest` is asserted with `('flow-1')` (lines 530, 621); `countJobsForStepSince` doubles read `(_flowId, step)` (lines 1031, 1047, 1059) and assertions use `('flow-1', 'SPEC_REVIEW', APPROVED_AT)` (lines 1033, 1038); the dispatch options are asserted exactly as `{ flowId, flowStep, auditKey }` (lines 860, 904, 1021). The negated assertion at line 1038 must also gain the feature id, or it passes vacuously. The feature id becomes the second argument of each read and a `flowFeatureId` field of the options."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+          "reason": "`latestJobForStep` asserted with `('flow-1', 'PLAN')` (line 169), `countJobsForStepSince` with `('flow-1', 'PLAN', APPROVED_AT)` (line 274) and a `(_flowId, step)` double (line 247); each gains the feature id as the second argument."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-answers.spec.ts",
+          "reason": "the `latestJobForStep` double reads `(flowId, step)` (line 63) and assertions use `('flow-1', 'RUN')` (lines 116, 159); each gains the feature id as the second argument; the negated assertion at line 159 must gain it too, or it passes vacuously."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-rulings.spec.ts",
+          "reason": "the `latestJobForStep` double reads `(_flowId, step)` (line 129); after the change the second argument is the feature id, so the double reads `(_flowId, _featureId, step)`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-prd-edits.spec.ts",
+          "reason": "the `countJobsForStepSince` double reads `(_flowId, step)` (line 83); it becomes `(_flowId, _featureId, step)`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Feature branch and state persistence",
+      "description": "**Goal** — Persist feature branches/states and separate the approved set sha from the first feature's changing spec sha.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — `FleetFlowFeatureRecord.branch`; step repository `setFeatureBranch`, `markFeatureState`, `setFlowState`; `complete` leaves `MERGED` features `MERGED`; `recordCalls` with a null sha leaves `flow.specSha`, and with `setSha: true` also moves `flow.setSha`; `PrismaFleetFlowRepository` writes `setSha` with `specSha` on create, re-ask and `updateSha`.\n\n**A new `FleetFlow.setSha` holds the set's sha.** `flow.specSha` moves with the first feature's `PRD_REVIEW` calls (the re-PLAN preflight needs that), so after feature 1's PRD round it points at a commit that carries feature 1's `prd.json`. `setSha` is written wherever the flow repository writes `specSha` from outside the flow (create, re-ask, re-publish) and by `SPEC_REVIEW` calls, never by `PRD_REVIEW` calls. The `base: 'spec'` start and the spec blob check use `setSha`. `PRD_REVIEW` calls and PRD edits of a later feature are committed on that feature's branch and move neither sha.\n\n**New feature states** `READY` (ready PR) and `MERGED`. A flow completes when no feature is `PENDING` and none is active; completion sets every non-`MERGED` feature to `COMPLETED` (a single-feature flow ends `COMPLETED`, as today).\n\nRetain row-spreading mapping; add setSha to the flow domain record and optional nullable branch to the feature record. State writers mutate only the addressed row; activities/orchestration belong to later stories. Preserve complete's existing rejection when the flow is missing, before any feature completion writes. Null sha records the calls marker without either sha changing even if setSha promotion is requested. Verify persisted values through real repository reads.\n\n**Scope** — In: domain mappings, feature/flow state and branch writers, completion persistence, calls sha promotion, create/reask/updateSha lifecycle. Out: schema migration (US-001), next-feature selection (US-004), orchestration/activity emission (US-008/009/010).\n\n**Interface** — `recordCalls(flowId, featureId, jobId, specSha: string | null, options?: { setSha?: boolean })`: a non-null `specSha` moves `flow.specSha`, and with `setSha: true` also `flow.setSha`. New: `setFeatureBranch(featureId, branch)`, `markFeatureState(featureId, state)`, `setFlowState(flowId, state)`. `FleetFlowFeatureRecord` gains `branch?: string | null`.",
+      "acceptanceCriteria": [
+        "[integration] A flow read through IFleetFlowRepository.findById returns each feature's branch (null until set).",
+        "[integration] setFeatureBranch(featureId, 'feat/b') persists branch 'feat/b' on that feature only.",
+        "[integration] markFeatureState(featureId, 'READY') persists the feature's state 'READY' and leaves the other features and the flow state unchanged.",
+        "[integration] setFlowState(flowId, 'WAITING_MERGE') persists the flow state and leaves the features unchanged.",
+        "[integration] complete(flowId, now) on a flow with one MERGED and one READY feature sets the flow COMPLETED with endedAt now, leaves the MERGED feature MERGED and sets the READY feature COMPLETED.",
+        "[integration] recordCalls(flowId, featureId, jobId, null) sets the feature's callsJobId and leaves flow.specSha and flow.setSha unchanged.",
+        "[integration] recordCalls(flowId, featureId, jobId, 'sha2') sets the feature's callsJobId and flow.specSha 'sha2' and leaves flow.setSha unchanged.",
+        "[integration] recordCalls(flowId, featureId, jobId, 'sha3', { setSha: true }) sets both flow.specSha and flow.setSha to 'sha3'.",
+        "[integration] PrismaFleetFlowRepository.updateSha(id, 'sha4') and reask(id, { specSha: 'sha4', ... }) each set both specSha and setSha to 'sha4', and a created flow has setSha equal to its specSha.",
+        "[integration] complete('missing-flow', now) rejects and leaves unrelated flow and feature rows unchanged, preserving the existing missing-flow rejection before feature completion writes."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing repository patterns support localized field/state writers and sha-update semantics, verified by database round-trips."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts",
+        "apps/api/src/fleet/flows/domain/fleet-flow.domain.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Flow branch rule for later features",
+      "description": "**Goal** — Reject NAX flow inputs whose branch collides with a later feature's reserved feat branch.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — `parseFlowInput` (nax entry) rejects a later feature whose `feat/<feature>` equals the flow branch.\n\n**`dependsOn` already names only earlier features**: `parseFlowInput` rejects a dependency it has not seen yet, so positions are the run order. New: for the nax entry, no feature after the first may have `feat/<feature>` equal to the flow branch (a create-time 400); the branch check runs where `branch` is validated, after the features.\n\nOne new validation failure is raised through its `fail(property)` helper (`ValidationAppException` with `reason` = the property path). A `dependsOn` naming the feature itself or a later feature is already rejected. Do not change THREAD normalization or existing validation/normalization order.\n\n**Scope** — In: NAX create-input branch collision rule and existing parser tests. Out: dependency validation redesign (already implemented), GitHub branch creation/conflict resolution (US-005/011).\n\n**Interface** — `parseFlowInput(body, entry)`; fail with `features.<position>.feature` for a later feature collision.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowInput(body, 'NAX') with branch feat/b and features [a, b] throws ValidationAppException with reason features.1.feature.",
+        "[unit] parseFlowInput(body, 'NAX') with branch feat/a and features [a, b] accepts the input (the first feature may use its own feat/<feature> as the flow branch)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One additive parser check uses the existing validation helper and does not change authentication or authorization."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-input.ts",
+        "apps/api/src/fleet/flows/flow-input.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Next-feature rule",
+      "description": "**Goal** — Supply pure, position-ordered feature selection and review-finding grouping for the flow engine.\n\n**Motivation** — A flow created with two or more features is accepted, approved, and then never advanced: `listAdvanceable` filters on a feature count of 1 and `decideFlowStep` returns `skip` when `featureCount !== 1`.\n\n**Interface** — A new pure module `flow-features.ts`:\n\n```ts\nexport interface FlowFeatureView {\n  id: string; position: number; feature: string; dependsOn: string[]; state: string; prNumber: number | null;\n}\nexport type FlowFeatureAction =\n  | { kind: 'active'; featureId: string }\n  | { kind: 'start'; featureId: string; base: 'spec' | 'default' }\n  | { kind: 'wait_merge'; featureIds: string[] }\n  | { kind: 'complete' };\n\nexport function nextFlowFeature(features: readonly FlowFeatureView[]): FlowFeatureAction;\n```\n\n`groupFindingsByFeature(findings, features)` is the other pure export.\n\n**Approach** — Rules, in order, over features sorted by `position`:\n\n1. The first feature in `RUNNING` or `WAITING_ANSWER` is `active`.\n2. The position-0 feature in `PENDING` is `active` (the flow has not started; it runs `SPEC_REVIEW`).\n3. Otherwise take the first `PENDING` feature. None: `complete`.\n4. If every feature its `dependsOn` names is `MERGED`: `start`, with `base: 'default'` when `dependsOn` is not empty and `base: 'spec'` when it is empty.\n5. Otherwise `wait_merge`, with the ids of the named features that are not `MERGED`.\n\n`SPEC_REVIEW` calls for a set: the `apply_calls` pass groups the findings by `feature` (a missing or unknown name goes to the first feature), and commits one spec at a time in position order, each with `expectedHead` = the previous commit sha (the first: `flow.specSha`), on the flow branch. Implement only the grouping in this story: return groups in feature position order, keep verdict order inside a group, and omit empty groups. Do not mutate the readonly input order. Existing input validation guarantees dependencies name earlier features.\n\n**Scope** — In: pure selection/grouping exports and co-located unit tests. Out: engine integration (US-008/009), forge calls (US-011/012), committing grouped calls (US-010).",
+      "acceptanceCriteria": [
+        "[unit] nextFlowFeature with features at positions 0 and 1, both PENDING, returns { kind: 'active', featureId: <position 0 id> }.",
+        "[unit] nextFlowFeature returns active for the position-1 feature when it is RUNNING and position 0 is READY.",
+        "[unit] nextFlowFeature returns active for a WAITING_ANSWER feature.",
+        "[unit] nextFlowFeature with position 0 READY and position 1 PENDING with empty dependsOn returns { kind: 'start', featureId: <position 1 id>, base: 'spec' }.",
+        "[unit] nextFlowFeature with position 0 MERGED and position 1 PENDING with dependsOn naming position 0 returns { kind: 'start', featureId: <position 1 id>, base: 'default' }.",
+        "[unit] nextFlowFeature with position 0 READY and position 1 PENDING with dependsOn naming position 0 returns { kind: 'wait_merge', featureIds: [<position 0 id>] }.",
+        "[unit] nextFlowFeature with three features where position 2 depends on positions 0 and 1, position 0 MERGED and position 1 READY, returns wait_merge with only position 1's id.",
+        "[unit] nextFlowFeature with every feature READY or MERGED returns { kind: 'complete' }.",
+        "[unit] nextFlowFeature reads features by position, not by array order: given [position 1, position 0], both PENDING, it returns position 0 as active.",
+        "[unit] groupFindingsByFeature(findings, features) returns the findings grouped per feature in position order, each group keeping the verdict's order, and omits features with no finding.",
+        "[unit] groupFindingsByFeature puts a finding with no feature, or with a name no feature has, in the first feature's group."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "domain"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small pure domain abstraction has explicit deterministic precedence and ordering rules without external state or credentials."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-states.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/flow-features.ts",
+        "apps/api/src/fleet/flows/flow-features.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Forge branch creation and repo default branch",
+      "description": "**Goal** — Add idempotency-aware GitHub branch creation and expose the repository default branch to flow passes.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — `GitHubAppClient.createBranch(token, owner, name, branch, sha)` and `FleetReposService.findReviewRepo` returning `defaultBranch`.\n\n**The API creates each later feature's branch** (`GitHubAppClient.createBranch`, `POST /git/refs`) before its `PLAN`, because a flow `PLAN` carries `expectBranch: job.ref` (`assign-payload.ts:67`) and the runner refuses a PRD whose `branchName` differs from the ref. No runner change.\n\nPOST `/repos/<owner>/<name>/git/refs` through the existing FleetHttpClient with `{ ref: 'refs/heads/<branch>', sha }`. A 201 returns created. On 422, probe getBranchHead and return exists with the observed sha; if that probe throws repo_not_found because the branch does not exist, return refused. Preserve other probe failures for classification by callers. Map HTTP 403/404/500 to app_permissions_insufficient/repo_not_found/provider_error. Do not log or persist the bearer token. The caller, not this client method, decides whether an existing branch's sha is acceptable.\n\n`FleetReposService.findReviewRepo(id)` target: the pick also includes `defaultBranch`. Keep the narrow projection, and update its equality test and the typed reviewRepo fixture in fleet-flow-calls.service.spec.ts with defaultBranch: 'main'.\n\n**Scope** — In: GitHub client operation, response/error mapping, repo projection and affected fixtures. Out: branch base selection/spec verification/creator checks (US-011), merge watch (US-012), runner changes.\n\n**Interface** — `GitHubAppClient.createBranch(token, owner, name, branch, sha)` returns `{ kind: 'created' }`, `{ kind: 'exists', sha: <head> }`, or `{ kind: 'refused' }`; `findReviewRepo(id)` returns `Pick<FleetRepoRecord, 'id' | 'projectId' | 'owner' | 'name' | 'githubInstallationId' | 'defaultBranch'> | null` asynchronously.",
+      "acceptanceCriteria": [
+        "[unit] GitHubAppClient.createBranch(token, 'o', 'r', 'feat/b', 'sha1') sends POST /repos/o/r/git/refs with body { ref: 'refs/heads/feat/b', sha: 'sha1' } and returns { kind: 'created' } on HTTP 201.",
+        "[unit] On HTTP 422, createBranch reads getBranchHead for feat/b and returns { kind: 'exists', sha: <head> }.",
+        "[unit] On HTTP 403, createBranch throws RepoCheckException with app_permissions_insufficient.",
+        "[unit] On HTTP 404, createBranch throws RepoCheckException with repo_not_found.",
+        "[unit] On HTTP 500, createBranch throws RepoCheckException with provider_error.",
+        "[unit] FleetReposService.findReviewRepo(id) returns the repo's defaultBranch with the existing id, projectId, owner, name and githubInstallationId review projection fields.",
+        "[unit] On HTTP 422 when getBranchHead for feat/b throws RepoCheckException with repo_not_found (the branch does not exist), createBranch returns { kind: 'refused' }."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "github",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing HTTP integration patterns are straightforward, but bearer-token handling and forge permission classification require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.spec.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.ts",
+        "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/repos/fleet-repos.service.spec.ts",
+          "reason": "\"findReviewRepo exposes only the review projection\" (line 35) asserts `toEqual({ id, projectId, owner, name, githubInstallationId })`; the projection now also carries `defaultBranch`, so the expected object gains it."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts",
+          "reason": "the `findReviewRepo` double is typed `vi.fn<FleetReposService['findReviewRepo']>` (line 70) and its `reviewRepo()` fixture has no `defaultBranch`; the fixture gains `defaultBranch: 'main'` so the double matches the widened return type."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Step decision for later features",
+      "description": "**Goal** — Make first-feature review entry distinct from later-feature PLAN entry in the pure step decision.\n\n**Motivation** — A flow created with two or more features is accepted, approved, and then never advanced: `listAdvanceable` filters on a feature count of 1 and `decideFlowStep` returns `skip` when `featureCount !== 1`.\n\n**Approach** — `decideFlowStep` takes `firstFeature` instead of `featureCount`; the advance service's `decisionInput` passes `firstFeature: true` (it still reads `flow.features[0]` until US-008). The new stop reasons `pr_closed` and `spec_changed` join `FlowStopReason`.\n\n`featureCount` replaced by `firstFeature: boolean`; no skip; with a null latest job, the first feature dispatches `SPEC_REVIEW` and a later feature dispatches `PLAN`; `state === 'APPROVED'` handling applies to the first feature only.\n\n**The set's `SPEC_REVIEW` belongs to the first feature** (`flowFeatureId` = position 0). Later features start at `PLAN`.\n\nRetain all other completed PLAN, PRD_REVIEW, RUN ingest, REVIEW/RULE, answer, failure and FIX readiness behavior, including already-ready FIX results. Replace the old multi-feature skip test with later-feature PLAN entry, and update both advance decision-input assertions from featureCount: 1 to firstFeature: true.\n\n**Scope** — In: decision input/branch rules, stop reason union and interim first-feature service adapter. Out: selecting the active feature (US-008), READY/merge transitions (US-009/012).\n\n**Interface** — `decideFlowStep(input: FlowStepInput)` with `firstFeature: boolean` instead of `featureCount`; `FlowStopReason` adds `'pr_closed' | 'spec_changed'`.",
+      "acceptanceCriteria": [
+        "[unit] decideFlowStep with firstFeature: false, state RUNNING and no latest job returns { kind: 'dispatch', step: 'PLAN' }.",
+        "[unit] decideFlowStep with firstFeature: true, state RUNNING and no latest job returns { kind: 'dispatch', step: 'SPEC_REVIEW' }.",
+        "[unit] decideFlowStep with firstFeature: true, state APPROVED and no latest job returns { kind: 'dispatch', step: 'SPEC_REVIEW' }.",
+        "[unit] decideFlowStep with firstFeature: false, state RUNNING and a completed PLAN job with a result branch and sha returns { kind: 'dispatch', step: 'PRD_REVIEW' }.",
+        "[unit] decideFlowStep with firstFeature: false, state RUNNING and a completed FIX job whose fixReady.markedReady is true returns { kind: 'complete' }.",
+        "[unit] For a single-feature flow, FleetFlowAdvanceService.advance passes a decision input with firstFeature true and no featureCount field.",
+        "[unit] decideFlowStep with state RUNNING and a completed PLAN job missing resultBranch or resultSha returns { kind: 'stop', reason: 'plan_no_result', detail: 'PLAN job has no result branch or sha' } for either firstFeature value, preserving the existing incomplete-PLAN guard."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "domain"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized pure decision and input-adapter changes retain the existing step state machine."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-step-decision.ts",
+        "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/flow-step-decision.spec.ts",
+          "reason": "the input fixture sets `featureCount: 1` (line 10) and a test asserts `skip` for `featureCount: 2` (line 22); the fixture now sets `firstFeature: true`, and the skip test is replaced by the later-feature `PLAN` test."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "two assertions match the decision input with `featureCount: 1` (lines 476, 523); `FlowStepInput` no longer has `featureCount`, so both match `firstFeature: true`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Set review task, per-feature findings, dispatch input and calls target",
+      "description": "**Goal** — Make set-wide review tasks and explicit per-feature dispatch/commit targets available to the advance engine.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — `parseFlowVerdict` keeps a finding's `feature`; `buildReviewTask` builds the set task from `setSpecPaths`; `buildStepDispatch` forwards `setSpecPaths` and plans from `feature.branch`; `FleetFlowCallsService.apply` and `applyPrdEdits` take a `target`. The advance service passes `{ feature, specPath, branch: flow.branch }` of `flow.features[0]` as the target until US-008.\n\nEach `SPEC_REVIEW` round is one AGENT job over the whole set: it names every spec path and asks for cross-spec consistency. Its calls and questions may target any feature's spec.\n\n`FlowFinding` / `parseFlowVerdict`: an optional string `feature` field is kept on each finding when present. `buildReviewTask(step, specPath, feature, options)` where `options.setSpecPaths?: string[]` (two or more paths) makes the `SPEC_REVIEW` task name every spec path, ask for cross-spec consistency, and ask each finding to carry `\"feature\":\"<feature>\"`. Preserve exact prior task output without set paths and keep the verdict suffix whole under AGENT_TASK_MAX_LENGTH. A non-string finding.feature is omitted without dropping its finding.\n\n`PLAN` uses `input.feature.branch ?? flow.branch` as its ref; `SPEC_REVIEW` forwards `input.setSpecPaths` to `buildReviewTask`; the advance service sets `setSpecPaths` to every feature's spec path in position order when the flow has two or more features (that population belongs to US-008). Explicit calls targets replace hardcoded flow.features[0] and flow.branch for reads, writes, PRD path and commit messages, preserving pinned-head, conflict/retry and already-applied behavior. Use the target.feature for `.nax/features/<feature>/prd.json`. All existing three-argument apply/applyPrdEdits callers and assertions gain the fourth argument now.\n\n**Scope** — In: verdict/parser, set prompt, dispatch builder inputs/ref and explicit calls-service target with interim first-feature caller wiring. Out: selecting active features (US-008), grouping/multiple commits (US-010), branch creation (US-011). Runner changes remain excluded.\n\n**Interface** — `buildReviewTask(step, specPath, feature, options)` adds `options.setSpecPaths?: string[]`; `BuildStepDispatchInput.feature: { feature: string; specPath: string; branch?: string | null }` and a top-level `setSpecPaths?: string[]`. Both `FleetFlowCallsService.apply(flow, action, expectedHead)` and `applyPrdEdits(flow, action, expectedHead)` take a fourth argument `target: { feature: string; specPath: string; branch: string }`.",
+      "acceptanceCriteria": [
+        "[unit] parseFlowVerdict on {\"findings\":[{\"class\":\"minor\",\"summary\":\"s\",\"fix\":\"f\",\"feature\":\"b\"}]} returns the finding with feature: 'b'.",
+        "[unit] parseFlowVerdict drops a non-string feature from a finding and keeps the finding.",
+        "[unit] buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a', { setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'] }) returns a task that starts with /spec-review .nax/features/a/spec.md and names .nax/features/b/spec.md.",
+        "[unit] buildReviewTask('SPEC_REVIEW', '.nax/features/a/spec.md', 'a', { setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'] }) returns a task asking for cross-spec consistency and telling the reviewer to put \"feature\":\"<feature>\" on each finding, naming the features a and b.",
+        "[unit] buildReviewTask('SPEC_REVIEW', path, 'a') without setSpecPaths returns the same task as before this feature (no set wording).",
+        "[unit] When the set SPEC_REVIEW prompt would exceed AGENT_TASK_MAX_LENGTH, buildReviewTask cuts the returned task to AGENT_TASK_MAX_LENGTH with the verdict instruction kept whole, as the single-spec task is.",
+        "[unit] buildStepDispatch for SPEC_REVIEW with input setSpecPaths: ['.nax/features/a/spec.md', '.nax/features/b/spec.md'] returns an agent.task naming both paths.",
+        "[unit] buildStepDispatch for PLAN with feature.branch 'feat/b' returns ref 'feat/b'.",
+        "[unit] buildStepDispatch for PLAN with feature.branch null or absent returns ref flow.branch.",
+        "[unit] FleetFlowCallsService.apply(flow, action, head, { feature: 'b', specPath: '.nax/features/b/spec.md', branch: 'feat/b' }) reads getBranchHead of feat/b and getFile of .nax/features/b/spec.md.",
+        "[unit] That apply call commits with putFile on branch feat/b at path .nax/features/b/spec.md.",
+        "[unit] applyPrdEdits(flow, action, head, { feature: 'b', specPath, branch: 'feat/b' }) reads and writes .nax/features/b/prd.json on feat/b."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "review",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module parsing/prompt/dispatch seams and token-bearing branch-targeted forge writes require strict security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/flow-verdict.ts",
+        "apps/api/src/fleet/flows/flow-steps.ts",
+        "apps/api/src/fleet/flows/flow-step-dispatch.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/common/agent-jobs.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-calls.service.spec.ts",
+          "reason": "`apply(flow, action, expectedHead)` and `applyPrdEdits(flow, action, expectedHead)` are called with three arguments and read the spec of `flow.features[0]` on `flow.branch`; every call gains a `target`, and the forge doubles are asserted against the target's path and branch."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+          "reason": "the `calls.apply` double is asserted with three arguments; it now receives the target `{ feature, specPath, branch }` as a fourth."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-prd-edits.spec.ts",
+          "reason": "the `applyPrdEdits` double is asserted with three arguments; it now receives the target as a fourth."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Advance runs the active feature",
+      "description": "**Goal** — Drive the existing step chain using the selected feature's identity, jobs, markers, branch and payloads.\n\n**Motivation** — A flow created with two or more features is accepted, approved, and then never advanced: `listAdvanceable` filters on a feature count of 1 and `decideFlowStep` returns `skip` when `featureCount !== 1`.\n\n**Approach** — `decide`'s single-feature early return is removed and `listAdvanceable` lists flows of any feature count. `FleetFlowAdvanceService` selects the active feature with `nextFlowFeature` and carries it as `DispatchPass.feature` to the decision, `dispatchStep`, the calls, rulings and PRD-edit passes, the stop payload and the waiting payload; the spec preflight runs only for the first feature; a later feature's `PRD_REVIEW` calls and PRD edits target its own branch and move no sha; a later feature's `stale` calls or PRD-edits outcome stops `spec_changed`.\n\n**The spec preflight belongs to the first feature.** `readSpecHead` and the `SPEC_REVIEW`/`PLAN` spec-sha check in `decide` compare the flow branch head with `flow.specSha`; once feature 1 has run, that branch carries its PLAN, RUN and FIX commits. Both run only while the active feature is the first; a later feature's spec was checked by its start pass.\n\nThe active feature reaches `dispatchStep` and the calls, rulings and PRD-edit passes as a new `feature` field on `DispatchPass` (a `FleetFlowFeatureRecord`); `dispatchStep` builds the body from `pass.feature`, not `flow.features[0]`.\n\nA later feature is never re-asked: a `stale` calls or PRD-edits outcome while a later feature is active stops the flow `spec_changed` in the advance service instead of calling `reaskLocked` (the design's non-goal: a stopped flow is cloned, not restarted). `reaskLocked` itself is unchanged: its other callers (the first feature's preflight and the thread re-publish listener) only ever see a flow whose first feature is active.\n\nUse position, not array index, to determine firstFeature. Carry the selected feature through REVIEW claim adoption, dispatch flowFeatureId and locked step recording/recovery as well as action passes. Feed that feature's callsJobId, questionsJobId, answers, rulingsJobId, prdEditsJobId, prNumber and scoped job counts. Populate ordered setSpecPaths for multi-feature SPEC_REVIEW. Later PRD calls use the active feature's PLAN result sha and `recordCalls(..., null)`; later PRD edits only record the edit marker. For either later PRD pass, reject a PLAN branch mismatch with dispatch_refused and exact detail `PLAN pushed <x>, expected <y>` without setBranch. Retain first-feature PLAN branch adoption and approval generation guards. All forge work stays outside transactions and creator permission checks remain in force. Replace old multi-feature no-op tests; update private dispatchStep fixtures to include feature.\n\n**Scope** — In: active chain selection, all selected-feature seams, eligibility by feature count, preflight boundaries, later PRD target/sha/stale handling and events. Out: READY/completion transitions (US-009), grouped SPEC_REVIEW commits (US-010), external start/merge passes (US-011/012). Restarting or cloning a stopped multi-feature flow and per-feature cost caps remain excluded.\n\n**Interface** — `DispatchPass` gains `feature: FleetFlowFeatureRecord`. `BuildStepDispatchInput.feature: { feature: string; specPath: string; branch?: string | null }`, `setSpecPaths?: string[]`. Feature-scoped job reads and `opts.flowFeatureId` use `pass.feature.id`.",
+      "acceptanceCriteria": [
+        "[unit] For a two-feature flow, both PENDING, advance dispatches SPEC_REVIEW for the position-0 feature by passing buildStepDispatch a setSpecPaths input listing both spec paths in position order, and the resulting jobs.dispatch body contains an agent.task naming both paths.",
+        "[unit] For a two-feature flow with position 0 READY and position 1 RUNNING with branch feat/b and no jobs, advance dispatches PLAN with ref feat/b, feature b and options carrying position 1's flowFeatureId.",
+        "[unit] In that case the flow branch head differs from flow.specSha, and advance neither reads getBranchHead of the flow branch nor calls reaskLocked.",
+        "[unit] The decision input for the position-1 feature carries firstFeature: false and that feature's callsJobId, prNumber, questionsJobId and answers.",
+        "[unit] A stop of a two-feature flow while position 1 is active records the fleet_flow_stopped outbox event with feature b.",
+        "[unit] A wait_answer while position 1 is active stores the questions on position 1's feature row (setWaiting(flowId, <position 1 id>, ...)) and the fleet_flow_questions event carries feature b.",
+        "[unit] The RULE pass for the active position-1 feature reads latestJobForStep(flowId, <position 1 id>, 'RUN') and records rulings on position 1's row.",
+        "[unit] A later feature's PRD_REVIEW calls pass passes calls.apply the target { feature: 'b', specPath: '.nax/features/b/spec.md', branch: 'feat/b' } with expectedHead the feature's latest PLAN result sha.",
+        "[unit] After that calls pass commits, recordCalls(flowId, <position 1 id>, jobId, null) is called.",
+        "[unit] A later feature's PRD-edits pass passes applyPrdEdits the same feat/b target.",
+        "[unit] In the later feature's PRD_REVIEW calls or PRD-edits pass, a latest PLAN result branch other than feat/b stops the flow dispatch_refused with detail PLAN pushed <x>, expected feat/b, and setBranch is not called.",
+        "[unit] A stale outcome from calls.apply while position 1 is active stops the flow spec_changed and does not call reaskLocked.",
+        "[unit] A stale outcome from applyPrdEdits while position 1 is active stops the flow spec_changed and does not call reaskLocked.",
+        "[integration] listAdvanceable returns an APPROVED flow with two features."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "orchestration",
+        "security"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004",
+        "US-006",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing orchestration is extended rather than re-architected, but feature identity spans job reads, crash recovery and events; access-checked dispatch and forge targets retain the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+        "apps/api/src/fleet/flows/flow-features.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an owned REVIEW head is adopted while feature b is active, jobs.adoptForFlow receives b's feature id and no progress marker is written to feature a.",
+        "When a dispatch pass for feature a reaches its locked record after the active feature or approvedAt has changed, no step marker is recorded for that obsolete pass."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance-prd-edits.spec.ts",
+          "reason": "\"AC-7\" (lines 134-166) calls the private `dispatchStep({ flow, action, plan, remainingCapUsd })` and builds the expected body from `flow.features[0]`; the pass now carries `feature`, so the call adds `feature: flow.features[0]`."
+        },
+        {
+          "path": "apps/api/src/fleet/flows/fleet-flow-advance.service.spec.ts",
+          "reason": "\"leaves multi-feature flows alone\" (line 839) asserts that a two-feature flow writes nothing; a two-feature flow now advances its first feature, so the test asserts a `SPEC_REVIEW` dispatch for position 0."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-advance.integration.spec.ts",
+          "reason": "\"AC-6/7: multiple features remain approved and do not dispatch\" (line 166) expects no job for a two-feature flow; it now expects one `SPEC_REVIEW` job for the first feature."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "\"AC-1/2/3 returns only APPROVED/RUNNING flows with exactly one feature\" seeds a two-feature `APPROVED` flow and expects it omitted; it is now listed."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Feature completion and the next-feature transitions",
+      "description": "**Goal** — Turn a ready step outcome into feature readiness and the next ordered flow transition atomically.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — The step decision's `complete` marks the active feature `READY` and applies `nextFlowFeature` in the same transaction (flow `COMPLETED`, `WAITING_MERGE`, or left `RUNNING`); a live flow with no active and no pending feature completes.\n\nThe step decision's `complete` for the active feature marks it `READY` (activity `flow.feature_ready`) and then applies `nextFlowFeature` in the same transaction: `complete` completes the flow, `wait_merge` moves it to `WAITING_MERGE`, `start` leaves it `RUNNING` for the next pass.\n\nAn `APPROVED`/`RUNNING` flow decides with `nextFlowFeature`. `active`: the existing step decision, fed with the active feature's own jobs, ids and branch. `start`: the **start pass**. `complete`: complete the flow. `wait_merge`: move the flow to `WAITING_MERGE` (activity `flow.waiting_merge`). This story records the transitions and leaves start execution to US-011.\n\n**New feature states** `READY` (ready PR) and `MERGED`. A flow completes when no feature is `PENDING` and none is active; completion sets every non-`MERGED` feature to `COMPLETED` (a single-feature flow ends `COMPLETED`, as today).\n\nEvaluate the next action from an updated in-memory feature view or locked re-read after marking READY; a stale snapshot must not select the just-finished feature again. Record flow.waiting_merge with awaited feature ids and flow.completed with the existing audit/activity pattern under the same parent/flow locks. A ready PR is sufficient for an independent successor; do not wait for unrelated PR merges or dispatch the next PLAN in the completion transaction. Preserve the existing pr_not_ready stop for a completed FIX carrying a CI readyHeld reason; that negative path must not enter the READY/completion branch.\n\n**Scope** — In: per-feature READY, post-ready state decision, no-active/no-pending completion, activities and the existing CI-held FIX stop regression. Out: branch creation (US-011), polling/marking MERGED/resuming (US-012), parallel feature execution.\n\n**Interface** — Consume `nextFlowFeature(features: readonly FlowFeatureView[]): FlowFeatureAction`; persist through `markFeatureState(featureId, state)`, `setFlowState(flowId, state)`, and `complete(flowId, now)`.",
+      "acceptanceCriteria": [
+        "[unit] When the active position-1 feature's latest completed FIX job has fixReady.markedReady true and its step is already recorded, advance calls markFeatureState(<position 1 id>, 'READY') and records activity flow.feature_ready.",
+        "[unit] When the step decision completes the position-0 feature and position 1 is independent, the flow stays RUNNING and steps.complete is not called.",
+        "[unit] When the step decision completes the position-0 feature and position 1 depends on it, setFlowState(flowId, 'WAITING_MERGE') is called and activity flow.waiting_merge is recorded with the awaited feature ids.",
+        "[unit] When the step decision completes the last feature, steps.complete is called and activity flow.completed is recorded.",
+        "[unit] For a single-feature flow, a ready FIX still ends the flow COMPLETED through steps.complete.",
+        "[unit] A RUNNING flow whose features are all READY or MERGED (no active, none pending) is completed by advance through steps.complete without dispatching a job.",
+        "[unit] When the recorded active feature's completed FIX has fixReady { markedReady: false, readyHeld: 'CI checks failing' }, advance stops the flow pr_not_ready with detail CI checks failing rather than marking the feature READY or completing the flow, preserving the existing CI hold behavior."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Completion changes are localized to the existing locked advance path and one new unit suite, reusing the upstream pure selector and repository writers without new I/O or security logic."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/flow-features.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-completion.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Set SPEC_REVIEW calls pass",
+      "description": "**Goal** — Commit each set-wide SPEC_REVIEW finding into its target spec and record the set review atomically after all commits.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — The `apply_calls` pass for a multi-feature `SPEC_REVIEW` commits the findings spec by spec and records them.\n\n`SPEC_REVIEW` calls for a set: the `apply_calls` pass groups the findings by `feature` (a missing or unknown name goes to the first feature), and commits one spec at a time in position order, each with `expectedHead` = the previous commit sha (the first: `flow.specSha`), on the flow branch. After the last commit, under the locks, `recordCalls` for every target feature, the last one moving `flow.specSha` and `flow.setSha` (`setSha: true`) to the last commit, and the first feature's `callsJobId` is set to the job id (the set marker the decision reads). The grouping is a pure function `groupFindingsByFeature(findings, features)` in `flow-features.ts`.\n\nKeep all forge calls outside transactions; only after every targeted spec commits may the locked record phase write markers/shas/activity. Use null sha for non-final marker writes; the final target promotes both shas. Record the position-0 marker even when it has no findings, without committing an empty spec group. A failed call stops calls_failed and short-circuits later groups; retry writes no progress, so the next pass begins at the first group. A stale outcome while the first feature owns SPEC_REVIEW retains existing re-ask behavior. Keep existing single-file already-applied recovery; do not invent multi-commit crash recovery. Unknown feature names silently fall back to the first feature's spec. Preserve the existing single-feature calls target and one-call execution; every SPEC_REVIEW calls commit, including a single-feature pass, promotes setSha together with specSha. Setting the first feature's callsJobId moves past the applied job, not necessarily past the SPEC_REVIEW step: the existing round-count rule may request another set review before PLAN.\n\n**Scope** — In: multi-feature SPEC_REVIEW grouping/commit chain, locked set markers and sha promotion, retry/failed behavior and single-feature calls regression. Out: later PRD_REVIEW behavior (US-008) and feature start/merge watch (US-011/012). Recovering a set `SPEC_REVIEW` calls pass in which two or more spec commits landed and nothing was recorded; the\n  next pass sees a stale head and re-asks the flow (no feature is `READY` yet). A pass where only the first commit\n  landed recovers through the existing already-applied check. US-010 only: a `SPEC_REVIEW` finding whose `feature` names no flow feature is not reported; it goes to the first\n  feature's spec.\n\n**Interface** — Consume `groupFindingsByFeature(findings, features)`, `calls.apply(flow, action, expectedHead, target)` with `target: { feature: string; specPath: string; branch: string }`, and `recordCalls(flowId, featureId, jobId, specSha: string | null, options?: { setSha?: boolean })`.",
+      "acceptanceCriteria": [
+        "[unit] For a two-feature flow whose SPEC_REVIEW verdict has findings with feature a and b, the apply_calls pass calls calls.apply twice, first for a with expectedHead flow.specSha, then for b with expectedHead the commit sha of the first call.",
+        "[unit] Both calls in that pass target the flow branch, and each receives only the findings of its own feature.",
+        "[unit] A SPEC_REVIEW finding with no feature, or with a name no flow feature has, is committed into the first feature's spec.",
+        "[unit] After that pass, recordCalls is called for a and for b, the last call with the second commit's sha and { setSha: true }, and the first feature's callsJobId is the SPEC_REVIEW job id.",
+        "[unit] When the first apply of a set pass returns failed, the flow stops calls_failed and the second feature's apply is not called.",
+        "[unit] When the second apply returns retry, nothing is recorded and the next pass starts again from the first feature.",
+        "[unit] A set pass whose findings all target feature b commits only b's spec and still sets the first feature's callsJobId to the job id, so the next decision moves past this review without reapplying its calls (another SPEC_REVIEW round when specReviewCount < 2, otherwise PLAN).",
+        "[unit] For a single-feature SPEC_REVIEW calls pass, advance calls calls.apply exactly once with expectedHead flow.specSha and the original feature/specPath on flow.branch, preserving the existing single-spec calls target."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "review",
+        "orchestration"
+      ],
+      "dependencies": [
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Sequential external commits followed by generation-fenced atomic markers introduce partial-failure and idempotency risks without changing token minting."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance-calls.spec.ts",
+        "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts",
+        "apps/api/src/fleet/flows/flow-features.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance-set-calls.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Start pass for a later feature",
+      "description": "**Goal** — Safely create and record each later feature's branch from the approved set or merged default-branch head before PLAN.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — **Start pass** (`runFeatureStart` in `fleet-flow-feature-passes.ts`), outside any transaction, with one `mintInstallationToken` token: refuse a thread-entry flow (`dispatch_refused`, `thread entry runs one feature`); resolve the base sha (`spec`: `flow.setSha`; `default`: `getBranchHead` of the repo's `defaultBranch`); read the feature's spec file at the base and at `flow.setSha` and compare their blob shas (different or missing: stop `spec_changed`, detail `<specPath> differs from the approved spec`); create `feat/<feature>` at the base sha. Then under the locks, only if the feature is still `PENDING` at the locked re-read: `setFeatureBranch`, `markFeatureState(RUNNING)`, activity `flow.feature_started` with `{ feature, base, sha, branch }`. The next pass dispatches its `PLAN`.\n\nThe two new passes live in a new file `fleet-flow-feature-passes.ts` as functions that take the advance service's collaborators as arguments, so the service stays under 800 lines and its constructor does not change. This story owns the new module and start export; US-012 adds merge watch in the same module on the binding sibling dependency graph. Preserve sibling edits rather than overwriting the module.\n\n**Tokens (my call).** Merge watch reads PRs with `mintThreadReadToken` (contents, pull_requests and metadata read): `mintReadOnlyToken` has no `pull_requests` grant and gets a 403 on a private repo (`fleet-pr-rulings.service.ts:42`). The start pass uses `mintInstallationToken` (contents write) for every call, because `POST /git/refs` needs `contents: write`.\n\n**Forge errors are classified as the calls already are** (`callsOutcomeForForgeError`): a `RepoCheckException` with reason `app_not_installed`, `app_permissions_insufficient` or `repo_not_found` stops the flow `dispatch_refused` with the reason as detail; any other reason ends the pass and the next tick retries.\n\nCreator lost dispatch access at the start pass: stop `creator_lost_access` before any forge call. Repo has no GitHub installation (not connected): stop `dispatch_refused`, detail `repo not connected`. Same-base existing branch is treated as created. Existing branch at another sha: stop `dispatch_refused`, detail `branch feat/<feature> already exists`. Refused creation (422 with no branch, invalid base): stop `dispatch_refused`, detail `branch feat/<feature> not created`. Spec comparisons use blob shas, not commit shas, and use setSha, not specSha. Mint one token for all forge operations in the pass; never persist/log it. On transient failure, write nothing. Record under parent then flow locks only for the same approval generation and still-live/PENDING selected feature; a stopped flow, changed approvedAt or already-started feature drops external progress. Every unit acceptance criterion drives FleetFlowAdvanceService.advance, not the helper directly.\n\n**Scope** — In: runFeatureStart wiring, permission guard, repo/base/spec checks, forge branch operation consumption, locked record/activity and preservation of the first feature's existing SPEC_REVIEW entry without branch creation. Out: merge watch (US-012) and job dispatch (next pass via US-008). Stacked PRs: building a feature on another feature's unmerged branch. Multi-feature thread-entry flows: they stop at the second feature's start. Rebasing, merging or updating a feature branch when the default branch moves; a conflict fails a job and stops\n  the flow like any failure. A crash between `createBranch` and its record on a `base: 'default'` start, after which the default branch moves:\n  the repeat finds the branch at the old sha and stops `dispatch_refused`; the flow is cloned.\n\n**Interface** — `runFeatureStart` is a collaborator-taking function in `fleet-flow-feature-passes.ts`, consumed by `FleetFlowAdvanceService.advance`; `GitHubAppClient.createBranch(token, owner, name, branch, sha)` and `FleetReposService.findReviewRepo(id)` with `defaultBranch` supply the forge seam.",
+      "acceptanceCriteria": [
+        "[unit] advance on a flow whose next action is a start with base: 'spec' mints one token with mintInstallationToken and calls createBranch for feat/b at flow.setSha when the spec blob shas at the base and at flow.setSha are equal.",
+        "[unit] For a start with base: 'default', advance reads getBranchHead of the repo's defaultBranch and calls createBranch for feat/b at that sha.",
+        "[unit] When the spec blob shas at the base and at flow.setSha differ, the flow stops spec_changed with detail .nax/features/b/spec.md differs from the approved spec and createBranch is not called.",
+        "[unit] When the spec file is missing at the base, the flow stops spec_changed.",
+        "[unit] When the spec file is missing at flow.setSha, the flow stops spec_changed.",
+        "[unit] After createBranch returns created, under the locks advance calls setFeatureBranch(<id>, 'feat/b'), markFeatureState(<id>, 'RUNNING') and records activity flow.feature_started with feature, base, sha and branch.",
+        "[unit] When advance receives createBranch { kind: 'exists', sha: <resolved base sha> }, it treats the branch as created: under the locks it records feat/b on the selected PENDING feature, marks that feature RUNNING and records flow.feature_started with the same feature, base, sha and branch payload as a created result.",
+        "[unit] createBranch returning exists with another sha stops the flow dispatch_refused with detail branch feat/b already exists.",
+        "[unit] createBranch returning refused stops the flow dispatch_refused with detail branch feat/b not created.",
+        "[unit] A thread-entry flow reaching a start stops dispatch_refused with detail thread entry runs one feature and makes no forge call.",
+        "[unit] A RepoCheckException with reason provider_error from any start-pass forge call, or with any other reason outside app_not_installed, app_permissions_insufficient and repo_not_found, ends the pass with no write and no stop so the next tick retries.",
+        "[unit] A RepoCheckException with a permanent reason app_not_installed, app_permissions_insufficient or repo_not_found from any start-pass forge call, including app_permissions_insufficient from createBranch, stops the flow dispatch_refused with that reason as detail.",
+        "[unit] A repo with a null githubInstallationId stops the flow dispatch_refused with detail repo not connected and makes no forge call.",
+        "[unit] A creator without dispatch access at the start stops the flow creator_lost_access before any forge call.",
+        "[unit] When, at the record transaction's locked re-read, the flow is stopped or the feature is no longer PENDING, the start records nothing and emits no flow.feature_started."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "github",
+        "security",
+        "orchestration"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Creator access, write-token scope, external branch side effects and locked approval-generation recording require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/flow-features.ts",
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-feature-passes.ts",
+        "apps/api/src/fleet/flows/fleet-flow-feature-start.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When approvedAt changes before the start record transaction's locked re-read, advance writes no feature branch/state or flow.feature_started activity."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Merge watch",
+      "description": "**Goal** — Poll awaited PRs for WAITING_MERGE flows, persist merges and resume or stop without dispatching jobs.\n\n**Motivation** — The fleet flow design (`docs/superpowers/specs/2026-11-04-fleet-flow-design.md`, G6 and Steps 2.6) splits one brainstorm into several specs and carries them to ready PRs with one approval.\n\n**Approach** — A `WAITING_MERGE` flow runs **merge watch** (`runMergeWatch` in `fleet-flow-feature-passes.ts`): outside any transaction, mint a token with `mintThreadReadToken` and call `getPullRequest` for each awaited feature's `prNumber`. `merged: true` marks the feature `MERGED`; `state: 'closed'` with `merged: false`, or a null result, stops the flow `pr_closed` with detail `PR #<n> closed without merge` or `PR #<n> not found`; an open PR changes nothing. Then, under the locks, write the merges and, when `nextFlowFeature` now returns `start`, move the flow to `RUNNING` (activity `flow.resumed`).\n\nThe record transaction re-reads the flow under the parent and flow locks and writes only while it is still `WAITING_MERGE` with the same `approvedAt`. The two new passes live in a new file `fleet-flow-feature-passes.ts` as functions that take the advance service's collaborators as arguments, so the service stays under 800 lines and its constructor does not change. US-011 owns creation of the shared file, but is a sibling, not a binding dependency: coordinate adding runMergeWatch without overwriting runFeatureStart; do not alter the required story dependency list.\n\n**Tokens (my call).** Merge watch reads PRs with `mintThreadReadToken` (contents, pull_requests and metadata read): `mintReadOnlyToken` has no `pull_requests` grant and gets a 403 on a private repo (`fleet-pr-rulings.service.ts:42`). The start pass uses `mintInstallationToken` (contents write) for every call, because `POST /git/refs` needs `contents: write`.\n\n**Forge errors are classified as the calls already are** (`callsOutcomeForForgeError`): a `RepoCheckException` with reason `app_not_installed`, `app_permissions_insufficient` or `repo_not_found` stops the flow `dispatch_refused` with the reason as detail; any other reason ends the pass and the next tick retries.\n\n`listAdvanceable` also lists `WAITING_MERGE` flows; retain APPROVED/RUNNING flows of any feature count, id paging and exclusions for PENDING/WAITING_ANSWER/terminal flows. Select awaited ids with nextFlowFeature; poll only named dependencies still unmerged. Missing installation stops dispatch_refused (`repo not connected`); awaited READY without prNumber stops dispatch_refused (`feature <feature> has no PR`). Collect forge results outside any transaction, including token minting; a transient failure writes nothing. Under the locked, same-generation WAITING_MERGE re-read, persist partial merges even when another dependency is open, and use flows.stop for pr_closed with normal activity/audit/outbox. Never dispatch in merge watch even if every dependency merges; resume first, start on the next pass. Every unit acceptance criterion drives FleetFlowAdvanceService.advance.\n\n**Scope** — In: WAITING_MERGE eligibility, runMergeWatch, read-token polling, partial merge persistence, fenced resume/stop, failure classification. Out: branch creation (US-011), webhook-driven merge detection, merging/rebasing PRs, web/CLI displays.\n\n**Interface** — `runMergeWatch` is a collaborator-taking function consumed by `FleetFlowAdvanceService.advance`; `GitHubAppClient.getPullRequest(token, owner, name, number): Promise<VcsPrStatus | null>` supplies `state`, `merged`, `mergedAt`, `headSha?`, `url`; persistence uses `markFeatureState`, `setFlowState` and `flows.stop` after the locked re-read.",
+      "acceptanceCriteria": [
+        "[integration] listAdvanceable returns a WAITING_MERGE flow.",
+        "[integration] listAdvanceable does not return PENDING, WAITING_ANSWER, COMPLETED or STOPPED flows.",
+        "[unit] For a WAITING_MERGE flow awaiting position 0 with prNumber 31, advance calls getPullRequest(token, owner, name, 31) with a token from mintThreadReadToken.",
+        "[unit] When that PR is merged: true, the pass calls markFeatureState(<position 0 id>, 'MERGED'), moves the flow to RUNNING with setFlowState, and records activity flow.resumed.",
+        "[unit] When the PR is open, the pass writes nothing and the flow stays WAITING_MERGE.",
+        "[unit] When the PR has state: 'closed' and merged: false, the flow stops pr_closed with detail PR #31 closed without merge.",
+        "[unit] When getPullRequest returns null, the flow stops pr_closed with detail PR #31 not found.",
+        "[unit] When getPullRequest throws RepoCheckException with reason provider_error, or with any other reason outside app_not_installed, app_permissions_insufficient and repo_not_found, the pass ends with no write so the next tick retries.",
+        "[unit] When any merge-watch forge call, including getPullRequest, throws RepoCheckException with a permanent reason app_not_installed, app_permissions_insufficient or repo_not_found (including repo_not_found from getPullRequest), the flow stops dispatch_refused with that reason as detail.",
+        "[unit] A repo with a null githubInstallationId stops the flow dispatch_refused with detail repo not connected.",
+        "[unit] An awaited READY feature with a null prNumber stops the flow dispatch_refused with detail feature a has no PR.",
+        "[unit] With two awaited features, one merged and one open, the pass marks the merged one MERGED and the flow stays WAITING_MERGE.",
+        "[unit] A WAITING_MERGE pass dispatches no job (jobs.dispatch is not called), even when every awaited PR is merged; the next pass runs the start.",
+        "[unit] Given a merge-watch result with one awaited PR merged and another closed without merge, when the flow is no longer WAITING_MERGE at the record transaction's locked re-read (stopped meanwhile), the pass writes nothing; when it is still WAITING_MERGE with the same approvedAt, the pass records the observed merges and the pr_closed stop through flows.stop."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "github",
+        "security",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Private-PR read-token grants, external polling and same-generation locked partial merges/stops require security-isolated tests."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts",
+        "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+        "apps/api/src/fleet/flows/flow-features.ts",
+        "apps/api/src/fleet/flows/flow-calls.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/flows/fleet-flow-merge-watch.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When approvedAt changes before the locked WAITING_MERGE re-read, advance records no merges, resume activity or stop from the obsolete poll."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/fleet-flow-step.repository.integration.spec.ts",
+          "reason": "the same \"AC-1/2/3\" test seeds a `WAITING_MERGE` flow and expects it omitted; it is now listed."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-013",
+      "title": "Two-feature flows against the database",
+      "description": "**Goal** — Demonstrate the complete ordered independent and dependent feature lifecycles through the real ticker and database with a stubbed forge.\n\n**Motivation** — A flow created with two or more features is accepted, approved, and then never advanced: `listAdvanceable` filters on a feature count of 1 and `decideFlowStep` returns `skip` when `featureCount !== 1`.\n\n**Approach** — An integration spec driving `FleetFlowTicker.tick` for two nax-entry flows with the forge stubbed: an independent second feature that starts at the first's ready PR, and a dependent second feature that waits for the first's merge.\n\nOne feature is active at a time. An independent feature (no `dependsOn`) starts as soon as the previous feature reaches a ready PR; it does not wait for a merge. A dependent feature waits (`WAITING_MERGE`) until every feature it names is merged.\n\nFeature 1 keeps the flow branch. A dependent feature plans from the default branch after its dependencies are merged; an independent feature plans from the flow's spec sha. Each later feature gets its own `feat/<feature>` branch and PR. For the independent base, use the stable `flow.setSha` defined by the set-sha ruling, not the first feature's later PRD-bearing specSha.\n\nUse the real flow repository, dispatch path, permissions and FleetFlowTicker; manually settle each dispatched job and required ingest/PR fields in the test to progress the chain. Stub forge calls, not nextFlowFeature or the step decision. Mirror fleet-flow-verdicts.integration.spec.ts and fleet-fixtures.ts: disable background sweep/outbox relay, create isolated repo/creator/runner fixtures, make explicit ticks, and record the transaction probe for every token/forge stub. Use the transaction manager's existing isInTransaction() behind the test's inTransaction probe. Assert independent b starts despite a moved flow-branch head; use distinct setSha/specSha/default-head values so the correct base is observable. Verify the closed-unmerged dependent case with an isolated instance or fixture reset rather than trying to restart a stopped flow. Gate real PostgreSQL using canRunDbTests, require KODA_DB_TESTS=1 outside the sandbox, and run the scoped integration suite on a private test database; a skip is not verification. This test-only story is explicitly binding and remains separate from implementation stories.\n\n**Scope** — In: two end-to-end engine/database scenarios, persisted feature/job identity, state/branch bases, closed PR failure and forge transaction boundary. Out: production runner execution, real GitHub network calls, UI/CLI, parallel feature execution or broader coverage targets.\n\n**Interface** — Drive `FleetFlowTicker.tick(now)` -> `FleetFlowAdvanceService.advance(flow.id, now)` through existing dependency injection and stubbed `GitHubAppClient`; observe persisted `FleetJob.flowFeatureId`, `FleetFlow.setSha`, feature branch/state and flow stopReason.",
+      "acceptanceCriteria": [
+        "[integration] A nax-entry flow with features a and independent b, driven by FleetFlowTicker.tick with the forge stubbed and each job completed by the test, dispatches SPEC_REVIEW, PLAN, PRD_REVIEW, RUN, REVIEW and FIX for a, each job carrying a's flowFeatureId.",
+        "[integration] After a's ready FIX, feature a is READY, the next tick creates feat/b at flow.setSha, and the following tick dispatches PLAN for b with ref feat/b and b's flowFeatureId, while the stubbed flow-branch head differs from flow.specSha.",
+        "[integration] After b's ready FIX, the flow is COMPLETED and both features are COMPLETED.",
+        "[integration] A second flow with b depending on a moves to WAITING_MERGE after a's ready FIX, and a tick with a's PR still open leaves it WAITING_MERGE.",
+        "[integration] A tick after the stubbed PR reports merged: true marks a MERGED and the flow RUNNING; the next tick creates feat/b at the stubbed default-branch head.",
+        "[integration] In that second flow, a tick where the stubbed PR reports closed without merge stops the flow pr_closed with stopReason persisted on the row.",
+        "[integration] Every forge stub records the inTransaction() probe of the transaction manager when called, and every recorded value is false in both flows."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "integration",
+        "security"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-010",
+        "US-011",
+        "US-012"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Binding integration-only story proves real persistence, permission-backed dispatch, token-bearing forge boundaries and multi-tick state transitions; security override applies."
+      },
+      "contextFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-verdicts.integration.spec.ts",
+        "apps/api/test/helpers/fleet-fixtures.ts",
+        "apps/api/src/fleet/flows/fleet-flow.ticker.ts",
+        "apps/api/src/fleet/flows/fleet-flow-advance.service.ts",
+        "apps/api/src/fleet/flows/fleet-flow-feature-passes.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-flow-features.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository-backed enhancement, not greenfield. Navigation used direct Read/Grep/Glob because codebase-memory MCP was unavailable in this session; all citations below refer to the execution checkout. The supplied framework detection is inaccurate: apps/api is NestJS 12 on Fastify with Nathapp platform modules, Prisma 7 and Vitest, not an Express application; see apps/api/package.json:41 and .nax/mono/apps/api/context.md:22. Web is Nuxt, not Next.js, and has no work in this feature. All 13 binding stories remain scoped to apps/api, with their exact dependency lists. Before implementation, follow .nax/mono/apps/api/context.md and the nathapp-nestjs-patterns skill; do not edit generated AGENTS.md, generated Prisma code, generated CLI clients or acceptance files.\n\nCurrent architecture and blockers: FleetFlowTicker is the sole bounded, in-process single-flight trigger; it pages listAdvanceable and calls advance under runAsSystem on behalf of each creator (apps/api/src/fleet/flows/fleet-flow.ticker.ts:13, :39, :49). The default polling period is 30,000 ms (apps/api/src/config/fleet.config.ts:180). The repository restricts eligibility to APPROVED/RUNNING and exactly one feature (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:44). decideFlowStep skips featureCount !== 1 and otherwise starts SPEC_REVIEW (apps/api/src/fleet/flows/flow-step-decision.ts:91). The advance service additionally returns for multiple features and hardcodes features[0] throughout (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:348, :382). Removing just one guard is insufficient: all feature job reads, dispatch links, progress markers, question/ruling targets, notifications, recovery and branch choices must agree.\n\nPersistence and migration (US-001/002): FleetJob currently stores nullable flowId/flowStep and has a [flowId, queuedAt] index (apps/api/prisma/schema.prisma:1120, :1159). FleetFlow has specSha but no stable setSha; FleetFlowFeature has ordered positions, unique (flowId, position)/(flowId, feature), state, PR and review markers but no branch (apps/api/prisma/schema.prisma:1224, :1264). Add migration 20261203090000_fleet_flow_features with nullable FleetJob.flowFeatureId, index [flowId, flowFeatureId, queuedAt], nullable feature branch, and required flow setSha. Backfill flowFeatureId by joining each job's flow to its position-0 feature, leaving non-flow jobs null; backfill setSha from specSha before enforcing NOT NULL. Existing feature branches stay null. This preserves existing single-feature job visibility; do not infer identity from FleetJob.feature because REVIEW uses a canonical PR feature, decoded by prNumberOfReviewFeature (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:598). Extend FleetJobRecord, create data and repository adoption interface (apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:223, :254, :371). dispatch inserts flow links atomically with the job (apps/api/src/fleet/jobs/fleet-jobs.service.ts:135); add flowFeatureId only with flowId. adoptForFlow is one conditional update where flowId is null, not a read-then-write (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:128), and service forwarding is at apps/api/src/fleet/jobs/fleet-jobs.service.ts:193. Preserve its false-on-already-owned behavior.\n\nFeature-scoped reads must keep latest job plus that job's own lease ingest settlement in ONE statement, retaining queuedAt/id descending tie-breaks (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:63). Separating those reads can pair an old RUN with a new settled flag and falsely stop it. latestJobWithIngest, latestJobForStep and countJobsForStepSince gain featureId as second argument (apps/api/src/fleet/flows/domain/fleet-flow-step.domain.ts:44). latestJob(flowId) and sumCost(flowId) remain flow-wide; the latter sums spent plus carried cost with Decimal (apps/api/src/fleet/flows/prisma-fleet-flow-step.repository.ts:142). complete currently rewrites all feature states and must preserve MERGED instead (same file:39). recordCalls currently always moves specSha (same file:110); add null-as-no-sha-update and optional setSha promotion. Flow mapping spreads database rows and sorts positions (apps/api/src/fleet/flows/prisma-fleet-flow.repository.ts:20), so the new columns flow through after domain updates. create, reask and updateSha must write setSha with specSha (same file:30, :90, :93). US-001 introduces required setSha while US-002 finishes repository creation/update semantics: treat these as a coordinated rollout, not independently deployable schema/runtime releases. Update all direct Prisma create fixtures with setSha and newly scoped jobs with flowFeatureId; do not use an empty fake setSha default to hide missing writes. Regenerate the local Prisma client; never hand-edit it.\n\nInput and pure scheduling (US-003/004/006): parseFlowInput already enforces 1..20 unique features, normalizes spec paths and rejects self/later/duplicate dependencies using previously seen names plus the explicit self check (apps/api/src/fleet/flows/flow-input.ts:39, :42, :49). Add the NAX-only later-feature branch collision check after branch validation (same file:62), using fail('features.<index>.feature') and ValidationAppException, not a generic exception. Do not reject feature 0 using its own feat branch. flow-states.ts already permits RUNNING -> WAITING_MERGE and WAITING_MERGE -> RUNNING (apps/api/src/fleet/flows/flow-states.ts:13). Feature states are persisted strings, not Prisma enums. New pure flow-features.ts sorts copies by position, gives RUNNING/WAITING_ANSWER precedence, treats the initial PENDING position-0 feature as active, starts only the first subsequent PENDING feature, and waits on only its unmerged named dependencies. Missing/unknown finding feature names fall back to position 0, never error or warn in US-010. Replace featureCount with firstFeature in the step input; retain existing failure, ingest, PR timeout, RULE, answer and FIX-ready logic. APPROVED-generation special handling is first-feature-only. Existing FIX already-ready behavior also completes (apps/api/src/fleet/flows/flow-step-decision.ts:220), and must not regress.\n\nReview and forge seams (US-005/007): buildStepDispatch currently uses flow.branch for PLAN and flow.specSha for SPEC_REVIEW; PLAN/RUN/PRD_REVIEW reuse the PLAN result for subsequent steps (apps/api/src/fleet/flows/flow-step-dispatch.ts:15, :43, :57). Add feature.branch ?? flow.branch and setSpecPaths forwarding. buildReviewTask preserves a whole instruction suffix under AGENT_TASK_MAX_LENGTH (apps/api/src/fleet/flows/flow-steps.ts:31); set wording must not truncate the verdict instruction or change single-spec output. parseFlowVerdict validates classes and drops non-actionable notes and malformed optional values (apps/api/src/fleet/flows/flow-verdict.ts:27, :48); preserve these rules while retaining an optional string finding.feature. Calls and PRD-edit services currently hardcode the first feature/flow branch (apps/api/src/fleet/flows/fleet-flow-calls.service.ts:40, :92). Require an explicit target for both, preserving pinned-head reads, bounded text, single-file already-applied recovery and ForgeFile.sha as a BLOB sha. PRD files derive from target.feature, not from an arbitrary spec basename. They perform no flow mutations.\n\nGitHubAppClient already provides mintInstallationToken (write), mintReadOnlyToken (contents/metadata only), and mintThreadReadToken (contents/pull_requests/metadata read), at apps/api/src/fleet/git-broker/github-app-client.ts:96, :104, :119. Do not use mintReadOnlyToken for private PR polling. getPullRequest returns null on 404 and uses existing VcsPrStatus (same file:246); getBranchHead encodes branch segments and reports missing refs via repo_not_found (same file:311); getFile returns the file's blob sha/content at a pinned ref (same file:385). Add createBranch through FleetHttpClient and the existing auth headers/repoPath, using POST git/refs and {ref:'refs/heads/<branch>',sha}. On 422, probe the branch: only a missing-ref repo_not_found becomes refused; an existing branch returns exists with its sha. Map 403 to app_permissions_insufficient, 404 to repo_not_found, and other unsuccessful responses to provider_error. The narrow findReviewRepo projection currently omits defaultBranch (apps/api/src/fleet/repos/fleet-repos.service.ts:177); widen only by defaultBranch, not by spreading credential-bearing repo data. Calls' typed reviewRepo fixture and projection equality tests must change. Tokens stay method-local, never in activity, outbox or persistence.\n\nAdvance orchestration (US-008..012): the service is currently 713 lines; retain its constructor and keep it below 800 lines by extracting new passes as collaborator-taking functions into fleet-flow-feature-passes.ts. Its established phases are unlocked snapshot/preflight, parent-then-flow locked decision, external dispatch/forge work, and locked record (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:49, :105, :348). lockLive currently accepts APPROVED/RUNNING and checks branch, specSha, approvedAt (same file:333); merge watch needs its own WAITING_MERGE guard and identical approval-generation fencing, not permission to write any live state. Parent locks must remain thread or repo first, then flow (same file:498), matching stop, re-publish and create. Forge calls and token minting NEVER run inside txManager.run, including refused starts, merge watch and set calls. Transient forge failures return without even spent-bookkeeping writes. Re-read feature id/state and approval generation before recording any external result; do not apply a pass to a different active feature or approval.\n\nCarry FleetFlowFeatureRecord on DispatchPass through dispatch, adoption, recordStep, calls, rulings, PRD edits, wait payloads and stopped outbox payloads. decisionInput currently reads featureCount and all markers from feature 0 (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:542); replace with the selected feature and its scoped counts/jobs. Creator access must remain checked for every work-producing path using creatorAccess + effectiveKeys + mayDispatch, including start BEFORE any forge call (same file:412). REVIEW's head claim/adoption crash recovery must retain the selected flowFeatureId (same file:230, :271). The readSpecHead preflight (same file:509) and SPEC_REVIEW/PLAN approval-head comparison (same file:446) apply only while position 0 is active: after its execution the flow branch carries PLAN/RUN/FIX commits and must not re-ask later features. The existing first-feature PLAN output branch adoption can remain; later-feature PLAN output mismatches stop dispatch_refused ('PLAN pushed <x>, expected <y>') without setBranch. Later PRD calls/edits target the feature branch, use that feature's latest PLAN result sha and move neither flow sha. Stale later calls/edits stop spec_changed instead of reaskLocked. reaskLocked itself is unchanged; its publication/preflight callers remain first-feature-only (apps/api/src/fleet/flows/fleet-flows.service.ts:172, :198). The answer path already finds WAITING_ANSWER by state (same file:112), so do not introduce a competing answer lookup.\n\nCompletion is two-level: mark the finished feature READY and emit flow.feature_ready, then evaluate a view with the updated state in the SAME transaction. If next is independent start, leave RUNNING; if dependencies are unmerged, set WAITING_MERGE and emit flow.waiting_merge with awaited ids; if no feature remains active/pending, complete flow and all non-MERGED features with flow.completed. Completion does not wait for every PR to merge. Awaited READY features become MERGED only when polled. For SPEC_REVIEW set calls, group in position order while preserving within-group verdict order, commit outside transactions on the flow branch with expectedHead chained from flow.specSha, then atomically record all markers after the final commit. Promote both specSha and setSha only on that final SPEC_REVIEW commit; ensure position 0 gets callsJobId even if all findings target b. Retry means no progress record; existing one-commit recovery is intentionally the limit. setSha must NOT absorb feature 0's PRD commits, otherwise independent b branches from a PRD-bearing commit instead of the approved set.\n\nStart pass resolves spec base from setSha or dependency base from current repo defaultBranch head, compares target spec blob shas at that base and setSha, creates feat/<feature>, then records branch/RUNNING and flow.feature_started with {feature,base,sha,branch} under locks only if still PENDING. A same-sha existing branch is idempotent; another sha or refused creation is dispatch_refused. Thread entry is refused before forge I/O at second-feature start. Merge watch polls only awaited PRs with mintThreadReadToken, records partial merges, stops closed/missing PRs through flows.stop, resumes with flow.resumed only once nextFlowFeature returns start, and never dispatches in that pass. Reuse callsOutcomeForForgeError's exact permanent set (apps/api/src/fleet/flows/flow-calls.ts:13): app_not_installed/app_permissions_insufficient/repo_not_found -> dispatch_refused with reason detail; every other reason quietly retries next tick. Missing installation, missing awaited prNumber, blob differences/missing files, branch conflicts, lost creator access and stale later edits have the exact stop reasons/details preserved in story ACs. Activity/audit/outbox writes remain in the mutation transaction; writeDecision currently owns stopped/question payloads (apps/api/src/fleet/flows/fleet-flow-advance.service.ts:620). Sanitize and bound existing untrusted text as before, and never log tokens.\n\nConsumers and test blast radius: update all old positional calls and exact/negated assertions, not just production signatures. US-001 touches prisma-fleet-flow-step.repository.spec.ts; integration/fleet/fleet-flow-step.repository.integration.spec.ts, fleet-flow-verdicts-migration.integration.spec.ts and fleet-job-flow-fields.integration.spec.ts; and fleet-flow-advance.service.spec.ts, -review.spec.ts, -calls.spec.ts, -answers.spec.ts, -rulings.spec.ts, -prd-edits.spec.ts. Doubles previously reading (_flowId, step) need (_flowId, _featureId, step); negated old-signature assertions would otherwise pass vacuously. Exact dispatch opts must include flowFeatureId; adopted REVIEW assertions gain featureId. US-005 updates fleet-repos.service.spec.ts and fleet-flow-calls.service.spec.ts reviewRepo defaultBranch fixtures. US-006 updates featureCount fixtures and decision-input assertions. US-007 updates all three-argument calls/applyPrdEdits assertions to explicit targets. US-008 updates the private dispatchStep pass fixture in -prd-edits.spec.ts to include feature, replaces 'leaves multi-feature flows alone' in the unit suite, and replaces the no-dispatch two-feature integration assertion in fleet-flow-advance.integration.spec.ts. listAdvanceable integration eligibility expectations change first for any feature count, then for WAITING_MERGE; preserve paging/excluded states. Existing coverage also includes flow-input.spec.ts, flow-step-decision.spec.ts, flow-steps.spec.ts, flow-step-dispatch.spec.ts, flow-verdict.spec.ts, fleet-flow-calls.service.spec.ts, github-app-client.spec.ts and fleet-flow.ticker.spec.ts. New source files belong to US-004 (flow-features.ts) and US-011 (fleet-flow-feature-passes.ts); new suites are listed per story. US-011/012 share fleet-flow-feature-passes.ts, but their binding dependencies are parallel siblings. Coordinate shared-file edits without changing the required graph or replacing the sibling's pass; US-012 must not list that not-yet-guaranteed sibling output in contextFiles or claim ownership of US-011's new file in expectedFiles. It may add its merge-watch export to the same module while preserving the start export when present.\n\nVerification and rollout: normal DB tests use prisma db push, not committed migrations, so explicitly exercise pre-migration seeded rows via scratchSchemaBefore/applyMigration (apps/api/test/helpers/migration-schema.ts:1, :30, :42), not only the final schema. Its SQL splitter does not support literal semicolons within statements, so prefer simple migration statements. Mirror fleet-flow-verdicts-migration.integration.spec.ts:25 for scratch-schema setup. Integration fixtures for the new feature should mirror fleet-flow-verdicts.integration.spec.ts:27: disable automatic sweep/outbox relay, seed permissions and repo/runner, run explicit FleetFlowTicker.tick, and spy on every forge operation's transaction probe (same file:79). Use the actual ITransactionManager.isInTransaction() method to implement the spec's inTransaction() probe. US-013 is intentionally its own integration-only story as explicitly bound by the spec; drive persisted jobs and ticker through both full scenarios, including setSha vs mutated flow-branch head and no forge I/O in transactions. Test fixtures grant real roles via seedFleetBase (apps/api/test/helpers/fleet-fixtures.ts:22); do not bypass production permission logic. Unit tests are co-located src/**/*.spec.ts; no-DB unit/DI tests stay there. DB suites live test/integration/** and use canRunDbTests; KODA_DB_TESTS=1 is required outside NAX_SANDBOXED=1. bun run test:scoped <files> enables DB mode for integration paths, using the private test PG mechanism; missing PG is a failure outside the sandbox, and skipped tests are not verification. Never run DB-reset suites concurrently against one test database; use KODA_TEST_DB_CONTAINER=1 for another worktree. scripts and exclusions are in apps/api/package.json:12. Run generated acceptance only through vitest.nax.config.ts with story AC filters, never copy/edit it. No tests or commands were executed during PRD drafting.\n\nCompatibility boundaries: no runner or fleet-protocol runtime import changes. Flow PLAN already sends expectBranch:job.ref (apps/api/src/fleet/jobs/assign-payload.ts:67), and runner checkPlanPrd refuses branch mismatch (apps/runner/src/verdict/plan-verdict.ts:14); creating the branch API-side is therefore mandatory. Existing first-feature/single-feature flows, global cost cap, human answers, review head claims, already-ready FIX and replay-safe notifications must remain intact. No web/CLI display work or webhook merge detection. Do not widen DTOs as an incidental convenience; if an actual controller/DTO API contract changes, regenerate root openapi.json and the CLI through the repository generation flow rather than hand-edit generated outputs. Done means ordered feature execution, ready-versus-merge lifecycle persistence, set-wide reviews, safe branch bases and every bound failure behavior demonstrated through advance and real database ticker scenarios, with all forge I/O outside transactions.\n\nSecond-pass adversarial audit (manual, no executable validator available): enumerated all 122 numbered spec ACs and retained them at the same story and ordinal prefix: US-001 AC-1,2,3,4,5,6,7,8,9,10,11,12; US-002 AC-1,2,3,4,5,6,7,8,9; US-003 AC-1,2; US-004 AC-1,2,3,4,5,6,7,8,9,10,11; US-005 AC-1,2,3,4,5,6,7; US-006 AC-1,2,3,4,5,6; US-007 AC-1,2,3,4,5,6,7,8,9,10,11,12; US-008 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14; US-009 AC-1,2,3,4,5,6; US-010 AC-1,2,3,4,5,6,7; US-011 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15; US-012 AC-1,2,3,4,5,6,7,8,9,10,11,12,13,14; US-013 AC-1,2,3,4,5,6,7. The original assertion and regression qualifiers survive each clarification: pre-migration/existing/null flow data, already-owned adoption unchanged, unrelated feature/flow state unchanged, null-until-set branches, original single-spec task wording and whole verdict suffix, first-feature own branch allowance, no later preflight/reask/setBranch, single-feature completion, first marker even when only b has findings, stopped-meanwhile fencing, no job during merge watch even when all PRs merge, and the divergent flow-head/transaction-probe integration anchors. Four failure-table generalizations from the initial draft remain appended in US-011/012; six additional failure/regression checks were appended in US-002/006/009/010/011/012 rather than replacing any spec AC. Final AC counts are 12,10,2,11,7,7,12,14,7,8,18,17,7 (132 total).\n\nAudit fixes: US-008's setSpecPaths assertion now names the actual buildStepDispatch input seam and resulting agent.task instead of suggesting setSpecPaths is a dispatch DTO property (flow-step-dispatch.ts:15, :52). US-006/009 FIX completion probes specify a completed, already-recorded job where needed, consistent with the existing recovery pass before the decision (fleet-flow-advance.service.ts:388). US-011's same-base exists outcome now names the observable branch/state/activity record instead of only saying treated as created. US-012's locked-stop criterion now explicitly assumes an observed merged PR plus a closed PR, preventing the erroneous interpretation that an open PR must stop the flow; stopped-meanwhile and same-approvedAt guards remain. US-010's marker criterion distinguishes advancing past the applied review job from skipping the remaining SPEC_REVIEW round; flow-step-decision.ts:169 still selects another review when the round count is below two. The missing PLAN result and CI-held FIX guards are anchored to existing errors at flow-step-decision.ts:185 and :230. The missing-flow completion regression follows the update-before-updateMany order in prisma-fleet-flow-step.repository.ts:39, without inventing a new helper or error class.\n\nEvery story now has a directly observable negative-path anchor: US-001 owned-job adoption false; US-002 missing-flow completion rejects; US-003 branch collision exception; US-004 unresolved dependency waits and unknown finding fallback; US-005 HTTP/refusal errors; US-006 incomplete PLAN stops; US-007 malformed optional feature is dropped; US-008 branch mismatch/stale edits stop; US-009 CI-held FIX stops without READY/completion; US-010 failed/retry calls do not advance records; US-011 access/spec/forge/race refusals; US-012 missing/closed PRs, disconnected repo and stale record guards; US-013 persisted closed-PR stop. Regression anchors cover all changed signatures or old no-op paths, including single-feature calls/first-feature entry and existing eligible-flow pagination. Failure-table rows map respectively to US-011 AC-11/17 and US-012 AC-8/16 (transient); US-012 AC-6/7 (closed/missing); US-011 AC-3/4/5 (spec blobs); US-011 AC-9 (refused ref); US-011 AC-7 (same base); US-011 AC-8 (different base); US-011 AC-10 (thread); US-008 AC-11 (PLAN branch); US-008 AC-12/13 (stale); US-011 AC-14 (access); US-011 AC-16 and US-012 AC-15 (permanent reasons); US-011 AC-13 and US-012 AC-10 (installation); US-012 AC-11 (no PR).\n\nThe binding ids, workdirs and dependency arrays are unchanged, contain only existing ids and are acyclic. All readable spec-recommended context files remain included within the five-file limit. The one deliberate context exception is US-012's planned fleet-flow-feature-passes.ts: it does not exist on disk and its US-011 owner is a sibling, not an upstream dependency, so the readable-context rule prevents listing it as an available input; its exact path, shared-module extension and coordination constraint remain explicit in US-012's description instead. US-011 owns that output; US-012 must preserve whichever sibling export has landed. No dependency was added to hide that binding-spec scheduling constraint. Routing was reduced to complex (not expert) for US-008 because this extends existing phases, and to medium/tdd-simple for US-009 because it reuses existing locks, selector and writers in one production service. Strict strategies remain only where the story actually involves token-bearing forge operations, permission-backed orchestration or the binding integration scenario; other complex stories retain lite isolation.\n\nAll 12 feature-level exclusions remain verbatim in top-level outOfScope, in original order: concurrent features; stacked PRs; rebasing/merging/updating branches; webhook merge detection; restarting/cloning stopped flows; multi-feature thread execution; web/CLI display; runner changes; per-feature cost caps; default-head crash recovery; unrecorded multi-commit set recovery; unknown-feature reporting for US-010. There is no separate story-local Out of Scope block under an AC to hoist. Nearby US-010/011 descriptions now echo the exact multi-commit recovery, unknown-feature fallback, stacked/thread and default-head crash boundaries. Description scope also explicitly includes the added single-feature and CI/missing-flow regressions. No acceptance assertion was replaced with a quality gate, file-existence check or test-count target; no source, generated file or runtime API was modified by this audit.",
+  "outOfScope": [
+    "Running two features at once, or two features' `RUN`s on different runners.",
+    "Stacked PRs: building a feature on another feature's unmerged branch.",
+    "Rebasing, merging or updating a feature branch when the default branch moves; a conflict fails a job and stops\n  the flow like any failure.",
+    "Webhook-driven merge detection; the ticker polls.",
+    "Restarting or cloning a stopped multi-feature flow.",
+    "Multi-feature thread-entry flows: they stop at the second feature's start.",
+    "Web flow page and CLI display of feature branches, `READY`/`MERGED` states or the new stop reasons (F6).",
+    "Runner changes; the existing flow `PLAN` checkout and `expectBranch` check are used as they are.",
+    "A per-feature cost cap; the flow cap covers every feature.",
+    "A crash between `createBranch` and its record on a `base: 'default'` start, after which the default branch moves:\n  the repeat finds the branch at the old sha and stops `dispatch_refused`; the flow is cloned.",
+    "Recovering a set `SPEC_REVIEW` calls pass in which two or more spec commits landed and nothing was recorded; the\n  next pass sees a stale head and re-asks the flow (no feature is `READY` yet). A pass where only the first commit\n  landed recovers through the existing already-applied check.",
+    "US-010 only: a `SPEC_REVIEW` finding whose `feature` names no flow feature is not reported; it goes to the first\n  feature's spec."
+  ],
+  "routingProfile": "native-ds-m3-flash"
+}
