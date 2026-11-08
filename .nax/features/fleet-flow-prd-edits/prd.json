@@ -3,7 +3,7 @@
   "feature": "fleet-flow-prd-edits",
   "branchName": "feat/fleet-flow-prd-edits",
   "createdAt": "2026-12-02T09:00:00.000Z",
-  "updatedAt": "2026-11-08T14:29:27.647Z",
+  "updatedAt": "2026-11-08T14:38:22.063Z",
   "userStories": [
     {
       "id": "US-001",
@@ -439,14 +439,17 @@
       "dependencies": [
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Recovery and refusal classification extend the same service using existing isSingleFileCommit and error helpers, while token and permission-error paths retain strict security TDD."
+        "reasoning": "Recovery and refusal classification extend the same service using existing isSingleFileCommit and error helpers, while token and permission-error paths retain strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/flows/fleet-flow-calls.service.ts",
@@ -465,7 +468,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f3026ebdffe8d7c9326ccc7cd68d3145f6f9b1ce"
     },
     {
       "id": "US-009",
