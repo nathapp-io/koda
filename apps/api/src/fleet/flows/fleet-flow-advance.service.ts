@@ -18,10 +18,10 @@ import { FLEET_FLOW_REPOSITORY, type FleetFlowRecord, type IFleetFlowRepository 
 import {
   FLEET_FLOW_STEP_REPOSITORY, type IFleetFlowStepRepository, type LatestFlowJob,
 } from './domain/fleet-flow-step.domain';
-import { decideFlowStep, type ApplyCallsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
+import { decideFlowStep, type ApplyCallsAction, type ApplyPrdEditsAction, type ApplyRulingsAction, type FlowJobView, type FlowStepAction, type FlowStopReason, type FlowStepInput } from './flow-step-decision';
 import { FleetFlowCallsService } from './fleet-flow-calls.service';
 import { ruleTaskItems, type FlowOpenItem, type FlowRuling, type FlowRuleGuidance } from './flow-rulings';
-import { oneLine, sanitizeFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
+import { FLOW_CALL_TEXT_MAX, oneLine, sanitizeFlowText, truncateFlowText, type FlowAnswer, type FlowQuestion } from './flow-calls';
 import { FleetPrRulingsService } from '../rulings/fleet-pr-rulings.service';
 import { FLOW_STOP_DETAIL_MAX, type FlowStep } from './flow-steps';
 import { FleetReviewClaimService } from '../reviews/fleet-review-claim.service';
@@ -38,7 +38,8 @@ import { FLEET_CFG, type IFleetConfig } from '../../config/fleet.config';
 import { FLEET_FLOW_QUESTIONS, FLEET_FLOW_STOPPED } from '../../notifications/fleet/fleet-notification-events';
 
 type DispatchAction = Extract<FlowStepAction, { kind: 'dispatch' }>;
-interface DispatchPass<A extends DispatchAction | ApplyCallsAction | ApplyRulingsAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction> {
+type FlowPassAction = DispatchAction | ApplyCallsAction | ApplyRulingsAction | ApplyPrdEditsAction;
+interface DispatchPass<A extends FlowPassAction = FlowPassAction> {
   flow: FleetFlowRecord;
   action: A;
   plan: FleetJobRecord | null;
@@ -82,6 +83,10 @@ export class FleetFlowAdvanceService {
       await this.advanceRulings(flow, action);
       return;
     }
+    if (action.kind === 'apply_prd_edits') {
+      await this.advancePrdEdits(flow, action, pass.plan, now);
+      return;
+    }
     const dispatchPass = { ...pass, action };
     if (action.step === 'REVIEW') {
       await this.advanceReview(dispatchPass, now);
@@ -123,6 +128,42 @@ export class FleetFlowAdvanceService {
       await this.steps.recordCalls(current.id, current.features[0].id, action.jobId, outcome.specSha);
       await this.record(current, `flow calls ${action.step}`, 'flow.calls', {
         step: action.step, jobId: action.jobId, specSha: outcome.specSha, count: action.findings.length,
+      });
+    });
+  }
+
+  /**
+   * The PRD edits are committed on the flow's branch outside any transaction, exactly like the spec
+   * calls: the forge call never holds the flow locks. The marker and the activity are written in a
+   * second transaction, under the locks, so a stop or a re-ask that lands in between keeps the commit
+   * and drops the progress. The accepted findings are the review's own summary, cut and sanitized:
+   * the payload is a JSON column, and a lone surrogate would fail the write on every tick.
+   */
+  private async advancePrdEdits(
+    flow: FleetFlowRecord, action: ApplyPrdEditsAction, plan: FleetJobRecord | null, now: Date,
+  ): Promise<void> {
+    const expectedHead = plan?.resultSha;
+    if (!expectedHead) throw new Error('PRD_REVIEW edits require a PLAN result sha');
+    const outcome = await this.calls.applyPrdEdits(flow, action, expectedHead);
+    if (outcome.kind === 'retry') return;
+    if (outcome.kind === 'failed') {
+      await this.writeStop(flow, 'calls_failed', `PRD_REVIEW edits: ${outcome.detail}`, now);
+      return;
+    }
+    await this.txManager.run(async () => {
+      const current = await this.lockLive(flow);
+      if (!current) return;
+      if (outcome.kind === 'stale') {
+        await this.flowService.reaskLocked(current, outcome.head, now);
+        return;
+      }
+      await this.steps.recordPrdEdits(current.id, current.features[0].id, action.jobId);
+      await this.record(current, 'flow PRD edits', 'flow.prd_edits', {
+        jobId: action.jobId,
+        sha: outcome.kind === 'committed' ? outcome.sha : null,
+        applied: outcome.kind === 'committed' ? outcome.applied : 0,
+        refused: outcome.refused,
+        accepted: action.accepted.map((finding) => truncateFlowText(finding.summary, FLOW_CALL_TEXT_MAX)),
       });
     });
   }
@@ -350,7 +391,8 @@ export class FleetFlowAdvanceService {
         await this.recordStep(current, job.flowStep as FlowStep, job.id, input.latestJob?.prNumber ?? undefined);
         return;
       }
-      if (action.kind !== 'dispatch' && action.kind !== 'apply_calls' && action.kind !== 'apply_rulings') {
+      if (action.kind !== 'dispatch' && action.kind !== 'apply_calls' && action.kind !== 'apply_rulings'
+        && action.kind !== 'apply_prd_edits') {
         await this.writeDecision(current, job ?? null, action, now);
         return;
       }
@@ -375,9 +417,11 @@ export class FleetFlowAdvanceService {
         // Rulings are written outside this transaction, each in its own: the flow records them after.
         return { flow: current, action, plan: null, remainingCapUsd: remaining };
       }
-      if (action.kind === 'apply_calls') {
-        const plan = action.step === 'PRD_REVIEW' ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
-        if (action.step === 'PRD_REVIEW') {
+      if (action.kind === 'apply_calls' || action.kind === 'apply_prd_edits') {
+        // The PRD edit action has no step of its own: it belongs to the PRD_REVIEW branch.
+        const prdReview = action.kind === 'apply_prd_edits' || action.step === 'PRD_REVIEW';
+        const plan = prdReview ? await this.steps.latestJobForStep(current.id, 'PLAN') : null;
+        if (prdReview) {
           if (!plan?.resultBranch || !plan.resultSha) throw new Error('PRD_REVIEW calls require a PLAN result branch and sha');
           // PLAN pushes to the PRD's branchName, not necessarily the accepted input branch. Persist
           // its target under the locks so calls, re-asks and the following PLAN all use that branch.

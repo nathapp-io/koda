@@ -153,7 +153,13 @@ export function decideFlowStep(input: FlowStepInput): FlowStepAction {
       if (ambiguous.length > 0 && !hasCurrentAnswers) {
         return { kind: 'wait_answer', step: latestJob.step, jobId: latestJob.id, questions: flowQuestions(verdict.findings) };
       }
-      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2 && ambiguous.length === 0) return stopFindings();
+      // The second PRD round no longer re-plans: the RUN builds from the spec, so the review's own
+      // edits are committed and its findings are accepted instead of being written into the spec.
+      // A round the user answered still re-plans: the answer may change what is built.
+      if (latestJob.step === 'PRD_REVIEW' && input.planCount >= 2 && !hasCurrentAnswers) {
+        if (input.prdEditsJobId === latestJob.id) return dispatch('RUN');
+        return { kind: 'apply_prd_edits', jobId: latestJob.id, edits: verdict.prdEdits, accepted: verdict.findings };
+      }
       if (input.callsJobId === latestJob.id) {
         return dispatch(latestJob.step === 'SPEC_REVIEW'
           && input.specReviewCount !== undefined && input.specReviewCount < 2

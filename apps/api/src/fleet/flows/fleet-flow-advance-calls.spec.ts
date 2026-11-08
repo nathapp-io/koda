@@ -75,6 +75,7 @@ function build(opts: Options = {}) {
     countJobsForStepSince: vi.fn<IFleetFlowStepRepository['countJobsForStepSince']>(async () => opts.planCount ?? 0),
     setBranch: vi.fn(async (_id: string, branch: string) => { assertTx(); row.branch = branch; }),
     recordCalls: vi.fn<IFleetFlowStepRepository['recordCalls']>(async () => { assertTx(); }),
+    recordPrdEdits: vi.fn<IFleetFlowStepRepository['recordPrdEdits']>(async () => { assertTx(); }),
     latestJobForStep: vi.fn(async () => job({ id: 'plan-1', command: 'PLAN', flowStep: 'PLAN', resultSha: 'plan-sha' })),
   };
   const repos = {
@@ -103,6 +104,9 @@ function build(opts: Options = {}) {
   const calls = { apply: vi.fn<FleetFlowCallsService['apply']>(async () => {
     expect(inTransaction).toBe(false);
     return opts.outcome ?? { kind: 'committed', specSha: 's2' };
+  }), applyPrdEdits: vi.fn(async () => {
+    expect(inTransaction).toBe(false);
+    return { kind: 'unchanged', refused: [] };
   }) };
   const outbox = { record: vi.fn(async () => { assertTx(); }) };
   const service = new FleetFlowAdvanceService(
@@ -264,11 +268,14 @@ describe('FleetFlowAdvanceService.advance calls', () => {
     expect(h.jobs.dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'RUN' }),
       expect.objectContaining({ flowStep: 'RUN' }));
   });
-  it('AC-14: counts PLAN jobs since approval to stop second-round findings', async () => {
+  it('AC-14: counts PLAN jobs since approval to accept second-round findings', async () => {
     const h = build({ latest: { flowStep: 'PRD_REVIEW' }, planCount: 2 });
     await h.service.advance('flow-1', NOW);
     expect(h.steps.countJobsForStepSince).toHaveBeenCalledWith('flow-1', 'PLAN', APPROVED_AT);
-    expect(h.flows.stop).toHaveBeenCalledWith('flow-1', 'review_findings', NOW, expect.stringContaining('Missing AC'));
+    expect(h.calls.applyPrdEdits).toHaveBeenCalledExactlyOnceWith(h.row, {
+      kind: 'apply_prd_edits', jobId: 'j1', edits: [], accepted: [FINDING],
+    }, 'plan-sha');
+    expect(h.flows.stop).not.toHaveBeenCalled();
     expect(h.calls.apply).not.toHaveBeenCalled();
   });
   it('AC-15: thread-entry findings stop rather than applying calls', async () => {

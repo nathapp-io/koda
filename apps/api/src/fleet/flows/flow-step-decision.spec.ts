@@ -261,9 +261,10 @@ describe('decideFlowStep', () => {
     expect(decideFlowStep(input({ canApplyCalls: true, latestJob: classifiedReview('SPEC_REVIEW', findings) })))
       .toMatchObject({ kind: 'stop', reason: 'review_findings' });
   });
-  it('US-004 AC-12 keeps second-round minor PRD stop', () => {
+  it('US-004 AC-12 accepts second-round minor PRD findings instead of stopping', () => {
     expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
-      latestJob: classifiedReview('PRD_REVIEW', [minor]) }))).toMatchObject({ kind: 'stop', reason: 'review_findings' });
+      latestJob: classifiedReview('PRD_REVIEW', [minor]) })))
+      .toEqual({ kind: 'apply_prd_edits', jobId: 'j1', edits: [], accepted: [minor] });
   });
   it('US-004 AC-13 stops over-limit findings regardless of class', () => {
     const findings = Array.from({ length: 21 }, (_, i) => ({ ...minor, id: `m${i}` }));
@@ -300,10 +301,10 @@ describe('decideFlowStep', () => {
       latestJob: classifiedReview('PRD_REVIEW', [minor], 'j2') })))
       .toEqual({ kind: 'dispatch', step: 'PLAN' });
   });
-  it('US-005 AC-9 stops findings in the second PRD_REVIEW round', () => {
+  it('US-005 AC-9 accepts findings in the second PRD_REVIEW round', () => {
     expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
       latestJob: classifiedReview('PRD_REVIEW', [minor], 'j3') })))
-      .toMatchObject({ kind: 'stop', reason: 'review_findings' });
+      .toEqual({ kind: 'apply_prd_edits', jobId: 'j3', edits: [], accepted: [minor] });
   });
   it('US-005 AC-10 permits an empty second-round PRD_REVIEW', () => {
     expect(decideFlowStep(input({ planCount: 2,
@@ -445,6 +446,39 @@ describe('decideFlowStep', () => {
           .toMatchObject({ kind: 'stop', reason: 'review_findings' });
       },
     );
+  });
+
+  describe('US-010 second-round PRD findings are accepted, not committed as calls', () => {
+    const edit: FlowPrdEdit = { story: 'US-001', op: 'add_ac', new: 'Cover the behavior' };
+    const secondRound = (findings: unknown[], id = 'review-2') =>
+      job({ id, step: 'PRD_REVIEW', agentOutput: JSON.stringify({ findings, prdEdits: [edit] }) });
+
+    it('AC-1 applies the second-round PRD edits and accepts the findings', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
+        latestJob: secondRound([minor]) })))
+        .toEqual({ kind: 'apply_prd_edits', jobId: 'review-2', edits: [edit], accepted: [minor] });
+    });
+    it('AC-2 dispatches RUN when the second-round edits are already recorded', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2, prdEditsJobId: 'review-2',
+        latestJob: secondRound([minor]) })))
+        .toEqual({ kind: 'dispatch', step: 'RUN' });
+    });
+    it('AC-3 stops a second-round PRD_REVIEW above the findings cap', () => {
+      const findings = Array.from({ length: 21 }, (_, index) => ({ ...minor, id: `m${index}` }));
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2,
+        latestJob: secondRound(findings) })))
+        .toMatchObject({ kind: 'stop', reason: 'review_findings' });
+    });
+    it('AC-1/2 keeps the first-round PRD_REVIEW on the calls path', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 1,
+        latestJob: secondRound([minor], 'review-1') })))
+        .toEqual({ kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'review-1', findings: [minor] });
+    });
+    it('AC-1/2 re-plans a second-round PRD_REVIEW that carries current answers', () => {
+      expect(decideFlowStep(input({ canApplyCalls: true, planCount: 2, questionsJobId: 'review-2',
+        answers: [{ id: '1', answer: 'A1' }], latestJob: secondRound([minor]) })))
+        .toEqual({ kind: 'apply_calls', step: 'PRD_REVIEW', jobId: 'review-2', findings: [minor] });
+    });
   });
 
   it.each([

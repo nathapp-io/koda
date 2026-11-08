@@ -225,11 +225,11 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     }
   });
 
-  it('AC-10: PRD_REVIEW minor findings stop after two PLAN jobs since approval', async () => {
-    const { flow } = await seedReview('PRD_REVIEW', minor);
+  it('AC-10: PRD_REVIEW minor findings are accepted after two PLAN jobs since approval', async () => {
+    const { flow, job } = await seedReview('PRD_REVIEW', minor);
     for (const secondsAgo of [90, 60]) {
       await db.fleetJob.create({ data: {
-        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA,
+        ...jobData(flow.id), flowStep: 'PLAN', resultSha: SHA, resultBranch: BRANCH,
         queuedAt: new Date(now.getTime() - secondsAgo * 1_000),
         finishedAt: new Date(now.getTime() - (secondsAgo - 10) * 1_000),
       } });
@@ -239,9 +239,19 @@ integration('classified fleet flow verdicts through tick and outbox (PG)', () =>
     await ticker.tick(now);
 
     expect(await db.fleetFlow.findUniqueOrThrow({ where: { id: flow.id } }))
-      .toMatchObject({ state: 'STOPPED', stopReason: 'review_findings' });
+      .toMatchObject({ state: 'RUNNING', stopReason: null });
+    expect(await db.fleetFlowFeature.findFirstOrThrow({ where: { flowId: flow.id } }))
+      .toMatchObject({ prdEditsJobId: job.id });
+    const activities = await db.fleetActivity.findMany({
+      where: { entityId: flow.id, action: 'flow.prd_edits' }, take: 2,
+    });
+    expect(activities).toHaveLength(1);
+    expect(activities[0].payload).toMatchObject({
+      jobId: job.id, sha: null, applied: 0, accepted: [minor.summary],
+    });
     expect(await db.fleetJob.count({ where: { flowId: flow.id } })).toBe(3);
     expect(github.putFile).not.toHaveBeenCalled();
+    expect(github.mintInstallationToken).not.toHaveBeenCalled();
     expect(Logger.prototype.error).not.toHaveBeenCalled();
   });
 });
